@@ -16,6 +16,7 @@ DECLARE_CYCLE_STAT(TEXT("Fluid Tick"), STAT_FluidTick, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Predict Positions"), STAT_PredictPositions, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Update Neighbors"), STAT_UpdateNeighbors, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Solve Density"), STAT_SolveDensity, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Cache Collider Shapes"), STAT_CacheColliderShapes, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Handle Collisions"), STAT_HandleCollisions, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("World Collision"), STAT_WorldCollision, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Finalize Positions"), STAT_FinalizePositions, STATGROUP_KawaiiFluid);
@@ -135,6 +136,13 @@ void AFluidSimulator::Tick(float DeltaTime)
 		UpdateNeighbors();
 	}
 
+	// 2.5. 콜라이더 충돌 형상 캐싱 (프레임당 한 번)
+	{
+		SCOPE_CYCLE_COUNTER(STAT_CacheColliderShapes);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_CacheColliderShapes);
+		CacheColliderShapes();
+	}
+
 	// 3. 밀도 제약 해결 (반복)
 	for (int32 Iter = 0; Iter < SolverIterations; ++Iter)
 	{
@@ -241,6 +249,17 @@ void AFluidSimulator::SolveDensityConstraints()
 	if (DensityConstraint.IsValid())
 	{
 		DensityConstraint->Solve(Particles, SmoothingRadius, RestDensity, Epsilon);
+	}
+}
+
+void AFluidSimulator::CacheColliderShapes()
+{
+	for (UFluidCollider* Collider : Colliders)
+	{
+		if (Collider && Collider->IsColliderEnabled())
+		{
+			Collider->CacheCollisionShapes();
+		}
 	}
 }
 

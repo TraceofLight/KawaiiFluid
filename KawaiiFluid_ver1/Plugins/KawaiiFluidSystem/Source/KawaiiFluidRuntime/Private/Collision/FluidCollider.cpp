@@ -24,7 +24,7 @@ void UFluidCollider::ResolveCollisions(TArray<FFluidParticle>& Particles)
 	{
 		return;
 	}
-
+	
 	for (FFluidParticle& Particle : Particles)
 	{
 		ResolveParticleCollision(Particle);

@@ -13,6 +13,8 @@ UMeshFluidCollider::UMeshFluidCollider()
 	bAutoFindMesh = true;
 	bUseSimplifiedCollision = true;
 	CollisionMargin = 1.0f;
+	bCacheValid = false;
+	CachedBounds = FBox(ForceInit);
 }
 
 void UMeshFluidCollider::BeginPlay()
@@ -81,11 +83,16 @@ void UMeshFluidCollider::AutoFindMeshComponent()
 	//UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider: No mesh component found!"));
 }
 
-bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
+void UMeshFluidCollider::CacheCollisionShapes()
 {
+	CachedCapsules.Reset();
+	CachedSpheres.Reset();
+	CachedBounds = FBox(ForceInit);
+	bCacheValid = false;
+
 	if (!TargetMeshComponent)
 	{
-		return false;
+		return;
 	}
 
 	// CapsuleComponent인 경우
@@ -93,33 +100,22 @@ bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClose
 	if (Capsule)
 	{
 		FVector CapsuleCenter = Capsule->GetComponentLocation();
-		float CapsuleRadius = Capsule->GetScaledCapsuleRadius();
+		float CapsuleRadius = Capsule->GetScaledCapsuleRadius() + CollisionMargin;
 		float CapsuleHalfHeight = Capsule->GetScaledCapsuleHalfHeight();
 		FVector CapsuleUp = Capsule->GetUpVector();
 
-		FVector ToPoint = Point - CapsuleCenter;
-		float AxisProjection = FVector::DotProduct(ToPoint, CapsuleUp);
+		float HalfLength = CapsuleHalfHeight - CapsuleRadius;
+		FCachedCapsule CachedCap;
+		CachedCap.Start = CapsuleCenter - CapsuleUp * HalfLength;
+		CachedCap.End = CapsuleCenter + CapsuleUp * HalfLength;
+		CachedCap.Radius = CapsuleRadius;
+		CachedCapsules.Add(CachedCap);
 
-		float ClampedProjection = FMath::Clamp(AxisProjection, -CapsuleHalfHeight + CapsuleRadius, CapsuleHalfHeight - CapsuleRadius);
-		FVector ClosestOnAxis = CapsuleCenter + CapsuleUp * ClampedProjection;
-
-		FVector RadialVector = Point - ClosestOnAxis;
-		float RadialDistance = RadialVector.Size();
-
-		if (RadialDistance < KINDA_SMALL_NUMBER)
-		{
-			OutNormal = FVector::ForwardVector;
-			OutClosestPoint = ClosestOnAxis + OutNormal * CapsuleRadius;
-			OutDistance = CapsuleRadius;
-		}
-		else
-		{
-			OutNormal = RadialVector / RadialDistance;
-			OutClosestPoint = ClosestOnAxis + OutNormal * CapsuleRadius;
-			OutDistance = RadialDistance - CapsuleRadius;
-		}
-
-		return true;
+		CachedBounds += CachedCap.Start;
+		CachedBounds += CachedCap.End;
+		CachedBounds = CachedBounds.ExpandBy(CapsuleRadius);
+		bCacheValid = true;
+		return;
 	}
 
 	// SkeletalMeshComponent인 경우 - PhysicsAsset 사용
@@ -129,9 +125,6 @@ bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClose
 		UPhysicsAsset* PhysAsset = SkelMesh->GetPhysicsAsset();
 		if (PhysAsset)
 		{
-			bool bFoundAny = false;
-			float MinDistance = TNumericLimits<float>::Max();
-
 			for (USkeletalBodySetup* BodySetup : PhysAsset->SkeletalBodySetups)
 			{
 				if (!BodySetup)
@@ -147,7 +140,7 @@ bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClose
 
 				FTransform BoneTransform = SkelMesh->GetBoneTransform(BoneIndex);
 
-				// PhysicsAsset의 Sphyl(캡슐) 요소들 처리
+				// 캡슐 캐싱
 				for (const FKSphylElem& SphylElem : BodySetup->AggGeom.SphylElems)
 				{
 					FTransform CapsuleLocalTransform = SphylElem.GetTransform();
@@ -159,136 +152,176 @@ bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClose
 					FVector CapsuleUp = CapsuleWorldTransform.GetRotation().GetUpVector();
 
 					float HalfLength = CapsuleLength * 0.5f;
-					FVector CapsuleStart = CapsuleCenter - CapsuleUp * HalfLength;
-					FVector CapsuleEnd = CapsuleCenter + CapsuleUp * HalfLength;
 
-					// 캡슐 축에서 가장 가까운 점 찾기
-					FVector SegmentDir = CapsuleEnd - CapsuleStart;
-					float SegmentLengthSq = SegmentDir.SizeSquared();
+					FCachedCapsule CachedCap;
+					CachedCap.Start = CapsuleCenter - CapsuleUp * HalfLength;
+					CachedCap.End = CapsuleCenter + CapsuleUp * HalfLength;
+					CachedCap.Radius = CapsuleRadius;
+					CachedCapsules.Add(CachedCap);
 
-					FVector ClosestOnAxis;
-					if (SegmentLengthSq < KINDA_SMALL_NUMBER)
-					{
-						ClosestOnAxis = CapsuleStart;
-					}
-					else
-					{
-						float t = FVector::DotProduct(Point - CapsuleStart, SegmentDir) / SegmentLengthSq;
-						t = FMath::Clamp(t, 0.0f, 1.0f);
-						ClosestOnAxis = CapsuleStart + SegmentDir * t;
-					}
-
-					FVector ToPointVec = Point - ClosestOnAxis;
-					float DistToAxis = ToPointVec.Size();
-
-					FVector TempNormal;
-					FVector TempClosestPoint;
-					float TempDistance;
-
-					if (DistToAxis < KINDA_SMALL_NUMBER)
-					{
-						TempNormal = FVector::ForwardVector;
-						TempClosestPoint = ClosestOnAxis + TempNormal * CapsuleRadius;
-						TempDistance = -CapsuleRadius;
-					}
-					else
-					{
-						TempNormal = ToPointVec / DistToAxis;
-						TempClosestPoint = ClosestOnAxis + TempNormal * CapsuleRadius;
-						TempDistance = DistToAxis - CapsuleRadius;
-					}
-
-					if (TempDistance < MinDistance)
-					{
-						MinDistance = TempDistance;
-						OutClosestPoint = TempClosestPoint;
-						OutNormal = TempNormal;
-						OutDistance = TempDistance;
-						bFoundAny = true;
-					}
+					CachedBounds += CachedCap.Start;
+					CachedBounds += CachedCap.End;
 				}
 
-				// PhysicsAsset의 Sphere 요소들 처리
+				// 스피어 캐싱
 				for (const FKSphereElem& SphereElem : BodySetup->AggGeom.SphereElems)
 				{
 					FTransform SphereLocalTransform = SphereElem.GetTransform();
 					FTransform SphereWorldTransform = SphereLocalTransform * BoneTransform;
 
-					FVector SphereCenter = SphereWorldTransform.GetLocation();
-					float SphereRadius = SphereElem.Radius + CollisionMargin;
+					FCachedSphere CachedSph;
+					CachedSph.Center = SphereWorldTransform.GetLocation();
+					CachedSph.Radius = SphereElem.Radius + CollisionMargin;
+					CachedSpheres.Add(CachedSph);
 
-					FVector ToPointVec = Point - SphereCenter;
-					float DistToCenter = ToPointVec.Size();
-
-					FVector TempNormal;
-					FVector TempClosestPoint;
-					float TempDistance;
-
-					if (DistToCenter < KINDA_SMALL_NUMBER)
-					{
-						TempNormal = FVector::UpVector;
-						TempClosestPoint = SphereCenter + TempNormal * SphereRadius;
-						TempDistance = -SphereRadius;
-					}
-					else
-					{
-						TempNormal = ToPointVec / DistToCenter;
-						TempClosestPoint = SphereCenter + TempNormal * SphereRadius;
-						TempDistance = DistToCenter - SphereRadius;
-					}
-
-					if (TempDistance < MinDistance)
-					{
-						MinDistance = TempDistance;
-						OutClosestPoint = TempClosestPoint;
-						OutNormal = TempNormal;
-						OutDistance = TempDistance;
-						bFoundAny = true;
-					}
+					CachedBounds += CachedSph.Center;
 				}
 			}
 
-			if (bFoundAny)
+			if (CachedCapsules.Num() > 0 || CachedSpheres.Num() > 0)
 			{
-				// 디버그: 가장 가까운 캡슐까지의 거리 (가끔 출력)
-				// 원자적 증가 및 체크
-				static std::atomic<int32> DebugCounter = 0;
-				if (++DebugCounter % 1000 == 0)
+				// 가장 큰 반경으로 바운딩 박스 확장
+				float MaxRadius = CollisionMargin;
+				for (const FCachedCapsule& Cap : CachedCapsules)
 				{
-					//UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider: Closest distance = %.2f"), MinDistance);
+					MaxRadius = FMath::Max(MaxRadius, Cap.Radius);
 				}
-				return true;
-			}
-			else
-			{
-				// 캡슐을 찾지 못함
-				// 원자적 증가 및 체크
-				static std::atomic<int32> DebugCounter2 = 0;
-				if (++DebugCounter2 % 1000 == 0)
+				for (const FCachedSphere& Sph : CachedSpheres)
 				{
-					//UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider: No capsules found in GetClosestPoint!"));
+					MaxRadius = FMath::Max(MaxRadius, Sph.Radius);
 				}
+				CachedBounds = CachedBounds.ExpandBy(MaxRadius);
+				bCacheValid = true;
+				return;
 			}
 		}
 	}
 
 	// 폴백: 바운딩 박스 사용
 	FBoxSphereBounds Bounds = TargetMeshComponent->Bounds;
-	FVector BoxCenter = Bounds.Origin;
-	FVector BoxExtent = Bounds.BoxExtent;
+	CachedBounds = Bounds.GetBox();
+	bCacheValid = true;
+}
 
-	FVector LocalPoint = Point - BoxCenter;
-	FVector ClampedPoint;
-	ClampedPoint.X = FMath::Clamp(LocalPoint.X, -BoxExtent.X, BoxExtent.X);
-	ClampedPoint.Y = FMath::Clamp(LocalPoint.Y, -BoxExtent.Y, BoxExtent.Y);
-	ClampedPoint.Z = FMath::Clamp(LocalPoint.Z, -BoxExtent.Z, BoxExtent.Z);
+bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
+{
+	if (!bCacheValid)
+	{
+		return false;
+	}
 
-	OutClosestPoint = BoxCenter + ClampedPoint;
-	FVector ToPointVec = Point - OutClosestPoint;
-	OutDistance = ToPointVec.Size();
-	OutNormal = OutDistance > KINDA_SMALL_NUMBER ? ToPointVec / OutDistance : FVector::UpVector;
+	// AABB 컬링: 바운딩 박스 밖이면 스킵
+	const float CullingMargin = 50.0f;  // 충돌 마진 + 여유
+	if (!CachedBounds.ExpandBy(CullingMargin).IsInside(Point))
+	{
+		return false;
+	}
 
-	return true;
+	float MinDistance = TNumericLimits<float>::Max();
+	bool bFoundAny = false;
+
+	// 캐싱된 캡슐들 순회
+	for (const FCachedCapsule& Cap : CachedCapsules)
+	{
+		// 캡슐 축에서 가장 가까운 점 찾기
+		FVector SegmentDir = Cap.End - Cap.Start;
+		float SegmentLengthSq = SegmentDir.SizeSquared();
+
+		FVector ClosestOnAxis;
+		if (SegmentLengthSq < KINDA_SMALL_NUMBER)
+		{
+			ClosestOnAxis = Cap.Start;
+		}
+		else
+		{
+			float t = FVector::DotProduct(Point - Cap.Start, SegmentDir) / SegmentLengthSq;
+			t = FMath::Clamp(t, 0.0f, 1.0f);
+			ClosestOnAxis = Cap.Start + SegmentDir * t;
+		}
+
+		FVector ToPointVec = Point - ClosestOnAxis;
+		float DistToAxis = ToPointVec.Size();
+
+		FVector TempNormal;
+		FVector TempClosestPoint;
+		float TempDistance;
+
+		if (DistToAxis < KINDA_SMALL_NUMBER)
+		{
+			TempNormal = FVector::ForwardVector;
+			TempClosestPoint = ClosestOnAxis + TempNormal * Cap.Radius;
+			TempDistance = -Cap.Radius;
+		}
+		else
+		{
+			TempNormal = ToPointVec / DistToAxis;
+			TempClosestPoint = ClosestOnAxis + TempNormal * Cap.Radius;
+			TempDistance = DistToAxis - Cap.Radius;
+		}
+
+		if (TempDistance < MinDistance)
+		{
+			MinDistance = TempDistance;
+			OutClosestPoint = TempClosestPoint;
+			OutNormal = TempNormal;
+			OutDistance = TempDistance;
+			bFoundAny = true;
+		}
+	}
+
+	// 캐싱된 스피어들 순회
+	for (const FCachedSphere& Sph : CachedSpheres)
+	{
+		FVector ToPointVec = Point - Sph.Center;
+		float DistToCenter = ToPointVec.Size();
+
+		FVector TempNormal;
+		FVector TempClosestPoint;
+		float TempDistance;
+
+		if (DistToCenter < KINDA_SMALL_NUMBER)
+		{
+			TempNormal = FVector::UpVector;
+			TempClosestPoint = Sph.Center + TempNormal * Sph.Radius;
+			TempDistance = -Sph.Radius;
+		}
+		else
+		{
+			TempNormal = ToPointVec / DistToCenter;
+			TempClosestPoint = Sph.Center + TempNormal * Sph.Radius;
+			TempDistance = DistToCenter - Sph.Radius;
+		}
+
+		if (TempDistance < MinDistance)
+		{
+			MinDistance = TempDistance;
+			OutClosestPoint = TempClosestPoint;
+			OutNormal = TempNormal;
+			OutDistance = TempDistance;
+			bFoundAny = true;
+		}
+	}
+
+	// 캐싱된 데이터가 없으면 바운딩 박스 사용
+	if (!bFoundAny && TargetMeshComponent)
+	{
+		FVector BoxCenter = CachedBounds.GetCenter();
+		FVector BoxExtent = CachedBounds.GetExtent();
+
+		FVector LocalPoint = Point - BoxCenter;
+		FVector ClampedPoint;
+		ClampedPoint.X = FMath::Clamp(LocalPoint.X, -BoxExtent.X, BoxExtent.X);
+		ClampedPoint.Y = FMath::Clamp(LocalPoint.Y, -BoxExtent.Y, BoxExtent.Y);
+		ClampedPoint.Z = FMath::Clamp(LocalPoint.Z, -BoxExtent.Z, BoxExtent.Z);
+
+		OutClosestPoint = BoxCenter + ClampedPoint;
+		FVector ToPointVec = Point - OutClosestPoint;
+		OutDistance = ToPointVec.Size();
+		OutNormal = OutDistance > KINDA_SMALL_NUMBER ? ToPointVec / OutDistance : FVector::UpVector;
+		bFoundAny = true;
+	}
+
+	return bFoundAny;
 }
 
 bool UMeshFluidCollider::IsPointInside(const FVector& Point) const

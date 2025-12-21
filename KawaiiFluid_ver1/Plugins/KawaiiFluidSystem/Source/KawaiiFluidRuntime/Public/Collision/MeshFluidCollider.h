@@ -6,6 +6,21 @@
 #include "Collision/FluidCollider.h"
 #include "MeshFluidCollider.generated.h"
 
+/** 캐싱된 캡슐 데이터 */
+struct FCachedCapsule
+{
+	FVector Start;
+	FVector End;
+	float Radius;
+};
+
+/** 캐싱된 스피어 데이터 */
+struct FCachedSphere
+{
+	FVector Center;
+	float Radius;
+};
+
 /**
  * 메시 기반 유체 콜라이더
  * 캐릭터나 복잡한 형태의 오브젝트와 상호작용
@@ -32,10 +47,17 @@ public:
 
 	virtual bool GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const override;
 	virtual bool IsPointInside(const FVector& Point) const override;
+	virtual void CacheCollisionShapes() override;
 
 protected:
 	virtual void BeginPlay() override;
 
 private:
 	void AutoFindMeshComponent();
+
+	// 캐싱된 충돌 형상
+	TArray<FCachedCapsule> CachedCapsules;
+	TArray<FCachedSphere> CachedSpheres;
+	FBox CachedBounds;
+	bool bCacheValid;
 };

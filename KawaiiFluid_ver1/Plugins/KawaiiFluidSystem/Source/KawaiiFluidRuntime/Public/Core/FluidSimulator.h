@@ -251,6 +251,9 @@ private:
 	/** 3. 밀도 제약 해결 (반복) */
 	void SolveDensityConstraints();
 
+	/** 충돌 형상 캐싱 (프레임당 한 번) */
+	void CacheColliderShapes();
+
 	/** 4. 충돌 처리 */
 	void HandleCollisions();
 

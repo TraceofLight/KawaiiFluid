@@ -45,6 +45,9 @@ public:
 
 	virtual void ResolveCollisions(TArray<FFluidParticle>& Particles);
 
+	/** 충돌 형상 캐싱 (프레임당 한 번 호출) */
+	virtual void CacheCollisionShapes() {}
+
 	UFUNCTION(BlueprintCallable, Category = "Fluid Collider")
 	virtual bool GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const;
 
