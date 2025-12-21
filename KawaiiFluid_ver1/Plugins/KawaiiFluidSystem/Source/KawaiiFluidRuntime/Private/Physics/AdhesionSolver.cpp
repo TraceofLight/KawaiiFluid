@@ -28,8 +28,21 @@ void FAdhesionSolver::Apply(
 		return;
 	}
 
-	for (FFluidParticle& Particle : Particles)
+	// 결과 저장용 구조체
+	struct FAdhesionResult
 	{
+		FVector Force;
+		AActor* ClosestActor;
+		float ForceMagnitude;
+	};
+
+	TArray<FAdhesionResult> Results;
+	Results.SetNum(Particles.Num());
+
+	// 병렬 계산 (읽기만 하므로 안전)
+	ParallelFor(Particles.Num(), [&](int32 i)
+	{
+		const FFluidParticle& Particle = Particles[i];
 		FVector TotalAdhesionForce = FVector::ZeroVector;
 		AActor* ClosestColliderActor = nullptr;
 		float ClosestDistance = AdhesionRadius;
@@ -65,14 +78,6 @@ void FAdhesionSolver::Apply(
 
 					TotalAdhesionForce += AdhesionForce;
 
-					// 디버그
-					static int32 AdhesionDebugCounter = 0;
-					if (++AdhesionDebugCounter % 1000 == 0)
-					{
-						UE_LOG(LogTemp, Warning, TEXT("AdhesionSolver: Distance=%.2f, Force=(%.2f, %.2f, %.2f)"),
-							Distance, AdhesionForce.X, AdhesionForce.Y, AdhesionForce.Z);
-					}
-
 					// 가장 가까운 콜라이더 추적
 					if (Distance < ClosestDistance)
 					{
@@ -83,12 +88,16 @@ void FAdhesionSolver::Apply(
 			}
 		}
 
-		// 접착력 적용 (속도에 추가)
-		float ForceMagnitude = TotalAdhesionForce.Size();
-		Particle.Velocity += TotalAdhesionForce;
+		Results[i].Force = TotalAdhesionForce;
+		Results[i].ClosestActor = ClosestColliderActor;
+		Results[i].ForceMagnitude = TotalAdhesionForce.Size();
+	});
 
-		// 접착 상태 업데이트
-		UpdateAttachmentState(Particle, ClosestColliderActor, ForceMagnitude, DetachThreshold);
+	// 순차 적용 (상태 변경이 있으므로)
+	for (int32 i = 0; i < Particles.Num(); ++i)
+	{
+		Particles[i].Velocity += Results[i].Force;
+		UpdateAttachmentState(Particles[i], Results[i].ClosestActor, Results[i].ForceMagnitude, DetachThreshold);
 	}
 }
 
@@ -102,9 +111,13 @@ void FAdhesionSolver::ApplyCohesion(
 		return;
 	}
 
-	for (int32 i = 0; i < Particles.Num(); ++i)
+	TArray<FVector> CohesionForces;
+	CohesionForces.SetNum(Particles.Num());
+
+	// 병렬 계산
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
-		FFluidParticle& Particle = Particles[i];
+		const FFluidParticle& Particle = Particles[i];
 		FVector CohesionForce = FVector::ZeroVector;
 
 		for (int32 NeighborIdx : Particle.NeighborIndices)
@@ -131,8 +144,14 @@ void FAdhesionSolver::ApplyCohesion(
 			CohesionForce += CohesionStrength * CohesionWeight * Direction;
 		}
 
-		Particle.Velocity += CohesionForce;
-	}
+		CohesionForces[i] = CohesionForce;
+	});
+
+	// 병렬 적용
+	ParallelFor(Particles.Num(), [&](int32 i)
+	{
+		Particles[i].Velocity += CohesionForces[i];
+	});
 }
 
 FVector FAdhesionSolver::ComputeAdhesionForce(

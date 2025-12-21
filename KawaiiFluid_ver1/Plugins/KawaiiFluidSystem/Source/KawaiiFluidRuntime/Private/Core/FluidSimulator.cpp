@@ -153,20 +153,19 @@ void AFluidSimulator::Tick(float DeltaTime)
 
 void AFluidSimulator::PredictPositions(float DeltaTime)
 {
-	for (FFluidParticle& Particle : Particles)
-	{
-		// 외력 적용 (중력 + 누적 외력)
-		FVector TotalForce = Gravity + AccumulatedExternalForce;
-		Particle.Velocity += TotalForce * DeltaTime;
+	const FVector TotalForce = Gravity + AccumulatedExternalForce;
 
-		// 위치 예측
+	ParallelFor(Particles.Num(), [&](int32 i)
+	{
+		FFluidParticle& Particle = Particles[i];
+		Particle.Velocity += TotalForce * DeltaTime;
 		Particle.PredictedPosition = Particle.Position + Particle.Velocity * DeltaTime;
-	}
+	});
 }
 
 void AFluidSimulator::UpdateNeighbors()
 {
-	// 공간 해시 재구축
+	// 공간 해시 재구축 (순차 - 해시맵 쓰기)
 	TArray<FVector> Positions;
 	Positions.Reserve(Particles.Num());
 
@@ -177,15 +176,15 @@ void AFluidSimulator::UpdateNeighbors()
 
 	SpatialHash->BuildFromPositions(Positions);
 
-	// 각 입자의 이웃 캐싱
-	for (int32 i = 0; i < Particles.Num(); ++i)
+	// 각 입자의 이웃 캐싱 (병렬 - 읽기만)
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		SpatialHash->GetNeighbors(
 			Particles[i].PredictedPosition,
 			SmoothingRadius,
 			Particles[i].NeighborIndices
 		);
-	}
+	});
 }
 
 void AFluidSimulator::SolveDensityConstraints()
@@ -259,14 +258,12 @@ void AFluidSimulator::FinalizePositions(float DeltaTime)
 {
 	const float InvDeltaTime = 1.0f / DeltaTime;
 
-	for (FFluidParticle& Particle : Particles)
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
-		// 속도 업데이트: v = (x* - x) / dt
+		FFluidParticle& Particle = Particles[i];
 		Particle.Velocity = (Particle.PredictedPosition - Particle.Position) * InvDeltaTime;
-
-		// 위치 확정
 		Particle.Position = Particle.PredictedPosition;
-	}
+	});
 }
 
 void AFluidSimulator::ApplyViscosity()

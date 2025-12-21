@@ -19,7 +19,8 @@ void FViscositySolver::ApplyXSPH(TArray<FFluidParticle>& Particles, float Viscos
 	TArray<FVector> NewVelocities;
 	NewVelocities.SetNum(Particles.Num());
 
-	for (int32 i = 0; i < Particles.Num(); ++i)
+	// 병렬 계산
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		const FFluidParticle& Particle = Particles[i];
 		FVector VelocityCorrection = FVector::ZeroVector;
@@ -53,13 +54,13 @@ void FViscositySolver::ApplyXSPH(TArray<FFluidParticle>& Particles, float Viscos
 
 		// XSPH 점성 적용: v_new = v + c * Σ(v_j - v_i) * W
 		NewVelocities[i] = Particle.Velocity + ViscosityCoeff * VelocityCorrection;
-	}
+	});
 
-	// 속도 업데이트
-	for (int32 i = 0; i < Particles.Num(); ++i)
+	// 병렬 속도 업데이트
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		Particles[i].Velocity = NewVelocities[i];
-	}
+	});
 }
 
 void FViscositySolver::ApplyViscoelasticSprings(TArray<FFluidParticle>& Particles, float SpringStiffness, float DeltaTime)

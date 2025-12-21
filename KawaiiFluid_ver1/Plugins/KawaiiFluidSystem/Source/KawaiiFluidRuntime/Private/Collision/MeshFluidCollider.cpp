@@ -251,7 +251,8 @@ bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClose
 			if (bFoundAny)
 			{
 				// 디버그: 가장 가까운 캡슐까지의 거리 (가끔 출력)
-				static int32 DebugCounter = 0;
+				// 원자적 증가 및 체크
+				static std::atomic<int32> DebugCounter = 0;
 				if (++DebugCounter % 1000 == 0)
 				{
 					//UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider: Closest distance = %.2f"), MinDistance);
@@ -261,7 +262,8 @@ bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClose
 			else
 			{
 				// 캡슐을 찾지 못함
-				static int32 DebugCounter2 = 0;
+				// 원자적 증가 및 체크
+				static std::atomic<int32> DebugCounter2 = 0;
 				if (++DebugCounter2 % 1000 == 0)
 				{
 					//UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider: No capsules found in GetClosestPoint!"));

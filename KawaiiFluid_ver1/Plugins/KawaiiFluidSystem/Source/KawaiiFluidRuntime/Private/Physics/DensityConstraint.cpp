@@ -49,18 +49,18 @@ void FDensityConstraint::Solve(TArray<FFluidParticle>& Particles, float InSmooth
 
 void FDensityConstraint::ComputeDensities(TArray<FFluidParticle>& Particles)
 {
-	for (FFluidParticle& Particle : Particles)
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
-		Particle.Density = ComputeParticleDensity(Particle, Particles);
-	}
+		Particles[i].Density = ComputeParticleDensity(Particles[i], Particles);
+	});
 }
 
 void FDensityConstraint::ComputeLambdas(TArray<FFluidParticle>& Particles)
 {
-	for (FFluidParticle& Particle : Particles)
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
-		Particle.Lambda = ComputeParticleLambda(Particle, Particles);
-	}
+		Particles[i].Lambda = ComputeParticleLambda(Particles[i], Particles);
+	});
 }
 
 void FDensityConstraint::ApplyPositionCorrection(TArray<FFluidParticle>& Particles)
@@ -69,16 +69,17 @@ void FDensityConstraint::ApplyPositionCorrection(TArray<FFluidParticle>& Particl
 	TArray<FVector> DeltaPositions;
 	DeltaPositions.SetNum(Particles.Num());
 
-	for (int32 i = 0; i < Particles.Num(); ++i)
+	// 병렬 계산
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		DeltaPositions[i] = ComputeDeltaPosition(i, Particles);
-	}
+	});
 
-	// 보정 적용
-	for (int32 i = 0; i < Particles.Num(); ++i)
+	// 병렬 적용
+	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		Particles[i].PredictedPosition += DeltaPositions[i];
-	}
+	});
 }
 
 float FDensityConstraint::ComputeParticleDensity(const FFluidParticle& Particle, const TArray<FFluidParticle>& Particles)
