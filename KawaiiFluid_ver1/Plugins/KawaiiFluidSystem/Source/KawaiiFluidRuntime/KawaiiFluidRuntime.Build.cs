@@ -17,7 +17,8 @@ public class KawaiiFluidRuntime : ModuleRules
 				Path.Combine(ModulePath, "Public/Core"),
 				Path.Combine(ModulePath, "Public/Physics"),
 				Path.Combine(ModulePath, "Public/Collision"),
-				Path.Combine(ModulePath, "Public/Components")
+				Path.Combine(ModulePath, "Public/Components"),
+				Path.Combine(ModulePath, "Public/Rendering")
 			}
 		);
 
@@ -27,7 +28,8 @@ public class KawaiiFluidRuntime : ModuleRules
 				Path.Combine(ModulePath, "Private/Core"),
 				Path.Combine(ModulePath, "Private/Physics"),
 				Path.Combine(ModulePath, "Private/Collision"),
-				Path.Combine(ModulePath, "Private/Components")
+				Path.Combine(ModulePath, "Private/Components"),
+				Path.Combine(ModulePath, "Private/Rendering")
 			}
 		);
 
@@ -36,7 +38,10 @@ public class KawaiiFluidRuntime : ModuleRules
 			{
 				"Core",
 				"CoreUObject",
-				"Engine"
+				"Engine",
+				"RenderCore",
+				"Renderer",
+				"RHI"
 			}
 		);
 
@@ -45,9 +50,9 @@ public class KawaiiFluidRuntime : ModuleRules
 			{
 				"Slate",
 				"SlateCore",
-				"Projects", // IPluginManager »ç¿ëÇÏ±â À§ÇÔ
-				"RenderCore", // AddShaderSourceDirectoryMapping »ç¿ë À§ÇÔ
-            }
+				"Projects", // IPluginManager ï¿½ï¿½ï¿½ï¿½Ï±ï¿½ ï¿½ï¿½ï¿½ï¿½
+				"RenderCore", // AddShaderSourceDirectoryMapping ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½
+			}
 		);
 	}
 }
