@@ -9,6 +9,20 @@
 #include "UObject/ConstructorHelpers.h"
 #include "DrawDebugHelpers.h"
 
+// 프로파일링용 STAT 그룹
+DECLARE_STATS_GROUP(TEXT("KawaiiFluid"), STATGROUP_KawaiiFluid, STATCAT_Advanced);
+
+DECLARE_CYCLE_STAT(TEXT("Fluid Tick"), STAT_FluidTick, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Predict Positions"), STAT_PredictPositions, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Update Neighbors"), STAT_UpdateNeighbors, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Solve Density"), STAT_SolveDensity, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Handle Collisions"), STAT_HandleCollisions, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("World Collision"), STAT_WorldCollision, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Finalize Positions"), STAT_FinalizePositions, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Apply Viscosity"), STAT_ApplyViscosity, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Apply Adhesion"), STAT_ApplyAdhesion, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Debug Rendering"), STAT_DebugRendering, STATGROUP_KawaiiFluid);
+
 AFluidSimulator::AFluidSimulator()
 {
 	PrimaryActorTick.bCanEverTick = true;
@@ -96,6 +110,9 @@ void AFluidSimulator::InitializeSolvers()
 
 void AFluidSimulator::Tick(float DeltaTime)
 {
+	SCOPE_CYCLE_COUNTER(STAT_FluidTick);
+	TRACE_CPUPROFILER_EVENT_SCOPE(FluidSimulator_Tick);
+
 	Super::Tick(DeltaTime);
 
 	if (!bSimulationEnabled || Particles.Num() == 0)
@@ -105,32 +122,62 @@ void AFluidSimulator::Tick(float DeltaTime)
 
 	// PBF 시뮬레이션 루프
 	// 1. 외력 적용 & 위치 예측
-	PredictPositions(DeltaTime);
+	{
+		SCOPE_CYCLE_COUNTER(STAT_PredictPositions);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_PredictPositions);
+		PredictPositions(DeltaTime);
+	}
 
 	// 2. 이웃 탐색
-	UpdateNeighbors();
+	{
+		SCOPE_CYCLE_COUNTER(STAT_UpdateNeighbors);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_UpdateNeighbors);
+		UpdateNeighbors();
+	}
 
 	// 3. 밀도 제약 해결 (반복)
 	for (int32 Iter = 0; Iter < SolverIterations; ++Iter)
 	{
-		SolveDensityConstraints();
-		HandleCollisions();
+		{
+			SCOPE_CYCLE_COUNTER(STAT_SolveDensity);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_SolveDensity);
+			SolveDensityConstraints();
+		}
+		{
+			SCOPE_CYCLE_COUNTER(STAT_HandleCollisions);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_HandleCollisions);
+			HandleCollisions();
+		}
 
 		// 월드 콜리전
 		if (bUseWorldCollision)
 		{
+			SCOPE_CYCLE_COUNTER(STAT_WorldCollision);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_WorldCollision);
 			HandleWorldCollision();
 		}
 	}
 
 	// 4. 속도 업데이트 & 위치 확정
-	FinalizePositions(DeltaTime);
+	{
+		SCOPE_CYCLE_COUNTER(STAT_FinalizePositions);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_FinalizePositions);
+		FinalizePositions(DeltaTime);
+	}
 
 	// 5. 점성 적용
-	ApplyViscosity();
+	{
+		SCOPE_CYCLE_COUNTER(STAT_ApplyViscosity);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_ApplyViscosity);
+		ApplyViscosity();
+	}
 
 	// 6. 접착력 적용
-	ApplyAdhesion();
+	{
+		SCOPE_CYCLE_COUNTER(STAT_ApplyAdhesion);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_ApplyAdhesion);
+		ApplyAdhesion();
+	}
 
 	// 외력 리셋
 	AccumulatedExternalForce = FVector::ZeroVector;
@@ -138,6 +185,8 @@ void AFluidSimulator::Tick(float DeltaTime)
 	// 디버그 렌더링 업데이트
 	if (bEnableDebugRendering)
 	{
+		SCOPE_CYCLE_COUNTER(STAT_DebugRendering);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_DebugRendering);
 		UpdateDebugInstances();
 
 		// 실제 위치 디버그 (빨간색 = 실제 물리 위치)

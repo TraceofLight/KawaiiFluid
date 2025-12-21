@@ -52,7 +52,7 @@ void FDensityConstraint::ComputeDensities(TArray<FFluidParticle>& Particles)
 	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		Particles[i].Density = ComputeParticleDensity(Particles[i], Particles);
-	});
+	}, EParallelForFlags::Unbalanced);
 }
 
 void FDensityConstraint::ComputeLambdas(TArray<FFluidParticle>& Particles)
@@ -60,7 +60,7 @@ void FDensityConstraint::ComputeLambdas(TArray<FFluidParticle>& Particles)
 	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		Particles[i].Lambda = ComputeParticleLambda(Particles[i], Particles);
-	});
+	}, EParallelForFlags::Unbalanced);
 }
 
 void FDensityConstraint::ApplyPositionCorrection(TArray<FFluidParticle>& Particles)
@@ -73,7 +73,7 @@ void FDensityConstraint::ApplyPositionCorrection(TArray<FFluidParticle>& Particl
 	ParallelFor(Particles.Num(), [&](int32 i)
 	{
 		DeltaPositions[i] = ComputeDeltaPosition(i, Particles);
-	});
+	}, EParallelForFlags::Unbalanced);
 
 	// 병렬 적용
 	ParallelFor(Particles.Num(), [&](int32 i)
