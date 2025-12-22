@@ -7,6 +7,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiRenderParticle.h"
+#include "Rendering/IKawaiiFluidRenderable.h"
 #include "FluidSimulator.generated.h"
 
 class FSpatialHash;
@@ -33,7 +34,7 @@ enum class EFluidType : uint8
  * 점성 유체(슬라임, 꿀 등) 시뮬레이션의 메인 클래스
  */
 UCLASS(BlueprintType)
-class KAWAIIFLUIDRUNTIME_API AFluidSimulator : public AActor
+class KAWAIIFLUIDRUNTIME_API AFluidSimulator : public AActor, public IKawaiiFluidRenderable
 {
 	GENERATED_BODY()
 
@@ -45,6 +46,24 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void BeginDestroy() override;
 	virtual void Tick(float DeltaTime) override;
+
+	//========================================
+	// IKawaiiFluidRenderable 인터페이스 구현
+	//========================================
+
+	virtual FKawaiiFluidRenderResource* GetFluidRenderResource() const override;
+
+	virtual bool IsFluidRenderResourceValid() const override;
+
+	virtual float GetParticleRenderRadius() const override
+	{
+		return DebugParticleRadius;
+	}
+
+	virtual FString GetDebugName() const override
+	{
+		return FString::Printf(TEXT("Simulator_%s"), *GetName());
+	}
 
 	//========================================
 	// 유체 타입 프리셋

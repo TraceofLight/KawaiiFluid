@@ -728,3 +728,13 @@ TArray<FKawaiiRenderParticle> AFluidSimulator::ConvertToRenderParticles() const
 
 	return RenderParticles;
 }
+
+bool AFluidSimulator::IsFluidRenderResourceValid() const
+{
+	return RenderResource.IsValid() && RenderResource->IsValid();
+}
+
+FKawaiiFluidRenderResource* AFluidSimulator::GetFluidRenderResource() const
+{
+	return RenderResource.Get();
+}
