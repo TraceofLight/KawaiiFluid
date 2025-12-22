@@ -1,9 +1,10 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Rendering/FluidDepthPass.h"
 #include "Rendering/FluidDepthShaders.h"
 #include "Rendering/FluidRendererSubsystem.h"
-#include "Core/FluidSimulator.h"
+#include "Rendering/IKawaiiFluidRenderable.h"
+#include "Rendering/KawaiiFluidRenderResource.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -24,14 +25,7 @@ void RenderFluidDepthPass(
 	UFluidRendererSubsystem* Subsystem,
 	FRDGTextureRef& OutDepthTexture)
 {
-	RDG_EVENT_SCOPE(GraphBuilder, "FluidDepthPass_InstancedMesh");
-
-	// 등록된 시뮬레이터 가져오기
-	const TArray<AFluidSimulator*>& Simulators = Subsystem->GetRegisteredSimulators();
-	if (Simulators.Num() == 0)
-	{
-		return;
-	}
+	RDG_EVENT_SCOPE(GraphBuilder, "FluidDepthPass");
 
 	// Depth Texture 생성
 	FRDGTextureDesc DepthDesc = FRDGTextureDesc::Create2D(
@@ -42,85 +36,88 @@ void RenderFluidDepthPass(
 
 	OutDepthTexture = GraphBuilder.CreateTexture(DepthDesc, TEXT("FluidDepthTexture"));
 
-	// 각 시뮬레이터의 InstancedMesh 렌더링
-	for (AFluidSimulator* Simulator : Simulators)
+
+	//=============================================================================
+	// SSFR 렌더링만 처리 (DebugMesh는 UE 기본 렌더링 사용)
+	//=============================================================================
+	
+	TArray<IKawaiiFluidRenderable*> Renderables = Subsystem->GetAllRenderables();
+	bool bFirstPass = true;
+
+	for (IKawaiiFluidRenderable* Renderable : Renderables)
 	{
-		if (!Simulator || Simulator->GetParticleCount() == 0)
+		if (!Renderable)
 		{
 			continue;
 		}
 
-		// DebugMeshComponent (InstancedStaticMeshComponent) 가져오기
-		UInstancedStaticMeshComponent* MeshComp = Simulator->DebugMeshComponent;
-		if (!MeshComp || !MeshComp->IsVisible())
+		// SSFR 모드만 처리 (DebugMesh 모드는 스킵)
+		if (!Renderable->ShouldUseSSFR())
 		{
 			continue;
 		}
 
-		// 파티클 개수 확인
-		int32 InstanceCount = MeshComp->GetInstanceCount();
-		if (InstanceCount == 0)
+		if (!Renderable->IsFluidRenderResourceValid())
 		{
 			continue;
 		}
 
-		// UE_LOG(LogTemp, Log, TEXT("FluidDepthPass: Rendering %s with %d instances"),
-		// 	*Simulator->GetName(), InstanceCount);
+		FKawaiiFluidRenderResource* RR = Renderable->GetFluidRenderResource();
+		const TArray<FKawaiiRenderParticle>& CachedParticles = RR->GetCachedParticles();
 
-		// Instance transforms에서 파티클 위치 추출
+		if (CachedParticles.Num() == 0)
+		{
+			continue;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("✅ DepthPass (SSFR): %s with %d particles"),
+			*Renderable->GetDebugName(), CachedParticles.Num());
+
+		// Position만 추출
 		TArray<FVector3f> ParticlePositions;
-		ParticlePositions.Reserve(InstanceCount);
-
-		for (int32 i = 0; i < InstanceCount; ++i)
+		ParticlePositions.Reserve(CachedParticles.Num());
+		for (const FKawaiiRenderParticle& Particle : CachedParticles)
 		{
-			FTransform InstanceTransform;
-			if (MeshComp->GetInstanceTransform(i, InstanceTransform, true)) // World space
-			{
-				FVector WorldPos = InstanceTransform.GetLocation();
-				ParticlePositions.Add(FVector3f(WorldPos));
-			}
+			ParticlePositions.Add(Particle.Position);
 		}
 
-		if (ParticlePositions.Num() == 0)
-		{
-			continue;
-		}
-
-		// GPU 버퍼 생성 및 업로드
+		// RDG 버퍼 생성 및 업로드
 		const uint32 BufferSize = ParticlePositions.Num() * sizeof(FVector3f);
-		FRDGBufferDesc BufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), ParticlePositions.Num());
-		FRDGBufferRef ParticleBuffer = GraphBuilder.CreateBuffer(BufferDesc, TEXT("FluidParticlePositions"));
+		FRDGBufferDesc BufferDesc = FRDGBufferDesc::CreateStructuredDesc(
+			sizeof(FVector3f), ParticlePositions.Num());
+		FRDGBufferRef ParticleBuffer = GraphBuilder.CreateBuffer(
+			BufferDesc, TEXT("SSFRParticlePositions"));
 
-		// 데이터 업로드
 		GraphBuilder.QueueBufferUpload(ParticleBuffer, ParticlePositions.GetData(), BufferSize);
-
 		FRDGBufferSRVRef ParticleBufferSRV = GraphBuilder.CreateSRV(ParticleBuffer);
 
 		// View matrices
 		FMatrix ViewMatrix = View.ViewMatrices.GetViewMatrix();
 		FMatrix ProjectionMatrix = View.ViewMatrices.GetProjectionMatrix();
 		FMatrix ViewProjectionMatrix = View.ViewMatrices.GetViewProjectionMatrix();
+		float ParticleRadius = Renderable->GetParticleRenderRadius();
 
-		float ParticleRadius = Subsystem->RenderingParameters.ParticleRenderRadius;
-
-		// Depth 렌더링 패스
+		// Shader Parameters
 		auto* PassParameters = GraphBuilder.AllocParameters<FFluidDepthParameters>();
 		PassParameters->ParticlePositions = ParticleBufferSRV;
 		PassParameters->ParticleRadius = ParticleRadius;
 		PassParameters->ViewMatrix = FMatrix44f(ViewMatrix);
 		PassParameters->ProjectionMatrix = FMatrix44f(ProjectionMatrix);
 		PassParameters->ViewProjectionMatrix = FMatrix44f(ViewProjectionMatrix);
-		PassParameters->RenderTargets[0] = FRenderTargetBinding(OutDepthTexture, ERenderTargetLoadAction::EClear);
+		PassParameters->RenderTargets[0] = FRenderTargetBinding(
+			OutDepthTexture,
+			bFirstPass ? ERenderTargetLoadAction::EClear : ERenderTargetLoadAction::ELoad
+		);
 
 		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 		TShaderMapRef<FFluidDepthVS> VertexShader(GlobalShaderMap);
 		TShaderMapRef<FFluidDepthPS> PixelShader(GlobalShaderMap);
 
 		GraphBuilder.AddPass(
-			RDG_EVENT_NAME("FluidDepthDraw_%s", *Simulator->GetName()),
+			RDG_EVENT_NAME("DepthDraw_SSFR_%s", *Renderable->GetDebugName()),
 			PassParameters,
 			ERDGPassFlags::Raster,
-			[VertexShader, PixelShader, PassParameters, InstanceCount](FRHICommandList& RHICmdList)
+			[VertexShader, PixelShader, PassParameters, ParticleCount = ParticlePositions.Num()](FRHICommandList& RHICmdList)
 			{
 				FGraphicsPipelineStateInitializer GraphicsPSOInit;
 				RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
@@ -134,12 +131,12 @@ void RenderFluidDepthPass(
 				GraphicsPSOInit.PrimitiveType = PT_TriangleStrip;
 
 				SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
-
 				SetShaderParameters(RHICmdList, VertexShader, VertexShader.GetVertexShader(), *PassParameters);
 				SetShaderParameters(RHICmdList, PixelShader, PixelShader.GetPixelShader(), *PassParameters);
 
-				// Draw instanced quads (4 vertices per instance)
-				RHICmdList.DrawPrimitive(0, 2, InstanceCount);
+				RHICmdList.DrawPrimitive(0, 2, ParticleCount);
 			});
+
+		bFirstPass = false;
 	}
 }

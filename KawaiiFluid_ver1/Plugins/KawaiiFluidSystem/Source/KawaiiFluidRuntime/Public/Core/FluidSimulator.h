@@ -8,6 +8,7 @@
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiRenderParticle.h"
 #include "Rendering/IKawaiiFluidRenderable.h"
+#include "Rendering/KawaiiFluidRenderingMode.h"
 #include "FluidSimulator.generated.h"
 
 class FSpatialHash;
@@ -65,6 +66,26 @@ public:
 		return FString::Printf(TEXT("Simulator_%s"), *GetName());
 	}
 
+	virtual bool ShouldUseSSFR() const override
+	{
+		return RenderingMode == EKawaiiFluidRenderingMode::SSFR || 
+		       RenderingMode == EKawaiiFluidRenderingMode::Both;
+	}
+
+	virtual bool ShouldUseDebugMesh() const override
+	{
+		return bEnableDebugRendering && 
+		       (RenderingMode == EKawaiiFluidRenderingMode::DebugMesh || 
+		        RenderingMode == EKawaiiFluidRenderingMode::Both);
+	}
+
+	virtual UInstancedStaticMeshComponent* GetDebugMeshComponent() const override
+	{
+		return DebugMeshComponent;
+	}
+
+	virtual int32 GetParticleCount() const override;
+	
 	//========================================
 	// 유체 타입 프리셋
 	//========================================
@@ -169,6 +190,23 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Debug")
 	UInstancedStaticMeshComponent* DebugMeshComponent;
 
+	//========================================
+	// 렌더링 방식 선택
+	//========================================
+
+	/** 
+	 * 렌더링 방식 선택
+	 * - DebugMesh: Instanced Static Mesh
+	 * - SSFR: Screen Space Fluid Rendering
+	 * - Both: 둘 다 (디버그용)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Rendering")
+	EKawaiiFluidRenderingMode RenderingMode = EKawaiiFluidRenderingMode::DebugMesh;
+
+	//========================================
+	// 자동 스폰
+	//========================================
+
 	/** 시작 시 자동 스폰 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug")
 	bool bSpawnOnBeginPlay;
@@ -211,10 +249,6 @@ public:
 	/** 입자 속도 배열 반환 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	TArray<FVector> GetParticleVelocities() const;
-
-	/** 현재 입자 수 */
-	UFUNCTION(BlueprintCallable, Category = "Fluid")
-	int32 GetParticleCount() const;
 
 	/** 모든 입자 제거 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")

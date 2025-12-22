@@ -1,31 +1,54 @@
 ﻿// Copyright KawaiiFluid Team. All Rights Reserved.
 
-#include "Test/KawaiiDummyParticles.h"
+#include "Test/KawaiiFluidDummy.h"
 #include "Rendering/KawaiiFluidRenderResource.h"
 #include "Rendering/FluidRendererSubsystem.h"
 #include "Components/SceneComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Engine/World.h"
+#include "UObject/ConstructorHelpers.h"
 
-AKawaiiDummyParticles::AKawaiiDummyParticles()
+AKawaiiFluidDummy::AKawaiiFluidDummy()
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.TickGroup = TG_PrePhysics;
 
-	// ✅ RootComponent 생성 (에디터에서 이동 가능)
+	// RootComponent 생성 (에디터에서 이동 가능)
 	RootSceneComponent = CreateDefaultSubobject<USceneComponent>(TEXT("RootSceneComponent"));
 	RootComponent = RootSceneComponent;
+
+	// 디버그 메시 컴포넌트 생성
+	DebugMeshComponent = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("DebugMeshComponent"));
+	DebugMeshComponent->SetupAttachment(RootSceneComponent);
+	DebugMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	DebugMeshComponent->SetVisibility(false);  // 기본적으로 숨김
+
+	// 기본 Sphere 메시 로드
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	if (SphereMesh.Succeeded())
+	{
+		DebugMeshComponent->SetStaticMesh(SphereMesh.Object);
+	}
+
+	// 기본 머티리얼 설정
+	static ConstructorHelpers::FObjectFinder<UMaterial> DefaultMaterial(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (DefaultMaterial.Succeeded())
+	{
+		DebugMeshComponent->SetMaterial(0, DefaultMaterial.Object);
+	}
 }
 
-AKawaiiDummyParticles::~AKawaiiDummyParticles() = default;
+AKawaiiFluidDummy::~AKawaiiFluidDummy() = default;
 
-void AKawaiiDummyParticles::BeginPlay()
+void AKawaiiFluidDummy::BeginPlay()
 {
 	Super::BeginPlay();
 
 	InitializeRenderResource();
-	GenerateDummyParticles();
+	InitializeDebugMesh();
+	GenerateTestParticles();
 
-	// ✅ Subsystem에 등록
+	// Subsystem에 등록
 	if (bEnableRendering)
 	{
 		if (UWorld* World = GetWorld())
@@ -33,18 +56,22 @@ void AKawaiiDummyParticles::BeginPlay()
 			if (UFluidRendererSubsystem* Subsystem = World->GetSubsystem<UFluidRendererSubsystem>())
 			{
 				Subsystem->RegisterRenderable(this);
-				UE_LOG(LogTemp, Log, TEXT("KawaiiDummyParticles: Registered to Subsystem"));
+				
+				const TCHAR* ModeStr = (RenderingMode == EKawaiiFluidRenderingMode::SSFR) ? TEXT("SSFR") :
+				                       (RenderingMode == EKawaiiFluidRenderingMode::DebugMesh) ? TEXT("DebugMesh") : TEXT("Both");
+				
+				UE_LOG(LogTemp, Log, TEXT("KawaiiFluidDummy registered: %s (Mode: %s)"), *GetName(), ModeStr);
 			}
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiDummyParticles: Generated %d dummy particles at %s"),
-		DummyParticles.Num(), *GetActorLocation().ToString());
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidDummy: Generated %d test particles at %s"),
+		TestParticles.Num(), *GetActorLocation().ToString());
 }
 
-void AKawaiiDummyParticles::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void AKawaiiFluidDummy::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// ✅ Subsystem에서 등록 해제
+	// Subsystem에서 등록 해제
 	if (UWorld* World = GetWorld())
 	{
 		if (UFluidRendererSubsystem* Subsystem = World->GetSubsystem<UFluidRendererSubsystem>())
@@ -56,12 +83,12 @@ void AKawaiiDummyParticles::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void AKawaiiDummyParticles::BeginDestroy()
+void AKawaiiFluidDummy::BeginDestroy()
 {
 	// 렌더 리소스 정리
 	if (RenderResource.IsValid())
 	{
-		ENQUEUE_RENDER_COMMAND(ReleaseDummyParticlesRenderResource)(
+		ENQUEUE_RENDER_COMMAND(ReleaseFluidDummyRenderResource)(
 			[RenderResource = MoveTemp(RenderResource)](FRHICommandListImmediate& RHICmdList) mutable
 			{
 				if (RenderResource.IsValid())
@@ -76,11 +103,11 @@ void AKawaiiDummyParticles::BeginDestroy()
 	Super::BeginDestroy();
 }
 
-void AKawaiiDummyParticles::Tick(float DeltaTime)
+void AKawaiiFluidDummy::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (!bEnableRendering || DummyParticles.Num() == 0)
+	if (!bEnableRendering || TestParticles.Num() == 0)
 	{
 		return;
 	}
@@ -93,16 +120,22 @@ void AKawaiiDummyParticles::Tick(float DeltaTime)
 		// GPU 버퍼 업데이트
 		if (RenderResource.IsValid())
 		{
-			RenderResource->UpdateParticleData(DummyParticles);
+			RenderResource->UpdateParticleData(TestParticles);
 		}
+	}
+
+	// 디버그 메시 업데이트 (렌더링 모드에 따라 조건부)
+	if (ShouldUseDebugMesh())
+	{
+		UpdateDebugMeshInstances();
 	}
 }
 
-void AKawaiiDummyParticles::InitializeRenderResource()
+void AKawaiiFluidDummy::InitializeRenderResource()
 {
 	RenderResource = MakeShared<FKawaiiFluidRenderResource>();
 
-	ENQUEUE_RENDER_COMMAND(InitDummyParticlesRenderResource)(
+	ENQUEUE_RENDER_COMMAND(InitFluidDummyRenderResource)(
 		[RenderResourcePtr = RenderResource.Get()](FRHICommandListImmediate& RHICmdList)
 		{
 			RenderResourcePtr->InitResource(RHICmdList);
@@ -110,7 +143,69 @@ void AKawaiiDummyParticles::InitializeRenderResource()
 	);
 }
 
-void AKawaiiDummyParticles::GenerateDummyParticles()
+void AKawaiiFluidDummy::InitializeDebugMesh()
+{
+	if (!DebugMeshComponent)
+	{
+		return;
+	}
+
+	// 렌더링 모드에 따라 가시성 설정
+	bool bVisible = ShouldUseDebugMesh();
+	DebugMeshComponent->SetVisibility(bVisible);
+	
+	if (bVisible)
+	{
+		DebugMeshComponent->ClearInstances();
+		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidDummy: Debug Mesh enabled"));
+	}
+}
+
+void AKawaiiFluidDummy::UpdateDebugMeshInstances()
+{
+	if (!DebugMeshComponent || TestParticles.Num() == 0)
+	{
+		return;
+	}
+
+	const int32 NumParticles = TestParticles.Num();
+	const int32 InstanceCount = DebugMeshComponent->GetInstanceCount();
+
+	// 인스턴스 수 조정
+	if (InstanceCount < NumParticles)
+	{
+		for (int32 i = InstanceCount; i < NumParticles; ++i)
+		{
+			DebugMeshComponent->AddInstance(FTransform::Identity);
+		}
+	}
+	else if (InstanceCount > NumParticles)
+	{
+		for (int32 i = InstanceCount - 1; i >= NumParticles; --i)
+		{
+			DebugMeshComponent->RemoveInstance(i);
+		}
+	}
+
+	// 스케일 계산 (기본 Sphere는 지름 100cm = 반지름 50cm)
+	const float Scale = ParticleRadius / 50.0f;
+	const FVector ScaleVec(Scale, Scale, Scale);
+
+	// 각 파티클 위치로 인스턴스 업데이트
+	for (int32 i = 0; i < NumParticles; ++i)
+	{
+		FTransform InstanceTransform;
+		InstanceTransform.SetLocation(FVector(TestParticles[i].Position));
+		InstanceTransform.SetScale3D(ScaleVec);
+
+		DebugMeshComponent->UpdateInstanceTransform(i, InstanceTransform, true, false, false);
+	}
+
+	// 일괄 업데이트
+	DebugMeshComponent->MarkRenderStateDirty();
+}
+
+void AKawaiiFluidDummy::GenerateTestParticles()
 {
 	switch (DataMode)
 	{
@@ -138,14 +233,14 @@ void AKawaiiDummyParticles::GenerateDummyParticles()
 	// GPU 버퍼로 전송
 	if (RenderResource.IsValid())
 	{
-		RenderResource->UpdateParticleData(DummyParticles);
+		RenderResource->UpdateParticleData(TestParticles);
 	}
 }
 
-void AKawaiiDummyParticles::GenerateStaticData()
+void AKawaiiFluidDummy::GenerateStaticData()
 {
-	DummyParticles.Empty();
-	DummyParticles.Reserve(ParticleCount);
+	TestParticles.Empty();
+	TestParticles.Reserve(ParticleCount);
 
 	const FVector ActorLocation = GetActorLocation();
 
@@ -165,13 +260,13 @@ void AKawaiiDummyParticles::GenerateStaticData()
 		Particle.Radius = ParticleRadius;
 		Particle.Padding = 0.0f;
 
-		DummyParticles.Add(Particle);
+		TestParticles.Add(Particle);
 	}
 }
 
-void AKawaiiDummyParticles::GenerateGridPattern()
+void AKawaiiFluidDummy::GenerateGridPattern()
 {
-	DummyParticles.Empty();
+	TestParticles.Empty();
 
 	const int32 GridSize = FMath::CeilToInt(FMath::Pow(ParticleCount, 1.0f / 3.0f));
 	const FVector ActorLocation = GetActorLocation();
@@ -197,17 +292,17 @@ void AKawaiiDummyParticles::GenerateGridPattern()
 				Particle.Radius = ParticleRadius;
 				Particle.Padding = 0.0f;
 
-				DummyParticles.Add(Particle);
+				TestParticles.Add(Particle);
 				Count++;
 			}
 		}
 	}
 }
 
-void AKawaiiDummyParticles::GenerateSpherePattern()
+void AKawaiiFluidDummy::GenerateSpherePattern()
 {
-	DummyParticles.Empty();
-	DummyParticles.Reserve(ParticleCount);
+	TestParticles.Empty();
+	TestParticles.Reserve(ParticleCount);
 
 	const FVector ActorLocation = GetActorLocation();
 	const float SphereRadius = SpawnExtent.X;
@@ -231,11 +326,11 @@ void AKawaiiDummyParticles::GenerateSpherePattern()
 		Particle.Radius = ParticleRadius;
 		Particle.Padding = 0.0f;
 
-		DummyParticles.Add(Particle);
+		TestParticles.Add(Particle);
 	}
 }
 
-void AKawaiiDummyParticles::UpdateAnimatedParticles(float DeltaTime)
+void AKawaiiFluidDummy::UpdateAnimatedParticles(float DeltaTime)
 {
 	AnimationTime += DeltaTime * AnimationSpeed;
 
@@ -244,9 +339,9 @@ void AKawaiiDummyParticles::UpdateAnimatedParticles(float DeltaTime)
 	if (DataMode == ETestDataMode::Animated)
 	{
 		// 회전 애니메이션
-		for (int32 i = 0; i < DummyParticles.Num(); ++i)
+		for (int32 i = 0; i < TestParticles.Num(); ++i)
 		{
-			FKawaiiRenderParticle& Particle = DummyParticles[i];
+			FKawaiiRenderParticle& Particle = TestParticles[i];
 
 			// 원래 위치 (Actor 기준)
 			FVector LocalPos = FVector(Particle.Position) - ActorLocation;
@@ -261,20 +356,20 @@ void AKawaiiDummyParticles::UpdateAnimatedParticles(float DeltaTime)
 	else if (DataMode == ETestDataMode::Wave)
 	{
 		// 파동 애니메이션 (Grid Pattern 기반)
-		for (int32 i = 0; i < DummyParticles.Num(); ++i)
+		for (int32 i = 0; i < TestParticles.Num(); ++i)
 		{
-			FKawaiiRenderParticle& Particle = DummyParticles[i];
+			FKawaiiRenderParticle& Particle = TestParticles[i];
 
 			FVector LocalPos = FVector(Particle.Position) - ActorLocation;
 
 			// 원래 Z 위치 저장 (초기 생성 시)
 			static TArray<float> OriginalZPositions;
-			if (OriginalZPositions.Num() != DummyParticles.Num())
+			if (OriginalZPositions.Num() != TestParticles.Num())
 			{
-				OriginalZPositions.SetNum(DummyParticles.Num());
-				for (int32 j = 0; j < DummyParticles.Num(); ++j)
+				OriginalZPositions.SetNum(TestParticles.Num());
+				for (int32 j = 0; j < TestParticles.Num(); ++j)
 				{
-					OriginalZPositions[j] = FVector(DummyParticles[j].Position).Z - ActorLocation.Z;
+					OriginalZPositions[j] = FVector(TestParticles[j].Position).Z - ActorLocation.Z;
 				}
 			}
 
@@ -287,22 +382,22 @@ void AKawaiiDummyParticles::UpdateAnimatedParticles(float DeltaTime)
 	}
 }
 
-void AKawaiiDummyParticles::RegenerateDummyData()
+void AKawaiiFluidDummy::RegenerateTestData()
 {
-	GenerateDummyParticles();
-	UE_LOG(LogTemp, Log, TEXT("KawaiiDummyParticles: Regenerated %d particles"), DummyParticles.Num());
+	GenerateTestParticles();
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidDummy: Regenerated %d particles"), TestParticles.Num());
 }
 
-void AKawaiiDummyParticles::ForceUpdateGPUBuffer()
+void AKawaiiFluidDummy::ForceUpdateGPUBuffer()
 {
-	if (RenderResource.IsValid() && DummyParticles.Num() > 0)
+	if (RenderResource.IsValid() && TestParticles.Num() > 0)
 	{
-		RenderResource->UpdateParticleData(DummyParticles);
-		UE_LOG(LogTemp, Log, TEXT("KawaiiDummyParticles: GPU buffer updated (%d particles)"), DummyParticles.Num());
+		RenderResource->UpdateParticleData(TestParticles);
+		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidDummy: GPU buffer updated (%d particles)"), TestParticles.Num());
 	}
 }
 
-bool AKawaiiDummyParticles::IsFluidRenderResourceValid() const
+bool AKawaiiFluidDummy::IsFluidRenderResourceValid() const
 {
 	return RenderResource.IsValid() && RenderResource->IsValid();
 }

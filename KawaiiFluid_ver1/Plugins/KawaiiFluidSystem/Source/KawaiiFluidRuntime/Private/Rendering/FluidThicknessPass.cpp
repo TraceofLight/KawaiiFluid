@@ -1,9 +1,10 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Rendering/FluidThicknessPass.h"
 #include "Rendering/FluidThicknessShaders.h"
 #include "Rendering/FluidRendererSubsystem.h"
-#include "Core/FluidSimulator.h"
+#include "Rendering/IKawaiiFluidRenderable.h"
+#include "Rendering/KawaiiFluidRenderResource.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -14,6 +15,10 @@
 #include "RHIStaticStates.h"
 #include "CommonRenderResources.h"
 
+//=============================================================================
+// Thickness Pass Implementation
+//=============================================================================
+
 void RenderFluidThicknessPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
@@ -22,14 +27,7 @@ void RenderFluidThicknessPass(
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "FluidThicknessPass");
 
-	const TArray<AFluidSimulator*>& Simulators = Subsystem->GetRegisteredSimulators();
-	if (Simulators.Num() == 0)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid: FluidThicknessPass - No registered simulators found."));
-		return;
-	}
-
-	// Thickness Texture 생성 (가산 혼합을 위해 R16F 또는 R32F 사용)
+	// Thickness Texture 생성
 	FRDGTextureDesc ThicknessDesc = FRDGTextureDesc::Create2D(
 		View.UnscaledViewRect.Size(),
 		PF_R16F,
@@ -38,80 +36,87 @@ void RenderFluidThicknessPass(
 
 	OutThicknessTexture = GraphBuilder.CreateTexture(ThicknessDesc, TEXT("FluidThicknessTexture"));
 
-	// 초기화 (Clear)
 	AddClearRenderTargetPass(GraphBuilder, OutThicknessTexture, FLinearColor::Black);
 
-	for (AFluidSimulator* Simulator : Simulators)
+	//=============================================================================
+	// SSFR 렌더링만 처리 (DebugMesh는 UE 기본 렌더링 사용)
+	//=============================================================================
+	
+	TArray<IKawaiiFluidRenderable*> Renderables = Subsystem->GetAllRenderables();
+
+	for (IKawaiiFluidRenderable* Renderable : Renderables)
 	{
-		if (!Simulator || Simulator->GetParticleCount() == 0)
+		if (!Renderable)
 		{
 			continue;
 		}
 
-		UInstancedStaticMeshComponent* MeshComp = Simulator->DebugMeshComponent;
-		if (!MeshComp || !MeshComp->IsVisible())
+		// SSFR 모드만 처리 (DebugMesh 모드는 스킵)
+		if (!Renderable->ShouldUseSSFR())
 		{
 			continue;
 		}
 
-		int32 InstanceCount = MeshComp->GetInstanceCount();
-		if (InstanceCount == 0)
+		if (!Renderable->IsFluidRenderResourceValid())
 		{
 			continue;
 		}
 
+		FKawaiiFluidRenderResource* RR = Renderable->GetFluidRenderResource();
+		const TArray<FKawaiiRenderParticle>& CachedParticles = RR->GetCachedParticles();
+
+		if (CachedParticles.Num() == 0)
+		{
+			continue;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("✅ ThicknessPass (SSFR): %s with %d particles"),
+			*Renderable->GetDebugName(), CachedParticles.Num());
+
+		// Position만 추출
 		TArray<FVector3f> ParticlePositions;
-		ParticlePositions.Reserve(InstanceCount);
-
-		UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: Rendering FluidThicknessPass for %s. InstanceCount: %d"), 
-			*Simulator->GetName(), InstanceCount);
-
-		for (int32 i = 0; i < InstanceCount; ++i)
+		ParticlePositions.Reserve(CachedParticles.Num());
+		for (const FKawaiiRenderParticle& Particle : CachedParticles)
 		{
-			FTransform InstanceTransform;
-			if (MeshComp->GetInstanceTransform(i, InstanceTransform, true))
-			{
-				ParticlePositions.Add(FVector3f(InstanceTransform.GetLocation()));
-			}
+			ParticlePositions.Add(Particle.Position);
 		}
 
-		if (ParticlePositions.Num() == 0)
-		{
-			continue;
-		}
-
+		// RDG 버퍼 생성 및 업로드
 		const uint32 BufferSize = ParticlePositions.Num() * sizeof(FVector3f);
-		FRDGBufferDesc BufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), ParticlePositions.Num());
-		FRDGBufferRef ParticleBuffer = GraphBuilder.CreateBuffer(BufferDesc, TEXT("FluidThicknessParticlePositions"));
-		GraphBuilder.QueueBufferUpload(ParticleBuffer, ParticlePositions.GetData(), BufferSize);
+		FRDGBufferDesc BufferDesc = FRDGBufferDesc::CreateStructuredDesc(
+			sizeof(FVector3f), ParticlePositions.Num());
+		FRDGBufferRef ParticleBuffer = GraphBuilder.CreateBuffer(
+			BufferDesc, TEXT("SSFRThicknessPositions"));
 
+		GraphBuilder.QueueBufferUpload(ParticleBuffer, ParticlePositions.GetData(), BufferSize);
 		FRDGBufferSRVRef ParticleBufferSRV = GraphBuilder.CreateSRV(ParticleBuffer);
 
 		FMatrix ViewMatrix = View.ViewMatrices.GetViewMatrix();
 		FMatrix ProjectionMatrix = View.ViewMatrices.GetProjectionMatrix();
+		float ParticleRadius = Renderable->GetParticleRenderRadius();
 
 		auto* PassParameters = GraphBuilder.AllocParameters<FFluidThicknessParameters>();
 		PassParameters->ParticlePositions = ParticleBufferSRV;
-		PassParameters->ParticleRadius = Subsystem->RenderingParameters.ParticleRenderRadius;
+		PassParameters->ParticleRadius = ParticleRadius;
 		PassParameters->ViewMatrix = FMatrix44f(ViewMatrix);
 		PassParameters->ProjectionMatrix = FMatrix44f(ProjectionMatrix);
 		PassParameters->ThicknessScale = Subsystem->RenderingParameters.ThicknessScale;
-		PassParameters->RenderTargets[0] = FRenderTargetBinding(OutThicknessTexture, ERenderTargetLoadAction::ELoad);
+		PassParameters->RenderTargets[0] = FRenderTargetBinding(
+			OutThicknessTexture, ERenderTargetLoadAction::ELoad);
 
 		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 		TShaderMapRef<FFluidThicknessVS> VertexShader(GlobalShaderMap);
 		TShaderMapRef<FFluidThicknessPS> PixelShader(GlobalShaderMap);
 
 		GraphBuilder.AddPass(
-			RDG_EVENT_NAME("FluidThicknessDraw_%s", *Simulator->GetName()),
+			RDG_EVENT_NAME("ThicknessDraw_SSFR_%s", *Renderable->GetDebugName()),
 			PassParameters,
 			ERDGPassFlags::Raster,
-			[VertexShader, PixelShader, PassParameters, InstanceCount](FRHICommandList& RHICmdList)
+			[VertexShader, PixelShader, PassParameters, ParticleCount = ParticlePositions.Num()](FRHICommandList& RHICmdList)
 			{
 				FGraphicsPipelineStateInitializer GraphicsPSOInit;
 				RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
 				
-				// Additive Blending 설정
 				GraphicsPSOInit.BlendState = TStaticBlendState<CW_RED, BO_Add, BF_One, BF_One>::GetRHI();
 				GraphicsPSOInit.RasterizerState = TStaticRasterizerState<>::GetRHI();
 				GraphicsPSOInit.DepthStencilState = TStaticDepthStencilState<false, CF_Always>::GetRHI();
@@ -122,11 +127,10 @@ void RenderFluidThicknessPass(
 				GraphicsPSOInit.PrimitiveType = PT_TriangleStrip;
 
 				SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
-
 				SetShaderParameters(RHICmdList, VertexShader, VertexShader.GetVertexShader(), *PassParameters);
 				SetShaderParameters(RHICmdList, PixelShader, PixelShader.GetPixelShader(), *PassParameters);
 
-				RHICmdList.DrawPrimitive(0, 2, InstanceCount);
+				RHICmdList.DrawPrimitive(0, 2, ParticleCount);
 			});
 	}
 }

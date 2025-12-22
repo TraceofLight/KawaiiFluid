@@ -44,11 +44,27 @@ public:
 	/** Structured Buffer의 SRV (Shader Resource View) 반환 */
 	FRHIShaderResourceView* GetParticleSRV() const { return ParticleSRV; }
 
+	/** RHI 버퍼 직접 반환 (미래 통합용) */
+	FRHIBuffer* GetParticleBufferRHI() const 
+	{ 
+		return ParticleBuffer.GetReference(); 
+	}
+
 	/** 현재 파티클 수 */
 	int32 GetParticleCount() const { return ParticleCount; }
 
 	/** 버퍼가 유효한지 확인 */
 	bool IsValid() const { return ParticleBuffer.IsValid() && ParticleSRV.IsValid(); }
+
+	//========================================
+	// CPU 측 데이터 캐시 (게임 스레드)
+	//========================================
+
+	/** 캐시된 파티클 데이터 반환 (RenderGraph Pass에서 사용) */
+	const TArray<FKawaiiRenderParticle>& GetCachedParticles() const 
+	{ 
+		return CachedParticles; 
+	}
 
 private:
 	//========================================
@@ -66,6 +82,16 @@ private:
 
 	/** 버퍼 최대 용량 (재할당 최소화) */
 	int32 BufferCapacity;
+
+	//========================================
+	// CPU 측 데이터 캐시 (게임 스레드)
+	//========================================
+
+	/** 
+	 * 파티클 데이터 캐시 (게임 스레드에서 접근)
+	 * RenderGraph Pass에서 Position 추출용으로 사용
+	 */
+	TArray<FKawaiiRenderParticle> CachedParticles;
 
 	//========================================
 	// 내부 헬퍼

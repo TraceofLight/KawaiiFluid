@@ -43,8 +43,12 @@ void FKawaiiFluidRenderResource::UpdateParticleData(const TArray<FKawaiiRenderPa
 	if (NewCount == 0)
 	{
 		ParticleCount = 0;
+		CachedParticles.Empty();  // ✅ 캐시 비우기
 		return;
 	}
+
+	// ✅ CPU 측 캐시 업데이트 (게임 스레드)
+	CachedParticles = InParticles;
 
 	// 데이터 복사 (렌더 스레드로 전달하기 위해)
 	TArray<FKawaiiRenderParticle> ParticlesCopy = InParticles;
@@ -71,9 +75,6 @@ void FKawaiiFluidRenderResource::UpdateParticleData(const TArray<FKawaiiRenderPa
 					ERHIAccess::CopyDest
 				));
 
-				// 1단계: LockBuffer 호출
-				// 내부: Staging Buffer 할당 (Upload Heap)
-                // 내부: CPU-writable 포인터 반환
 				void* BufferData = RHICmdList.LockBuffer(
 					RenderResource->ParticleBuffer,
 					0,
@@ -81,12 +82,8 @@ void FKawaiiFluidRenderResource::UpdateParticleData(const TArray<FKawaiiRenderPa
 					RLM_WriteOnly
 				);
 
-				// 2단계: 데이터 쓰기
 				FMemory::Memcpy(BufferData, ParticlesCopy.GetData(), NewCount * sizeof(FKawaiiRenderParticle));
 
-				// 3단계: UnlockBuffer 호출
-				// 내부: GPU Copy Command 발행
-                // 내부: Staging → GPU Buffer로 DMA 전송
 				RHICmdList.UnlockBuffer(RenderResource->ParticleBuffer);
 
 				// 상태 전환: CopyDest → SRVMask

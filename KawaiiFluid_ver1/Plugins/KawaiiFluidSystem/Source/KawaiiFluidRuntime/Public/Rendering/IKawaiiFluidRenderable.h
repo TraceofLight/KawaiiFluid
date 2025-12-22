@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Interface.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "IKawaiiFluidRenderable.generated.h"
 
 class FKawaiiFluidRenderResource;
@@ -47,4 +48,32 @@ public:
 	 * 디버그 이름 반환 (프로파일링용)
 	 */
 	virtual FString GetDebugName() const = 0;
+
+	//========================================
+	// 렌더링 모드 관련
+	//========================================
+
+	/**
+	 * SSFR 렌더링 사용 여부
+	 * @return SSFR 모드 또는 Both 모드일 경우 true
+	 */
+	virtual bool ShouldUseSSFR() const = 0;
+
+	/**
+	 * 디버그 메시 렌더링 사용 여부
+	 * @return DebugMesh 모드 또는 Both 모드일 경우 true
+	 */
+	virtual bool ShouldUseDebugMesh() const = 0;
+
+	/**
+	 * 디버그 메시 컴포넌트 반환
+	 * @return DebugMesh 모드에서 사용할 InstancedStaticMeshComponent
+	 */
+	virtual UInstancedStaticMeshComponent* GetDebugMeshComponent() const = 0;
+
+	/**
+	 * 파티클 개수 반환
+	 * @return 현재 시뮬레이션/테스트 중인 파티클 개수
+	 */
+	virtual int32 GetParticleCount() const = 0;
 };

@@ -108,7 +108,11 @@ void AFluidSimulator::BeginPlay()
 		if (UFluidRendererSubsystem* RendererSubsystem = World->GetSubsystem<UFluidRendererSubsystem>())
 		{
 			RendererSubsystem->RegisterSimulator(this);
-			UE_LOG(LogTemp, Log, TEXT("FluidSimulator registered to RendererSubsystem: %s"), *GetName());
+			
+			const TCHAR* ModeStr = (RenderingMode == EKawaiiFluidRenderingMode::SSFR) ? TEXT("SSFR") :
+			                       (RenderingMode == EKawaiiFluidRenderingMode::DebugMesh) ? TEXT("DebugMesh") : TEXT("Both");
+			
+			UE_LOG(LogTemp, Log, TEXT("FluidSimulator registered: %s (Mode: %s)"), *GetName(), ModeStr);
 		}
 		else
 		{
@@ -270,22 +274,16 @@ void AFluidSimulator::Tick(float DeltaTime)
 		UpdateRenderData();
 	}
 
-	// 디버그 렌더링 업데이트
-	if (bEnableDebugRendering)
+	// 디버그 렌더링 업데이트 (렌더링 모드에 따라 조건부)
+	if (ShouldUseDebugMesh())
 	{
 		SCOPE_CYCLE_COUNTER(STAT_DebugRendering);
 		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_DebugRendering);
 		UpdateDebugInstances();
-
-		// 실제 위치 디버그 (빨간색 = 실제 물리 위치)
-		for (const FFluidParticle& Particle : Particles)
-		{
-			//DrawDebugPoint(GetWorld(), Particle.Position, 10.0f, FColor::Red, false, -1.0f);
-
-			// 속도 방향 표시 (파란색 선)
-			//DrawDebugLine(GetWorld(), Particle.Position, Particle.Position + Particle.Velocity * 0.1f, FColor::Blue, false, -1.0f);
-		}
 	}
+
+	// 외력 리셋
+	AccumulatedExternalForce = FVector::ZeroVector;
 }
 
 void AFluidSimulator::PredictPositions(float DeltaTime)
