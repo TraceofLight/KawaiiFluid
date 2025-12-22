@@ -5,6 +5,7 @@
 #include "Rendering/FluidDepthPass.h"
 #include "Rendering/FluidSmoothingPass.h"
 #include "Rendering/FluidNormalPass.h"
+#include "Rendering/FluidThicknessPass.h"
 #include "Core/FluidSimulator.h"
 #include "SceneView.h"
 #include "RenderGraphBuilder.h"
@@ -68,8 +69,9 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(FRDGBuilder& Grap
 
 	// UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: NormalPass executed."));
 
-	// 4. Thickness Pass (TODO)
-	// RenderThicknessPass(GraphBuilder, View);
+	// 4. Thickness Pass
+	FRDGTextureRef ThicknessTexture = nullptr;
+	RenderThicknessPass(GraphBuilder, View, ThicknessTexture);
 
 	// 5. Final Shading Pass (TODO)
 	// RenderShadingPass(GraphBuilder, View, Inputs);
@@ -111,9 +113,16 @@ void FFluidSceneViewExtension::RenderNormalPass(FRDGBuilder& GraphBuilder, const
 	RenderFluidNormalPass(GraphBuilder, View, SmoothedDepthTexture, OutNormalTexture);
 }
 
-void FFluidSceneViewExtension::RenderThicknessPass(FRDGBuilder& GraphBuilder, const FSceneView& View)
+void FFluidSceneViewExtension::RenderThicknessPass(FRDGBuilder& GraphBuilder, const FSceneView& View, FRDGTextureRef& OutThicknessTexture)
 {
-	// TODO: 다음 단계에서 구현
+	UFluidRendererSubsystem* SubsystemPtr = Subsystem.Get();
+	if (!SubsystemPtr)
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: FluidSceneViewExtension::RenderThicknessPass called."));
+	RenderFluidThicknessPass(GraphBuilder, View, SubsystemPtr, OutThicknessTexture);
 }
 
 void FFluidSceneViewExtension::RenderShadingPass(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessingInputs& Inputs)

@@ -43,7 +43,7 @@ private:
 	void RenderNormalPass(FRDGBuilder& GraphBuilder, const FSceneView& View, FRDGTextureRef SmoothedDepthTexture, FRDGTextureRef& OutNormalTexture);
 
 	/** Thickness 렌더링 패스 */
-	void RenderThicknessPass(FRDGBuilder& GraphBuilder, const FSceneView& View);
+	void RenderThicknessPass(FRDGBuilder& GraphBuilder, const FSceneView& View, FRDGTextureRef& OutThicknessTexture);
 
 	/** Final Shading 패스 */
 	void RenderShadingPass(FRDGBuilder& GraphBuilder, const FSceneView& View, const FPostProcessingInputs& Inputs);
