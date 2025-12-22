@@ -88,6 +88,7 @@ void FAdhesionSolver::Apply(
 		// 이미 붙어있는 입자 (위에서 떨어지며 몸에 닿음): 엄격한 마진
 		const float AttachMargin_Attached = 5.0f;
 		const float MaintainMargin_Attached = 15.0f;
+		const float MaintainMargin_NearGround = 5.0f;  // 바닥 근처일 때 감소된 마진
 		// 안 붙어있던 입자 (바닥에서 몸에 새로 붙음): 여유로운 마진
 		const float AttachMargin_New = 10.0f;
 
@@ -98,8 +99,9 @@ void FAdhesionSolver::Apply(
 		{
 			if (bSameActor)
 			{
-				// 같은 액터에 접착 유지
-				bShouldApplyAdhesion = (ClosestDistance <= MaintainMargin_Attached);
+				// 같은 액터에 접착 유지 (바닥 근처면 마진 감소)
+				float EffectiveMaintainMargin = Particle.bNearGround ? MaintainMargin_NearGround : MaintainMargin_Attached;
+				bShouldApplyAdhesion = (ClosestDistance <= EffectiveMaintainMargin);
 			}
 			else
 			{
@@ -107,9 +109,10 @@ void FAdhesionSolver::Apply(
 				bShouldApplyAdhesion = (ClosestDistance <= AttachMargin_Attached);
 			}
 		}
-		else
+		else if (!Particle.bJustDetached)
 		{
 			// 새로 접착: 여유로운 마진 (바닥에서 몸에 붙는 경우 등 대응)
+			// bJustDetached가 true면 이번 프레임에 분리된 것이므로 재접착 안함
 			bShouldApplyAdhesion = (ClosestDistance <= AttachMargin_New);
 		}
 
@@ -179,6 +182,8 @@ void FAdhesionSolver::Apply(
 			Results[i].ParticlePosition,
 			Results[i].SurfaceNormal
 		);
+		// 프레임 끝에서 분리 플래그 리셋 (다음 프레임에는 재접착 가능)
+		Particles[i].bJustDetached = false;
 	}
 }
 

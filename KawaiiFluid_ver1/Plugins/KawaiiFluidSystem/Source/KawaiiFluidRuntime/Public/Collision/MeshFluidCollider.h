@@ -25,6 +25,16 @@ struct FCachedSphere
 	FTransform BoneTransform;
 };
 
+/** 캐싱된 박스 데이터 */
+struct FCachedBox
+{
+	FVector Center;
+	FVector Extent;  // Half extents (X, Y, Z)
+	FQuat Rotation;
+	FName BoneName;
+	FTransform BoneTransform;
+};
+
 /**
  * 메시 기반 유체 콜라이더
  * 캐릭터나 복잡한 형태의 오브젝트와 상호작용
@@ -63,6 +73,7 @@ private:
 	// 캐싱된 충돌 형상
 	TArray<FCachedCapsule> CachedCapsules;
 	TArray<FCachedSphere> CachedSpheres;
+	TArray<FCachedBox> CachedBoxes;
 	FBox CachedBounds;
 	bool bCacheValid;
 };

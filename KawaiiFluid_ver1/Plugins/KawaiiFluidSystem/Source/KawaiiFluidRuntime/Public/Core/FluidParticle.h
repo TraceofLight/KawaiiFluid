@@ -55,6 +55,12 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 	// 접착된 표면의 법선 (표면 미끄러짐 계산용)
 	FVector AttachedSurfaceNormal;
 
+	// 이번 프레임에 분리됨 (같은 프레임 재접착 방지)
+	bool bJustDetached;
+
+	// 바닥 근처에 있음 (접착 유지 마진 감소용)
+	bool bNearGround;
+
 	// 입자 ID
 	UPROPERTY(BlueprintReadOnly, Category = "Particle")
 	int32 ParticleID;
@@ -73,6 +79,8 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 		, AttachedBoneName(NAME_None)
 		, AttachedLocalOffset(FVector::ZeroVector)
 		, AttachedSurfaceNormal(FVector::UpVector)
+		, bJustDetached(false)
+		, bNearGround(false)
 		, ParticleID(-1)
 	{
 	}
@@ -88,6 +96,8 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 		, AttachedBoneName(NAME_None)
 		, AttachedLocalOffset(FVector::ZeroVector)
 		, AttachedSurfaceNormal(FVector::UpVector)
+		, bJustDetached(false)
+		, bNearGround(false)
 		, ParticleID(InID)
 	{
 	}

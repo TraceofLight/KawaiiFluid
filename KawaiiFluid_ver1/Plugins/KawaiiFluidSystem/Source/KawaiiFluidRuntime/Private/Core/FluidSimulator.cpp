@@ -569,12 +569,14 @@ void AFluidSimulator::HandleWorldCollision()
 
 	// 추가: 캐릭터에 붙은 입자가 바닥에 닿으면 분리
 	// (캐릭터를 무시하고 바닥만 감지)
-	const float FloorDetachDistance = 3.0f;
+	const float FloorDetachDistance = 5.0f;   // 바닥에 닿음 (분리)
+	const float FloorNearDistance = 20.0f;    // 바닥 근처 (접착 유지 마진 감소)
 
 	for (FFluidParticle& Particle : Particles)
 	{
 		if (!Particle.bIsAttached)
 		{
+			Particle.bNearGround = false;
 			continue;
 		}
 
@@ -587,23 +589,27 @@ void AFluidSimulator::HandleWorldCollision()
 			FloorQueryParams.AddIgnoredActor(Particle.AttachedActor.Get());
 		}
 
+		// 바닥 근처 체크 (더 넓은 범위)
 		FHitResult FloorHit;
-		bool bTouchingFloor = World->LineTraceSingleByChannel(
+		bool bNearFloor = World->LineTraceSingleByChannel(
 			FloorHit,
 			Particle.Position,
-			Particle.Position - FVector(0, 0, FloorDetachDistance),
+			Particle.Position - FVector(0, 0, FloorNearDistance),
 			CollisionChannel,
 			FloorQueryParams
 		);
 
+		Particle.bNearGround = bNearFloor;
+
 		// 바닥에 닿으면 무조건 캐릭터에서 분리
-		if (bTouchingFloor)
+		if (bNearFloor && FloorHit.Distance <= FloorDetachDistance)
 		{
 			Particle.bIsAttached = false;
 			Particle.AttachedActor.Reset();
 			Particle.AttachedBoneName = NAME_None;
 			Particle.AttachedLocalOffset = FVector::ZeroVector;
 			Particle.AttachedSurfaceNormal = FVector::UpVector;
+			Particle.bJustDetached = true;  // 같은 프레임 재접착 방지
 		}
 	}
 }

@@ -46,14 +46,19 @@ void UMeshFluidCollider::AutoFindMeshComponent()
 		if (PhysAsset)
 		{
 			int32 TotalCapsules = 0;
+			int32 TotalSpheres = 0;
+			int32 TotalBoxes = 0;
 			for (USkeletalBodySetup* BodySetup : PhysAsset->SkeletalBodySetups)
 			{
 				if (BodySetup)
 				{
 					TotalCapsules += BodySetup->AggGeom.SphylElems.Num();
+					TotalSpheres += BodySetup->AggGeom.SphereElems.Num();
+					TotalBoxes += BodySetup->AggGeom.BoxElems.Num();
 				}
 			}
-			//UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider: Found SkeletalMesh with PhysicsAsset '%s', Bodies: %d, Total Capsules: %d"),*PhysAsset->GetName(), PhysAsset->SkeletalBodySetups.Num(), TotalCapsules);
+			UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider: PhysicsAsset '%s' - Capsules: %d, Spheres: %d, Boxes: %d"),
+				*PhysAsset->GetName(), TotalCapsules, TotalSpheres, TotalBoxes);
 		}
 		else
 		{
@@ -87,6 +92,7 @@ void UMeshFluidCollider::CacheCollisionShapes()
 {
 	CachedCapsules.Reset();
 	CachedSpheres.Reset();
+	CachedBoxes.Reset();
 	CachedBounds = FBox(ForceInit);
 	bCacheValid = false;
 
@@ -180,9 +186,38 @@ void UMeshFluidCollider::CacheCollisionShapes()
 
 					CachedBounds += CachedSph.Center;
 				}
+
+				// 박스 캐싱
+				for (const FKBoxElem& BoxElem : BodySetup->AggGeom.BoxElems)
+				{
+					FTransform BoxLocalTransform = BoxElem.GetTransform();
+					FTransform BoxWorldTransform = BoxLocalTransform * BoneTransform;
+
+					FCachedBox CachedBx;
+					CachedBx.Center = BoxWorldTransform.GetLocation();
+					CachedBx.Extent = FVector(BoxElem.X * 0.5f + CollisionMargin,
+					                          BoxElem.Y * 0.5f + CollisionMargin,
+					                          BoxElem.Z * 0.5f + CollisionMargin);
+					CachedBx.Rotation = BoxWorldTransform.GetRotation();
+					CachedBx.BoneName = BodySetup->BoneName;
+					CachedBx.BoneTransform = BoneTransform;
+					CachedBoxes.Add(CachedBx);
+
+					// 박스 8개 코너 추가하여 바운딩 박스 확장
+					for (int32 CornerIdx = 0; CornerIdx < 8; ++CornerIdx)
+					{
+						FVector LocalCorner(
+							(CornerIdx & 1) ? CachedBx.Extent.X : -CachedBx.Extent.X,
+							(CornerIdx & 2) ? CachedBx.Extent.Y : -CachedBx.Extent.Y,
+							(CornerIdx & 4) ? CachedBx.Extent.Z : -CachedBx.Extent.Z
+						);
+						FVector WorldCorner = CachedBx.Center + CachedBx.Rotation.RotateVector(LocalCorner);
+						CachedBounds += WorldCorner;
+					}
+				}
 			}
 
-			if (CachedCapsules.Num() > 0 || CachedSpheres.Num() > 0)
+			if (CachedCapsules.Num() > 0 || CachedSpheres.Num() > 0 || CachedBoxes.Num() > 0)
 			{
 				// 가장 큰 반경으로 바운딩 박스 확장
 				float MaxRadius = CollisionMargin;
@@ -193,6 +228,10 @@ void UMeshFluidCollider::CacheCollisionShapes()
 				for (const FCachedSphere& Sph : CachedSpheres)
 				{
 					MaxRadius = FMath::Max(MaxRadius, Sph.Radius);
+				}
+				for (const FCachedBox& Box : CachedBoxes)
+				{
+					MaxRadius = FMath::Max(MaxRadius, Box.Extent.GetMax());
 				}
 				CachedBounds = CachedBounds.ExpandBy(MaxRadius);
 				bCacheValid = true;
@@ -294,6 +333,64 @@ bool UMeshFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClose
 			TempNormal = ToPointVec / DistToCenter;
 			TempClosestPoint = Sph.Center + TempNormal * Sph.Radius;
 			TempDistance = DistToCenter - Sph.Radius;
+		}
+
+		if (TempDistance < MinDistance)
+		{
+			MinDistance = TempDistance;
+			OutClosestPoint = TempClosestPoint;
+			OutNormal = TempNormal;
+			OutDistance = TempDistance;
+			bFoundAny = true;
+		}
+	}
+
+	// 캐싱된 박스들 순회
+	for (const FCachedBox& Box : CachedBoxes)
+	{
+		// 월드 좌표를 박스 로컬 좌표로 변환
+		FVector LocalPoint = Box.Rotation.UnrotateVector(Point - Box.Center);
+
+		// 로컬 좌표에서 가장 가까운 점 찾기 (클램핑)
+		FVector ClampedLocal;
+		ClampedLocal.X = FMath::Clamp(LocalPoint.X, -Box.Extent.X, Box.Extent.X);
+		ClampedLocal.Y = FMath::Clamp(LocalPoint.Y, -Box.Extent.Y, Box.Extent.Y);
+		ClampedLocal.Z = FMath::Clamp(LocalPoint.Z, -Box.Extent.Z, Box.Extent.Z);
+
+		// 다시 월드 좌표로 변환
+		FVector TempClosestPoint = Box.Center + Box.Rotation.RotateVector(ClampedLocal);
+
+		FVector ToPointVec = Point - TempClosestPoint;
+		float TempDistance = ToPointVec.Size();
+
+		FVector TempNormal;
+		if (TempDistance < KINDA_SMALL_NUMBER)
+		{
+			// 점이 박스 내부에 있음 - 가장 가까운 면으로 밀어냄
+			FVector AbsLocal = LocalPoint.GetAbs();
+			FVector DistToFace = Box.Extent - AbsLocal;
+
+			if (DistToFace.X <= DistToFace.Y && DistToFace.X <= DistToFace.Z)
+			{
+				TempNormal = FVector(FMath::Sign(LocalPoint.X), 0.0f, 0.0f);
+				TempDistance = -DistToFace.X;
+			}
+			else if (DistToFace.Y <= DistToFace.Z)
+			{
+				TempNormal = FVector(0.0f, FMath::Sign(LocalPoint.Y), 0.0f);
+				TempDistance = -DistToFace.Y;
+			}
+			else
+			{
+				TempNormal = FVector(0.0f, 0.0f, FMath::Sign(LocalPoint.Z));
+				TempDistance = -DistToFace.Z;
+			}
+			TempNormal = Box.Rotation.RotateVector(TempNormal);
+			TempClosestPoint = Point - TempNormal * TempDistance;
+		}
+		else
+		{
+			TempNormal = ToPointVec / TempDistance;
 		}
 
 		if (TempDistance < MinDistance)
@@ -434,6 +531,66 @@ bool UMeshFluidCollider::GetClosestPointWithBone(const FVector& Point, FVector& 
 		}
 	}
 
+	// 캐싱된 박스들 순회
+	for (const FCachedBox& Box : CachedBoxes)
+	{
+		// 월드 좌표를 박스 로컬 좌표로 변환
+		FVector LocalPoint = Box.Rotation.UnrotateVector(Point - Box.Center);
+
+		// 로컬 좌표에서 가장 가까운 점 찾기 (클램핑)
+		FVector ClampedLocal;
+		ClampedLocal.X = FMath::Clamp(LocalPoint.X, -Box.Extent.X, Box.Extent.X);
+		ClampedLocal.Y = FMath::Clamp(LocalPoint.Y, -Box.Extent.Y, Box.Extent.Y);
+		ClampedLocal.Z = FMath::Clamp(LocalPoint.Z, -Box.Extent.Z, Box.Extent.Z);
+
+		// 다시 월드 좌표로 변환
+		FVector TempClosestPoint = Box.Center + Box.Rotation.RotateVector(ClampedLocal);
+
+		FVector ToPointVec = Point - TempClosestPoint;
+		float TempDistance = ToPointVec.Size();
+
+		FVector TempNormal;
+		if (TempDistance < KINDA_SMALL_NUMBER)
+		{
+			// 점이 박스 내부에 있음 - 가장 가까운 면으로 밀어냄
+			FVector AbsLocal = LocalPoint.GetAbs();
+			FVector DistToFace = Box.Extent - AbsLocal;
+
+			if (DistToFace.X <= DistToFace.Y && DistToFace.X <= DistToFace.Z)
+			{
+				TempNormal = FVector(FMath::Sign(LocalPoint.X), 0.0f, 0.0f);
+				TempDistance = -DistToFace.X;
+			}
+			else if (DistToFace.Y <= DistToFace.Z)
+			{
+				TempNormal = FVector(0.0f, FMath::Sign(LocalPoint.Y), 0.0f);
+				TempDistance = -DistToFace.Y;
+			}
+			else
+			{
+				TempNormal = FVector(0.0f, 0.0f, FMath::Sign(LocalPoint.Z));
+				TempDistance = -DistToFace.Z;
+			}
+			TempNormal = Box.Rotation.RotateVector(TempNormal);
+			TempClosestPoint = Point - TempNormal * TempDistance;
+		}
+		else
+		{
+			TempNormal = ToPointVec / TempDistance;
+		}
+
+		if (TempDistance < MinDistance)
+		{
+			MinDistance = TempDistance;
+			OutClosestPoint = TempClosestPoint;
+			OutNormal = TempNormal;
+			OutDistance = TempDistance;
+			OutBoneName = Box.BoneName;
+			OutBoneTransform = Box.BoneTransform;
+			bFoundAny = true;
+		}
+	}
+
 	// 캐싱된 데이터가 없으면 바운딩 박스 사용 (본 정보 없음)
 	if (!bFoundAny && TargetMeshComponent)
 	{
@@ -560,6 +717,30 @@ bool UMeshFluidCollider::IsPointInside(const FVector& Point) const
 
 					float DistSq = FVector::DistSquared(Point, SphereCenter);
 					if (DistSq <= SphereRadius * SphereRadius)
+					{
+						return true;
+					}
+				}
+
+				// PhysicsAsset의 Box 요소들 처리
+				for (const FKBoxElem& BoxElem : BodySetup->AggGeom.BoxElems)
+				{
+					FTransform BoxLocalTransform = BoxElem.GetTransform();
+					FTransform BoxWorldTransform = BoxLocalTransform * BoneTransform;
+
+					FVector BoxCenter = BoxWorldTransform.GetLocation();
+					FVector BoxExtent(BoxElem.X * 0.5f + CollisionMargin,
+					                  BoxElem.Y * 0.5f + CollisionMargin,
+					                  BoxElem.Z * 0.5f + CollisionMargin);
+					FQuat BoxRotation = BoxWorldTransform.GetRotation();
+
+					// 월드 좌표를 박스 로컬 좌표로 변환
+					FVector LocalPoint = BoxRotation.UnrotateVector(Point - BoxCenter);
+
+					// 로컬 좌표가 박스 범위 내인지 확인
+					if (FMath::Abs(LocalPoint.X) <= BoxExtent.X &&
+					    FMath::Abs(LocalPoint.Y) <= BoxExtent.Y &&
+					    FMath::Abs(LocalPoint.Z) <= BoxExtent.Z)
 					{
 						return true;
 					}
