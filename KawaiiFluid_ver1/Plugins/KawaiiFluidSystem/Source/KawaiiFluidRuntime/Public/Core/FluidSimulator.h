@@ -127,17 +127,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics", meta = (ClampMin = "1.0"))
 	float SmoothingRadius;
 
-	/** 밀도 제약 솔버 반복 횟수 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics", meta = (ClampMin = "1", ClampMax = "10"))
-	int32 SolverIterations;
+	/** Substep 목표 dt (초) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics", meta = (ClampMin = "0.001", ClampMax = "0.05"))
+	float SubstepDeltaTime;
+
+	/** 최대 Substep 횟수 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics", meta = (ClampMin = "1", ClampMax = "16"))
+	int32 MaxSubsteps;
 
 	/** 중력 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics")
 	FVector Gravity;
 
-	/** 안정성 상수 (Epsilon) */
+	/** XPBD Compliance - 작을수록 비압축성 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics", meta = (ClampMin = "0.0"))
-	float Epsilon;
+	float Compliance;
 
 	//========================================
 	// 점성 파라미터
@@ -285,6 +289,9 @@ private:
 	/** 다음 입자 ID */
 	int32 NextParticleID;
 
+	/** Substep 시간 누적 */
+	float AccumulatedTime;
+
 	//========================================
 	// 솔버 및 유틸리티
 	//========================================
@@ -345,7 +352,7 @@ private:
 	void UpdateNeighbors();
 
 	/** 3. 밀도 제약 해결 (반복) */
-	void SolveDensityConstraints();
+	void SolveDensityConstraints(float DeltaTime);
 
 	/** 충돌 형상 캐싱 (프레임당 한 번) */
 	void CacheColliderShapes();

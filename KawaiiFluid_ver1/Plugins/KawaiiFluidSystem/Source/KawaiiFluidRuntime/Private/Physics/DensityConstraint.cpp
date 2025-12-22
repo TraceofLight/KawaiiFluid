@@ -87,11 +87,14 @@ void FDensityConstraint::ApplyFromSoA(TArray<FFluidParticle>& Particles)
 //========================================
 // 메인 솔버
 //========================================
-void FDensityConstraint::Solve(TArray<FFluidParticle>& Particles, float InSmoothingRadius, float InRestDensity, float InEpsilon)
+void FDensityConstraint::Solve(TArray<FFluidParticle>& Particles, float InSmoothingRadius, float InRestDensity, float InCompliance, float DeltaTime)
 {
 	SmoothingRadius = InSmoothingRadius;
 	RestDensity = InRestDensity;
-	Epsilon = InEpsilon;
+
+	// XPBD: α̃ = α / dt²
+	const float DtSq = DeltaTime * DeltaTime;
+	Epsilon = InCompliance / FMath::Max(DtSq, 1e-8f);
 
 	const int32 NumParticles = Particles.Num();
 	if (NumParticles == 0) return;

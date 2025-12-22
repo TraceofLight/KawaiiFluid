@@ -21,6 +21,7 @@ DECLARE_CYCLE_STAT(TEXT("Predict Positions"), STAT_PredictPositions, STATGROUP_K
 DECLARE_CYCLE_STAT(TEXT("Update Neighbors"), STAT_UpdateNeighbors, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Solve Density"), STAT_SolveDensity, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Cache Collider Shapes"), STAT_CacheColliderShapes, STATGROUP_KawaiiFluid);
+DECLARE_CYCLE_STAT(TEXT("Update Attached Particle Positions"), STAT_UpdateAttachedParticlePositions, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Handle Collisions"), STAT_HandleCollisions, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("World Collision"), STAT_WorldCollision, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Finalize Positions"), STAT_FinalizePositions, STATGROUP_KawaiiFluid);
@@ -28,6 +29,7 @@ DECLARE_CYCLE_STAT(TEXT("Apply Viscosity"), STAT_ApplyViscosity, STATGROUP_Kawai
 DECLARE_CYCLE_STAT(TEXT("Apply Adhesion"), STAT_ApplyAdhesion, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Debug Rendering"), STAT_DebugRendering, STATGROUP_KawaiiFluid);
 DECLARE_CYCLE_STAT(TEXT("Update Render Data"), STAT_UpdateRenderData, STATGROUP_KawaiiFluid);
+DECLARE_DWORD_COUNTER_STAT(TEXT("Particle Count"), STAT_ParticleCount, STATGROUP_KawaiiFluid);
 
 AFluidSimulator::AFluidSimulator()
 {
@@ -42,9 +44,10 @@ AFluidSimulator::AFluidSimulator()
 	RestDensity = 1000.0f;
 	ParticleMass = 1.0f;
 	SmoothingRadius = 20.0f;  // 20cm (입자 반경의 약 4배)
-	SolverIterations = 4;
+	SubstepDeltaTime = 1.0f / 120.0f;  // 120Hz substep
+	MaxSubsteps = 8;
 	Gravity = FVector(0.0f, 0.0f, -980.0f);
-	Epsilon = 600.0f;  // 스케일에 맞게 조정
+	Compliance = 0.0001f;  // XPBD compliance
 
 	// 점성 기본값 (슬라임)
 	ViscosityCoefficient = 0.5f;
@@ -57,6 +60,7 @@ AFluidSimulator::AFluidSimulator()
 	// 내부 변수 초기화
 	AccumulatedExternalForce = FVector::ZeroVector;
 	NextParticleID = 0;
+	AccumulatedTime = 0.0f;
 
 	// 디버그 렌더링 기본값
 	bEnableDebugRendering = true;
@@ -169,7 +173,7 @@ void AFluidSimulator::BeginDestroy()
 void AFluidSimulator::InitializeSolvers()
 {
 	SpatialHash = MakeShared<FSpatialHash>(SmoothingRadius);
-	DensityConstraint = MakeShared<FDensityConstraint>(RestDensity, SmoothingRadius, Epsilon);
+	DensityConstraint = MakeShared<FDensityConstraint>(RestDensity, SmoothingRadius, Compliance);
 	ViscositySolver = MakeShared<FViscositySolver>();
 	AdhesionSolver = MakeShared<FAdhesionSolver>();
 }
@@ -195,47 +199,58 @@ void AFluidSimulator::Tick(float DeltaTime)
 
 	Super::Tick(DeltaTime);
 
+	SET_DWORD_STAT(STAT_ParticleCount, Particles.Num());
+
 	if (!bSimulationEnabled || Particles.Num() == 0)
 	{
 		return;
 	}
+	
 
-	// PBF 시뮬레이션 루프
-	// 0. 붙은 입자 위치 업데이트 (본 추적 - 물리 시뮬레이션 전에 실행해야 중력 효과 유지)
-	{
-		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_UpdateAttachedPositions);
-		UpdateAttachedParticlePositions();
-	}
+	// Accumulator 방식: 고정 dt로 시뮬레이션
+	// 시간 빚 방지: 최대 처리 가능한 시간만 누적
+	const float MaxAllowedTime = SubstepDeltaTime * MaxSubsteps;
+	AccumulatedTime += FMath::Min(DeltaTime, MaxAllowedTime);
 
-	// 1. 외력 적용 & 위치 예측
-	{
-		SCOPE_CYCLE_COUNTER(STAT_PredictPositions);
-		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_PredictPositions);
-		PredictPositions(DeltaTime);
-	}
-
-	// 2. 이웃 탐색
-	{
-		SCOPE_CYCLE_COUNTER(STAT_UpdateNeighbors);
-		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_UpdateNeighbors);
-		UpdateNeighbors();
-	}
-
-	// 2.5. 콜라이더 충돌 형상 캐싱 (프레임당 한 번)
+	// 콜라이더 충돌 형상 캐싱 (프레임당 한 번)
 	{
 		SCOPE_CYCLE_COUNTER(STAT_CacheColliderShapes);
 		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_CacheColliderShapes);
 		CacheColliderShapes();
 	}
 
-	// 3. 밀도 제약 해결 (반복)
-	for (int32 Iter = 0; Iter < SolverIterations; ++Iter)
+	// PBF 시뮬레이션 루프
+	// 0. 붙은 입자 위치 업데이트 (본 추적 - 물리 시뮬레이션 전에 실행해야 중력 효과 유지)
+	{	
+		SCOPE_CYCLE_COUNTER(STAT_UpdateAttachedParticlePositions);
+		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_UpdateAttachedPositions);
+		UpdateAttachedParticlePositions();
+	}
+	
+	// Small Steps 루프 (고정 dt)
+	while (AccumulatedTime >= SubstepDeltaTime)
 	{
+		// 1. 외력 적용 & 위치 예측
+		{
+			SCOPE_CYCLE_COUNTER(STAT_PredictPositions);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_PredictPositions);
+			PredictPositions(SubstepDeltaTime);
+		}
+		// 2. 이웃 탐색
+		{
+			SCOPE_CYCLE_COUNTER(STAT_UpdateNeighbors);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_UpdateNeighbors);
+			UpdateNeighbors();
+		}
+
+		// 3. 밀도 제약 해결 (1회) - XPBD
 		{
 			SCOPE_CYCLE_COUNTER(STAT_SolveDensity);
 			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_SolveDensity);
-			SolveDensityConstraints();
+			SolveDensityConstraints(SubstepDeltaTime);
 		}
+
+		// 4. 충돌 처리
 		{
 			SCOPE_CYCLE_COUNTER(STAT_HandleCollisions);
 			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_HandleCollisions);
@@ -249,27 +264,29 @@ void AFluidSimulator::Tick(float DeltaTime)
 			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_WorldCollision);
 			HandleWorldCollision();
 		}
-	}
 
-	// 4. 속도 업데이트 & 위치 확정
-	{
-		SCOPE_CYCLE_COUNTER(STAT_FinalizePositions);
-		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_FinalizePositions);
-		FinalizePositions(DeltaTime);
-	}
+		// 5. 속도 업데이트 & 위치 확정
+		{
+			SCOPE_CYCLE_COUNTER(STAT_FinalizePositions);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_FinalizePositions);
+			FinalizePositions(SubstepDeltaTime);
+		}
 
-	// 5. 점성 적용
-	{
-		SCOPE_CYCLE_COUNTER(STAT_ApplyViscosity);
-		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_ApplyViscosity);
-		ApplyViscosity();
-	}
+		// 6. 점성 적용
+		{
+			SCOPE_CYCLE_COUNTER(STAT_ApplyViscosity);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_ApplyViscosity);
+			ApplyViscosity();
+		}
 
-	// 6. 접착력 적용
-	{
-		SCOPE_CYCLE_COUNTER(STAT_ApplyAdhesion);
-		TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_ApplyAdhesion);
-		ApplyAdhesion();
+		// 7. 접착력 적용
+		{
+			SCOPE_CYCLE_COUNTER(STAT_ApplyAdhesion);
+			TRACE_CPUPROFILER_EVENT_SCOPE(Fluid_ApplyAdhesion);
+			ApplyAdhesion();
+		}
+
+		AccumulatedTime -= SubstepDeltaTime;
 	}
 
 	// 외력 리셋
@@ -346,11 +363,11 @@ void AFluidSimulator::UpdateNeighbors()
 	});
 }
 
-void AFluidSimulator::SolveDensityConstraints()
+void AFluidSimulator::SolveDensityConstraints(float DeltaTime)
 {
 	if (DensityConstraint.IsValid())
 	{
-		DensityConstraint->Solve(Particles, SmoothingRadius, RestDensity, Epsilon);
+		DensityConstraint->Solve(Particles, SmoothingRadius, RestDensity, Compliance, DeltaTime);
 	}
 }
 
@@ -773,7 +790,7 @@ void AFluidSimulator::UpdateAttachedParticlePositions()
 				}
 
 				Particle.Position += BoneDelta;
-				Particle.PredictedPosition += BoneDelta;
+				//Particle.PredictedPosition += BoneDelta;
 				UpdatedCount++;
 
 				// 시뮬레이션 후 새 위치를 로컬 오프셋으로 업데이트 (흘러내림 반영)
@@ -883,21 +900,21 @@ void AFluidSimulator::ApplyFluidTypePreset(EFluidType NewType)
 		RestDensity = 1000.0f;
 		ViscosityCoefficient = 0.01f;
 		AdhesionStrength = 0.0f;
-		SolverIterations = 3;
+		Compliance = 0.0001f;  // 거의 비압축성
 		break;
 
 	case EFluidType::Honey:
 		RestDensity = 1400.0f;
 		ViscosityCoefficient = 0.8f;
 		AdhesionStrength = 0.3f;
-		SolverIterations = 5;
+		Compliance = 0.001f;   // 약간 부드러움
 		break;
 
 	case EFluidType::Slime:
 		RestDensity = 1200.0f;
 		ViscosityCoefficient = 0.5f;
 		AdhesionStrength = 0.7f;
-		SolverIterations = 4;
+		Compliance = 0.01f;    // 탄성 있음 (늘어남)
 		break;
 
 	case EFluidType::Custom:
