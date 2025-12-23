@@ -18,7 +18,9 @@ public class KawaiiFluidRuntime : ModuleRules
 				Path.Combine(ModulePath, "Public/Physics"),
 				Path.Combine(ModulePath, "Public/Collision"),
 				Path.Combine(ModulePath, "Public/Components"),
-				Path.Combine(ModulePath, "Public/Rendering")
+				Path.Combine(ModulePath, "Public/Rendering"),
+				Path.Combine(ModulePath, "Public/Data"),
+				Path.Combine(ModulePath, "Public/Gameplay")
 			}
 		);
 
@@ -29,7 +31,9 @@ public class KawaiiFluidRuntime : ModuleRules
 				Path.Combine(ModulePath, "Private/Physics"),
 				Path.Combine(ModulePath, "Private/Collision"),
 				Path.Combine(ModulePath, "Private/Components"),
-				Path.Combine(ModulePath, "Private/Rendering")
+				Path.Combine(ModulePath, "Private/Rendering"),
+				Path.Combine(ModulePath, "Private/Data"),
+				Path.Combine(ModulePath, "Private/Gameplay")
 			}
 		);
 

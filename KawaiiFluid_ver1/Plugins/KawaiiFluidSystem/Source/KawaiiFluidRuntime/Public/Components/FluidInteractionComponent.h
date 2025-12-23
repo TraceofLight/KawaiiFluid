@@ -7,6 +7,7 @@
 #include "FluidInteractionComponent.generated.h"
 
 class AFluidSimulator;
+class UKawaiiFluidSimulatorSubsystem;
 class UFluidCollider;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnFluidAttached, int32, ParticleCount);
@@ -37,8 +38,13 @@ public:
 
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
+	/** Target simulator (Legacy - Actor based) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction")
 	AFluidSimulator* TargetSimulator;
+
+	/** Cached subsystem reference (New system) */
+	UPROPERTY(Transient)
+	UKawaiiFluidSimulatorSubsystem* TargetSubsystem;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction")
 	bool bCanAttachFluid;
@@ -107,6 +113,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "Fluid Interaction")
 	bool IsWet() const { return bIsWet; }
+
+	/** Check if any fluid target is valid */
+	UFUNCTION(BlueprintCallable, Category = "Fluid Interaction")
+	bool HasValidTarget() const { return TargetSimulator != nullptr || TargetSubsystem != nullptr; }
 
 protected:
 	virtual void BeginPlay() override;

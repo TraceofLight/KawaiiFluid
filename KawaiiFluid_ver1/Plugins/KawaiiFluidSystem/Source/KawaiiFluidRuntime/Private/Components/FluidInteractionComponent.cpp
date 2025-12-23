@@ -2,6 +2,8 @@
 
 #include "Components/FluidInteractionComponent.h"
 #include "Core/FluidSimulator.h"
+#include "Core/KawaiiFluidSimulatorSubsystem.h"
+#include "Components/KawaiiFluidSimulationComponent.h"
 #include "Collision/MeshFluidCollider.h"
 #include "Kismet/GameplayStatics.h"
 
@@ -10,6 +12,7 @@ UFluidInteractionComponent::UFluidInteractionComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 
 	TargetSimulator = nullptr;
+	TargetSubsystem = nullptr;
 	bCanAttachFluid = true;
 	AdhesionMultiplier = 1.0f;
 	DragAlongStrength = 0.5f;
@@ -25,6 +28,17 @@ void UFluidInteractionComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Try to find target automatically
+	if (!TargetSimulator && !TargetSubsystem)
+	{
+		// First try new subsystem (preferred)
+		UWorld* World = GetWorld();
+		if (World)
+		{
+			TargetSubsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>();
+		}
+	}
+
 	if (!TargetSimulator)
 	{
 		AActor* FoundActor = UGameplayStatics::GetActorOfClass(GetWorld(), AFluidSimulator::StaticClass());
@@ -33,7 +47,7 @@ void UFluidInteractionComponent::BeginPlay()
 			TargetSimulator = Cast<AFluidSimulator>(FoundActor);
 		}
 	}
-
+	
 	if (bAutoCreateCollider)
 	{
 		CreateAutoCollider();
@@ -53,7 +67,7 @@ void UFluidInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickT
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (!TargetSimulator)
+	if (!TargetSimulator && !TargetSubsystem)
 	{
 		return;
 	}
@@ -123,19 +137,29 @@ void UFluidInteractionComponent::CreateAutoCollider()
 
 void UFluidInteractionComponent::RegisterWithSimulator()
 {
+	// Legacy: AFluidSimulator
 	if (TargetSimulator)
 	{
 		if (AutoCollider)
 		{
 			TargetSimulator->RegisterCollider(AutoCollider);
 		}
-		// 본 레벨 추적을 위해 자신도 등록
 		TargetSimulator->RegisterInteractionComponent(this);
+	}
+	// New: Subsystem (global collider + interaction component)
+	if (TargetSubsystem)
+	{
+		if (AutoCollider)
+		{
+			TargetSubsystem->RegisterGlobalCollider(AutoCollider);
+		}
+		TargetSubsystem->RegisterGlobalInteractionComponent(this);
 	}
 }
 
 void UFluidInteractionComponent::UnregisterFromSimulator()
 {
+	// Legacy: AFluidSimulator
 	if (TargetSimulator)
 	{
 		if (AutoCollider)
@@ -144,25 +168,47 @@ void UFluidInteractionComponent::UnregisterFromSimulator()
 		}
 		TargetSimulator->UnregisterInteractionComponent(this);
 	}
+	// New: Subsystem (global collider + interaction component)
+	if (TargetSubsystem)
+	{
+		if (AutoCollider)
+		{
+			TargetSubsystem->UnregisterGlobalCollider(AutoCollider);
+		}
+		TargetSubsystem->UnregisterGlobalInteractionComponent(this);
+	}
 }
 
 void UFluidInteractionComponent::UpdateAttachedParticleCount()
 {
-	if (!TargetSimulator)
-	{
-		AttachedParticleCount = 0;
-		return;
-	}
-
 	AActor* Owner = GetOwner();
 	int32 Count = 0;
 
-	const TArray<FFluidParticle>& Particles = TargetSimulator->GetParticles();
-	for (const FFluidParticle& Particle : Particles)
+	if (TargetSimulator)
 	{
-		if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+		const TArray<FFluidParticle>& Particles = TargetSimulator->GetParticles();
+		for (const FFluidParticle& Particle : Particles)
 		{
-			++Count;
+			if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+			{
+				++Count;
+			}
+		}
+	}
+
+	if (TargetSubsystem)
+	{
+		// Iterate all components from subsystem
+		for (UKawaiiFluidSimulationComponent* Comp : TargetSubsystem->GetAllComponents())
+		{
+			if (!Comp) continue;
+			for (const FFluidParticle& Particle : Comp->GetParticles())
+			{
+				if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+				{
+					++Count;
+				}
+			}
 		}
 	}
 
@@ -171,22 +217,33 @@ void UFluidInteractionComponent::UpdateAttachedParticleCount()
 
 void UFluidInteractionComponent::DetachAllFluid()
 {
-	if (!TargetSimulator)
-	{
-		return;
-	}
-
 	AActor* Owner = GetOwner();
 
-	TArray<FFluidParticle>& Particles = TargetSimulator->GetParticlesMutable();
-	for (FFluidParticle& Particle : Particles)
+	auto DetachFromParticles = [Owner](TArray<FFluidParticle>& Particles)
 	{
-		if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+		for (FFluidParticle& Particle : Particles)
 		{
-			Particle.bIsAttached = false;
-			Particle.AttachedActor.Reset();
-			Particle.AttachedBoneName = NAME_None;
-			Particle.AttachedLocalOffset = FVector::ZeroVector;
+			if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+			{
+				Particle.bIsAttached = false;
+				Particle.AttachedActor.Reset();
+				Particle.AttachedBoneName = NAME_None;
+				Particle.AttachedLocalOffset = FVector::ZeroVector;
+			}
+		}
+	};
+
+	if (TargetSimulator)
+	{
+		DetachFromParticles(TargetSimulator->GetParticlesMutable());
+	}
+
+	if (TargetSubsystem)
+	{
+		for (UKawaiiFluidSimulationComponent* Comp : TargetSubsystem->GetAllComponents())
+		{
+			if (!Comp) continue;
+			DetachFromParticles(Comp->GetParticlesMutable());
 		}
 	}
 
@@ -196,31 +253,45 @@ void UFluidInteractionComponent::DetachAllFluid()
 
 void UFluidInteractionComponent::PushFluid(FVector Direction, float Force)
 {
-	if (!TargetSimulator)
+	AActor* Owner = GetOwner();
+	if (!Owner) return;
+
+	FVector NormalizedDir = Direction.GetSafeNormal();
+	FVector OwnerLocation = Owner->GetActorLocation();
+
+	auto PushParticles = [Owner, NormalizedDir, OwnerLocation, Force](TArray<FFluidParticle>& Particles)
 	{
-		return;
+		for (FFluidParticle& Particle : Particles)
+		{
+			float Distance = FVector::Dist(Particle.Position, OwnerLocation);
+
+			if (Distance < 200.0f)
+			{
+				float FallOff = 1.0f - (Distance / 200.0f);
+				Particle.Velocity += NormalizedDir * Force * FallOff;
+
+				if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+				{
+					Particle.bIsAttached = false;
+					Particle.AttachedActor.Reset();
+					Particle.AttachedBoneName = NAME_None;
+					Particle.AttachedLocalOffset = FVector::ZeroVector;
+				}
+			}
+		}
+	};
+
+	if (TargetSimulator)
+	{
+		PushParticles(TargetSimulator->GetParticlesMutable());
 	}
 
-	AActor* Owner = GetOwner();
-	FVector NormalizedDir = Direction.GetSafeNormal();
-
-	TArray<FFluidParticle>& Particles = TargetSimulator->GetParticlesMutable();
-	for (FFluidParticle& Particle : Particles)
+	if (TargetSubsystem)
 	{
-		float Distance = FVector::Dist(Particle.Position, Owner->GetActorLocation());
-
-		if (Distance < 200.0f)
+		for (UKawaiiFluidSimulationComponent* Comp : TargetSubsystem->GetAllComponents())
 		{
-			float FallOff = 1.0f - (Distance / 200.0f);
-			Particle.Velocity += NormalizedDir * Force * FallOff;
-
-			if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
-			{
-				Particle.bIsAttached = false;
-				Particle.AttachedActor.Reset();
-				Particle.AttachedBoneName = NAME_None;
-				Particle.AttachedLocalOffset = FVector::ZeroVector;
-			}
+			if (!Comp) continue;
+			PushParticles(Comp->GetParticlesMutable());
 		}
 	}
 }
@@ -229,12 +300,13 @@ void UFluidInteractionComponent::SetTargetSimulator(AFluidSimulator* Simulator)
 {
 	UnregisterFromSimulator();
 	TargetSimulator = Simulator;
+	TargetSubsystem = nullptr;
 	RegisterWithSimulator();
 }
 
 void UFluidInteractionComponent::DetectCollidingParticles()
 {
-	if (!AutoCollider || !TargetSimulator)
+	if (!AutoCollider)
 	{
 		CollidingParticleCount = 0;
 		return;
@@ -243,21 +315,36 @@ void UFluidInteractionComponent::DetectCollidingParticles()
 	AActor* Owner = GetOwner();
 	int32 Count = 0;
 
-	const TArray<FFluidParticle>& Particles = TargetSimulator->GetParticles();
-	
-	for (const FFluidParticle& Particle : Particles)
+	auto CountColliding = [this, Owner, &Count](const TArray<FFluidParticle>& Particles)
 	{
-		// 1. 이미 붙어있으면 충돌 중
-		if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+		for (const FFluidParticle& Particle : Particles)
 		{
-			++Count;
-			continue;
+			// 1. 이미 붙어있으면 충돌 중
+			if (Particle.bIsAttached && Particle.AttachedActor.Get() == Owner)
+			{
+				++Count;
+				continue;
+			}
+
+			// 2. Collider 안에 있는지 체크 (물리 기반, 정확!)
+			if (AutoCollider->IsPointInside(Particle.Position))
+			{
+				++Count;
+			}
 		}
-		
-		// 2. Collider 안에 있는지 체크 (물리 기반, 정확!)
-		if (AutoCollider->IsPointInside(Particle.Position))
+	};
+
+	if (TargetSimulator)
+	{
+		CountColliding(TargetSimulator->GetParticles());
+	}
+
+	if (TargetSubsystem)
+	{
+		for (UKawaiiFluidSimulationComponent* Comp : TargetSubsystem->GetAllComponents())
 		{
-			++Count;
+			if (!Comp) continue;
+			CountColliding(Comp->GetParticles());
 		}
 	}
 
