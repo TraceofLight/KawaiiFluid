@@ -6,9 +6,8 @@
 #include "Components/ActorComponent.h"
 #include "Rendering/IKawaiiFluidRenderable.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
+#include "Modules/KawaiiFluidSimulationModule.h"
 #include "KawaiiFluidComponent.generated.h"
-
-class UKawaiiFluidSimulationModule;
 class FKawaiiFluidRenderResource;
 
 /**
@@ -153,33 +152,6 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Fluid|Events")
 	FOnFluidParticleHitComponent OnParticleHit;
 
-	/** Enable particle hit events (performance consideration - default off) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events")
-	bool bEnableParticleHitEvents = false;
-
-	/** Minimum velocity for collision event (cm/s) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0.0", EditCondition = "bEnableParticleHitEvents"))
-	float MinVelocityForEvent = 50.0f;
-
-	/** Maximum events per frame (0 = unlimited) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0", EditCondition = "bEnableParticleHitEvents"))
-	int32 MaxEventsPerFrame = 10;
-
-	/** Per-particle event cooldown in seconds */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0.0", EditCondition = "bEnableParticleHitEvents"))
-	float EventCooldownPerParticle = 0.1f;
-
-	//========================================
-	// Component-Level API
-	//========================================
-
-	/** Build simulation params (World, IgnoreActor 등 컴포넌트에서만 접근 가능한 값 포함) */
-	UFUNCTION(BlueprintCallable, Category = "Fluid")
-	FKawaiiFluidSimulationParams BuildSimulationParams();
-
-	/** Check if this component should simulate independently */
-	bool ShouldSimulateIndependently() const;
-
 private:
 	//========================================
 	// Continuous Spawn
@@ -192,10 +164,7 @@ private:
 	// Event System
 	//========================================
 
-	/** Event count this frame (for MaxEventsPerFrame limiting) */
-	int32 EventCountThisFrame = 0;
-
-	/** Handle collision event from simulation context */
+	/** Handle collision event from Module callback */
 	void HandleCollisionEvent(const FKawaiiFluidCollisionEvent& Event);
 
 	//========================================

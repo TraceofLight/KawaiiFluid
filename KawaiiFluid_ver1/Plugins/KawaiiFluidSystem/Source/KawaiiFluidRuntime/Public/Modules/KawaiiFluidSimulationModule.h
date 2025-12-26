@@ -8,6 +8,9 @@
 #include "Core/KawaiiFluidSimulationTypes.h"
 #include "KawaiiFluidSimulationModule.generated.h"
 
+/** Collision event callback type */
+DECLARE_DELEGATE_OneParam(FOnModuleCollisionEvent, const FKawaiiFluidCollisionEvent&);
+
 class FSpatialHash;
 class UKawaiiFluidPresetDataAsset;
 class UFluidCollider;
@@ -227,6 +230,47 @@ public:
 	bool IsIndependentSimulation() const { return bIndependentSimulation || HasAnyOverride(); }
 
 	//========================================
+	// Context (Outer 체인 캐시)
+	//========================================
+
+	/** Owner Actor 반환 (캐시됨) */
+	UFUNCTION(BlueprintPure, Category = "Fluid|Module")
+	AActor* GetOwnerActor() const;
+
+	/** World Collision 사용 여부 설정 */
+	UFUNCTION(BlueprintCallable, Category = "Fluid|Module")
+	void SetUseWorldCollision(bool bUse) { bUseWorldCollision = bUse; }
+
+	UFUNCTION(BlueprintPure, Category = "Fluid|Module")
+	bool GetUseWorldCollision() const { return bUseWorldCollision; }
+
+	//========================================
+	// Event Settings
+	//========================================
+
+	/** 충돌 이벤트 활성화 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events")
+	bool bEnableCollisionEvents = false;
+
+	/** 이벤트 발생을 위한 최소 속도 (cm/s) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0.0", EditCondition = "bEnableCollisionEvents"))
+	float MinVelocityForEvent = 50.0f;
+
+	/** 프레임당 최대 이벤트 수 (0 = 무제한) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0", EditCondition = "bEnableCollisionEvents"))
+	int32 MaxEventsPerFrame = 10;
+
+	/** 파티클별 이벤트 쿨다운 (초) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0.0", EditCondition = "bEnableCollisionEvents"))
+	float EventCooldownPerParticle = 0.1f;
+
+	/** 충돌 이벤트 콜백 설정 */
+	void SetCollisionEventCallback(FOnModuleCollisionEvent InCallback) { OnCollisionEventCallback = InCallback; }
+
+	/** 충돌 이벤트 콜백 가져오기 */
+	const FOnModuleCollisionEvent& GetCollisionEventCallback() const { return OnCollisionEventCallback; }
+
+	//========================================
 	// Preset (디테일 패널에 노출)
 	//========================================
 
@@ -275,6 +319,20 @@ public:
 	float Override_AdhesionStrength = 0.5f;
 
 private:
+	//========================================
+	// Context Cache
+	//========================================
+
+	/** 캐시된 Owner Actor (Outer 체인 최적화) */
+	UPROPERTY(Transient)
+	TWeakObjectPtr<AActor> CachedOwnerActor;
+
+	/** World Collision 사용 여부 */
+	bool bUseWorldCollision = true;
+
+	/** 충돌 이벤트 콜백 */
+	FOnModuleCollisionEvent OnCollisionEventCallback;
+
 	//========================================
 	// 데이터
 	//========================================

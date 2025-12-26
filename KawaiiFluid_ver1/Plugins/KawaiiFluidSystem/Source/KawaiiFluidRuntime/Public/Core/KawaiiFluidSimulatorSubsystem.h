@@ -9,6 +9,7 @@
 
 class UKawaiiFluidSimulationComponent;
 class UKawaiiFluidComponent;
+class UKawaiiFluidSimulationModule;
 class UKawaiiFluidSimulationContext;
 class UKawaiiFluidPresetDataAsset;
 class UFluidCollider;
@@ -48,25 +49,29 @@ public:
 	virtual bool IsTickableInEditor() const override { return false; }
 
 	//========================================
-	// Component Registration
+	// Module Registration (New)
 	//========================================
 
-	/** Register simulation component (legacy) */
-	void RegisterComponent(UKawaiiFluidSimulationComponent* Component);
+	/** Register simulation module */
+	void RegisterModule(UKawaiiFluidSimulationModule* Module);
 
-	/** Unregister simulation component (legacy) */
-	void UnregisterComponent(UKawaiiFluidSimulationComponent* Component);
+	/** Unregister simulation module */
+	void UnregisterModule(UKawaiiFluidSimulationModule* Module);
 
-	/** Register fluid component (new modular) */
+	/** Get all registered modules */
+	const TArray<UKawaiiFluidSimulationModule*>& GetAllModules() const { return AllModules; }
+
+	//========================================
+	// Component Registration (for backward compatibility)
+	//========================================
+
+	/** Register fluid component (deprecated - use RegisterModule) */
 	void RegisterComponent(UKawaiiFluidComponent* Component);
 
-	/** Unregister fluid component (new modular) */
+	/** Unregister fluid component (deprecated - use UnregisterModule) */
 	void UnregisterComponent(UKawaiiFluidComponent* Component);
 
-	/** Get all registered legacy components */
-	const TArray<UKawaiiFluidSimulationComponent*>& GetAllComponents() const { return AllComponents; }
-
-	/** Get all registered new components */
+	/** Get all registered components (deprecated) */
 	const TArray<UKawaiiFluidComponent*>& GetAllFluidComponents() const { return AllFluidComponents; }
 
 	//========================================
@@ -109,7 +114,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "KawaiiFluid|Query")
 	int32 GetTotalParticleCount() const;
 
-	/** Get component count (legacy + new) */
+	/** Get component count */
 	UFUNCTION(BlueprintCallable, Category = "KawaiiFluid|Query")
 	int32 GetComponentCount() const { return AllComponents.Num() + AllFluidComponents.Num(); }
 
@@ -122,14 +127,18 @@ public:
 
 private:
 	//========================================
-	// Component Management
+	// Module Management (New)
 	//========================================
 
-	/** All registered legacy components */
+	/** All registered simulation modules */
 	UPROPERTY()
-	TArray<UKawaiiFluidSimulationComponent*> AllComponents;
+	TArray<UKawaiiFluidSimulationModule*> AllModules;
 
-	/** All registered new modular components */
+	//========================================
+	// Component Management (Deprecated)
+	//========================================
+
+	/** All registered modular components (deprecated - kept for backward compatibility) */
 	UPROPERTY()
 	TArray<UKawaiiFluidComponent*> AllFluidComponents;
 
@@ -150,71 +159,86 @@ private:
 	TObjectPtr<UKawaiiFluidSimulationContext> DefaultContext;
 
 	//========================================
-	// Batching Resources
+	// Batching Resources (Module-based)
 	//========================================
 
 	/** Shared spatial hash for batching */
 	TSharedPtr<FSpatialHash> SharedSpatialHash;
 
-	/** Merged particle buffer for batching */
-	TArray<FFluidParticle> MergedParticleBuffer;
+	/** Batch info array (Module-based) */
+	TArray<FKawaiiFluidModuleBatchInfo> ModuleBatchInfos;
 
-	/** Batch info array (legacy) */
-	TArray<FKawaiiFluidBatchInfo> BatchInfos;
-
-	/** Batch info array (modular) */
-	TArray<FKawaiiFluidModularBatchInfo> ModularBatchInfos;
-
-	/** Merged particle buffer for modular batching */
+	/** Merged particle buffer for module batching */
 	TArray<FFluidParticle> MergedFluidParticleBuffer;
 
 	/** Atomic event counter for thread-safe collision event tracking */
 	std::atomic<int32> EventCountThisFrame{0};
 
 	//========================================
-	// Simulation Methods (Legacy)
+	// Simulation Methods
 	//========================================
 
-	/** Simulate independent components (each has own spatial hash) */
-	void SimulateIndependentComponents(float DeltaTime);
-
-	/** Simulate batched components (same preset merged) */
-	void SimulateBatchedComponents(float DeltaTime);
-
-	//========================================
-	// Simulation Methods (New Modular)
-	//========================================
-
-	/** Simulate new modular fluid components */
-	void SimulateFluidComponents(float DeltaTime);
-
-	/** Simulate independent modular components */
+	/** Simulate independent modules */
 	void SimulateIndependentFluidComponents(float DeltaTime);
 
-	/** Simulate batched modular components */
+	/** Simulate batched modules */
 	void SimulateBatchedFluidComponents(float DeltaTime);
 
-	/** Group components by preset */
+	/** Group modules by preset */
+	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidSimulationModule*>> GroupModulesByPreset() const;
+
+	/** Merge particles from modules */
+	void MergeModuleParticles(const TArray<UKawaiiFluidSimulationModule*>& Modules);
+
+	/** Split particles back to modules */
+	void SplitModuleParticles(const TArray<UKawaiiFluidSimulationModule*>& Modules);
+
+	/** Build merged params from modules */
+	FKawaiiFluidSimulationParams BuildMergedModuleSimulationParams(const TArray<UKawaiiFluidSimulationModule*>& Modules);
+
+	//##########################################################################
+	// DEPRECATED - UKawaiiFluidSimulationComponent (Legacy)
+	//##########################################################################
+#pragma region DEPRECATED_LEGACY
+
+public:
+	/** [DEPRECATED] Register simulation component (legacy) */
+	void RegisterComponent(UKawaiiFluidSimulationComponent* Component);
+
+	/** [DEPRECATED] Unregister simulation component (legacy) */
+	void UnregisterComponent(UKawaiiFluidSimulationComponent* Component);
+
+	/** [DEPRECATED] Get all registered legacy components */
+	const TArray<UKawaiiFluidSimulationComponent*>& GetAllComponents() const { return AllComponents; }
+
+private:
+	/** [DEPRECATED] All registered legacy components */
+	UPROPERTY()
+	TArray<UKawaiiFluidSimulationComponent*> AllComponents;
+
+	/** [DEPRECATED] Merged particle buffer for legacy batching */
+	TArray<FFluidParticle> MergedParticleBuffer;
+
+	/** [DEPRECATED] Batch info array (legacy) */
+	TArray<FKawaiiFluidBatchInfo> BatchInfos;
+
+	/** [DEPRECATED] Simulate independent components */
+	void SimulateIndependentComponents(float DeltaTime);
+
+	/** [DEPRECATED] Simulate batched components */
+	void SimulateBatchedComponents(float DeltaTime);
+
+	/** [DEPRECATED] Group components by preset */
 	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidSimulationComponent*>> GroupComponentsByPreset() const;
 
-	/** Group modular components by preset */
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidComponent*>> GroupFluidComponentsByPreset() const;
-
-	/** Merge particles from modular components */
-	void MergeFluidParticles(const TArray<UKawaiiFluidComponent*>& Components);
-
-	/** Split particles back to modular components */
-	void SplitFluidParticles(const TArray<UKawaiiFluidComponent*>& Components);
-
-	/** Build merged params for modular components */
-	FKawaiiFluidSimulationParams BuildMergedFluidSimulationParams(const TArray<UKawaiiFluidComponent*>& Components);
-
-	/** Merge particles from components into single buffer */
+	/** [DEPRECATED] Merge particles from components */
 	void MergeParticles(const TArray<UKawaiiFluidSimulationComponent*>& Components);
 
-	/** Split merged buffer back to components */
+	/** [DEPRECATED] Split merged buffer back */
 	void SplitParticles(const TArray<UKawaiiFluidSimulationComponent*>& Components);
 
-	/** Build merged simulation params */
+	/** [DEPRECATED] Build merged simulation params */
 	FKawaiiFluidSimulationParams BuildMergedSimulationParams(const TArray<UKawaiiFluidSimulationComponent*>& Components);
+
+#pragma endregion DEPRECATED_LEGACY
 };

@@ -20,6 +20,12 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 	Preset = InPreset;
 	bRuntimePresetDirty = true;
 
+	// Owner Actor 캐시 (Outer 체인 최적화)
+	if (UActorComponent* OwnerComp = Cast<UActorComponent>(GetOuter()))
+	{
+		CachedOwnerActor = OwnerComp->GetOwner();
+	}
+
 	// SpatialHash 초기화 (Independent 모드용)
 	float CellSize = 20.0f;
 	if (Preset)
@@ -142,6 +148,11 @@ void UKawaiiFluidSimulationModule::UpdateRuntimePreset()
 	bRuntimePresetDirty = false;
 }
 
+AActor* UKawaiiFluidSimulationModule::GetOwnerActor() const
+{
+	return CachedOwnerActor.Get();
+}
+
 FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams() const
 {
 	FKawaiiFluidSimulationParams Params;
@@ -160,7 +171,34 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 		Params.ParticleRadius = Preset->ParticleRadius;
 	}
 
-	// World와 IgnoreActor는 Component에서 설정해야 함 (모듈은 World 접근 불가)
+	// Context - Module에서 직접 접근 (Outer 체인 활용)
+	Params.World = GetWorld();
+	Params.IgnoreActor = CachedOwnerActor.Get();
+	Params.bUseWorldCollision = bUseWorldCollision;
+
+	// Event Settings
+	Params.bEnableCollisionEvents = bEnableCollisionEvents;
+	Params.MinVelocityForEvent = MinVelocityForEvent;
+	Params.MaxEventsPerFrame = MaxEventsPerFrame;
+	Params.EventCooldownPerParticle = EventCooldownPerParticle;
+
+	if (bEnableCollisionEvents)
+	{
+		// 쿨다운 추적용 맵 연결 (const_cast 필요 - mutable 대안)
+		Params.ParticleLastEventTimePtr = const_cast<TMap<int32, float>*>(&ParticleLastEventTime);
+
+		// 현재 게임 시간
+		if (UWorld* World = GetWorld())
+		{
+			Params.CurrentGameTime = World->GetTimeSeconds();
+		}
+
+		// 콜백 바인딩
+		if (OnCollisionEventCallback.IsBound())
+		{
+			Params.OnCollisionEvent = OnCollisionEventCallback;
+		}
+	}
 
 	return Params;
 }

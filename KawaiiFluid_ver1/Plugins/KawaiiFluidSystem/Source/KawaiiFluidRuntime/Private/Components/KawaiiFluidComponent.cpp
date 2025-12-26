@@ -29,9 +29,25 @@ void UKawaiiFluidComponent::BeginPlay()
 			UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidComponent [%s]: No Preset assigned, using default values"), *GetName());
 		}
 		SimulationModule->Initialize(SimulationModule->Preset);
+
+		// Component 설정을 Module에 전달
+		SimulationModule->SetUseWorldCollision(bUseWorldCollision);
+
+		// 이벤트 콜백 연결 (설정은 Module에서 직접 관리)
+		if (SimulationModule->bEnableCollisionEvents)
+		{
+			SimulationModule->SetCollisionEventCallback(
+				FOnModuleCollisionEvent::CreateUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent)
+			);
+		}
 	}
 
-	// Subsystem에 등록
+	// 렌더 모듈 초기화...
+	{
+		
+	}
+
+	// Module을 Subsystem에 등록 (Component가 아닌 Module!)
 	RegisterToSubsystem();
 
 	// 자동 스폰
@@ -65,9 +81,6 @@ void UKawaiiFluidComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
-
-	// 이벤트 카운터 리셋
-	EventCountThisFrame = 0;
 
 	// 연속 스폰 처리
 	if (bContinuousSpawn)
@@ -133,53 +146,6 @@ int32 UKawaiiFluidComponent::GetParticleCount() const
 }
 
 //========================================
-// Component-Level API
-//========================================
-
-FKawaiiFluidSimulationParams UKawaiiFluidComponent::BuildSimulationParams()
-{
-	FKawaiiFluidSimulationParams Params;
-
-	if (SimulationModule)
-	{
-		Params = SimulationModule->BuildSimulationParams();
-	}
-
-	// 모듈에서 접근 불가능한 값들 설정
-	Params.World = GetWorld();
-	Params.IgnoreActor = GetOwner();
-	Params.bUseWorldCollision = bUseWorldCollision;
-
-	// 이벤트 시스템 설정
-	Params.bEnableCollisionEvents = bEnableParticleHitEvents;
-	Params.MinVelocityForEvent = MinVelocityForEvent;
-	Params.MaxEventsPerFrame = MaxEventsPerFrame;
-	Params.EventCooldownPerParticle = EventCooldownPerParticle;
-
-	if (bEnableParticleHitEvents && SimulationModule)
-	{
-		// 쿨다운 추적용 맵 연결
-		Params.ParticleLastEventTimePtr = &SimulationModule->GetParticleLastEventTimeMap();
-
-		// 현재 게임 시간
-		if (UWorld* World = GetWorld())
-		{
-			Params.CurrentGameTime = World->GetTimeSeconds();
-		}
-
-		// 콜백 바인딩
-		Params.OnCollisionEvent.BindUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent);
-	}
-
-	return Params;
-}
-
-bool UKawaiiFluidComponent::ShouldSimulateIndependently() const
-{
-	return SimulationModule ? SimulationModule->IsIndependentSimulation() : false;
-}
-
-//========================================
 // Continuous Spawn
 //========================================
 
@@ -231,34 +197,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 
 void UKawaiiFluidComponent::HandleCollisionEvent(const FKawaiiFluidCollisionEvent& Event)
 {
-	// 이벤트 횟수 제한 체크
-	if (MaxEventsPerFrame > 0 && EventCountThisFrame >= MaxEventsPerFrame)
-	{
-		return;
-	}
-
-	// 쿨다운 체크
-	if (SimulationModule && EventCooldownPerParticle > 0.0f)
-	{
-		TMap<int32, float>& LastEventTimeMap = SimulationModule->GetParticleLastEventTimeMap();
-		float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-
-		if (float* LastTime = LastEventTimeMap.Find(Event.ParticleIndex))
-		{
-			if (CurrentTime - *LastTime < EventCooldownPerParticle)
-			{
-				return; // 쿨다운 중
-			}
-		}
-
-		// 마지막 이벤트 시간 갱신
-		LastEventTimeMap.Add(Event.ParticleIndex, CurrentTime);
-	}
-
-	// 이벤트 카운터 증가
-	EventCountThisFrame++;
-
-	// 델리게이트 브로드캐스트
+	// Module에서 필터링 완료 후 호출됨 - 바로 브로드캐스트
 	if (OnParticleHit.IsBound())
 	{
 		OnParticleHit.Broadcast(
@@ -277,22 +216,38 @@ void UKawaiiFluidComponent::HandleCollisionEvent(const FKawaiiFluidCollisionEven
 
 void UKawaiiFluidComponent::RegisterToSubsystem()
 {
+	if (!SimulationModule)
+	{
+		return;
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
 		{
-			Subsystem->RegisterComponent(this);
+			// Module을 직접 등록!
+			Subsystem->RegisterModule(SimulationModule);
 		}
+
+		// RenderSubSystem , ...
 	}
 }
 
 void UKawaiiFluidComponent::UnregisterFromSubsystem()
 {
+	if (!SimulationModule)
+	{
+		return;
+	}
+
 	if (UWorld* World = GetWorld())
 	{
 		if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
 		{
-			Subsystem->UnregisterComponent(this);
+			// Module 등록 해제
+			Subsystem->UnregisterModule(SimulationModule);
 		}
+		
+		// RenderSubSystem , ...
 	}
 }
