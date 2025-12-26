@@ -23,7 +23,7 @@
 
 namespace
 {
-	void CollectActiveSSFRRenderers(
+	void CollectActiveSSFRRenderersForThickness(
 		UFluidRendererSubsystem* Subsystem,
 		TArray<FKawaiiFluidRenderResource*>& OutResources,
 		TArray<float>& OutRadii,
@@ -98,7 +98,7 @@ void RenderFluidThicknessPass(
 	TArray<FKawaiiFluidRenderResource*> Resources;
 	TArray<float> Radii;
 	TArray<FString> DebugNames;
-	CollectActiveSSFRRenderers(Subsystem, Resources, Radii, DebugNames);
+	CollectActiveSSFRRenderersForThickness(Subsystem, Resources, Radii, DebugNames);
 
 	if (Resources.Num() == 0)
 	{

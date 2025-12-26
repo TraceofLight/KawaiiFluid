@@ -23,7 +23,7 @@
 
 namespace
 {
-	void CollectActiveSSFRRenderers(
+	void CollectActiveSSFRRenderersForDepth(
 		UFluidRendererSubsystem* Subsystem,
 		TArray<FKawaiiFluidRenderResource*>& OutResources,
 		TArray<float>& OutRadii,
@@ -113,7 +113,7 @@ void RenderFluidDepthPass(
 	TArray<FKawaiiFluidRenderResource*> Resources;
 	TArray<float> Radii;
 	TArray<FString> DebugNames;
-	CollectActiveSSFRRenderers(Subsystem, Resources, Radii, DebugNames);
+	CollectActiveSSFRRenderersForDepth(Subsystem, Resources, Radii, DebugNames);
 
 	if (Resources.Num() == 0)
 	{
