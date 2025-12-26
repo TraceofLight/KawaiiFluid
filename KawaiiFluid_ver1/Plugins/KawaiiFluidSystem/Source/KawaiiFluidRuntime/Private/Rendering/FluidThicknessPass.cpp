@@ -21,52 +21,55 @@
 // Helper: Collect Active SSFR Renderers (Legacy + New Architecture)
 //=============================================================================
 
-static void CollectActiveSSFRRenderers(
-	UFluidRendererSubsystem* Subsystem,
-	TArray<FKawaiiFluidRenderResource*>& OutResources,
-	TArray<float>& OutRadii,
-	TArray<FString>& OutDebugNames)
+namespace
 {
-	if (!Subsystem)
+	void CollectActiveSSFRRenderers(
+		UFluidRendererSubsystem* Subsystem,
+		TArray<FKawaiiFluidRenderResource*>& OutResources,
+		TArray<float>& OutRadii,
+		TArray<FString>& OutDebugNames)
 	{
-		return;
-	}
-
-	// Legacy: Collect from IKawaiiFluidRenderable
-	TArray<IKawaiiFluidRenderable*> Renderables = Subsystem->GetAllRenderables();
-	for (IKawaiiFluidRenderable* Renderable : Renderables)
-	{
-		if (Renderable && Renderable->ShouldUseSSFR())
+		if (!Subsystem)
 		{
-			FKawaiiFluidRenderResource* Resource = Renderable->GetFluidRenderResource();
-			if (Resource && Resource->IsValid())
+			return;
+		}
+
+		// Legacy: Collect from IKawaiiFluidRenderable
+		TArray<IKawaiiFluidRenderable*> Renderables = Subsystem->GetAllRenderables();
+		for (IKawaiiFluidRenderable* Renderable : Renderables)
+		{
+			if (Renderable && Renderable->ShouldUseSSFR())
 			{
-				OutResources.Add(Resource);
-				OutRadii.Add(Renderable->GetParticleRenderRadius());
-				OutDebugNames.Add(Renderable->GetDebugName());
+				FKawaiiFluidRenderResource* Resource = Renderable->GetFluidRenderResource();
+				if (Resource && Resource->IsValid())
+				{
+					OutResources.Add(Resource);
+					OutRadii.Add(Renderable->GetParticleRenderRadius());
+					OutDebugNames.Add(Renderable->GetDebugName());
+				}
+			}
+		}
+
+		// New: Collect from RenderControllers
+		const TArray<UKawaiiFluidRenderController*>& Controllers = Subsystem->GetAllRenderControllers();
+		for (UKawaiiFluidRenderController* Controller : Controllers)
+		{
+			if (!Controller) continue;
+
+			UKawaiiFluidSSFRRenderer* SSFRRenderer = Controller->GetSSFRRenderer();
+			if (SSFRRenderer && SSFRRenderer->IsRenderingActive())
+			{
+				FKawaiiFluidRenderResource* Resource = SSFRRenderer->GetFluidRenderResource();
+				if (Resource && Resource->IsValid())
+				{
+					OutResources.Add(Resource);
+					OutRadii.Add(SSFRRenderer->GetCachedParticleRadius());
+					OutDebugNames.Add(TEXT("SSFR_RenderController"));
+				}
 			}
 		}
 	}
-
-	// New: Collect from RenderControllers
-	const TArray<UKawaiiFluidRenderController*>& Controllers = Subsystem->GetAllRenderControllers();
-	for (UKawaiiFluidRenderController* Controller : Controllers)
-	{
-		if (!Controller) continue;
-
-		UKawaiiFluidSSFRRenderer* SSFRRenderer = Controller->GetSSFRRenderer();
-		if (SSFRRenderer && SSFRRenderer->IsRenderingActive())
-		{
-			FKawaiiFluidRenderResource* Resource = SSFRRenderer->GetFluidRenderResource();
-			if (Resource && Resource->IsValid())
-			{
-				OutResources.Add(Resource);
-				OutRadii.Add(SSFRRenderer->GetCachedParticleRadius());
-				OutDebugNames.Add(TEXT("SSFR_RenderController"));
-			}
-		}
-	}
-}
+} // anonymous namespace
 
 //=============================================================================
 // Thickness Pass Implementation
