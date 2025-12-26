@@ -7,7 +7,10 @@
 #include "Core/FluidParticle.h"
 #include "Interfaces/IKawaiiFluidDataProvider.h"
 #include "Test/FluidDummyGenerationMode.h"
+#include "Rendering/KawaiiFluidRendererSettings.h"
 #include "KawaiiFluidTestDataComponent.generated.h"
+
+class UKawaiiFluidRenderController;
 
 /**
  * 새 아키텍처 테스트용 유체 데이터 제공 컴포넌트
@@ -44,6 +47,7 @@ public:
 	UKawaiiFluidTestDataComponent();
 
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 
 	//========================================
@@ -111,6 +115,22 @@ public:
 	void ToggleAnimation();
 
 	//========================================
+	// Rendering Control
+	//========================================
+
+	/** Enable rendering system */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test Data|Rendering")
+	bool bEnableRendering = true;
+
+	/** ISM Renderer Settings */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test Data|Rendering", meta = (EditCondition = "bEnableRendering", DisplayName = "ISM Settings"))
+	FKawaiiFluidISMRendererSettings ISMSettings;
+
+	/** SSFR Renderer Settings */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Test Data|Rendering", meta = (EditCondition = "bEnableRendering", DisplayName = "SSFR Settings"))
+	FKawaiiFluidSSFRRendererSettings SSFRSettings;
+
+	//========================================
 	// IKawaiiFluidDataProvider 인터페이스 구현
 	//========================================
 
@@ -146,7 +166,7 @@ public:
 			Owner ? *Owner->GetName() : TEXT("NoOwner"));
 	}
 
-private:
+protected:
 	//========================================
 	// 테스트 데이터
 	//========================================
@@ -159,6 +179,14 @@ private:
 
 	/** 애니메이션 일시정지 */
 	bool bAnimationPaused = false;
+
+	//========================================
+	// 내부 렌더링 (Details Panel에 노출 안 됨)
+	//========================================
+
+	/** Internal render controller (not exposed in Details panel) */
+	UPROPERTY()
+	TObjectPtr<UKawaiiFluidRenderController> RenderController;
 
 	//========================================
 	// 내부 메서드

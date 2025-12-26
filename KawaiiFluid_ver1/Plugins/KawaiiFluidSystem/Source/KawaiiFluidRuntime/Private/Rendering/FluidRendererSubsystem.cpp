@@ -3,7 +3,7 @@
 #include "Rendering/FluidRendererSubsystem.h"
 #include "Rendering/FluidSceneViewExtension.h"
 #include "Rendering/IKawaiiFluidRenderable.h"
-#include "Components/KawaiiFluidRenderController.h"
+#include "Rendering/KawaiiFluidRenderController.h"
 #include "Core/FluidSimulator.h"
 
 void UFluidRendererSubsystem::Initialize(FSubsystemCollectionBase& Collection)

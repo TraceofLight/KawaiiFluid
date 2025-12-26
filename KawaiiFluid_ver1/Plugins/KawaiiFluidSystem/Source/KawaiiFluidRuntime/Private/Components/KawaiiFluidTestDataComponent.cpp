@@ -1,6 +1,10 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Components/KawaiiFluidTestDataComponent.h"
+#include "Rendering/KawaiiFluidRenderController.h"
+#include "Rendering/FluidRendererSubsystem.h"
+#include "Rendering/KawaiiFluidISMRenderer.h"
+#include "Rendering/KawaiiFluidSSFRRenderer.h"
 #include "Engine/World.h"
 
 UKawaiiFluidTestDataComponent::UKawaiiFluidTestDataComponent()
@@ -8,32 +12,93 @@ UKawaiiFluidTestDataComponent::UKawaiiFluidTestDataComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
 	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+
+	// Create default subobject for render controller (Instanced pattern)
+	RenderController = CreateDefaultSubobject<UKawaiiFluidRenderController>(TEXT("RenderController"));
 }
 
 void UKawaiiFluidTestDataComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 테스트 데이터 생성
+	// Generate test data
 	GenerateTestParticles();
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidTestDataComponent: Initialized with %d particles (New Architecture)"), 
-		TestParticles.Num());
+	// Initialize render controller if rendering is enabled
+	if (bEnableRendering && RenderController)
+	{
+		RenderController->Initialize(GetWorld(), GetOwner(), this);
+
+		// Apply settings from structs to renderers
+		if (UKawaiiFluidISMRenderer* ISMRenderer = RenderController->GetISMRenderer())
+		{
+			ISMRenderer->ApplySettings(ISMSettings);
+		}
+
+		if (UKawaiiFluidSSFRRenderer* SSFRRenderer = RenderController->GetSSFRRenderer())
+		{
+			SSFRRenderer->ApplySettings(SSFRSettings);
+		}
+
+		// Register with subsystem
+		if (UWorld* World = GetWorld())
+		{
+			if (UFluidRendererSubsystem* Subsystem = World->GetSubsystem<UFluidRendererSubsystem>())
+			{
+				Subsystem->RegisterRenderController(RenderController);
+			}
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidTestDataComponent: Initialized with %d particles and RenderController (ISM: %s, SSFR: %s)"),
+			TestParticles.Num(),
+			ISMSettings.bEnabled ? TEXT("Enabled") : TEXT("Disabled"),
+			SSFRSettings.bEnabled ? TEXT("Enabled") : TEXT("Disabled"));
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidTestDataComponent: Initialized with %d particles (No Rendering)"),
+			TestParticles.Num());
+	}
+}
+
+void UKawaiiFluidTestDataComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (RenderController)
+	{
+		// Unregister from subsystem
+		if (UWorld* World = GetWorld())
+		{
+			if (UFluidRendererSubsystem* Subsystem = World->GetSubsystem<UFluidRendererSubsystem>())
+			{
+				Subsystem->UnregisterRenderController(RenderController);
+			}
+		}
+
+		// Cleanup render controller
+		RenderController->Cleanup();
+		RenderController = nullptr;
+	}
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void UKawaiiFluidTestDataComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (TestParticles.Num() == 0 || bAnimationPaused)
+	// Update animation
+	if (TestParticles.Num() > 0 && !bAnimationPaused)
 	{
-		return;
+		if (DataMode == EKawaiiFluidDummyGenMode::Animated || DataMode == EKawaiiFluidDummyGenMode::Wave)
+		{
+			UpdateAnimatedParticles(DeltaTime);
+		}
 	}
 
-	// 애니메이션 모드에서만 업데이트
-	if (DataMode == EKawaiiFluidDummyGenMode::Animated || DataMode == EKawaiiFluidDummyGenMode::Wave)
+	// Update rendering
+	if (RenderController)
 	{
-		UpdateAnimatedParticles(DeltaTime);
+		RenderController->UpdateRenderers();
 	}
 }
 
@@ -65,7 +130,7 @@ void UKawaiiFluidTestDataComponent::SetParticleCount(int32 NewCount)
 void UKawaiiFluidTestDataComponent::ToggleAnimation()
 {
 	bAnimationPaused = !bAnimationPaused;
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidTestDataComponent: Animation %s"), 
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidTestDataComponent: Animation %s"),
 		bAnimationPaused ? TEXT("Paused") : TEXT("Resumed"));
 }
 
