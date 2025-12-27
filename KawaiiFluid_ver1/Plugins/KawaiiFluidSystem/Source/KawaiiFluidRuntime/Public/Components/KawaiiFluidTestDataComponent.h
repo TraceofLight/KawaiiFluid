@@ -146,8 +146,8 @@ public:
 		return TestParticles.Num();
 	}
 
-	/** 파티클 렌더링 반경 반환 */
-	virtual float GetParticleRenderRadius() const override
+	/** 파티클 반경 반환 (시뮬레이션 실제 반경) */
+	virtual float GetParticleRadius() const override
 	{
 		return ParticleRadius;
 	}

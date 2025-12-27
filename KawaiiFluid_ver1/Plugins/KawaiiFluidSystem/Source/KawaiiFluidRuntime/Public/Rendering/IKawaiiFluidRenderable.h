@@ -63,9 +63,9 @@ public:
 	virtual bool IsFluidRenderResourceValid() const = 0;
 
 	/**
-	 * 파티클 렌더링 반경 반환 (cm)
+	 * 파티클 반경 반환 (시뮬레이션 실제 반경, cm)
 	 */
-	virtual float GetParticleRenderRadius() const = 0;
+	virtual float GetParticleRadius() const = 0;
 
 	/**
 	 * 디버그 이름 반환 (프로파일링용)

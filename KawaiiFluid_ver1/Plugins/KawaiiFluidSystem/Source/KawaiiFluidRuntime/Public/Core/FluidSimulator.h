@@ -75,7 +75,7 @@ public:
 
 	virtual bool IsFluidRenderResourceValid() const override;
 
-	virtual float GetParticleRenderRadius() const override
+	virtual float GetParticleRadius() const override
 	{
 		return ParticleRenderRadius;
 	}

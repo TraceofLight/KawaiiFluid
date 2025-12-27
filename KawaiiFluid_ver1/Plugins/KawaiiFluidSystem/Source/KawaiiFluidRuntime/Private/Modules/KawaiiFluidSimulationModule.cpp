@@ -393,9 +393,9 @@ bool UKawaiiFluidSimulationModule::GetParticleInfo(int32 ParticleIndex, FVector&
 // IKawaiiFluidDataProvider Interface
 //========================================
 
-float UKawaiiFluidSimulationModule::GetParticleRenderRadius() const
+float UKawaiiFluidSimulationModule::GetParticleRadius() const
 {
-	// Preset에서 가져오기
+	// Preset에서 실제 시뮬레이션 파티클 반경 가져오기
 	if (Preset)
 	{
 		return Preset->ParticleRadius;

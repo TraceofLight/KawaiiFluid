@@ -246,7 +246,7 @@ bool UKawaiiFluidSimulationComponent::IsFluidRenderResourceValid() const
 	return RenderResource.IsValid() && RenderResource->IsValid();
 }
 
-float UKawaiiFluidSimulationComponent::GetParticleRenderRadius() const
+float UKawaiiFluidSimulationComponent::GetParticleRadius() const
 {
 	return Preset ? Preset->ParticleRadius : 5.0f;
 }

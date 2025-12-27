@@ -4,12 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
-#include "Interfaces/IKawaiiFluidRenderer.h"
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiRenderParticle.h"
 #include "Rendering/KawaiiFluidRendererSettings.h"
 #include "KawaiiFluidSSFRRenderer.generated.h"
 
+class IKawaiiFluidDataProvider;
 class UFluidRendererSubsystem;
 class FKawaiiFluidRenderResource;
 
@@ -29,7 +29,7 @@ class FKawaiiFluidRenderResource;
  * Pure UObject implementation (no component dependencies).
  */
 UCLASS()
-class KAWAIIFLUIDRUNTIME_API UKawaiiFluidSSFRRenderer : public UObject, public IKawaiiFluidRenderer
+class KAWAIIFLUIDRUNTIME_API UKawaiiFluidSSFRRenderer : public UObject
 {
 	GENERATED_BODY()
 
@@ -54,11 +54,18 @@ public:
 	 */
 	void ApplySettings(const FKawaiiFluidSSFRRendererSettings& Settings);
 
-	// IKawaiiFluidRenderer interface
-	virtual void UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime) override;
-	virtual bool IsEnabled() const override { return bEnabled; }
-	virtual EKawaiiFluidRenderingMode GetRenderingMode() const override { return EKawaiiFluidRenderingMode::SSFR; }
-	virtual void SetEnabled(bool bInEnabled) override { bEnabled = bInEnabled; }
+	/**
+	 * Update rendering
+	 * @param DataProvider Particle data provider
+	 * @param DeltaTime Frame delta time
+	 */
+	void UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime);
+
+	/** Check if rendering is enabled */
+	bool IsEnabled() const { return bEnabled; }
+
+	/** Enable or disable rendering */
+	void SetEnabled(bool bInEnabled) { bEnabled = bInEnabled; }
 
 	//========================================
 	// GPU Resource Access (for ViewExtension)

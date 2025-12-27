@@ -124,8 +124,8 @@ void UKawaiiFluidSSFRRenderer::UpdateRendering(const IKawaiiFluidDataProvider* D
 	// Limit number of particles to render
 	int32 NumParticles = FMath::Min(SimParticles.Num(), MaxRenderParticles);
 
-	// Get particle radius
-	float ParticleRadius = DataProvider->GetParticleRenderRadius();
+	// Get particle radius from simulation
+	float ParticleRadius = DataProvider->GetParticleRadius();
 
 	// Update GPU resources (ViewExtension will handle rendering automatically)
 	UpdateGPUResources(SimParticles, ParticleRadius);

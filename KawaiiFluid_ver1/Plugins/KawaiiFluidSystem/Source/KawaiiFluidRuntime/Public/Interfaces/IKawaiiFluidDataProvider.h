@@ -9,7 +9,7 @@
 struct FFluidParticle;
 
 /**
- * UInterface (Unreal Reflection System용)
+ * UInterface (for Unreal Reflection System)
  */
 UINTERFACE(MinimalAPI, Blueprintable)
 class UKawaiiFluidDataProvider : public UInterface
@@ -18,26 +18,32 @@ class UKawaiiFluidDataProvider : public UInterface
 };
 
 /**
- * 유체 시뮬레이션 데이터를 제공하는 인터페이스
- * 
- * 시뮬레이션 컴포넌트가 이 인터페이스를 구현하여
- * 렌더링 컴포넌트에게 파티클 데이터를 제공합니다.
- * 
- * 중요: 이 인터페이스는 시뮬레이션 데이터(FFluidParticle)를 제공하며,
- * 렌더링 레이어에 대한 의존성이 없습니다.
- * 렌더링 컴포넌트가 FFluidParticle을 FKawaiiRenderParticle로 변환해야 합니다.
- * 
- * 구현 대상:
- * - UKawaiiFluidDummyComponent (테스트용)
- * - UKawaiiFluidSimulationComponent (실제 시뮬레이션)
- * 
- * 사용 예시:
+ * Fluid Simulation Data Provider Interface
+ *
+ * This interface provides simulation particle data to rendering modules.
+ * Simulation modules implement this interface to expose their particle data
+ * to the rendering layer without creating dependencies on rendering code.
+ *
+ * Architecture:
+ * - SimulationModule (UKawaiiFluidSimulationModule) implements this interface
+ * - RenderingModule (UKawaiiFluidRenderingModule) consumes the data
+ * - Provides raw simulation data (FFluidParticle) without rendering concerns
+ *
+ * Implemented by:
+ * - UKawaiiFluidSimulationModule (production simulation module)
+ * - UKawaiiFluidTestDataComponent (test/dummy data provider)
+ *
+ * Usage example:
  * @code
- * IKawaiiFluidDataProvider* Provider = Cast<IKawaiiFluidDataProvider>(Component);
- * if (Provider && Provider->IsDataValid())
+ * // RenderingModule initialization
+ * RenderingModule->Initialize(World, Owner, SimulationModule);
+ *
+ * // In rendering code
+ * if (DataProvider && DataProvider->IsDataValid())
  * {
- *     const TArray<FFluidParticle>& Particles = Provider->GetParticles();
- *     // 렌더링용 데이터로 변환 후 렌더링 처리...
+ *     const TArray<FFluidParticle>& Particles = DataProvider->GetParticles();
+ *     float Radius = DataProvider->GetParticleRadius();
+ *     // Render particles...
  * }
  * @endcode
  */
@@ -47,36 +53,41 @@ class IKawaiiFluidDataProvider
 
 public:
 	/**
-	 * 시뮬레이션 파티클 데이터 반환
-	 * 
-	 * 주의: 시뮬레이션 원본 데이터를 반환합니다.
-	 * 렌더링 컴포넌트는 이 데이터를 렌더링 형식(FKawaiiRenderParticle)으로 변환해야 합니다.
-	 * 
-	 * @return 시뮬레이션 파티클 배열 (위치, 속도, 밀도, 접착 상태 등 포함)
+	 * Get simulation particle data
+	 *
+	 * Returns raw simulation particle array containing position, velocity,
+	 * density, adhesion state, and other simulation-specific data.
+	 *
+	 * @return Const reference to particle array
 	 */
 	virtual const TArray<FFluidParticle>& GetParticles() const = 0;
 
 	/**
-	 * 파티클 개수 반환
-	 * @return 현재 시뮬레이션 중인 파티클 개수
+	 * Get particle count
+	 * @return Number of active particles in simulation
 	 */
 	virtual int32 GetParticleCount() const = 0;
 
 	/**
-	 * 파티클 렌더링 반경 반환 (cm)
-	 * @return 파티클 표시 크기
+	 * Get particle radius used in simulation (cm)
+	 *
+	 * Returns the actual particle radius used for physics calculations.
+	 * This is NOT a rendering-specific scale - renderers may apply additional
+	 * scaling based on their own settings.
+	 *
+	 * @return Simulation particle radius in centimeters
 	 */
-	virtual float GetParticleRenderRadius() const = 0;
+	virtual float GetParticleRadius() const = 0;
 
 	/**
-	 * 데이터 유효성 확인
-	 * @return 렌더링 가능한 상태인지 여부
+	 * Check if data is valid for rendering
+	 * @return True if particle data is available and ready to render
 	 */
 	virtual bool IsDataValid() const = 0;
 
 	/**
-	 * 디버그 이름 반환 (프로파일링/로깅용)
-	 * @return 데이터 제공자 식별 문자열
+	 * Get debug name for profiling/logging
+	 * @return Human-readable identifier for this data provider
 	 */
 	virtual FString GetDebugName() const = 0;
 };

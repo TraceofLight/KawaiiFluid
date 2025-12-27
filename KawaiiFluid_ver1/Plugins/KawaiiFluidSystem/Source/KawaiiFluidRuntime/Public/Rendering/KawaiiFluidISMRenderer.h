@@ -4,10 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
-#include "Interfaces/IKawaiiFluidRenderer.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Rendering/KawaiiFluidRendererSettings.h"
 #include "KawaiiFluidISMRenderer.generated.h"
+
+class IKawaiiFluidDataProvider;
 
 /**
  * Instanced Static Mesh fluid renderer (UObject-based)
@@ -25,7 +26,7 @@
  * The ISMComponent inside IS a component, created and attached to the owner actor.
  */
 UCLASS()
-class KAWAIIFLUIDRUNTIME_API UKawaiiFluidISMRenderer : public UObject, public IKawaiiFluidRenderer
+class KAWAIIFLUIDRUNTIME_API UKawaiiFluidISMRenderer : public UObject
 {
 	GENERATED_BODY()
 
@@ -50,11 +51,18 @@ public:
 	 */
 	void ApplySettings(const FKawaiiFluidISMRendererSettings& Settings);
 
-	// IKawaiiFluidRenderer interface
-	virtual void UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime) override;
-	virtual bool IsEnabled() const override { return bEnabled; }
-	virtual EKawaiiFluidRenderingMode GetRenderingMode() const override { return EKawaiiFluidRenderingMode::ISM; }
-	virtual void SetEnabled(bool bInEnabled) override { bEnabled = bInEnabled; }
+	/**
+	 * Update rendering
+	 * @param DataProvider Particle data provider
+	 * @param DeltaTime Frame delta time
+	 */
+	void UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime);
+
+	/** Check if rendering is enabled */
+	bool IsEnabled() const { return bEnabled; }
+
+	/** Enable or disable rendering */
+	void SetEnabled(bool bInEnabled) { bEnabled = bInEnabled; }
 
 	//========================================
 	// Configuration

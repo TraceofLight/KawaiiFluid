@@ -469,7 +469,7 @@ void UNiagaraDataInterfaceKawaiiFluid::VMGetParticleRadius(FVectorVMExternalFunc
 	FNDIOutputParam<float> OutRadius(Context);
 
 	UKawaiiFluidDummyComponent* DummyComp = InstanceData->SourceComponent.Get();
-	float Radius = DummyComp ? DummyComp->GetParticleRenderRadius() : 5.0f;
+	float Radius = DummyComp ? DummyComp->GetParticleRadius() : 5.0f;
 
 	for (int32 i = 0; i < Context.GetNumInstances(); ++i)
 	{

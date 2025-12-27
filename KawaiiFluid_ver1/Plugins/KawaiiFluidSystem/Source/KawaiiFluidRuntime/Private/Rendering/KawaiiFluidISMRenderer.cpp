@@ -119,8 +119,8 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 	ISMComponent->ClearInstances();
 	ISMComponent->PreAllocateInstancesMemory(NumInstances);
 
-	// Get particle radius
-	float ParticleRadius = DataProvider->GetParticleRenderRadius();
+	// Get particle radius from simulation
+	float ParticleRadius = DataProvider->GetParticleRadius();
 	float ScaleFactor = (ParticleRadius / 50.0f) * ParticleScale; // Default Sphere has 50cm radius
 	FVector ScaleVec(ScaleFactor, ScaleFactor, ScaleFactor);
 

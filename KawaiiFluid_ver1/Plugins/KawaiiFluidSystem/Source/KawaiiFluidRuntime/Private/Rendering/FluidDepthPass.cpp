@@ -44,7 +44,7 @@ namespace
 				if (Resource && Resource->IsValid())
 				{
 					OutResources.Add(Resource);
-					OutRadii.Add(Renderable->GetParticleRenderRadius());
+					OutRadii.Add(Renderable->GetParticleRadius());
 					OutDebugNames.Add(Renderable->GetDebugName());
 				}
 			}

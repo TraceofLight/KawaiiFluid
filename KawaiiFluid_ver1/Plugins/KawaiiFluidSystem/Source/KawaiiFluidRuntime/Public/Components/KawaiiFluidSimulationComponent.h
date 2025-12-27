@@ -65,7 +65,7 @@ public:
 
 	virtual FKawaiiFluidRenderResource* GetFluidRenderResource() const override;
 	virtual bool IsFluidRenderResourceValid() const override;
-	virtual float GetParticleRenderRadius() const override;
+	virtual float GetParticleRadius() const override;
 	virtual FString GetDebugName() const override;
 	virtual bool ShouldUseSSFR() const override;
 	virtual bool ShouldUseDebugMesh() const override;

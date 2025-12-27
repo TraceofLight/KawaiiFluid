@@ -181,7 +181,7 @@ void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 				{
 					if (Renderable && Renderable->ShouldUseSSFR())
 					{
-						TotalRadius += Renderable->GetParticleRenderRadius();
+						TotalRadius += Renderable->GetParticleRadius();
 						ValidCount++;
 					}
 				}
@@ -330,7 +330,7 @@ void FFluidSceneViewExtension::RenderSmoothingPass(FRDGBuilder& GraphBuilder,
 	{
 		if (Renderable && Renderable->ShouldUseSSFR())
 		{
-			TotalRadius += Renderable->GetParticleRenderRadius();
+			TotalRadius += Renderable->GetParticleRadius();
 			ValidCount++;
 		}
 	}

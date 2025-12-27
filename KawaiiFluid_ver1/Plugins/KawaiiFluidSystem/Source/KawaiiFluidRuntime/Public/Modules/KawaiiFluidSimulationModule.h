@@ -386,8 +386,8 @@ public:
 	// IKawaiiFluidDataProvider Interface (나머지 메서드)
 	//========================================
 
-	/** Get particle render radius - IKawaiiFluidDataProvider */
-	virtual float GetParticleRenderRadius() const override;
+	/** Get particle radius (simulation actual radius) - IKawaiiFluidDataProvider */
+	virtual float GetParticleRadius() const override;
 
 	/** Data validity check - IKawaiiFluidDataProvider */
 	virtual bool IsDataValid() const override { return Particles.Num() > 0; }
