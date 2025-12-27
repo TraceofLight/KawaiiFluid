@@ -44,6 +44,10 @@ class KAWAIIFLUIDRUNTIME_API UKawaiiFluidSimulationModule : public UObject, publ
 public:
 	UKawaiiFluidSimulationModule();
 
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
+
 	//========================================
 	// 초기화 / 정리
 	//========================================
@@ -238,12 +242,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Fluid|Module")
 	AActor* GetOwnerActor() const;
 
-	/** World Collision 사용 여부 설정 */
-	UFUNCTION(BlueprintCallable, Category = "Fluid|Module")
-	void SetUseWorldCollision(bool bUse) { bUseWorldCollision = bUse; }
+	//========================================
+	// Collision Settings
+	//========================================
 
-	UFUNCTION(BlueprintPure, Category = "Fluid|Module")
-	bool GetUseWorldCollision() const { return bUseWorldCollision; }
+	/** World Collision 사용 여부 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision")
+	bool bUseWorldCollision = true;
 
 	//========================================
 	// Event Settings
@@ -321,15 +326,8 @@ public:
 
 private:
 	//========================================
-	// Context Cache
+	// Internal
 	//========================================
-
-	/** 캐시된 Owner Actor (Outer 체인 최적화) */
-	UPROPERTY(Transient)
-	TWeakObjectPtr<AActor> CachedOwnerActor;
-
-	/** World Collision 사용 여부 */
-	bool bUseWorldCollision = true;
 
 	/** 충돌 이벤트 콜백 */
 	FOnModuleCollisionEvent OnCollisionEventCallback;

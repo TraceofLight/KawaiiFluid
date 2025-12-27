@@ -87,14 +87,6 @@ public:
 	TObjectPtr<UKawaiiFluidSimulationModule> SimulationModule;
 
 	//========================================
-	// Configuration
-	//========================================
-
-	/** Use world collision */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision")
-	bool bUseWorldCollision = true;
-
-	//========================================
 	// Rendering Settings
 	//========================================
 
@@ -116,7 +108,7 @@ public:
 
 	/** Spawn on begin play */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Spawn")
-	bool bSpawnOnBeginPlay = true;
+	bool bSpawnOnBeginPlay = false;
 
 	/** Auto spawn count */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Spawn", meta = (ClampMin = "1", ClampMax = "5000", EditCondition = "bSpawnOnBeginPlay"))
@@ -132,7 +124,7 @@ public:
 
 	/** Enable continuous particle spawning */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Spawn")
-	bool bContinuousSpawn = false;
+	bool bContinuousSpawn = true;
 
 	/** Particles to spawn per second */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Spawn", meta = (ClampMin = "0.1", ClampMax = "1000.0", EditCondition = "bContinuousSpawn"))
@@ -193,7 +185,7 @@ private:
 	/** Handle collision event from Module callback */
 	void HandleCollisionEvent(const FKawaiiFluidCollisionEvent& Event);
 
-	//========================================
+	//=========================`===============
 	// Subsystem Registration
 	//========================================
 

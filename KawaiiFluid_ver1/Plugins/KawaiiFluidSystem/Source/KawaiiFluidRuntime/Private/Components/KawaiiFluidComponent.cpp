@@ -18,7 +18,7 @@ UKawaiiFluidComponent::UKawaiiFluidComponent()
 	// 시뮬레이션 모듈 생성
 	SimulationModule = CreateDefaultSubobject<UKawaiiFluidSimulationModule>(TEXT("SimulationModule"));
 
-	// 렌더링 모듈 생성
+	// 렌더링 모듈 생성`
 	RenderingModule = CreateDefaultSubobject<UKawaiiFluidRenderingModule>(TEXT("RenderingModule"));
 }
 
@@ -37,16 +37,10 @@ void UKawaiiFluidComponent::BeginPlay()
 		}
 		SimulationModule->Initialize(SimulationModule->Preset);
 
-		// Component 설정을 Module에 전달
-		SimulationModule->SetUseWorldCollision(bUseWorldCollision);
-
-		// 이벤트 콜백 연결 (설정은 Module에서 직접 관리)
-		if (SimulationModule->bEnableCollisionEvents)
-		{
-			SimulationModule->SetCollisionEventCallback(
-				FOnModuleCollisionEvent::CreateUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent)
-			);
-		}
+		// 이벤트 콜백 항상 연결 (Module에서 bEnableCollisionEvents 체크)
+		SimulationModule->SetCollisionEventCallback(
+			FOnModuleCollisionEvent::CreateUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent)
+		);
 	}
 
 	// 렌더링 모듈 초기화

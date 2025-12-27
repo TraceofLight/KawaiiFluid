@@ -10,6 +10,45 @@ UKawaiiFluidSimulationModule::UKawaiiFluidSimulationModule()
 {
 }
 
+#if WITH_EDITOR
+void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	const FName PropertyName = PropertyChangedEvent.GetPropertyName();
+
+	// Preset 변경 시
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, Preset))
+	{
+		bRuntimePresetDirty = true;
+		// SpatialHash 재구성
+		if (Preset && SpatialHash.IsValid())
+		{
+			SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
+		}
+	}
+	// Override 값 변경 시
+	else if (PropertyName.ToString().StartsWith(TEXT("bOverride_")) ||
+	         PropertyName.ToString().StartsWith(TEXT("Override_")))
+	{
+		bRuntimePresetDirty = true;
+		// SmoothingRadius override 시 SpatialHash도 갱신
+		if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, Override_SmoothingRadius) ||
+		    PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, bOverride_SmoothingRadius))
+		{
+			if (bOverride_SmoothingRadius && SpatialHash.IsValid())
+			{
+				SpatialHash = MakeShared<FSpatialHash>(Override_SmoothingRadius);
+			}
+			else if (!bOverride_SmoothingRadius && Preset && SpatialHash.IsValid())
+			{
+				SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
+			}
+		}
+	}
+}
+#endif
+
 void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPreset)
 {
 	if (bIsInitialized)
@@ -19,12 +58,6 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 
 	Preset = InPreset;
 	bRuntimePresetDirty = true;
-
-	// Owner Actor 캐시 (Outer 체인 최적화)
-	if (UActorComponent* OwnerComp = Cast<UActorComponent>(GetOuter()))
-	{
-		CachedOwnerActor = OwnerComp->GetOwner();
-	}
 
 	// SpatialHash 초기화 (Independent 모드용)
 	float CellSize = 20.0f;
@@ -150,7 +183,11 @@ void UKawaiiFluidSimulationModule::UpdateRuntimePreset()
 
 AActor* UKawaiiFluidSimulationModule::GetOwnerActor() const
 {
-	return CachedOwnerActor.Get();
+	if (UActorComponent* OwnerComp = Cast<UActorComponent>(GetOuter()))
+	{
+		return OwnerComp->GetOwner();
+	}
+	return nullptr;
 }
 
 FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams() const
@@ -173,7 +210,7 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 
 	// Context - Module에서 직접 접근 (Outer 체인 활용)
 	Params.World = GetWorld();
-	Params.IgnoreActor = CachedOwnerActor.Get();
+	Params.IgnoreActor = GetOwnerActor();
 	Params.bUseWorldCollision = bUseWorldCollision;
 
 	// Event Settings

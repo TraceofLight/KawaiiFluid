@@ -508,7 +508,7 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulatorSubsystem::BuildMergedModuleSi
 		Params.InteractionComponents.Append(Module->GetInteractionComponents());
 
 		// Use world collision if any module wants it
-		if (Module->GetUseWorldCollision())
+		if (Module->bUseWorldCollision)
 		{
 			bAnyUseWorldCollision = true;
 			if (Module->GetPreset())
