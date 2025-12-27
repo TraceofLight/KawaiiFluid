@@ -104,6 +104,22 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 	/** Collision event callback (non-UPROPERTY, set by component) */
 	FOnFluidCollisionEvent OnCollisionEvent;
 
+	//========================================
+	// Shape Matching (Slime)
+	//========================================
+
+	/** Enable shape matching constraint */
+	bool bEnableShapeMatching = false;
+
+	/** Shape matching stiffness (0 = no restoration, 1 = rigid) */
+	float ShapeMatchingStiffness = 0.01f;
+
+	/** Core particle stiffness multiplier */
+	float ShapeMatchingCoreMultiplier = 1.0f;
+
+	/** Core density constraint reduction (0 = full density effect, 1 = no density effect for core) */
+	float CoreDensityConstraintReduction = 0.0f;
+
 	FKawaiiFluidSimulationParams() = default;
 };
 

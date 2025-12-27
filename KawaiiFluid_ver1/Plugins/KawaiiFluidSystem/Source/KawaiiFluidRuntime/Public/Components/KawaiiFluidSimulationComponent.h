@@ -338,7 +338,7 @@ public:
 	void SetAccumulatedTime(float Time) { AccumulatedTime = Time; }
 
 	/** Build simulation params for context */
-	FKawaiiFluidSimulationParams BuildSimulationParams() const;
+	virtual FKawaiiFluidSimulationParams BuildSimulationParams() const;
 
 	//========================================
 	// Override System
