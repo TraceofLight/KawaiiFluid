@@ -120,7 +120,7 @@ private:
 	TSharedPtr<FFluidSceneViewExtension, ESPMode::ThreadSafe> ViewExtension;
 
 	//========================================
-	// 내부 헬퍼
+	// Internal Helper
 	//========================================
 
 	/** UObject가 IKawaiiFluidRenderable 인터페이스를 구현하는지 확인 */
