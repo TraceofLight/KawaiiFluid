@@ -112,20 +112,21 @@ void RenderFluidThicknessPass(
 		float ParticleRadius = Radii[i];
 		const FString& DebugName = DebugNames[i];
 
-		const TArray<FKawaiiRenderParticle>& CachedParticles = RR->GetCachedParticles();
+		// Thread-safe local copy to avoid race condition with UpdateGPUResources()
+		TArray<FKawaiiRenderParticle> CachedParticlesCopy = RR->GetCachedParticles();
 
-		if (CachedParticles.Num() == 0)
+		if (CachedParticlesCopy.Num() == 0)
 		{
 			continue;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("ThicknessPass (SSFR): %s with %d particles"),
-		       *DebugName, CachedParticles.Num());
+		       *DebugName, CachedParticlesCopy.Num());
 
 		// Position만 추출
 		TArray<FVector3f> ParticlePositions;
-		ParticlePositions.Reserve(CachedParticles.Num());
-		for (const FKawaiiRenderParticle& Particle : CachedParticles)
+		ParticlePositions.Reserve(CachedParticlesCopy.Num());
+		for (const FKawaiiRenderParticle& Particle : CachedParticlesCopy)
 		{
 			ParticlePositions.Add(Particle.Position);
 		}
@@ -232,20 +233,22 @@ void RenderFluidThicknessPass(
 
 		FKawaiiFluidRenderResource* RR = Renderer->GetFluidRenderResource();
 		if (!RR || !RR->IsValid()) continue;
-		const TArray<FKawaiiRenderParticle>& CachedParticles = RR->GetCachedParticles();
 
-		if (CachedParticles.Num() == 0)
+		// Thread-safe local copy to avoid race condition with UpdateGPUResources()
+		TArray<FKawaiiRenderParticle> CachedParticlesCopy = RR->GetCachedParticles();
+
+		if (CachedParticlesCopy.Num() == 0)
 		{
 			continue;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("ThicknessPass (Batched): Renderer with %d particles"),
-		       CachedParticles.Num());
+		       CachedParticlesCopy.Num());
 
 		// Position만 추출
 		TArray<FVector3f> ParticlePositions;
-		ParticlePositions.Reserve(CachedParticles.Num());
-		for (const FKawaiiRenderParticle& Particle : CachedParticles)
+		ParticlePositions.Reserve(CachedParticlesCopy.Num());
+		for (const FKawaiiRenderParticle& Particle : CachedParticlesCopy)
 		{
 			ParticlePositions.Add(Particle.Position);
 		}

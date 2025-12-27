@@ -127,20 +127,21 @@ void RenderFluidDepthPass(
 		float ParticleRadius = Radii[i];
 		const FString& DebugName = DebugNames[i];
 
-		const TArray<FKawaiiRenderParticle>& CachedParticles = RR->GetCachedParticles();
+		// Thread-safe local copy to avoid race condition with UpdateGPUResources()
+		TArray<FKawaiiRenderParticle> CachedParticlesCopy = RR->GetCachedParticles();
 
-		if (CachedParticles.Num() == 0)
+		if (CachedParticlesCopy.Num() == 0)
 		{
 			continue;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("DepthPass (SSFR): %s with %d particles"),
-		       *DebugName, CachedParticles.Num());
+		       *DebugName, CachedParticlesCopy.Num());
 
 		// Position만 추출
 		TArray<FVector3f> ParticlePositions;
-		ParticlePositions.Reserve(CachedParticles.Num());
-		for (const FKawaiiRenderParticle& Particle : CachedParticles)
+		ParticlePositions.Reserve(CachedParticlesCopy.Num());
+		for (const FKawaiiRenderParticle& Particle : CachedParticlesCopy)
 		{
 			ParticlePositions.Add(Particle.Position);
 		}
@@ -194,7 +195,7 @@ void RenderFluidDepthPass(
 			RDG_EVENT_NAME("DepthDraw_SSFR_%s", *DebugName),
 			PassParameters,
 			ERDGPassFlags::Raster,
-			[VertexShader, PixelShader, PassParameters, ParticleCount = CachedParticles.Num()](
+			[VertexShader, PixelShader, PassParameters, ParticleCount = CachedParticlesCopy.Num()](
 			FRHICommandList& RHICmdList)
 			{
 				FGraphicsPipelineStateInitializer GraphicsPSOInit;
@@ -281,20 +282,22 @@ void RenderFluidDepthPass(
 
 		FKawaiiFluidRenderResource* RR = Renderer->GetFluidRenderResource();
 		if (!RR || !RR->IsValid()) continue;
-		const TArray<FKawaiiRenderParticle>& CachedParticles = RR->GetCachedParticles();
 
-		if (CachedParticles.Num() == 0)
+		// Thread-safe local copy to avoid race condition with UpdateGPUResources()
+		TArray<FKawaiiRenderParticle> CachedParticlesCopy = RR->GetCachedParticles();
+
+		if (CachedParticlesCopy.Num() == 0)
 		{
 			continue;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("DepthPass (Batched): Renderer with %d particles"),
-		       CachedParticles.Num());
+		       CachedParticlesCopy.Num());
 
 		// Position만 추출
 		TArray<FVector3f> ParticlePositions;
-		ParticlePositions.Reserve(CachedParticles.Num());
-		for (const FKawaiiRenderParticle& Particle : CachedParticles)
+		ParticlePositions.Reserve(CachedParticlesCopy.Num());
+		for (const FKawaiiRenderParticle& Particle : CachedParticlesCopy)
 		{
 			ParticlePositions.Add(Particle.Position);
 		}
@@ -344,7 +347,7 @@ void RenderFluidDepthPass(
 			RDG_EVENT_NAME("DepthDraw_Batched"),
 			PassParameters,
 			ERDGPassFlags::Raster,
-			[VertexShader, PixelShader, PassParameters, ParticleCount = CachedParticles.Num()](
+			[VertexShader, PixelShader, PassParameters, ParticleCount = CachedParticlesCopy.Num()](
 			FRHICommandList& RHICmdList)
 			{
 				FGraphicsPipelineStateInitializer GraphicsPSOInit;
