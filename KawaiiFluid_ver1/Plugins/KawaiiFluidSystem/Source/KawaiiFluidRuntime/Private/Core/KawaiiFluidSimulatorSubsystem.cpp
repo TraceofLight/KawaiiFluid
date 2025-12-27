@@ -232,7 +232,7 @@ int32 UKawaiiFluidSimulatorSubsystem::GetTotalParticleCount() const
 	{
 		if (Component)
 		{
-			Total += Component->GetParticleCount();
+			Total += Component->SimulationModule->GetParticleCount();
 		}
 	}
 

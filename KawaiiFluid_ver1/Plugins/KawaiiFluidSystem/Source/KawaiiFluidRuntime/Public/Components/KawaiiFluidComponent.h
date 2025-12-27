@@ -4,13 +4,11 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
-#include "Rendering/IKawaiiFluidRenderable.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Rendering/KawaiiFluidRendererSettings.h"
 #include "KawaiiFluidComponent.generated.h"
 
-class FKawaiiFluidRenderResource;
 class UKawaiiFluidRenderingModule;
 
 /**
@@ -46,7 +44,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(
  * @endcode
  */
 UCLASS(ClassGroup=(KawaiiFluid), meta=(BlueprintSpawnableComponent, DisplayName="Kawaii Fluid"))
-class KAWAIIFLUIDRUNTIME_API UKawaiiFluidComponent : public UActorComponent, public IKawaiiFluidRenderable
+class KAWAIIFLUIDRUNTIME_API UKawaiiFluidComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
@@ -64,19 +62,6 @@ public:
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
-
-	//========================================
-	// IKawaiiFluidRenderable Interface (Legacy)
-	//========================================
-
-	virtual FKawaiiFluidRenderResource* GetFluidRenderResource() const override;
-	virtual bool IsFluidRenderResourceValid() const override;
-	virtual float GetParticleRenderRadius() const override;
-	virtual FString GetDebugName() const override;
-	virtual bool ShouldUseSSFR() const override;
-	virtual bool ShouldUseDebugMesh() const override;
-	virtual UInstancedStaticMeshComponent* GetDebugMeshComponent() const override;
-	virtual int32 GetParticleCount() const override;
 
 	//========================================
 	// Modules (Blueprint 직접 접근 가능)

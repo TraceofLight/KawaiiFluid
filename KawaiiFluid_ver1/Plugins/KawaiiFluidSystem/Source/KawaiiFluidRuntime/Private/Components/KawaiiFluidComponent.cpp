@@ -154,55 +154,6 @@ void UKawaiiFluidComponent::PostEditChangeProperty(FPropertyChangedEvent& Proper
 #endif
 
 //========================================
-// IKawaiiFluidRenderable Interface (Legacy)
-//========================================
-
-FKawaiiFluidRenderResource* UKawaiiFluidComponent::GetFluidRenderResource() const
-{
-	// RenderingModule로 대체됨
-	return nullptr;
-}
-
-bool UKawaiiFluidComponent::IsFluidRenderResourceValid() const
-{
-	// RenderingModule로 대체됨
-	return false;
-}
-
-float UKawaiiFluidComponent::GetParticleRenderRadius() const
-{
-	return ParticleRenderRadius;
-}
-
-FString UKawaiiFluidComponent::GetDebugName() const
-{
-	AActor* Owner = GetOwner();
-	return FString::Printf(TEXT("FluidComponent_%s"),
-		Owner ? *Owner->GetName() : TEXT("NoOwner"));
-}
-
-bool UKawaiiFluidComponent::ShouldUseSSFR() const
-{
-	// RenderingModule로 대체됨
-	return false;
-}
-
-bool UKawaiiFluidComponent::ShouldUseDebugMesh() const
-{
-	return true;
-}
-
-UInstancedStaticMeshComponent* UKawaiiFluidComponent::GetDebugMeshComponent() const
-{
-	return nullptr;
-}
-
-int32 UKawaiiFluidComponent::GetParticleCount() const
-{
-	return SimulationModule ? SimulationModule->GetParticleCount() : 0;
-}
-
-//========================================
 // Continuous Spawn
 //========================================
 
