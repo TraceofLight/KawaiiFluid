@@ -11,107 +11,11 @@
 #include "RenderGraphEvent.h"
 #include "ScreenPass.h"
 #include "PostProcess/PostProcessMaterialInputs.h"
-#include "PixelShaderUtils.h"
-#include "Rendering/FluidCompositeShaders.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Rendering/KawaiiFluidSSFRRenderer.h"
 #include "Rendering/Composite/IFluidCompositePass.h"
 
 static TRefCountPtr<IPooledRenderTarget> GFluidCompositeDebug_KeepAlive;
-
-static void RenderFluidCompositePass_Internal(
-	FRDGBuilder& GraphBuilder,
-	const FSceneView& View,
-	const FFluidRenderingParameters& RenderParams,
-	FRDGTextureRef FluidDepthTexture,
-	FRDGTextureRef FluidNormalTexture,
-	FRDGTextureRef FluidThicknessTexture,
-	FRDGTextureRef SceneDepthTexture,
-	FRDGTextureRef SceneColorTexture,
-	FScreenPassRenderTarget Output
-)
-{
-	if (!FluidDepthTexture || !FluidNormalTexture || !FluidThicknessTexture || !SceneDepthTexture)
-	{
-		return;
-	}
-
-	RDG_EVENT_SCOPE(GraphBuilder, "FluidCompositePass");
-
-	auto* PassParameters = GraphBuilder.AllocParameters<FFluidCompositePS::FParameters>();
-
-	// 텍스처 바인딩
-	PassParameters->FluidDepthTexture = FluidDepthTexture;
-	PassParameters->FluidNormalTexture = FluidNormalTexture;
-	PassParameters->FluidThicknessTexture = FluidThicknessTexture;
-	PassParameters->SceneDepthTexture = SceneDepthTexture;
-	PassParameters->SceneColorTexture = SceneColorTexture;
-	PassParameters->View = View.ViewUniformBuffer;
-	PassParameters->InputSampler = TStaticSamplerState<
-		SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-
-	PassParameters->InverseProjectionMatrix =
-		FMatrix44f(View.ViewMatrices.GetInvProjectionMatrix());
-	PassParameters->ProjectionMatrix = FMatrix44f(View.ViewMatrices.GetProjectionMatrix());
-	PassParameters->ViewMatrix = FMatrix44f(View.ViewMatrices.GetViewMatrix());
-
-	// Use RenderParams directly (passed from caller)
-	PassParameters->FluidColor = RenderParams.FluidColor;
-	PassParameters->FresnelStrength = RenderParams.FresnelStrength;
-	PassParameters->RefractiveIndex = RenderParams.RefractiveIndex;
-	PassParameters->AbsorptionCoefficient = RenderParams.AbsorptionCoefficient;
-	PassParameters->SpecularStrength = RenderParams.SpecularStrength;
-	PassParameters->SpecularRoughness = RenderParams.SpecularRoughness;
-	PassParameters->EnvironmentLightColor = RenderParams.EnvironmentLightColor;
-
-	// 배경 위에 그리기
-	PassParameters->RenderTargets[0] = FRenderTargetBinding(
-		Output.Texture, ERenderTargetLoadAction::ELoad);
-
-	// 쉐이더 가져오기
-	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
-	TShaderMapRef<FFluidCompositeVS> VertexShader(GlobalShaderMap);
-	TShaderMapRef<FFluidCompositePS> PixelShader(GlobalShaderMap);
-
-	FIntRect ViewRect = View.UnscaledViewRect;
-
-	GraphBuilder.AddPass(
-		RDG_EVENT_NAME("FluidCompositeDraw"),
-		PassParameters,
-		ERDGPassFlags::Raster,
-		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)
-		{
-			RHICmdList.SetViewport(ViewRect.Min.X, ViewRect.Min.Y, 0.0f, ViewRect.Max.X,
-			                       ViewRect.Max.Y, 1.0f);
-			RHICmdList.SetScissorRect(true, ViewRect.Min.X, ViewRect.Min.Y, ViewRect.Max.X,
-			                          ViewRect.Max.Y);
-
-			FGraphicsPipelineStateInitializer GraphicsPSOInit;
-			GraphicsPSOInit.BoundShaderState.VertexDeclarationRHI = GEmptyVertexDeclaration.
-				VertexDeclarationRHI; // [핵심] Input Layout 없음!
-			GraphicsPSOInit.BoundShaderState.VertexShaderRHI = VertexShader.GetVertexShader();
-			GraphicsPSOInit.BoundShaderState.PixelShaderRHI = PixelShader.GetPixelShader();
-			GraphicsPSOInit.PrimitiveType = PT_TriangleList;
-
-			// Alpha Blending
-			GraphicsPSOInit.BlendState = TStaticBlendState<
-				CW_RGBA,
-				BO_Add, BF_SourceAlpha, BF_InverseSourceAlpha,
-				BO_Add, BF_Zero, BF_One
-			>::GetRHI();
-			GraphicsPSOInit.RasterizerState = TStaticRasterizerState<FM_Solid, CM_None>::GetRHI();
-			GraphicsPSOInit.DepthStencilState = TStaticDepthStencilState<
-				false, CF_Always>::GetRHI();
-
-			RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
-			SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
-			SetShaderParameters(RHICmdList, PixelShader, PixelShader.GetPixelShader(),
-			                    *PassParameters);
-
-			// 삼각형 1개로 화면 채우기 (VS에서 VertexID로 좌표 생성)
-			RHICmdList.DrawPrimitive(0, 1, 1);
-		});
-}
 
 // ==============================================================================
 // Class Implementation
@@ -152,7 +56,7 @@ void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 				RDG_EVENT_SCOPE(GraphBuilder, "KawaiiFluidRendering");
 
 				// ============================================
-				// Batch renderers by LocalParameters (New Architecture only)
+				// Batch renderers by LocalParameters
 				// Separate batches by rendering mode
 				// ============================================
 				TMap<FFluidRenderingParameters, TArray<UKawaiiFluidSSFRRenderer*>> CustomBatches;
