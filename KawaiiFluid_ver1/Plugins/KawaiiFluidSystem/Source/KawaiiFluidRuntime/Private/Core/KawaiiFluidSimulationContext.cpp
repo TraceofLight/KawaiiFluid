@@ -66,6 +66,7 @@ void UKawaiiFluidSimulationContext::Simulate(
 	float& AccumulatedTime)
 {
 	SCOPE_CYCLE_COUNTER(STAT_ContextSimulate);
+	TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiFluidContext_Simulate);
 
 	if (!Preset || Particles.Num() == 0)
 	{
@@ -75,7 +76,8 @@ void UKawaiiFluidSimulationContext::Simulate(
 	EnsureSolversInitialized(Preset);
 
 	// Accumulator method: simulate with fixed dt
-	const float MaxAllowedTime = Preset->SubstepDeltaTime * Preset->MaxSubsteps;
+	constexpr int32 MaxSubstepsPerFrame = 4;
+	const float MaxAllowedTime = Preset->SubstepDeltaTime * FMath::Min(Preset->MaxSubsteps, MaxSubstepsPerFrame);
 	AccumulatedTime += FMath::Min(DeltaTime, MaxAllowedTime);
 
 	// Cache collider shapes once per frame
@@ -84,11 +86,13 @@ void UKawaiiFluidSimulationContext::Simulate(
 	// Update attached particle positions (bone tracking - before physics)
 	UpdateAttachedParticlePositions(Particles, Params.InteractionComponents);
 
-	// Substep loop
-	while (AccumulatedTime >= Preset->SubstepDeltaTime)
+	// Substep loop (hard limit: 4 substeps per frame)
+	int32 SubstepCount = 0;
+	while (AccumulatedTime >= Preset->SubstepDeltaTime && SubstepCount < MaxSubstepsPerFrame)
 	{
 		SimulateSubstep(Particles, Preset, Params, SpatialHash, Preset->SubstepDeltaTime);
 		AccumulatedTime -= Preset->SubstepDeltaTime;
+		++SubstepCount;
 	}
 }
 
@@ -99,21 +103,26 @@ void UKawaiiFluidSimulationContext::SimulateSubstep(
 	FSpatialHash& SpatialHash,
 	float SubstepDT)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiFluidContext_SimulateSubstep);
+
 	// 1. Predict positions
 	{
 		SCOPE_CYCLE_COUNTER(STAT_ContextPredictPositions);
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiFluidContext_PredictPositions);
 		PredictPositions(Particles, Preset, Params.ExternalForce, SubstepDT);
 	}
 
 	// 2. Update neighbors
 	{
 		SCOPE_CYCLE_COUNTER(STAT_ContextUpdateNeighbors);
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiFluidContext_UpdateNeighbors);
 		UpdateNeighbors(Particles, SpatialHash, Preset->SmoothingRadius);
 	}
 
 	// 3. Solve density constraints
 	{
 		SCOPE_CYCLE_COUNTER(STAT_ContextSolveDensity);
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiFluidContext_SolveDensity);
 
 		// Determine if we need to store original positions for core particle reduction
 		const bool bHasCoreReduction = Params.CoreDensityConstraintReduction > 0.0f;

@@ -4,6 +4,15 @@
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "Core/SpatialHash.h"
 
+// Profiling
+DECLARE_STATS_GROUP(TEXT("KawaiiSlimeContext"), STATGROUP_KawaiiSlimeContext, STATCAT_Advanced);
+DECLARE_CYCLE_STAT(TEXT("Slime SimulateSubstep"), STAT_SlimeSimulateSubstep, STATGROUP_KawaiiSlimeContext);
+DECLARE_CYCLE_STAT(TEXT("Slime UpdateSurfaceParticles"), STAT_SlimeUpdateSurfaceParticles, STATGROUP_KawaiiSlimeContext);
+DECLARE_CYCLE_STAT(TEXT("Slime RelaxSurfaceParticles"), STAT_SlimeRelaxSurfaceParticles, STATGROUP_KawaiiSlimeContext);
+DECLARE_CYCLE_STAT(TEXT("Slime SolveDensityConstraints"), STAT_SlimeSolveDensityConstraints, STATGROUP_KawaiiSlimeContext);
+DECLARE_CYCLE_STAT(TEXT("Slime NucleusAttraction"), STAT_SlimeNucleusAttraction, STATGROUP_KawaiiSlimeContext);
+DECLARE_CYCLE_STAT(TEXT("Slime SurfaceTension"), STAT_SlimeSurfaceTension, STATGROUP_KawaiiSlimeContext);
+
 UKawaiiSlimeSimulationContext::UKawaiiSlimeSimulationContext()
 {
 }
@@ -19,21 +28,39 @@ void UKawaiiSlimeSimulationContext::SimulateSubstep(
 	FSpatialHash& SpatialHash,
 	float SubstepDT)
 {
+	SCOPE_CYCLE_COUNTER(STAT_SlimeSimulateSubstep);
+	TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_SimulateSubstep);
+
 	// 1. Predict positions (gravity, external forces)
-	PredictPositions(Particles, Preset, Params.ExternalForce, SubstepDT);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_PredictPositions);
+		PredictPositions(Particles, Preset, Params.ExternalForce, SubstepDT);
+	}
 
 	// 2. Update neighbors
-	UpdateNeighbors(Particles, SpatialHash, Preset->SmoothingRadius);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_UpdateNeighbors);
+		UpdateNeighbors(Particles, SpatialHash, Preset->SmoothingRadius);
+	}
 
 	// 2.5. Update surface particles (needed before density constraints)
-	UpdateSurfaceParticles(Particles, Params);
+	{
+		SCOPE_CYCLE_COUNTER(STAT_SlimeUpdateSurfaceParticles);
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_UpdateSurfaceParticles);
+		UpdateSurfaceParticles(Particles, Params);
+	}
 
 	// 3. Solve density constraints (push/pull for proper density)
-	SolveDensityConstraints(Particles, Preset, SubstepDT);
+	{
+		SCOPE_CYCLE_COUNTER(STAT_SlimeSolveDensityConstraints);
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_SolveDensityConstraints);
+		SolveDensityConstraints(Particles, Preset, SubstepDT);
+	}
 
 	// 4. Apply shape matching (slime form preservation)
 	if (Params.bEnableShapeMatching)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_ShapeMatching);
 		ApplyShapeMatchingConstraint(Particles, Params);
 	}
 
@@ -41,26 +68,43 @@ void UKawaiiSlimeSimulationContext::SimulateSubstep(
 	//ApplyNucleusAttraction(Particles, Params, SubstepDT);
 
 	// 6. Relax surface particles for uniform distribution (improves SSFR rendering)
-	RelaxSurfaceParticles(Particles, Preset, SubstepDT);
+	{
+		SCOPE_CYCLE_COUNTER(STAT_SlimeRelaxSurfaceParticles);
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_RelaxSurfaceParticles);
+		RelaxSurfaceParticles(Particles, Preset, SubstepDT);
+	}
 	//ApplySurfaceTension(Particles, Preset, Params);
 
 	// 7. Handle collisions with registered colliders
-	HandleCollisions(Particles, Params.Colliders);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_HandleCollisions);
+		HandleCollisions(Particles, Params.Colliders);
+	}
 
 	// 8. World collision
 	if (Params.bUseWorldCollision && Params.World)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_WorldCollision);
 		HandleWorldCollision(Particles, Params, SpatialHash, Params.ParticleRadius);
 	}
 
 	// 9. Finalize positions and update velocities
-	FinalizePositions(Particles, SubstepDT);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_FinalizePositions);
+		FinalizePositions(Particles, SubstepDT);
+	}
 
 	// 10. Apply viscosity
-	ApplyViscosity(Particles, Preset);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_ApplyViscosity);
+		ApplyViscosity(Particles, Preset);
+	}
 
 	// 11. Apply adhesion
-	ApplyAdhesion(Particles, Preset, Params.Colliders);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_ApplyAdhesion);
+		ApplyAdhesion(Particles, Preset, Params.Colliders);
+	}
 }
 
 //========================================
@@ -72,6 +116,9 @@ void UKawaiiSlimeSimulationContext::ApplyNucleusAttraction(
 	const FKawaiiFluidSimulationParams& Params,
 	float DeltaTime)
 {
+	SCOPE_CYCLE_COUNTER(STAT_SlimeNucleusAttraction);
+	TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_NucleusAttraction);
+
 	if (Particles.Num() == 0)
 	{
 		return;
@@ -171,6 +218,9 @@ void UKawaiiSlimeSimulationContext::ApplySurfaceTension(
 	const UKawaiiFluidPresetDataAsset* Preset,
 	const FKawaiiFluidSimulationParams& Params)
 {
+	SCOPE_CYCLE_COUNTER(STAT_SlimeSurfaceTension);
+	TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiSlimeContext_SurfaceTension);
+
 	// TODO: Get surface tension coefficient from Params or Preset
 	const float SurfaceTensionCoefficient = 0.5f;
 
