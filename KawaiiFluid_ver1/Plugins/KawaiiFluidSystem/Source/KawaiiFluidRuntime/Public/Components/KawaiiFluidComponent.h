@@ -80,11 +80,11 @@ public:
 	bool bEnableRendering = true;
 
 	/** ISM Renderer Settings */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Rendering", meta = (EditCondition = "bEnableRendering", DisplayName = "ISM Settings"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Rendering", meta = (EditCondition = "bEnableRendering", DisplayName = "ISM Settings", ShowOnlyInnerProperties))
 	FKawaiiFluidISMRendererSettings ISMSettings;
 
 	/** SSFR Renderer Settings */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Rendering", meta = (EditCondition = "bEnableRendering", DisplayName = "SSFR Settings"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Rendering", meta = (EditCondition = "bEnableRendering", DisplayName = "SSFR Settings", ShowOnlyInnerProperties))
 	FKawaiiFluidSSFRRendererSettings SSFRSettings;
 
 	//========================================

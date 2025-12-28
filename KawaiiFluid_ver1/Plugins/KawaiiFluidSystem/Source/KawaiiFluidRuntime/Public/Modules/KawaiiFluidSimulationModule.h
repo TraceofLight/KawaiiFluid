@@ -287,6 +287,18 @@ public:
 	//========================================
 	// Override 값들 (디테일 패널에 노출)
 	//========================================
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (InlineEditConditionToggle))
+	bool bOverride_ParticleRadius = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (EditCondition = "bOverride_ParticleRadius", ClampMin = "0.1", ClampMax = "50.0"))
+	float Override_ParticleRadius = 5.0f;
+	
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (InlineEditConditionToggle))
+	bool bOverride_SmoothingRadius = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (EditCondition = "bOverride_SmoothingRadius", ClampMin = "1.0"))
+	float Override_SmoothingRadius = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (InlineEditConditionToggle))
 	bool bOverride_RestDensity = false;
@@ -299,12 +311,6 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (EditCondition = "bOverride_Compliance", ClampMin = "0.0"))
 	float Override_Compliance = 0.01f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (InlineEditConditionToggle))
-	bool bOverride_SmoothingRadius = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (EditCondition = "bOverride_SmoothingRadius", ClampMin = "1.0"))
-	float Override_SmoothingRadius = 20.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Simulation|Override", meta = (InlineEditConditionToggle))
 	bool bOverride_ViscosityCoefficient = false;

@@ -111,7 +111,8 @@ void UKawaiiFluidSimulationModule::InitializeSpatialHash(float CellSize)
 bool UKawaiiFluidSimulationModule::HasAnyOverride() const
 {
 	return bOverride_RestDensity || bOverride_Compliance || bOverride_SmoothingRadius ||
-	       bOverride_ViscosityCoefficient || bOverride_Gravity || bOverride_AdhesionStrength;
+	       bOverride_ViscosityCoefficient || bOverride_Gravity || bOverride_AdhesionStrength ||
+	       bOverride_ParticleRadius;
 }
 
 UKawaiiFluidPresetDataAsset* UKawaiiFluidSimulationModule::GetEffectivePreset()
@@ -150,6 +151,7 @@ void UKawaiiFluidSimulationModule::UpdateRuntimePreset()
 		RuntimePreset->ViscosityCoefficient = Preset->ViscosityCoefficient;
 		RuntimePreset->Gravity = Preset->Gravity;
 		RuntimePreset->AdhesionStrength = Preset->AdhesionStrength;
+		RuntimePreset->ParticleRadius = Preset->ParticleRadius;
 	}
 
 	// Override 적용
@@ -176,6 +178,10 @@ void UKawaiiFluidSimulationModule::UpdateRuntimePreset()
 	if (bOverride_AdhesionStrength)
 	{
 		RuntimePreset->AdhesionStrength = Override_AdhesionStrength;
+	}
+	if (bOverride_ParticleRadius)
+	{
+		RuntimePreset->ParticleRadius = Override_ParticleRadius;
 	}
 
 	bRuntimePresetDirty = false;
@@ -205,7 +211,7 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 	if (Preset)
 	{
 		Params.CollisionChannel = Preset->CollisionChannel;
-		Params.ParticleRadius = Preset->ParticleRadius;
+		Params.ParticleRadius = GetParticleRadius();  // Use getter to respect override
 	}
 
 	// Context - Module에서 직접 접근 (Outer 체인 활용)
@@ -395,11 +401,18 @@ bool UKawaiiFluidSimulationModule::GetParticleInfo(int32 ParticleIndex, FVector&
 
 float UKawaiiFluidSimulationModule::GetParticleRadius() const
 {
+	// Override가 있으면 Override 값 반환
+	if (bOverride_ParticleRadius)
+	{
+		return Override_ParticleRadius;
+	}
+
 	// Preset에서 실제 시뮬레이션 파티클 반경 가져오기
 	if (Preset)
 	{
 		return Preset->ParticleRadius;
 	}
+	
 	return 10.0f; // 기본값
 }
 
