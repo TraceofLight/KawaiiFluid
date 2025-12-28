@@ -12,18 +12,17 @@
 #include "CommonRenderResources.h"
 
 //=============================================================================
-// Bilateral Blur Compute Shader (간단하게 Compute로 변경)
+// 2D Bilateral Blur Compute Shader (9x9 kernel, 81 samples)
 //=============================================================================
 
-class FFluidBilateralBlurCS : public FGlobalShader
+class FFluidBilateralBlur2DCS : public FGlobalShader
 {
-	DECLARE_GLOBAL_SHADER(FFluidBilateralBlurCS);
-	SHADER_USE_PARAMETER_STRUCT(FFluidBilateralBlurCS, FGlobalShader);
+	DECLARE_GLOBAL_SHADER(FFluidBilateralBlur2DCS);
+	SHADER_USE_PARAMETER_STRUCT(FFluidBilateralBlur2DCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters,)
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, InputTexture)
 		SHADER_PARAMETER(FVector2f, TextureSize)
-		SHADER_PARAMETER(FIntPoint, BlurDirection)
 		SHADER_PARAMETER(float, BlurRadius)
 		SHADER_PARAMETER(float, BlurDepthFalloff)
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutputTexture)
@@ -42,8 +41,8 @@ class FFluidBilateralBlurCS : public FGlobalShader
 	}
 };
 
-IMPLEMENT_GLOBAL_SHADER(FFluidBilateralBlurCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "BilateralBlurCS",
+IMPLEMENT_GLOBAL_SHADER(FFluidBilateralBlur2DCS,
+                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "BilateralBlur2DCS",
                         SF_Compute);
 
 //=============================================================================
@@ -74,72 +73,42 @@ void RenderFluidSmoothingPass(
 		TexCreate_ShaderResource | TexCreate_UAV);
 
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-	TShaderMapRef<FFluidBilateralBlurCS> ComputeShader(GlobalShaderMap);
+	TShaderMapRef<FFluidBilateralBlur2DCS> ComputeShader(GlobalShaderMap);
 
 	// Current input/output for iteration loop
 	FRDGTextureRef CurrentInput = InputDepthTexture;
 
 	//=============================================================================
-	// Multiple Iterations (NVIDIA Flex style)
+	// Multiple Iterations with 2D Bilateral Blur (9x9 kernel)
 	//=============================================================================
 	for (int32 Iteration = 0; Iteration < NumIterations; ++Iteration)
 	{
-		// Create textures for this iteration
-		FRDGTextureRef HorizontalOutput = GraphBuilder.CreateTexture(
-			IntermediateDesc, TEXT("FluidDepthHorizontal"));
-
-		FRDGTextureRef VerticalOutput = GraphBuilder.CreateTexture(
-			IntermediateDesc, TEXT("FluidDepthVertical"));
-
-		// NVIDIA Flex: Use consistent parameters across iterations
-		// Multiple passes naturally fill gaps without scaling
-		float IterationBlurRadius = BlurRadius;
-		float IterationDepthFalloff = DepthFalloff;
+		// Create output texture for this iteration
+		FRDGTextureRef IterationOutput = GraphBuilder.CreateTexture(
+			IntermediateDesc, TEXT("FluidDepth2DBlur"));
 
 		//=============================================================================
-		// Horizontal Blur
+		// 2D Bilateral Blur (single pass, no separable filtering)
 		//=============================================================================
 		{
-			auto* PassParameters = GraphBuilder.AllocParameters<FFluidBilateralBlurCS::FParameters>();
+			auto* PassParameters = GraphBuilder.AllocParameters<FFluidBilateralBlur2DCS::FParameters>();
 
 			PassParameters->InputTexture = CurrentInput;
 			PassParameters->TextureSize = FVector2f(TextureSize.X, TextureSize.Y);
-			PassParameters->BlurDirection = FIntPoint(1, 0);
-			PassParameters->BlurRadius = IterationBlurRadius;
-			PassParameters->BlurDepthFalloff = IterationDepthFalloff;
-			PassParameters->OutputTexture = GraphBuilder.CreateUAV(HorizontalOutput);
+			PassParameters->BlurRadius = BlurRadius;
+			PassParameters->BlurDepthFalloff = DepthFalloff;
+			PassParameters->OutputTexture = GraphBuilder.CreateUAV(IterationOutput);
 
 			FComputeShaderUtils::AddPass(
 				GraphBuilder,
-				RDG_EVENT_NAME("Iteration%d_HorizontalBlur", Iteration),
-				ComputeShader,
-				PassParameters,
-				FComputeShaderUtils::GetGroupCount(TextureSize, 8));
-		}
-
-		//=============================================================================
-		// Vertical Blur
-		//=============================================================================
-		{
-			auto* PassParameters = GraphBuilder.AllocParameters<FFluidBilateralBlurCS::FParameters>();
-
-			PassParameters->InputTexture = HorizontalOutput;
-			PassParameters->TextureSize = FVector2f(TextureSize.X, TextureSize.Y);
-			PassParameters->BlurDirection = FIntPoint(0, 1);
-			PassParameters->BlurRadius = IterationBlurRadius;
-			PassParameters->BlurDepthFalloff = IterationDepthFalloff;
-			PassParameters->OutputTexture = GraphBuilder.CreateUAV(VerticalOutput);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("Iteration%d_VerticalBlur", Iteration),
+				RDG_EVENT_NAME("Iteration%d_2DBlur", Iteration),
 				ComputeShader,
 				PassParameters,
 				FComputeShaderUtils::GetGroupCount(TextureSize, 8));
 		}
 
 		// Use this iteration's output as next iteration's input
-		CurrentInput = VerticalOutput;
+		CurrentInput = IterationOutput;
 	}
 
 	// Final output

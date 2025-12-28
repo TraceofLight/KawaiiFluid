@@ -8,7 +8,6 @@ RWTexture2D<float> OutputTexture;
 
 // Blur Params
 float2 TextureSize;
-int2 BlurDirection;
 float BlurRadius;
 float BlurDepthFalloff;
 
@@ -29,11 +28,11 @@ float GetGaussianWeight(float Distance, float Sigma)
 }
 
 //=============================================================================
-// Bilateral Blur
+// 2D Bilateral Blur (9x9 kernel, 81 samples)
 //=============================================================================
 
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
-void BilateralBlurCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+void BilateralBlur2DCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	// 유효 범위 검사
 	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
@@ -53,43 +52,47 @@ void BilateralBlurCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	// 양방향 필터 파라미터 설정
-	const int KernelRadius = int(BlurRadius);
-	const float SpatialSigma = BlurRadius / 2.0;  // 더 부드럽게
+	const int KernelRadius = 4;  // 9x9 kernel (radius 4 = -4 to +4)
+	const float SpatialSigma = BlurRadius / 2.5;  // 더 부드럽게
 	const float DepthSigma = BlurDepthFalloff;
 
 	float TotalWeight = 0.0;
 	float TotalWeightedDepth = 0.0;
 
-	// 커널 영역 반복 수행
-	for (int Offset = -KernelRadius; Offset <= KernelRadius; ++Offset)
+	// 2D 커널 영역 반복 수행 (9x9 = 81 samples)
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
 	{
-		// 정수 좌표 계산 및 클램핑
-		int2 SampleCoord = CenterCoord + (BlurDirection * Offset);
-		SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
-
-		// 주변 깊이 샘플링
-		float SampleDepth = InputTexture.Load(int3(SampleCoord, 0));
-
-		// 배경 픽셀은 건너뜀
-		if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+		for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
 		{
-			continue;
+			// 정수 좌표 계산 및 클램핑
+			int2 SampleCoord = CenterCoord + int2(OffsetX, OffsetY);
+			SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
+
+			// 주변 깊이 샘플링
+			float SampleDepth = InputTexture.Load(int3(SampleCoord, 0));
+
+			// 배경 픽셀은 건너뜀
+			if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			{
+				continue;
+			}
+
+			// 공간적 가중치 계산 (2D 거리)
+			float2 SpatialOffset = float2(OffsetX, OffsetY);
+			float SpatialDistance = length(SpatialOffset);
+			float SpatialWeight = GetGaussianWeight(SpatialDistance, SpatialSigma);
+
+			// 범위 가중치 계산 (깊이 차이에 따른 가우시안)
+			float DepthDifference = abs(SampleDepth - CenterDepth);
+			float RangeWeight = GetGaussianWeight(DepthDifference, DepthSigma);
+
+			// 최종 양방향 가중치 결합
+			float CombinedWeight = SpatialWeight * RangeWeight;
+
+			// 가중치가 적용된 깊이 누적
+			TotalWeightedDepth += SampleDepth * CombinedWeight;
+			TotalWeight += CombinedWeight;
 		}
-
-		// 공간적 가중치 계산 (거리에 따른 가우시안)
-		float SpatialDistance = abs((float)Offset);
-		float SpatialWeight = GetGaussianWeight(SpatialDistance, SpatialSigma);
-
-		// 범위 가중치 계산 (깊이 차이에 따른 가우시안)
-		float DepthDifference = abs(SampleDepth - CenterDepth);
-		float RangeWeight = GetGaussianWeight(DepthDifference, DepthSigma);
-
-		// 최종 양방향 가중치 결합
-		float CombinedWeight = SpatialWeight * RangeWeight;
-
-		// 가중치가 적용된 깊이 누적
-		TotalWeightedDepth += SampleDepth * CombinedWeight;
-		TotalWeight += CombinedWeight;
 	}
 
 	float FinalDepth = CenterDepth;
