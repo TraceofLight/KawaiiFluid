@@ -121,12 +121,12 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	/** Maximum ray marching steps */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
 		meta = (EditCondition = "SSFRMode == ESSFRRenderingMode::RayMarching", ClampMin = "16", ClampMax = "256"))
-	int32 MaxRayMarchSteps = 64;
+	int32 MaxRayMarchSteps = 128;
 
 	/** Ray march hit threshold (surface detection) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
 		meta = (EditCondition = "SSFRMode == ESSFRRenderingMode::RayMarching", ClampMin = "0.0001", ClampMax = "1.0"))
-	float RayMarchHitThreshold = 0.01f;
+	float RayMarchHitThreshold = 1.0f;
 
 	/** Maximum ray march distance */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",

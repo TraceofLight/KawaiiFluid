@@ -230,7 +230,9 @@ void MainPS(
 
 	// UE5 uses reversed-Z: closer objects have higher Z values
 	// If hit point is behind scene geometry, discard
-	if (HitDeviceZ < SceneDeviceZ)
+	// Add small bias to prevent flickering at depth boundaries
+	float DepthBias = 0.0001;
+	if (HitDeviceZ < SceneDeviceZ - DepthBias)
 	{
 		discard;
 		return;

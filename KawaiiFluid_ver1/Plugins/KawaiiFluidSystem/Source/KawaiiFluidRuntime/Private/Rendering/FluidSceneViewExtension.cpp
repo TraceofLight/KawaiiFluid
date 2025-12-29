@@ -441,7 +441,7 @@ void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 						ParticleBuffer,
 						AllParticlePositions.GetData(),
 						BufferSize,
-						ERDGInitialDataFlags::NoCopy);
+						ERDGInitialDataFlags::None);  // Copy data to prevent flickering
 
 					FRDGBufferSRVRef ParticleBufferSRV = GraphBuilder.CreateSRV(ParticleBuffer);
 
