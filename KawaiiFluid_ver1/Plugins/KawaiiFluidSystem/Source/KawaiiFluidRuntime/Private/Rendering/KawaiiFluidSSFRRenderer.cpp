@@ -123,6 +123,23 @@ void UKawaiiFluidSSFRRenderer::ApplySettings(const FKawaiiFluidSSFRRendererSetti
 		MaxRenderParticles);
 }
 
+void UKawaiiFluidSSFRRenderer::SetEnabled(bool bInEnabled)
+{
+	bEnabled = bInEnabled;
+
+	if (!bEnabled)
+	{
+		// Clear rendering state when disabled
+		bIsRenderingActive = false;
+
+		// Clear GPU resources to stop rendering
+		if (RenderResource.IsValid())
+		{
+			RenderResource->UpdateParticleData(TArray<FKawaiiRenderParticle>());
+		}
+	}
+}
+
 void UKawaiiFluidSSFRRenderer::UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime)
 {
 	if (!bEnabled || !DataProvider)

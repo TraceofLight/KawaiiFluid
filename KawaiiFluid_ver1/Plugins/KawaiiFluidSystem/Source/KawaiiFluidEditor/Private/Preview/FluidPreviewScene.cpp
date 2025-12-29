@@ -218,6 +218,12 @@ void FFluidPreviewScene::RefreshFromPreset()
 		SimulationModule->SetPreset(CurrentPreset);
 	}
 
+	// Update simulation context solvers (physics parameters)
+	if (SimulationContext)
+	{
+		SimulationContext->InitializeSolvers(CurrentPreset);
+	}
+
 	CachedParticleRadius = CurrentPreset->ParticleRadius;
 
 	// Update rendering module with preset settings

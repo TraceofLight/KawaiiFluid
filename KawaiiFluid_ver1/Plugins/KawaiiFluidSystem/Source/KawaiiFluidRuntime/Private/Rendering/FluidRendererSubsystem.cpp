@@ -6,7 +6,7 @@
 
 bool UFluidRendererSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
-	if (!Super::ShouldCreateSubsystem(Outer))
+	if (!IsValid(Outer))
 	{
 		return false;
 	}
