@@ -9,6 +9,8 @@
 #include "FluidThicknessPass.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphEvent.h"
+#include "SceneRendering.h"
+#include "SceneTextures.h"
 #include "ScreenPass.h"
 #include "PostProcess/PostProcessMaterialInputs.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
@@ -31,12 +33,146 @@ FFluidSceneViewExtension::~FFluidSceneViewExtension()
 {
 }
 
+void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
+	FRDGBuilder& GraphBuilder,
+	FSceneView& InView,
+	const FRenderTargetBindingSlots& RenderTargets,
+	TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures)
+{
+	UFluidRendererSubsystem* SubsystemPtr = Subsystem.Get();
+	if (!SubsystemPtr || !SubsystemPtr->RenderingParameters.bEnableRendering)
+	{
+		return;
+	}
+
+	RDG_EVENT_SCOPE(GraphBuilder, "KawaiiFluidGBuffer_PostBasePass");
+
+	// Collect GBuffer mode renderers only
+	TMap<FFluidRenderingParameters, TArray<UKawaiiFluidSSFRRenderer*>> GBufferBatches;
+
+	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
+	for (UKawaiiFluidRenderingModule* Module : Modules)
+	{
+		if (!Module) continue;
+
+		UKawaiiFluidSSFRRenderer* SSFRRenderer = Module->GetSSFRRenderer();
+		if (SSFRRenderer && SSFRRenderer->IsRenderingActive())
+		{
+			const FFluidRenderingParameters& Params = SSFRRenderer->GetLocalParameters();
+			if (Params.SSFRMode == ESSFRRenderingMode::GBuffer)
+			{
+				GBufferBatches.FindOrAdd(Params).Add(SSFRRenderer);
+			}
+		}
+	}
+
+	if (GBufferBatches.Num() == 0)
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: PostRenderBasePassDeferred - Processing %d GBuffer batches"), GBufferBatches.Num());
+
+	// Get SceneDepth from RenderTargets
+	FRDGTextureRef SceneDepthTexture = RenderTargets.DepthStencil.GetTexture();
+
+	// Process GBuffer batches
+	for (auto& Batch : GBufferBatches)
+	{
+		const FFluidRenderingParameters& BatchParams = Batch.Key;
+		const TArray<UKawaiiFluidSSFRRenderer*>& Renderers = Batch.Value;
+
+		// Calculate average particle radius
+		float AverageParticleRadius = 10.0f;
+		float TotalRadius = 0.0f;
+		int ValidCount = 0;
+
+		for (UKawaiiFluidSSFRRenderer* Renderer : Renderers)
+		{
+			TotalRadius += Renderer->GetCachedParticleRadius();
+			ValidCount++;
+		}
+
+		if (ValidCount > 0)
+		{
+			AverageParticleRadius = TotalRadius / ValidCount;
+		}
+
+		float BlurRadius = static_cast<float>(BatchParams.BilateralFilterRadius);
+		float DepthFalloff = AverageParticleRadius * 0.7f;
+		int32 NumIterations = 3;
+
+		// Depth Pass
+		FRDGTextureRef BatchDepthTexture = nullptr;
+		RenderFluidDepthPass(GraphBuilder, InView, Renderers, SceneDepthTexture, BatchDepthTexture);
+
+		if (BatchDepthTexture)
+		{
+			// Smoothing Pass
+			FRDGTextureRef BatchSmoothedDepthTexture = nullptr;
+			RenderFluidSmoothingPass(GraphBuilder, InView, BatchDepthTexture, BatchSmoothedDepthTexture,
+									 BlurRadius, DepthFalloff, NumIterations);
+
+			if (BatchSmoothedDepthTexture)
+			{
+				// Normal Pass
+				FRDGTextureRef BatchNormalTexture = nullptr;
+				RenderFluidNormalPass(GraphBuilder, InView, BatchSmoothedDepthTexture, BatchNormalTexture);
+
+				// Thickness Pass
+				FRDGTextureRef BatchThicknessTexture = nullptr;
+				RenderFluidThicknessPass(GraphBuilder, InView, Renderers, BatchThicknessTexture);
+
+				if (BatchNormalTexture && BatchThicknessTexture)
+				{
+					if (Renderers.Num() > 0 && Renderers[0]->GetCompositePass())
+					{
+						FFluidIntermediateTextures IntermediateTextures;
+						IntermediateTextures.SmoothedDepthTexture = BatchSmoothedDepthTexture;
+						IntermediateTextures.NormalTexture = BatchNormalTexture;
+						IntermediateTextures.ThicknessTexture = BatchThicknessTexture;
+
+						// Get GBuffer textures directly from FSceneTextures (UE 5.7)
+						const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(InView);
+						const FSceneTextures& SceneTexturesRef = ViewInfo.GetSceneTextures();
+						IntermediateTextures.GBufferATexture = SceneTexturesRef.GBufferA;
+						IntermediateTextures.GBufferBTexture = SceneTexturesRef.GBufferB;
+						IntermediateTextures.GBufferCTexture = SceneTexturesRef.GBufferC;
+						IntermediateTextures.GBufferDTexture = SceneTexturesRef.GBufferD;
+
+						UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: GBuffer textures - A:%s B:%s C:%s D:%s"),
+							IntermediateTextures.GBufferATexture ? TEXT("OK") : TEXT("NULL"),
+							IntermediateTextures.GBufferBTexture ? TEXT("OK") : TEXT("NULL"),
+							IntermediateTextures.GBufferCTexture ? TEXT("OK") : TEXT("NULL"),
+							IntermediateTextures.GBufferDTexture ? TEXT("OK") : TEXT("NULL"));
+
+						FScreenPassRenderTarget DummyOutput;
+
+						Renderers[0]->GetCompositePass()->RenderComposite(
+							GraphBuilder,
+							InView,
+							BatchParams,
+							IntermediateTextures,
+							SceneDepthTexture,
+							nullptr,  // SceneColorTexture not available here
+							DummyOutput
+						);
+
+						UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: GBuffer write complete at correct timing (PostBasePass)"));
+					}
+				}
+			}
+		}
+	}
+}
+
 void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 	EPostProcessingPass Pass,
 	const FSceneView& InView,
 	FPostProcessingPassDelegateArray& InOutPassCallbacks,
 	bool bIsPassEnabled)
 {
+	// Custom mode: Tonemap pass (post-lighting)
 	if (Pass == EPostProcessingPass::Tonemap)
 	{
 		InOutPassCallbacks.Add(FAfterPassCallbackDelegate::CreateLambda(
