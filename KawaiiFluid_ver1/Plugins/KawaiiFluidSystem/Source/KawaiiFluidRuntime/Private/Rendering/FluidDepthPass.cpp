@@ -8,6 +8,7 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "SceneView.h"
+#include "ScenePrivate.h"
 #include "GlobalShader.h"
 #include "ShaderParameterStruct.h"
 #include "PipelineStateCache.h"
@@ -110,6 +111,16 @@ void RenderFluidDepthPass(
 		PassParameters->ViewProjectionMatrix = FMatrix44f(ViewProjectionMatrix);
 		PassParameters->SceneDepthTexture = SceneDepthTexture;
 		PassParameters->SceneDepthSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+
+		// SceneDepth UV 변환을 위한 ViewRect와 텍스처 크기
+		// FViewInfo::ViewRect = SceneDepth의 유효 영역 (Screen Percentage 적용됨)
+		const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
+		PassParameters->SceneViewRect = FVector2f(
+			ViewInfo.ViewRect.Width(),
+			ViewInfo.ViewRect.Height());
+		PassParameters->SceneTextureSize = FVector2f(
+			SceneDepthTexture->Desc.Extent.X,
+			SceneDepthTexture->Desc.Extent.Y);
 
 		PassParameters->RenderTargets[0] = FRenderTargetBinding(
 			OutLinearDepthTexture,

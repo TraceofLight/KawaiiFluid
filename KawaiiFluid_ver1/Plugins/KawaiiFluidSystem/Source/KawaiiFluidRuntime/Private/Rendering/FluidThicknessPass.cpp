@@ -31,9 +31,12 @@ void RenderFluidThicknessPass(
 		return;
 	}
 
+	// 뷰포트 크기로 텍스처 생성
+	FIntPoint TextureSize = View.UnscaledViewRect.Size();
+
 	// Thickness Texture 생성
 	FRDGTextureDesc ThicknessDesc = FRDGTextureDesc::Create2D(
-		View.UnscaledViewRect.Size(),
+		TextureSize,
 		PF_R16F,
 		FClearValueBinding::Black,
 		TexCreate_ShaderResource | TexCreate_RenderTargetable);

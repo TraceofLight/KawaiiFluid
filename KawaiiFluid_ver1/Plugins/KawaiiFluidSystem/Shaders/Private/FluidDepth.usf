@@ -22,6 +22,10 @@ float4x4 ViewProjectionMatrix;
 Texture2D SceneDepthTexture;
 SamplerState SceneDepthSampler;
 
+// SceneDepth UV 변환용 파라미터
+float2 SceneViewRect;    // SceneDepth 유효 영역 크기 (Screen Percentage 적용됨)
+float2 SceneTextureSize; // SceneDepth 텍스처 전체 크기
+
 //-----------------------------------------------------------------------------
 // 버텍스 셰이더 (Vertex Shader)
 //-----------------------------------------------------------------------------
@@ -109,8 +113,12 @@ FPixelOutput MainPS(FVertexOutput Input)
 	ScreenUV = ScreenUV * 0.5 + 0.5;
 	ScreenUV.y = 1.0 - ScreenUV.y;
 
+	// SceneDepth UV 변환: ScreenUV를 SceneDepth의 유효 영역에 매핑
+	// SceneViewRect = SceneDepth 유효 영역, SceneTextureSize = SceneDepth 텍스처 전체 크기
+	float2 SceneUV = ScreenUV * (SceneViewRect / SceneTextureSize);
+
 	// Sample scene depth and perform occlusion test
-	float SceneDeviceDepth = SceneDepthTexture.Sample(SceneDepthSampler, ScreenUV).r;
+	float SceneDeviceDepth = SceneDepthTexture.Sample(SceneDepthSampler, SceneUV).r;
 
 	// Early discard if quad is behind scene geometry
 	// Reversed-Z: 0.0 = far, 1.0 = near, so if quad depth < scene depth, it's farther away
