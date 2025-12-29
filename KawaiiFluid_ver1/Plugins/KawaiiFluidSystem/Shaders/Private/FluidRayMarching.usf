@@ -245,54 +245,58 @@ void MainPS(
 	float3 P = result.Position;
 	float Thickness = result.Thickness;
 
-	// Light direction (from View uniform buffer)
-	float3 L = normalize(-View.DirectionalLightDirection);
+	// Default light direction (top-down sun angle)
+	float3 L = normalize(float3(0.5, 0.5, -0.707));
 
-	// Fresnel (Schlick approximation)
+	// Fresnel (Schlick approximation) - use smoothstep for softer transition
 	float NoV = saturate(dot(N, V));
-	float Fresnel = SchlickFresnel(NoV, FresnelStrength);
+	float FresnelRaw = SchlickFresnel(NoV, FresnelStrength);
+	float Fresnel = smoothstep(0.0, 1.0, FresnelRaw) * 0.5;  // Soften and reduce
 
-	// Specular (Blinn-Phong)
+	// Specular (Blinn-Phong) - softer specular
 	float NoL = saturate(dot(N, L));
-	float Specular = BlinnPhongSpecular(N, V, L, SpecularRoughness) * SpecularStrength * NoL;
+	float SpecularRaw = BlinnPhongSpecular(N, V, L, max(SpecularRoughness, 0.5));  // Min roughness 0.5
+	float Specular = smoothstep(0.0, 1.0, SpecularRaw) * SpecularStrength * NoL * 0.3;  // Reduce intensity
 
-	// Beer's Law absorption
-	float AbsorptionFactor = 1.0 - exp(-Thickness * AbsorptionCoefficient * 0.1);
+	// Beer's Law absorption - gentler
+	float AbsorptionFactor = 1.0 - exp(-Thickness * AbsorptionCoefficient * 0.05);
 
 	// Refracted background sampling
 	float3 RefractDir = refract(-V, N, 1.0 / RefractiveIndex);
-	float2 RefractedUV = UV + RefractDir.xy * 0.03;
+	float2 RefractedUV = UV + RefractDir.xy * 0.02;  // Reduce distortion
 	RefractedUV = saturate(RefractedUV);
 	float3 RefractedBackground = SceneColorTexture.Sample(SceneTextureSampler, RefractedUV).rgb;
 
-	// Base color with absorption
-	float3 BaseColor = lerp(RefractedBackground, FluidColor.rgb, AbsorptionFactor);
+	// Base color - mostly fluid color with subtle background blend
+	float3 BaseColor = lerp(RefractedBackground, FluidColor.rgb, saturate(AbsorptionFactor + 0.7));
 
 	//=========================================================================
-	// Subsurface Scattering (SSS) - Jelly Effect
+	// Subsurface Scattering (SSS) - Jelly Effect (simplified)
 	//=========================================================================
 
-	// SSS: light passing through thin regions
-	float SSSFactor = saturate(1.0 - Thickness * 0.1) * SSSIntensity;
-	float3 SSSContribution = SSSColor.rgb * SSSFactor * NoL;
+	// SSS: simple rim lighting effect
+	float RimFactor = 1.0 - NoV;
+	float SSSFactor = smoothstep(0.3, 1.0, RimFactor) * SSSIntensity * 0.5;
+	float3 SSSContribution = SSSColor.rgb * SSSFactor;
 
 	//=========================================================================
 	// Final Composition
 	//=========================================================================
 
-	// Fresnel reflection (environment)
+	// Fresnel reflection (subtle environment reflection)
 	float3 ReflectedColor = EnvironmentLightColor.rgb * Fresnel;
 
-	// Combine all lighting
-	float3 FinalColor = BaseColor;
-	FinalColor = lerp(FinalColor, ReflectedColor, Fresnel * 0.5);
-	FinalColor += SSSContribution;
-	FinalColor += Specular * View.DirectionalLightColor.rgb;
+	// Simple diffuse lighting
+	float Diffuse = NoL * 0.5 + 0.5;  // Half-lambert for softer shading
 
-	// Alpha based on thickness and fresnel
-	float Alpha = saturate(1.0 - exp(-Thickness * 0.05));
-	Alpha = max(Alpha, Fresnel * 0.5);
-	Alpha = max(Alpha, AbsorptionFactor);
+	// Combine all lighting
+	float3 FinalColor = BaseColor * Diffuse;
+	FinalColor += ReflectedColor * 0.3;
+	FinalColor += SSSContribution;
+	FinalColor += Specular;
+
+	// Alpha - simpler calculation
+	float Alpha = saturate(0.85 + Fresnel * 0.15);
 
 	OutColor = float4(FinalColor, Alpha);
 }
