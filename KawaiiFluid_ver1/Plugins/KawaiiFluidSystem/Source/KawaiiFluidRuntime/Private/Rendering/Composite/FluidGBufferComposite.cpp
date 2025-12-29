@@ -1,8 +1,13 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Rendering/Composite/FluidGBufferComposite.h"
+#include "Rendering/Shaders/FluidGBufferWriteShaders.h"
 #include "Rendering/FluidRenderingParameters.h"
 #include "RenderGraphBuilder.h"
+#include "ScreenPass.h"
+#include "GlobalShader.h"
+#include "RenderGraphUtils.h"
+#include "RHIStaticStates.h"
 
 void FFluidGBufferComposite::RenderComposite(
 	FRDGBuilder& GraphBuilder,
@@ -13,65 +18,109 @@ void FFluidGBufferComposite::RenderComposite(
 	FRDGTextureRef SceneColorTexture,
 	FScreenPassRenderTarget Output)
 {
-	// TODO (TEAM MEMBER IMPLEMENTATION):
-	//
-	// This is a SKELETON implementation. You need to implement the actual GBuffer write logic here.
-	//
-	// STEP-BY-STEP GUIDE:
-	//
-	// 1. Access GBuffer textures from SceneTextures
-	//    - You'll need to access the GBuffer render targets
-	//    - FRDGTextureRef GBufferA = SceneTextures->GBufferATexture;
-	//    - FRDGTextureRef GBufferB = SceneTextures->GBufferBTexture;
-	//    - FRDGTextureRef GBufferC = SceneTextures->GBufferCTexture;
-	//    - FRDGTextureRef GBufferD = SceneTextures->GBufferDTexture;
-	//
-	// 2. Create shader instance: TShaderMapRef<FFluidGBufferWritePS>
-	//    - First, you need to create FluidGBufferWriteShaders.h/cpp
-	//    - Define shader parameter struct with all needed inputs
-	//
-	// 3. Bind parameters:
-	//    - IntermediateTextures.SmoothedDepthTexture (fluid depth)
-	//    - IntermediateTextures.NormalTexture (view-space normals)
-	//    - IntermediateTextures.ThicknessTexture (for subsurface scattering)
-	//    - RenderParams.FluidColor (base color input)
-	//    - RenderParams.Metallic (material property)
-	//    - RenderParams.Roughness (material property)
-	//    - RenderParams.SubsurfaceOpacity (SSS control)
-	//    - View matrices (ViewToWorld for normal transformation)
-	//
-	// 4. Set up PSO (Pipeline State Object):
-	//    - RenderTargets: GBufferA, GBufferB, GBufferC, GBufferD (MRT - Multiple Render Targets)
-	//    - BlendState: Opaque or appropriate blending for GBuffer
-	//    - DepthStencilState: Write custom depth if needed
-	//
-	// 5. Create the shader (FluidGBufferWrite.usf):
-	//    - Output to MRT (4 render targets)
-	//    - GBufferA: Encode world-space normal
-	//    - GBufferB: Encode Metallic, Specular, Roughness, ShadingModelID
-	//    - GBufferC: Encode BaseColor (use Beer's Law with thickness)
-	//    - GBufferD: Custom data (thickness for subsurface scattering)
-	//
-	// 6. Execute: AddDrawScreenPass(GraphBuilder, ...) or GraphBuilder.AddPass(...)
-	//
-	// REFERENCE FILES:
-	// - FluidCustomComposite.cpp (structure reference)
-	// - Unreal Engine: DeferredShadingRenderer.cpp (GBuffer write examples)
-	// - Unreal Engine: BasePassRendering.cpp (material GBuffer encoding)
-	//
-	// SHADER REFERENCE:
-	// - DeferredShadingCommon.ush (GBuffer encoding functions)
-	// - ShadingModels.ush (shading model IDs)
-	//
-	// TESTING:
-	// - Console command: r.GBuffer.Visualize 1 (to see GBuffer contents)
-	// - Enable Lumen reflections and check if fluid surface reflects
-	// - Enable VSM and check if fluid receives dynamic shadows
+	// Validate input textures
+	if (!IntermediateTextures.SmoothedDepthTexture ||
+		!IntermediateTextures.NormalTexture ||
+		!IntermediateTextures.ThicknessTexture ||
+		!SceneDepthTexture)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("FFluidGBufferComposite: Missing input textures"));
+		return;
+	}
 
-	UE_LOG(LogTemp, Warning, TEXT("FFluidGBufferComposite::RenderComposite - NOT YET IMPLEMENTED"));
-	UE_LOG(LogTemp, Warning, TEXT("This is a skeleton implementation. Team member should implement GBuffer write logic here."));
-	UE_LOG(LogTemp, Warning, TEXT("See IMPLEMENTATION_GUIDE.md for detailed instructions."));
+	// Validate GBuffer textures
+	if (!IntermediateTextures.GBufferATexture ||
+		!IntermediateTextures.GBufferBTexture ||
+		!IntermediateTextures.GBufferCTexture ||
+		!IntermediateTextures.GBufferDTexture)
+	{
+		UE_LOG(LogTemp, Error, TEXT("FFluidGBufferComposite: Missing GBuffer textures!"));
+		return;
+	}
 
-	// Placeholder: do nothing (won't render anything)
-	// When implemented, this function should write to GBuffer and enable Lumen/VSM integration
+	RDG_EVENT_SCOPE(GraphBuilder, "FluidGBufferWrite");
+
+	auto* PassParameters = GraphBuilder.AllocParameters<FFluidGBufferWriteParameters>();
+
+	// Texture bindings
+	PassParameters->SmoothedDepthTexture = IntermediateTextures.SmoothedDepthTexture;
+	PassParameters->NormalTexture = IntermediateTextures.NormalTexture;
+	PassParameters->ThicknessTexture = IntermediateTextures.ThicknessTexture;
+	PassParameters->FluidSceneDepthTexture = SceneDepthTexture;
+
+	// Samplers
+	PassParameters->PointClampSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+	PassParameters->BilinearClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+
+	// Material parameters
+	PassParameters->FluidBaseColor = FVector3f(RenderParams.FluidColor.R, RenderParams.FluidColor.G, RenderParams.FluidColor.B);
+	PassParameters->Metallic = RenderParams.Metallic;
+	PassParameters->Roughness = RenderParams.Roughness;
+	PassParameters->SubsurfaceOpacity = RenderParams.SubsurfaceOpacity;
+	PassParameters->AbsorptionCoefficient = RenderParams.AbsorptionCoefficient;
+
+	// View uniforms
+	PassParameters->View = View.ViewUniformBuffer;
+
+	// MRT: GBuffer A/B/C/D
+	PassParameters->RenderTargets[0] = FRenderTargetBinding(
+		IntermediateTextures.GBufferATexture, ERenderTargetLoadAction::ELoad);
+	PassParameters->RenderTargets[1] = FRenderTargetBinding(
+		IntermediateTextures.GBufferBTexture, ERenderTargetLoadAction::ELoad);
+	PassParameters->RenderTargets[2] = FRenderTargetBinding(
+		IntermediateTextures.GBufferCTexture, ERenderTargetLoadAction::ELoad);
+	PassParameters->RenderTargets[3] = FRenderTargetBinding(
+		IntermediateTextures.GBufferDTexture, ERenderTargetLoadAction::ELoad);
+
+	// Depth/Stencil binding (write custom depth)
+	PassParameters->RenderTargets.DepthStencil = FDepthStencilBinding(
+		SceneDepthTexture,
+		ERenderTargetLoadAction::ELoad,
+		ERenderTargetLoadAction::ELoad,
+		FExclusiveDepthStencil::DepthWrite_StencilWrite);
+
+	// Get shaders
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
+	TShaderMapRef<FFluidGBufferWriteVS> VertexShader(GlobalShaderMap);
+	TShaderMapRef<FFluidGBufferWritePS> PixelShader(GlobalShaderMap);
+
+	FIntRect ViewRect = View.UnscaledViewRect;
+
+	GraphBuilder.AddPass(
+		RDG_EVENT_NAME("FluidGBufferWriteDraw"),
+		PassParameters,
+		ERDGPassFlags::Raster,
+		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)
+		{
+			RHICmdList.SetViewport(ViewRect.Min.X, ViewRect.Min.Y, 0.0f, ViewRect.Max.X,
+			                       ViewRect.Max.Y, 1.0f);
+			RHICmdList.SetScissorRect(true, ViewRect.Min.X, ViewRect.Min.Y, ViewRect.Max.X,
+			                          ViewRect.Max.Y);
+
+			FGraphicsPipelineStateInitializer GraphicsPSOInit;
+			GraphicsPSOInit.BoundShaderState.VertexDeclarationRHI = GEmptyVertexDeclaration.VertexDeclarationRHI;
+			GraphicsPSOInit.BoundShaderState.VertexShaderRHI = VertexShader.GetVertexShader();
+			GraphicsPSOInit.BoundShaderState.PixelShaderRHI = PixelShader.GetPixelShader();
+			GraphicsPSOInit.PrimitiveType = PT_TriangleList;
+
+			// Opaque blending for GBuffer write
+			GraphicsPSOInit.BlendState = TStaticBlendState<>::GetRHI();
+			GraphicsPSOInit.RasterizerState = TStaticRasterizerState<FM_Solid, CM_None>::GetRHI();
+
+			// Write depth
+			GraphicsPSOInit.DepthStencilState = TStaticDepthStencilState<
+				true, CF_DepthNearOrEqual>::GetRHI();
+
+			RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
+			SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
+			SetShaderParameters(RHICmdList, PixelShader, PixelShader.GetPixelShader(),
+			                    *PassParameters);
+			SetShaderParameters(RHICmdList, VertexShader, VertexShader.GetVertexShader(),
+			                    *PassParameters);
+
+			// Draw fullscreen triangle
+			RHICmdList.DrawPrimitive(0, 1, 1);
+		});
+
+	UE_LOG(LogTemp, Log, TEXT("FFluidGBufferComposite: GBuffer write executed successfully"));
 }

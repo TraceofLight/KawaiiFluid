@@ -45,9 +45,6 @@ struct FGBufferVSToPS
 /**
  * @brief Fullscreen triangle vertex shader
  *
- * Generates a fullscreen triangle using vertex ID (0, 1, 2).
- * No vertex buffer required - positions and UVs are generated procedurally.
- *
  * @param VertexID System-generated vertex index (0, 1, or 2)
  * @param Output Vertex-to-pixel interpolated data
  */
@@ -55,10 +52,6 @@ void MainVS(
 	in uint VertexID : SV_VertexID,
 	out FGBufferVSToPS Output)
 {
-	// Fullscreen triangle trick:
-	// VertexID 0: UV=(0,0) -> NDC=(-1, 1)
-	// VertexID 1: UV=(2,0) -> NDC=( 3, 1)
-	// VertexID 2: UV=(0,2) -> NDC=(-1,-3)
 	float2 UV = float2((VertexID << 1) & 2, VertexID & 2);
 	Output.UV = UV;
 	Output.Position = float4(UV * float2(2, -2) + float2(-1, 1), 0.5f, 1.0f);
@@ -69,10 +62,25 @@ void MainVS(
 //-----------------------------------------------------------------------------
 
 /**
- * @brief Apply Beer's Law absorption based on thickness
+ * @brief Reconstruct view space position from screen UV and linear depth
  *
- * Reused from FluidComposite.usf with modifications for GBuffer mode.
- * Calculates color absorption through fluid volume.
+ * @param ScreenUV Screen-space UV coordinates [0,1]
+ * @param LinearDepth Linear depth in view space
+ * @return View space position
+ */
+float3 ReconstructViewPosition(float2 ScreenUV, float LinearDepth)
+{
+	float4 ClipPosition = float4(ScreenUV * 2.0 - 1.0, 0.5, 1.0);
+	float4 ViewPosition = mul(ClipPosition, View.ClipToView);
+	ViewPosition /= ViewPosition.w;
+	float3 ViewRay = ViewPosition.xyz / ViewPosition.z;
+
+	// Use negative depth because camera looks down -Z axis in view space
+	return ViewRay * (-LinearDepth);
+}
+
+/**
+ * @brief Apply Beer's Law absorption based on thickness
  *
  * @param BaseColor Base fluid color
  * @param Thickness Accumulated particle thickness
@@ -80,7 +88,6 @@ void MainVS(
  */
 float3 ApplyBeerLawAbsorption(float3 BaseColor, float Thickness)
 {
-	// Beer-Lambert law: I = I0 * exp(-absorption * thickness)
 	float Absorption = exp(-AbsorptionCoefficient * Thickness);
 	return BaseColor * Absorption;
 }
@@ -91,9 +98,6 @@ float3 ApplyBeerLawAbsorption(float3 BaseColor, float Thickness)
 
 /**
  * @brief GBuffer Multiple Render Targets output
- *
- * Writes to Unreal's GBuffer for deferred shading integration.
- * Enables Lumen reflections, VSM shadows, and global illumination.
  */
 struct FGBufferOutput
 {
@@ -101,7 +105,7 @@ struct FGBufferOutput
 	float4 GBufferB : SV_Target1;  // Metallic, Specular, Roughness, ShadingModelID
 	float4 GBufferC : SV_Target2;  // BaseColor (RGB), AO (A)
 	float4 GBufferD : SV_Target3;  // Custom data (Subsurface, etc)
-	float  OutDepth : SV_Depth;    // Custom depth write
+	float  OutDepth : SV_Depth;
 };
 
 //-----------------------------------------------------------------------------
@@ -111,10 +115,7 @@ struct FGBufferOutput
 /**
  * @brief Writes fluid surface to GBuffer
  *
- * Samples depth/normal/thickness from intermediate textures and encodes
- * them into GBuffer format for deferred rendering pipeline.
- *
- * @param Input Vertex-to-pixel interpolated data (position, UV)
+ * @param Input Vertex-to-pixel interpolated data
  * @return GBuffer data (MRT output)
  */
 FGBufferOutput MainPS(FGBufferVSToPS Input)
@@ -123,61 +124,45 @@ FGBufferOutput MainPS(FGBufferVSToPS Input)
 
 	float2 UV = Input.UV;
 
-	// 1. Sample fluid depth
 	float FluidDepth = SmoothedDepthTexture.SampleLevel(PointClampSampler, UV, 0);
 
-	// Early exit: background
 	if (FluidDepth > BACKGROUND_DEPTH_THRESH)
 	{
 		discard;
 	}
 
-	// 2. Sample scene depth for occlusion test
+	// Occlusion test with bias to prevent false culling
 	float SceneDeviceZ = FluidSceneDepthTexture.SampleLevel(PointClampSampler, UV, 0);
-	float SceneDepth = ConvertFromDeviceZ(SceneDeviceZ);
+	float SceneLinearDepth = ConvertFromDeviceZ(SceneDeviceZ);
 
-	// Convert fluid linear depth to device Z for comparison
-	float4 ClipPos = float4(0, 0, FluidDepth, 1);
-	float4 ViewPos = mul(ClipPos, View.ClipToView);
-	ViewPos /= ViewPos.w;
-	float4 ProjPos = mul(ViewPos, View.ViewToClip);
-	float FluidDeviceZ = ProjPos.z / ProjPos.w;
-
-	if (FluidDeviceZ > SceneDeviceZ)
+	if (FluidDepth > SceneLinearDepth + 2.0f)
 	{
-		discard;  // Fluid behind geometry (DeviceZ: smaller = closer to camera)
+		discard;
 	}
 
-	// 3. Sample normal (view-space)
+	// Convert linear depth to device Z for depth buffer write
+	float3 FluidViewPos = ReconstructViewPosition(UV, FluidDepth);
+	float4 FluidClipPos = mul(float4(FluidViewPos, 1.0), View.ViewToClip);
+	float FluidDeviceZ = FluidClipPos.z / FluidClipPos.w;
+
 	float3 ViewSpaceNormal = NormalTexture.SampleLevel(BilinearClampSampler, UV, 0).xyz;
 	ViewSpaceNormal = normalize(ViewSpaceNormal);
 
-	// 4. Transform normal to world-space
 	float3 WorldNormal = mul((float3x3)View.ViewToTranslatedWorld, ViewSpaceNormal);
 	WorldNormal = normalize(WorldNormal);
 
-	// 5. Sample thickness for subsurface scattering
 	float Thickness = ThicknessTexture.SampleLevel(BilinearClampSampler, UV, 0);
-
-	// 6. Calculate base color with Beer's Law absorption
 	float3 AbsorbedColor = ApplyBeerLawAbsorption(FluidBaseColor, Thickness);
 
-	// 7. Encode to GBuffer (simplified manual encoding)
-	// GBufferA: World Normal (RGB) + PerObjectGBufferData (A)
+	// Encode to GBuffer
 	Output.GBufferA = float4(WorldNormal * 0.5f + 0.5f, 0.0f);
 
-	// GBufferB: Metallic, Specular, Roughness, ShadingModelID
-	// Layout: R=Metallic, G=Specular, B=Roughness, A=ShadingModelID
-	uint ShadingModelID = SHADINGMODELID_SUBSURFACE;  // Subsurface scattering
+	uint ShadingModelID = SHADINGMODELID_DEFAULT_LIT;
 	Output.GBufferB = float4(Metallic, 0.5f, Roughness, float(ShadingModelID) / 255.0f);
 
-	// GBufferC: BaseColor (RGB) + AO (A)
 	Output.GBufferC = float4(AbsorbedColor, 1.0f);
+	Output.GBufferD = float4(0.0f, 0.0f, 0.0f, 0.0f);
 
-	// GBufferD: Custom data (subsurface color for SSS)
-	Output.GBufferD = float4(AbsorbedColor * SubsurfaceOpacity, 1.0f);
-
-	// 8. Write custom depth
 	Output.OutDepth = FluidDeviceZ;
 
 	return Output;

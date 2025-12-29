@@ -23,10 +23,17 @@ struct FFluidIntermediateTextures
 
 	/** Accumulated thickness texture */
 	FRDGTextureRef ThicknessTexture = nullptr;
-	
+
+	/** GBuffer A (World Normal + PerObjectGBufferData) */
 	FRDGTextureRef GBufferATexture = nullptr;
+
+	/** GBuffer B (Metallic, Specular, Roughness, ShadingModelID) */
 	FRDGTextureRef GBufferBTexture = nullptr;
+
+	/** GBuffer C (BaseColor + AO) */
 	FRDGTextureRef GBufferCTexture = nullptr;
+
+	/** GBuffer D (Custom data) */
 	FRDGTextureRef GBufferDTexture = nullptr;
 };
 

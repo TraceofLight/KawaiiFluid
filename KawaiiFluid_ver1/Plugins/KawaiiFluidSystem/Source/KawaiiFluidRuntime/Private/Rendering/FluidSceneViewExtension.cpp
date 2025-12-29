@@ -11,6 +11,7 @@
 #include "RenderGraphEvent.h"
 #include "SceneRendering.h"
 #include "SceneTextures.h"
+#include "SceneTexturesConfig.h"
 #include "ScreenPass.h"
 #include "PostProcess/PostProcessMaterialInputs.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
