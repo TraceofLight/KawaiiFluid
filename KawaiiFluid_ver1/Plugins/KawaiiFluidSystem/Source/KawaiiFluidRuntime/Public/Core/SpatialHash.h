@@ -45,6 +45,12 @@ private:
 	/** 캐싱된 입자 위치 (거리 필터링용) */
 	TArray<FVector> CachedPositions;
 
+	/** 빈 셀 정리용 카운터 */
+	int32 RebuildCounter = 0;
+
+	/** 빈 셀 정리 주기 */
+	static constexpr int32 PurgeInterval = 300;  // 약 5초 (60fps 기준)
+
 	/** 월드 좌표를 셀 좌표로 변환 */
 	FIntVector GetCellCoord(const FVector& Position) const;
 };

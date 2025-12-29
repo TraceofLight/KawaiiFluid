@@ -14,8 +14,24 @@ FSpatialHash::FSpatialHash(float InCellSize)
 
 void FSpatialHash::Clear()
 {
-	Grid.Empty();
-	CachedPositions.Reset();
+	++RebuildCounter;
+
+	// 주기적으로 빈 셀 정리 (메모리 누수 방지)
+	if (RebuildCounter >= PurgeInterval)
+	{
+		Grid.Empty();
+		CachedPositions.Empty();
+		RebuildCounter = 0;
+	}
+	else
+	{
+		// 메모리 재할당 없이 비우기 (capacity 유지)
+		for (auto& Pair : Grid)
+		{
+			Pair.Value.Reset();
+		}
+		CachedPositions.Reset();
+	}
 }
 
 void FSpatialHash::SetCellSize(float NewCellSize)
