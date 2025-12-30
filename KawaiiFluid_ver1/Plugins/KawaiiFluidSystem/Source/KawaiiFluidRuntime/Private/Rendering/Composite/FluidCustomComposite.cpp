@@ -64,7 +64,9 @@ void FFluidCustomComposite::RenderComposite(
 	TShaderMapRef<FFluidCompositeVS> VertexShader(GlobalShaderMap);
 	TShaderMapRef<FFluidCompositePS> PixelShader(GlobalShaderMap);
 
-	FIntRect ViewRect = View.UnscaledViewRect;
+	// Use Output.ViewRect instead of View.UnscaledViewRect
+	// This ensures consistency with the output target during Slate layout changes
+	FIntRect ViewRect = Output.ViewRect;
 
 	GraphBuilder.AddPass(
 		RDG_EVENT_NAME("FluidCompositeDraw"),

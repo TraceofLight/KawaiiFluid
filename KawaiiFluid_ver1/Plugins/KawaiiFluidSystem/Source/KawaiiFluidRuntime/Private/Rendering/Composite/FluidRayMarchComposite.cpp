@@ -96,8 +96,8 @@ void FFluidRayMarchComposite::RenderComposite(
 	PassParameters->ViewMatrix = FMatrix44f(View.ViewMatrices.GetViewMatrix());
 	PassParameters->ProjectionMatrix = FMatrix44f(View.ViewMatrices.GetProjectionMatrix());
 
-	// Viewport size
-	FIntRect ViewRect = View.UnscaledViewRect;
+	// Viewport size - use Output.ViewRect for consistency during Slate layout changes
+	FIntRect ViewRect = Output.ViewRect;
 	PassParameters->ViewportSize = FVector2f(ViewRect.Width(), ViewRect.Height());
 
 	// Light parameters are accessed directly from View uniform buffer in shader
