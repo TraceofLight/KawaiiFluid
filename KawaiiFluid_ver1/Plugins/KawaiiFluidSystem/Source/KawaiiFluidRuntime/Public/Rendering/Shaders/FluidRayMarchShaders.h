@@ -54,6 +54,12 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidRayMarchParameters, )
 	SHADER_PARAMETER_SAMPLER(SamplerState, SceneTextureSampler)
 
 	//========================================
+	// SceneDepth UV Mapping
+	//========================================
+	SHADER_PARAMETER(FVector2f, SceneViewRect)
+	SHADER_PARAMETER(FVector2f, SceneTextureSize)
+
+	//========================================
 	// View Matrices
 	//========================================
 	SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)

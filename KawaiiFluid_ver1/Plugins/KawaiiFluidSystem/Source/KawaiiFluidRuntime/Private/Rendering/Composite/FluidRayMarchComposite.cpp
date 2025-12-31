@@ -8,6 +8,7 @@
 #include "GlobalShader.h"
 #include "RenderGraphUtils.h"
 #include "SceneView.h"
+#include "ScenePrivate.h"
 
 void FFluidRayMarchComposite::SetParticleData(
 	FRDGBufferSRVRef InParticleBufferSRV,
@@ -99,6 +100,15 @@ void FFluidRayMarchComposite::RenderComposite(
 	// Viewport size - use Output.ViewRect for consistency during Slate layout changes
 	FIntRect ViewRect = Output.ViewRect;
 	PassParameters->ViewportSize = FVector2f(ViewRect.Width(), ViewRect.Height());
+
+	// SceneDepth UV 변환을 위한 ViewRect와 텍스처 크기
+	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
+	PassParameters->SceneViewRect = FVector2f(
+		ViewInfo.ViewRect.Width(),
+		ViewInfo.ViewRect.Height());
+	PassParameters->SceneTextureSize = FVector2f(
+		SceneDepthTexture->Desc.Extent.X,
+		SceneDepthTexture->Desc.Extent.Y);
 
 	// Light parameters are accessed directly from View uniform buffer in shader
 	// (View.DirectionalLightDirection, View.DirectionalLightColor)

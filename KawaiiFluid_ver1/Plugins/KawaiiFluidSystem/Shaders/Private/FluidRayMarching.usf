@@ -45,6 +45,10 @@ float4x4 ViewMatrix;
 float4x4 ProjectionMatrix;
 float2 ViewportSize;
 
+// SceneDepth UV 변환용 파라미터
+float2 SceneViewRect;    // SceneDepth 유효 영역 크기
+float2 SceneTextureSize; // SceneDepth 텍스처 전체 크기
+
 // Light Direction accessed from View uniform buffer:
 // View.DirectionalLightDirection, View.DirectionalLightColor
 
@@ -207,7 +211,9 @@ void MainPS(
 	GetCameraRay(UV, RayOrigin, RayDirection);
 
 	// Get scene depth for occlusion
-	float SceneDeviceZ = SceneDepthTexture.SampleLevel(SceneTextureSampler, UV, 0).r;
+	// SceneDepth UV 변환: ScreenUV를 SceneDepth의 유효 영역에 매핑
+	float2 SceneUV = UV * (SceneViewRect / SceneTextureSize);
+	float SceneDeviceZ = SceneDepthTexture.SampleLevel(SceneTextureSampler, SceneUV, 0).r;
 	float SceneLinearDepth = ConvertDeviceZToLinearDepth(SceneDeviceZ);
 
 	// Clamp max distance to scene depth
