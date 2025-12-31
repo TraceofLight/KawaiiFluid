@@ -54,6 +54,15 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidRayMarchParameters, )
 	SHADER_PARAMETER_SAMPLER(SamplerState, SceneTextureSampler)
 
 	//========================================
+	// SDF Volume (for optimized ray marching)
+	//========================================
+	SHADER_PARAMETER_RDG_TEXTURE_SRV(Texture3D<float>, SDFVolumeTexture)
+	SHADER_PARAMETER_SAMPLER(SamplerState, SDFVolumeSampler)
+	SHADER_PARAMETER(FVector3f, SDFVolumeMin)
+	SHADER_PARAMETER(FVector3f, SDFVolumeMax)
+	SHADER_PARAMETER(FIntVector, SDFVolumeResolution)
+
+	//========================================
 	// SceneDepth UV Mapping
 	//========================================
 	SHADER_PARAMETER(FVector2f, SceneViewRect)
@@ -98,6 +107,11 @@ public:
 };
 
 /**
+ * @brief Shader permutation dimension for SDF Volume optimization
+ */
+class FUseSDFVolumeDim : SHADER_PERMUTATION_BOOL("USE_SDF_VOLUME");
+
+/**
  * @brief Pixel shader for Ray Marching SDF fluid rendering
  *
  * Performs ray marching through metaball SDF field to render
@@ -107,6 +121,10 @@ public:
  * - Refraction
  * - Specular highlights
  * - Beer's Law absorption
+ *
+ * Supports two modes via USE_SDF_VOLUME permutation:
+ * - USE_SDF_VOLUME=0: Original O(N) particle iteration (slower)
+ * - USE_SDF_VOLUME=1: Optimized O(1) volume texture sampling (faster)
  */
 class FFluidRayMarchPS : public FGlobalShader
 {
@@ -115,6 +133,7 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FFluidRayMarchPS, FGlobalShader);
 
 	using FParameters = FFluidRayMarchParameters;
+	using FPermutationDomain = TShaderPermutationDomain<FUseSDFVolumeDim>;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{

@@ -143,6 +143,21 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 		meta = (EditCondition = "SSFRMode == ESSFRRenderingMode::RayMarching"))
 	FLinearColor SSSColor = FLinearColor(1.0f, 0.5f, 0.3f, 1.0f);
 
+	/**
+	 * Use SDF Volume optimization for Ray Marching
+	 * When enabled, bakes SDF to 3D texture using compute shader (~400x faster)
+	 * When disabled, uses direct particle iteration (legacy mode)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
+		meta = (EditCondition = "SSFRMode == ESSFRRenderingMode::RayMarching"))
+	bool bUseSDFVolumeOptimization = true;
+
+	/** SDF Volume resolution (64 = 64x64x64 voxels) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
+		meta = (EditCondition = "SSFRMode == ESSFRRenderingMode::RayMarching && bUseSDFVolumeOptimization",
+			ClampMin = "32", ClampMax = "256"))
+	int32 SDFVolumeResolution = 64;
+
 	//========================================
 	// G-Buffer Mode Parameters (for future implementation)
 	//========================================
@@ -192,6 +207,8 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.RayMarchMaxDistance));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSIntensity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSColor.ToString()));
+	Hash = HashCombine(Hash, GetTypeHash(Params.bUseSDFVolumeOptimization));
+	Hash = HashCombine(Hash, GetTypeHash(Params.SDFVolumeResolution));
 	return Hash;
 }
 
@@ -221,5 +238,7 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 	       FMath::IsNearlyEqual(A.RayMarchHitThreshold, B.RayMarchHitThreshold, 0.0001f) &&
 	       FMath::IsNearlyEqual(A.RayMarchMaxDistance, B.RayMarchMaxDistance, 0.001f) &&
 	       FMath::IsNearlyEqual(A.SSSIntensity, B.SSSIntensity, 0.001f) &&
-	       A.SSSColor.Equals(B.SSSColor, 0.001f);
+	       A.SSSColor.Equals(B.SSSColor, 0.001f) &&
+	       A.bUseSDFVolumeOptimization == B.bUseSDFVolumeOptimization &&
+	       A.SDFVolumeResolution == B.SDFVolumeResolution;
 }

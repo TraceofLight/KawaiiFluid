@@ -19,6 +19,7 @@
 #include "Rendering/KawaiiFluidRenderResource.h"
 #include "Rendering/Composite/IFluidCompositePass.h"
 #include "Rendering/Composite/FluidRayMarchComposite.h"
+#include "Rendering/SDFVolumeManager.h"
 
 static TRefCountPtr<IPooledRenderTarget> GFluidCompositeDebug_KeepAlive;
 
@@ -383,6 +384,9 @@ void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 				// ============================================
 				UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: RayMarchingBatches count = %d"), RayMarchingBatches.Num());
 
+				// SDF Volume Manager for optimized ray marching
+				static FSDFVolumeManager SDFVolumeManager;
+
 				for (auto& Batch : RayMarchingBatches)
 				{
 					const FFluidRenderingParameters& BatchParams = Batch.Key;
@@ -452,11 +456,71 @@ void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 						FFluidRayMarchComposite* RayMarchComposite =
 							static_cast<FFluidRayMarchComposite*>(Renderers[0]->GetCompositePass().Get());
 
-						// Set particle data
-						RayMarchComposite->SetParticleData(
-							ParticleBufferSRV,
-							AllParticlePositions.Num(),
-							AverageParticleRadius);
+						// Check if SDF Volume optimization is enabled
+						const bool bUseSDFVolume = BatchParams.bUseSDFVolumeOptimization;
+
+						if (bUseSDFVolume)
+						{
+							// ============================================
+							// Optimized Path: Bake SDF to 3D Volume Texture
+							// ============================================
+							RDG_EVENT_SCOPE(GraphBuilder, "SDFVolumeBake");
+
+							// Set volume resolution from parameters
+							int32 Resolution = FMath::Clamp(BatchParams.SDFVolumeResolution, 32, 256);
+							SDFVolumeManager.SetVolumeResolution(FIntVector(Resolution, Resolution, Resolution));
+
+							// Calculate bounding box for volume
+							FVector3f VolumeMin, VolumeMax;
+							float Margin = AverageParticleRadius * 2.0f;  // Extra margin around particles
+							CalculateParticleBoundingBox(AllParticlePositions, AverageParticleRadius, Margin, VolumeMin, VolumeMax);
+
+							UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: SDF Volume Bake - Min:(%.1f,%.1f,%.1f) Max:(%.1f,%.1f,%.1f)"),
+								VolumeMin.X, VolumeMin.Y, VolumeMin.Z,
+								VolumeMax.X, VolumeMax.Y, VolumeMax.Z);
+
+							// Bake SDF volume using compute shader
+							FRDGTextureSRVRef SDFVolumeSRV = SDFVolumeManager.BakeSDFVolume(
+								GraphBuilder,
+								ParticleBufferSRV,
+								AllParticlePositions.Num(),
+								AverageParticleRadius,
+								BatchParams.SDFSmoothness,
+								VolumeMin,
+								VolumeMax);
+
+							// Set volume data for ray marching
+							RayMarchComposite->SetUseSDFVolume(true);
+							RayMarchComposite->SetSDFVolumeData(
+								SDFVolumeSRV,
+								VolumeMin,
+								VolumeMax,
+								SDFVolumeManager.GetVolumeResolution());
+
+							// Still need particle data for radius
+							RayMarchComposite->SetParticleData(
+								ParticleBufferSRV,
+								AllParticlePositions.Num(),
+								AverageParticleRadius);
+
+							UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: Using SDF Volume optimization (%dx%dx%d)"),
+								SDFVolumeManager.GetVolumeResolution().X,
+								SDFVolumeManager.GetVolumeResolution().Y,
+								SDFVolumeManager.GetVolumeResolution().Z);
+						}
+						else
+						{
+							// ============================================
+							// Legacy Path: Direct particle iteration
+							// ============================================
+							RayMarchComposite->SetUseSDFVolume(false);
+							RayMarchComposite->SetParticleData(
+								ParticleBufferSRV,
+								AllParticlePositions.Num(),
+								AverageParticleRadius);
+
+							UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: Using direct particle iteration (legacy)"));
+						}
 
 						// Render (no intermediate textures needed for ray marching)
 						FFluidIntermediateTextures DummyIntermediateTextures;

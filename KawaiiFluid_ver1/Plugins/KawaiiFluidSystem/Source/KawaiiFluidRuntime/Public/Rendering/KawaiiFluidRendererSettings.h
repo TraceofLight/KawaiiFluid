@@ -172,6 +172,21 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSSFRRendererSettings
 		meta = (EditCondition = "bEnabled && SSFRMode == ESSFRRenderingMode::RayMarching"))
 	FLinearColor SSSColor = FLinearColor(1.0f, 0.5f, 0.3f, 1.0f);
 
+	/**
+	 * Use SDF Volume optimization for Ray Marching
+	 * When enabled, bakes SDF to 3D texture using compute shader (~400x faster)
+	 * When disabled, uses direct particle iteration (legacy mode)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
+		meta = (EditCondition = "bEnabled && SSFRMode == ESSFRRenderingMode::RayMarching"))
+	bool bUseSDFVolumeOptimization = true;
+
+	/** SDF Volume resolution (64 = 64x64x64 voxels) - higher = more precise but slower compute */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
+		meta = (EditCondition = "bEnabled && SSFRMode == ESSFRRenderingMode::RayMarching && bUseSDFVolumeOptimization",
+			ClampMin = "32", ClampMax = "256"))
+	int32 SDFVolumeResolution = 64;
+
 	//========================================
 	// G-Buffer Mode Parameters
 	//========================================

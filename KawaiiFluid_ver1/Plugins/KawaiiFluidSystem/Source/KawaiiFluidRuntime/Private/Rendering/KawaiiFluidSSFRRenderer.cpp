@@ -128,6 +128,8 @@ void UKawaiiFluidSSFRRenderer::ApplySettings(const FKawaiiFluidSSFRRendererSetti
 	LocalParameters.RayMarchMaxDistance = Settings.RayMarchMaxDistance;
 	LocalParameters.SSSIntensity = Settings.SSSIntensity;
 	LocalParameters.SSSColor = Settings.SSSColor;
+	LocalParameters.bUseSDFVolumeOptimization = Settings.bUseSDFVolumeOptimization;
+	LocalParameters.SDFVolumeResolution = Settings.SDFVolumeResolution;
 
 	// MaxRenderParticles stays as member variable (not in LocalParameters)
 	MaxRenderParticles = Settings.MaxRenderParticles;

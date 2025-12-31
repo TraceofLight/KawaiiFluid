@@ -20,6 +20,18 @@ void FFluidRayMarchComposite::SetParticleData(
 	ParticleRadius = InParticleRadius;
 }
 
+void FFluidRayMarchComposite::SetSDFVolumeData(
+	FRDGTextureSRVRef InSDFVolumeSRV,
+	const FVector3f& InVolumeMin,
+	const FVector3f& InVolumeMax,
+	const FIntVector& InVolumeResolution)
+{
+	SDFVolumeSRV = InSDFVolumeSRV;
+	VolumeMin = InVolumeMin;
+	VolumeMax = InVolumeMax;
+	VolumeResolution = InVolumeResolution;
+}
+
 void FFluidRayMarchComposite::RenderComposite(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
@@ -29,14 +41,27 @@ void FFluidRayMarchComposite::RenderComposite(
 	FRDGTextureRef SceneColorTexture,
 	FScreenPassRenderTarget Output)
 {
-	UE_LOG(LogTemp, Log, TEXT("FFluidRayMarchComposite::RenderComposite called - Particles: %d, Radius: %.2f"),
-		ParticleCount, ParticleRadius);
+	UE_LOG(LogTemp, Log, TEXT("FFluidRayMarchComposite::RenderComposite called - Particles: %d, Radius: %.2f, UseSDFVolume: %s"),
+		ParticleCount, ParticleRadius, bUseSDFVolume ? TEXT("true") : TEXT("false"));
 
-	// Validate particle data
-	if (!ParticleBufferSRV || ParticleCount <= 0)
+	// Validate based on rendering mode
+	if (bUseSDFVolume)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FFluidRayMarchComposite: No particle data set"));
-		return;
+		// SDF Volume mode: need volume texture
+		if (!SDFVolumeSRV)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FFluidRayMarchComposite: SDF Volume mode enabled but no volume data set"));
+			return;
+		}
+	}
+	else
+	{
+		// Legacy mode: need particle data
+		if (!ParticleBufferSRV || ParticleCount <= 0)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FFluidRayMarchComposite: No particle data set"));
+			return;
+		}
 	}
 
 	if (!SceneDepthTexture || !SceneColorTexture)
@@ -58,10 +83,26 @@ void FFluidRayMarchComposite::RenderComposite(
 
 	auto* PassParameters = GraphBuilder.AllocParameters<FFluidRayMarchPS::FParameters>();
 
-	// Particle data
+	// Particle data (still needed for ParticleRadius even in volume mode)
 	PassParameters->ParticlePositions = ParticleBufferSRV;
-	PassParameters->ParticleCount = ParticleCount;
+	PassParameters->ParticleCount = ParticleCount;  // Always pass actual count
 	PassParameters->ParticleRadius = ParticleRadius;
+
+	// SDF Volume data (for optimized mode)
+	if (bUseSDFVolume && SDFVolumeSRV)
+	{
+		PassParameters->SDFVolumeTexture = SDFVolumeSRV;
+		PassParameters->SDFVolumeSampler = TStaticSamplerState<
+			SF_Trilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
+		PassParameters->SDFVolumeMin = VolumeMin;
+		PassParameters->SDFVolumeMax = VolumeMax;
+		PassParameters->SDFVolumeResolution = VolumeResolution;
+
+		UE_LOG(LogTemp, Log, TEXT("FFluidRayMarchComposite: SDF Volume - Min:(%.1f,%.1f,%.1f) Max:(%.1f,%.1f,%.1f) Res:(%d,%d,%d)"),
+			VolumeMin.X, VolumeMin.Y, VolumeMin.Z,
+			VolumeMax.X, VolumeMax.Y, VolumeMax.Z,
+			VolumeResolution.X, VolumeResolution.Y, VolumeResolution.Z);
+	}
 
 	// Ray marching parameters
 	PassParameters->SDFSmoothness = RenderParams.SDFSmoothness;
@@ -117,13 +158,20 @@ void FFluidRayMarchComposite::RenderComposite(
 	PassParameters->RenderTargets[0] = FRenderTargetBinding(
 		Output.Texture, ERenderTargetLoadAction::ELoad);
 
-	// Get shaders
+	// Get shaders with appropriate permutation
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
 	TShaderMapRef<FFluidRayMarchVS> VertexShader(GlobalShaderMap);
-	TShaderMapRef<FFluidRayMarchPS> PixelShader(GlobalShaderMap);
+
+	// Select pixel shader permutation based on SDF volume usage
+	FFluidRayMarchPS::FPermutationDomain PermutationVector;
+	PermutationVector.Set<FUseSDFVolumeDim>(bUseSDFVolume);
+	TShaderMapRef<FFluidRayMarchPS> PixelShader(GlobalShaderMap, PermutationVector);
+
+	const bool bUseVolume = bUseSDFVolume;  // Capture for lambda
 
 	GraphBuilder.AddPass(
-		RDG_EVENT_NAME("FluidRayMarchDraw (Particles: %d)", ParticleCount),
+		RDG_EVENT_NAME("FluidRayMarchDraw (%s, Particles: %d)",
+			bUseVolume ? TEXT("SDFVolume") : TEXT("Direct"), ParticleCount),
 		PassParameters,
 		ERDGPassFlags::Raster,
 		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)
@@ -160,7 +208,8 @@ void FFluidRayMarchComposite::RenderComposite(
 			RHICmdList.DrawPrimitive(0, 1, 1);
 		});
 
-	// Clear particle data for next frame
+	// Clear data for next frame
 	ParticleBufferSRV = nullptr;
 	ParticleCount = 0;
+	SDFVolumeSRV = nullptr;
 }

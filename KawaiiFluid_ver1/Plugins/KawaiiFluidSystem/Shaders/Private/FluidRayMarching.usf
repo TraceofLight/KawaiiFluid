@@ -9,10 +9,21 @@
 // Shader Parameters
 //=============================================================================
 
-// Particle Data
+// Particle Data (used when USE_SDF_VOLUME is 0)
 StructuredBuffer<float3> ParticlePositions;
 int ParticleCount;
 float ParticleRadius;
+
+//=============================================================================
+// SDF Volume Parameters (used when USE_SDF_VOLUME is 1)
+//=============================================================================
+#if USE_SDF_VOLUME
+Texture3D<float> SDFVolumeTexture;
+SamplerState SDFVolumeSampler;
+float3 SDFVolumeMin;
+float3 SDFVolumeMax;
+int3 SDFVolumeResolution;
+#endif
 
 // Ray Marching Parameters
 float SDFSmoothness;
@@ -101,6 +112,61 @@ float ConvertDeviceZToLinearDepth(float DeviceZ)
 }
 
 //=============================================================================
+// SDF Volume Sampling (when USE_SDF_VOLUME is enabled)
+//=============================================================================
+
+#if USE_SDF_VOLUME
+// Sample SDF from 3D volume texture
+float SampleSDFVolume(float3 worldPos)
+{
+	// Convert world position to normalized UVW coordinates
+	float3 uvw = (worldPos - SDFVolumeMin) / (SDFVolumeMax - SDFVolumeMin);
+
+	// Check if position is outside volume bounds
+	if (any(uvw < 0.0) || any(uvw > 1.0))
+	{
+		return 1e10;  // Return large distance if outside volume
+	}
+
+	// Sample 3D texture with trilinear interpolation
+	return SDFVolumeTexture.SampleLevel(SDFVolumeSampler, uvw, 0);
+}
+
+// Calculate normal from SDF volume using central differences
+float3 CalculateSDFNormalFromVolume(float3 p, float centerSDF)
+{
+	const float eps = 0.5;  // Slightly larger epsilon for volume sampling
+
+	float3 n;
+	n.x = SampleSDFVolume(p + float3(eps, 0, 0)) - SampleSDFVolume(p - float3(eps, 0, 0));
+	n.y = SampleSDFVolume(p + float3(0, eps, 0)) - SampleSDFVolume(p - float3(0, eps, 0));
+	n.z = SampleSDFVolume(p + float3(0, 0, eps)) - SampleSDFVolume(p - float3(0, 0, eps));
+
+	return normalize(n);
+}
+
+// Ray-Box Intersection (for SDF Volume bounds)
+// Returns true if ray intersects AABB, outputs entry and exit distances
+bool RayBoxIntersect(float3 ro, float3 rd, float3 boxMin, float3 boxMax, out float tMin, out float tMax)
+{
+	float3 invRd = 1.0 / rd;
+	float3 t0 = (boxMin - ro) * invRd;
+	float3 t1 = (boxMax - ro) * invRd;
+
+	float3 tNear = min(t0, t1);
+	float3 tFar = max(t0, t1);
+
+	tMin = max(max(tNear.x, tNear.y), tNear.z);
+	tMax = min(min(tFar.x, tFar.y), tFar.z);
+
+	// Clamp tMin to 0 if camera is inside the box
+	tMin = max(tMin, 0.0);
+
+	return tMax >= tMin && tMax > 0.0;
+}
+#endif
+
+//=============================================================================
 // Ray Marching
 //=============================================================================
 
@@ -114,14 +180,38 @@ FRayMarchResult RayMarchSDF(float3 ro, float3 rd, float maxDist)
 	result.Thickness = 0.0;
 	result.LastSDF = 1e10;
 
+#if USE_SDF_VOLUME
+	// Find where ray enters/exits the SDF volume bounds
+	float tBoxMin, tBoxMax;
+	if (!RayBoxIntersect(ro, rd, SDFVolumeMin, SDFVolumeMax, tBoxMin, tBoxMax))
+	{
+		// Ray doesn't intersect volume - no hit possible
+		return result;
+	}
+
+	// Start marching from volume entry point
+	float t = tBoxMin + 0.01;
+	float marchMaxDist = min(maxDist, tBoxMax);
+#else
 	float t = 0.0;
+	float marchMaxDist = maxDist;
+#endif
+
 	float lastSDF = 1e10;
 
 	// Main ray marching loop
-	for (int i = 0; i < MaxRayMarchSteps && t < maxDist; ++i)
+	for (int i = 0; i < MaxRayMarchSteps && t < marchMaxDist; ++i)
 	{
 		float3 p = ro + rd * t;
+
+#if USE_SDF_VOLUME
+		// Optimized path: Sample from pre-baked 3D SDF texture (O(1))
+		float sdf = SampleSDFVolume(p);
+#else
+		// Original path: Evaluate metaball SDF directly (O(N) particles)
 		float sdf = EvaluateMetaballSDF(p, ParticlePositions, ParticleCount, ParticleRadius, SDFSmoothness);
+#endif
+
 		lastSDF = sdf;
 
 		// Hit detection
@@ -132,8 +222,13 @@ FRayMarchResult RayMarchSDF(float3 ro, float3 rd, float maxDist)
 			result.Position = p;
 			result.LastSDF = sdf;
 
+#if USE_SDF_VOLUME
+			// Calculate normal from volume texture
+			result.Normal = CalculateSDFNormalFromVolume(p, sdf);
+#else
 			// Calculate normal using 3-tap (faster)
 			result.Normal = CalculateSDFNormal3Tap(p, sdf, ParticlePositions, ParticleCount, ParticleRadius, SDFSmoothness);
+#endif
 
 			// Estimate thickness based on SDF and particle radius (simple approximation)
 			// Avoids internal ray marching which causes visible internal boundaries
@@ -199,12 +294,17 @@ void MainPS(
 {
 	float2 UV = Input.UV;
 
-	// Early out if no particles
+#if USE_SDF_VOLUME
+	// SDF Volume mode: no early exit based on ParticleCount
+	// We use the pre-baked 3D SDF texture instead
+#else
+	// Legacy mode: Early out if no particles
 	if (ParticleCount <= 0)
 	{
 		discard;
 		return;
 	}
+#endif
 
 	// Get camera ray
 	float3 RayOrigin, RayDirection;
