@@ -230,33 +230,46 @@ void FKawaiiTranslucentShading::RenderPostLightingPass(
 	PassParameters->TintColor = FVector3f(RenderParams.FluidColor.R, RenderParams.FluidColor.G, RenderParams.FluidColor.B);
 	PassParameters->AbsorptionCoefficient = RenderParams.AbsorptionCoefficient;
 
-	// Viewport info - Use Output.ViewRect for rendering, ViewInfo.ViewRect for GBuffer sampling
+	// Viewport info - In PrePostProcessPass, all textures are at internal resolution
+	// Output.ViewRect == ViewInfo.ViewRect (same internal resolution)
 	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
-	FIntRect OutputRect = Output.ViewRect;      // PostProcessing output region
-	FIntRect GBufferRect = ViewInfo.ViewRect;   // GBuffer rendering region (may differ due to Screen Percentage)
+	FIntRect ViewRect = Output.ViewRect;  // Same as ViewInfo.ViewRect in PrePostProcessPass
 
+	// All coordinates are now at the same internal resolution
 	// Output coordinates (for rendering)
-	PassParameters->OutputViewRect = FVector2f(OutputRect.Width(), OutputRect.Height());
-	PassParameters->OutputViewRectMin = FVector2f(OutputRect.Min.X, OutputRect.Min.Y);
+	PassParameters->OutputViewRect = FVector2f(ViewRect.Width(), ViewRect.Height());
+	PassParameters->OutputViewRectMin = FVector2f(ViewRect.Min.X, ViewRect.Min.Y);
 	PassParameters->OutputTextureSize = FVector2f(
 		Output.Texture->Desc.Extent.X,
 		Output.Texture->Desc.Extent.Y);
 
-	// GBuffer coordinates (for sampling - may be different resolution)
-	PassParameters->GBufferViewRect = FVector2f(GBufferRect.Width(), GBufferRect.Height());
-	PassParameters->GBufferViewRectMin = FVector2f(GBufferRect.Min.X, GBufferRect.Min.Y);
+	// GBuffer coordinates (same as Output in PrePostProcessPass)
+	PassParameters->GBufferViewRect = FVector2f(ViewRect.Width(), ViewRect.Height());
+	PassParameters->GBufferViewRectMin = FVector2f(ViewRect.Min.X, ViewRect.Min.Y);
 	PassParameters->GBufferTextureSize = FVector2f(
 		GBufferATexture->Desc.Extent.X,
 		GBufferATexture->Desc.Extent.Y);
 
-	// SceneColor texture size
+	// SceneColor coordinates (same as Output/GBuffer in PrePostProcessPass)
+	PassParameters->SceneViewRect = FVector2f(ViewRect.Width(), ViewRect.Height());
 	PassParameters->SceneTextureSize = FVector2f(
 		LitSceneColorTexture->Desc.Extent.X,
 		LitSceneColorTexture->Desc.Extent.Y);
 
-	// Viewport size (Output resolution)
-	PassParameters->ViewportSize = FVector2f(OutputRect.Width(), OutputRect.Height());
-	PassParameters->InverseViewportSize = FVector2f(1.0f / OutputRect.Width(), 1.0f / OutputRect.Height());
+	// Viewport size
+	PassParameters->ViewportSize = FVector2f(ViewRect.Width(), ViewRect.Height());
+	PassParameters->InverseViewportSize = FVector2f(1.0f / ViewRect.Width(), 1.0f / ViewRect.Height());
+
+	// Debug logging for transparency pass coordinates
+	UE_LOG(LogTemp, Warning, TEXT("=== TransparencyPass Coordinates (PrePostProcess - Internal Resolution) ==="));
+	UE_LOG(LogTemp, Warning, TEXT("ViewRect: Min(%d,%d) Size(%d,%d)"),
+		ViewRect.Min.X, ViewRect.Min.Y, ViewRect.Width(), ViewRect.Height());
+	UE_LOG(LogTemp, Warning, TEXT("Output.TextureSize: (%d,%d)"),
+		Output.Texture->Desc.Extent.X, Output.Texture->Desc.Extent.Y);
+	UE_LOG(LogTemp, Warning, TEXT("GBufferTextureSize: (%d,%d)"),
+		GBufferATexture->Desc.Extent.X, GBufferATexture->Desc.Extent.Y);
+	UE_LOG(LogTemp, Warning, TEXT("LitSceneColorTexture Size: (%d,%d)"),
+		LitSceneColorTexture->Desc.Extent.X, LitSceneColorTexture->Desc.Extent.Y);
 
 	// View uniforms
 	PassParameters->View = View.ViewUniformBuffer;
@@ -281,16 +294,16 @@ void FKawaiiTranslucentShading::RenderPostLightingPass(
 		RDG_EVENT_NAME("TranslucentShading_Transparency"),
 		PassParameters,
 		ERDGPassFlags::Raster,
-		[VertexShader, PixelShader, PassParameters, OutputRect](FRHICommandList& RHICmdList)
+		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)
 		{
-			// Use Output.ViewRect for rendering (PostProcessing output resolution)
+			// Use ViewRect (internal resolution - same as GBuffer)
 			RHICmdList.SetViewport(
-				OutputRect.Min.X, OutputRect.Min.Y, 0.0f,
-				OutputRect.Max.X, OutputRect.Max.Y, 1.0f);
+				ViewRect.Min.X, ViewRect.Min.Y, 0.0f,
+				ViewRect.Max.X, ViewRect.Max.Y, 1.0f);
 			RHICmdList.SetScissorRect(
 				true,
-				OutputRect.Min.X, OutputRect.Min.Y,
-				OutputRect.Max.X, OutputRect.Max.Y);
+				ViewRect.Min.X, ViewRect.Min.Y,
+				ViewRect.Max.X, ViewRect.Max.Y);
 
 			FGraphicsPipelineStateInitializer GraphicsPSOInit;
 			GraphicsPSOInit.BoundShaderState.VertexDeclarationRHI = GEmptyVertexDeclaration.VertexDeclarationRHI;

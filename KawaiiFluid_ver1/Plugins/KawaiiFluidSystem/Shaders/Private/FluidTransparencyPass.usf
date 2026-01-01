@@ -46,6 +46,7 @@ float2 GBufferViewRectMin;  // GBuffer ViewRect 시작점
 float2 GBufferTextureSize;  // GBuffer 텍스처 크기
 
 // UV mapping - SceneColor (same as Output in most cases)
+float2 SceneViewRect;       // SceneColor 렌더링 영역 크기
 float2 SceneTextureSize;
 
 //-----------------------------------------------------------------------------
@@ -55,6 +56,7 @@ float2 SceneTextureSize;
 struct FTransparencyVSToPS
 {
 	float4 Position : SV_POSITION;
+	float2 UV : TEXCOORD0;
 };
 
 void MainVS(
@@ -62,6 +64,7 @@ void MainVS(
 	out FTransparencyVSToPS Output)
 {
 	float2 UV = float2((VertexID << 1) & 2, VertexID & 2);
+	Output.UV = UV;
 	Output.Position = float4(UV * float2(2, -2) + float2(-1, 1), 0.5f, 1.0f);
 }
 
@@ -100,36 +103,28 @@ void MainPS(
 	FTransparencyVSToPS Input,
 	out float4 OutColor : SV_Target0)
 {
-	// SV_POSITION is in Output coordinate space (PostProcessing output resolution)
-	float2 OutputScreenPos = Input.Position.xy;
+	// UV from vertex shader (0-1 range) - covers viewport
+	float2 UV = Input.UV;
 
-	// Calculate position relative to Output ViewRect (0 to OutputViewRect size)
-	float2 OutputPos = OutputScreenPos - OutputViewRectMin;
+	// In PrePostProcessPass, all textures are at the same internal resolution
+	// GBuffer, SceneColor, and Output all share the same ViewRect
+	// So we use the same UV mapping for all textures
+	float2 PixelPos = UV * GBufferViewRect + GBufferViewRectMin;
+	float2 TextureUV = PixelPos / GBufferTextureSize;
 
-	// Normalize to 0-1 within Output ViewRect
-	float2 OutputUV = OutputPos / OutputViewRect;
+	// For SceneColor (same resolution as GBuffer in PrePostProcessPass)
+	float2 SceneTextureUV = PixelPos / SceneTextureSize;
 
-	// Convert Output UV to GBuffer coordinate space
-	// GBuffer was rendered at potentially different resolution (Screen Percentage)
-	float2 GBufferPos = OutputUV * GBufferViewRect + GBufferViewRectMin;
-	float2 GBufferTextureUV = GBufferPos / GBufferTextureSize;
-
-	// SceneColor texture UV (same coordinate space as Output)
-	float2 SceneTextureUV = OutputScreenPos / SceneTextureSize;
-
-	// Viewport UV for refraction offset calculation (0-1 normalized)
-	float2 ViewportUV = OutputUV;
-
-	// Sample original lit scene color (use SceneTextureUV)
+	// Sample original lit scene color
 	float4 LitColor = LitSceneColorTexture.SampleLevel(SceneColorSampler, SceneTextureUV, 0);
 
-	// Sample GBuffer normal (use GBufferTextureUV)
-	float4 GBufferA = FluidGBufferATex.SampleLevel(GBufferSampler, GBufferTextureUV, 0);
+	// Sample GBuffer normal
+	float4 GBufferA = FluidGBufferATex.SampleLevel(GBufferSampler, TextureUV, 0);
 	float3 WorldNormal = GBufferA.rgb * 2.0 - 1.0;
 	WorldNormal = normalize(WorldNormal);
 
-	// Sample thickness from GBufferD.r (use GBufferTextureUV)
-	float4 GBufferD = FluidGBufferDTex.SampleLevel(GBufferSampler, GBufferTextureUV, 0);
+	// Sample thickness from GBufferD.r
+	float4 GBufferD = FluidGBufferDTex.SampleLevel(GBufferSampler, TextureUV, 0);
 	float Thickness = GBufferD.r * 100.0;  // Restore original scale
 
 	// Use GBufferD as mask - if thickness is 0, this is not a slime pixel
@@ -139,23 +134,18 @@ void MainPS(
 		discard;
 	}
 
-	// DEBUG: Output bright magenta to see exactly where transparency pass renders
-	OutColor = float4(1.0, 0.0, 1.0, 1.0);
-	return;
-
 	// Approximate view direction (assume looking at screen center)
 	float3 ViewDir = float3(0, 0, 1);
 
 	// Calculate Fresnel
 	float Fresnel = SchlickFresnel(WorldNormal, ViewDir, FresnelStrength);
 
-	// Calculate refraction UV offset (in Output UV space, 0-1 normalized)
+	// Calculate refraction UV offset (in normalized UV space, 0-1)
 	float2 RefractionOffset = CalculateRefractionOffset(WorldNormal, RefractiveIndex, RefractionStrength);
-	// Apply offset in Output UV space
-	float2 RefractedOutputUV = saturate(ViewportUV + RefractionOffset);
-	// Convert refracted Output UV back to screen position, then to texture UV
-	float2 RefractedScreenPos = OutputViewRectMin + RefractedOutputUV * OutputViewRect;
-	float2 RefractedTextureUV = RefractedScreenPos / SceneTextureSize;
+	// Apply offset in normalized UV space and convert to texture UV
+	float2 RefractedUV = saturate(UV + RefractionOffset);
+	float2 RefractedPixelPos = RefractedUV * GBufferViewRect + GBufferViewRectMin;
+	float2 RefractedTextureUV = RefractedPixelPos / SceneTextureSize;
 
 	// Sample background through refraction
 	float3 RefractedBackground = LitSceneColorTexture.SampleLevel(SceneColorSampler, RefractedTextureUV, 0).rgb;
@@ -177,6 +167,11 @@ void MainPS(
 
 	// Output with opaque alpha (blending is done in shader, not blend state)
 	OutColor = float4(FinalColor, 1.0);
+
+	// Debug options (uncomment to use):
+	// OutColor = float4(UV.x, UV.y, 0, 1);  // UV visualization
+	// OutColor = float4(TextureUV.x, TextureUV.y, 0, 1);  // Texture UV
+	// OutColor = float4(RefractedBackground, 1.0);  // Sampled SceneColor
 }
 
 //-----------------------------------------------------------------------------

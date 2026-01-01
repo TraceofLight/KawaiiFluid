@@ -6,6 +6,7 @@
 #include "SceneViewExtension.h"
 
 class UFluidRendererSubsystem;
+struct FPostProcessingInputs;
 
 /**
  * SSFR 렌더링 파이프라인 인젝션을 위한 Scene View Extension
@@ -41,6 +42,16 @@ public:
 		FSceneView& InView,
 		const FRenderTargetBindingSlots& RenderTargets,
 		TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures) override;
+
+	/**
+	 * TransparencyPass - called after Lighting, before PostProcessing
+	 * This is the correct injection point for transparency/refraction effects
+	 * Both GBuffer and SceneColor are at internal resolution here
+	 */
+	virtual void PrePostProcessPass_RenderThread(
+		FRDGBuilder& GraphBuilder,
+		const FSceneView& View,
+		const FPostProcessingInputs& Inputs) override;
 
 	// End of ISceneViewExtension interface
 

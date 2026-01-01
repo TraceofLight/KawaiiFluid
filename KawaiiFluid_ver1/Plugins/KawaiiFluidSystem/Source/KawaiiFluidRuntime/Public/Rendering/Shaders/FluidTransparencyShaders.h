@@ -52,6 +52,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidTransparencyParameters, )
 	SHADER_PARAMETER(FVector2f, GBufferTextureSize)  // GBuffer 텍스처 크기
 
 	// UV mapping - SceneColor (same as Output in most cases)
+	SHADER_PARAMETER(FVector2f, SceneViewRect)      // SceneColor 렌더링 영역 크기
 	SHADER_PARAMETER(FVector2f, SceneTextureSize)
 
 	// View uniforms
