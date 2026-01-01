@@ -34,27 +34,24 @@ public:
 
 	/**
 	 * Execute at PostBasePass timing (PostRenderBasePassDeferred_RenderThread)
-	 * Used for: GBuffer write, Translucent Stencil marking, intermediate texture generation
+	 * Used for: GBuffer write, Translucent Stencil marking
 	 *
 	 * Called for:
 	 * - GBuffer mode: Write to GBuffer textures
 	 * - Translucent mode: Write to GBuffer + Stencil=0x01 marking
-	 * - PostProcess mode: Generate intermediate textures (depth, normal, thickness)
 	 *
 	 * @param GraphBuilder     RDG builder for pass registration
 	 * @param View             Scene view for rendering
 	 * @param RenderParams     Fluid rendering parameters (includes ShadingMode)
 	 * @param Renderers        Array of renderers to process
 	 * @param SceneDepthTexture Scene depth texture
-	 * @param Output           Render target (may be unused for GBuffer write)
 	 */
 	virtual void ExecutePostBasePass(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture,
-		FScreenPassRenderTarget Output) = 0;
+		FRDGTextureRef SceneDepthTexture) = 0;
 
 	/**
 	 * Execute at PrePostProcess timing (PrePostProcessPass_RenderThread)

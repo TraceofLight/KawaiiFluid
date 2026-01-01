@@ -28,14 +28,13 @@ public:
 	// IKawaiiMetaballRenderingPipeline Interface
 	//========================================
 
-	/** Execute at PostBasePass timing - generates intermediate textures */
+	/** Execute at PostBasePass timing - writes to GBuffer for GBuffer/Opaque modes */
 	virtual void ExecutePostBasePass(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture,
-		FScreenPassRenderTarget Output) override;
+		FRDGTextureRef SceneDepthTexture) override;
 
 	/** Execute at PrePostProcess timing - not used for ScreenSpace pipeline */
 	virtual void ExecutePrePostProcess(

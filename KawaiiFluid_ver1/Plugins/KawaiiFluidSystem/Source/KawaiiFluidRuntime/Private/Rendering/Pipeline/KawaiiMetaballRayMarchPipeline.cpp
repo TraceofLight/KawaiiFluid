@@ -120,8 +120,7 @@ void FKawaiiMetaballRayMarchPipeline::ExecutePostBasePass(
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,
 	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-	FRDGTextureRef SceneDepthTexture,
-	FScreenPassRenderTarget Output)
+	FRDGTextureRef SceneDepthTexture)
 {
 	if (Renderers.Num() == 0)
 	{

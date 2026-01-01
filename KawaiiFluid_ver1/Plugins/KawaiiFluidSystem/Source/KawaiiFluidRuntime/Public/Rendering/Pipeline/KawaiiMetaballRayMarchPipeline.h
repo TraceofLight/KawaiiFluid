@@ -36,8 +36,7 @@ public:
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture,
-		FScreenPassRenderTarget Output) override;
+		FRDGTextureRef SceneDepthTexture) override;
 
 	/** Execute at PrePostProcess timing - Translucent transparency compositing */
 	virtual void ExecutePrePostProcess(

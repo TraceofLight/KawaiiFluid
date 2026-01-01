@@ -135,16 +135,12 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
 
 			// Execute PostBasePass - handles GBuffer write internally based on ShadingMode
-			// Note: For GBuffer mode, Output is not used (writes directly to GBuffer textures)
-			FScreenPassRenderTarget DummyOutput;
-
 			Pipeline->ExecutePostBasePass(
 				GraphBuilder,
 				InView,
 				BatchParams,
 				Renderers,
-				SceneDepthTexture,
-				DummyOutput);
+				SceneDepthTexture);
 
 			UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: GBuffer Pipeline rendered %d renderers at PostBasePass timing"), Renderers.Num());
 		}
@@ -169,17 +165,13 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
 
 			// Execute PostBasePass - handles GBuffer write with Stencil marking internally
-			// Note: For Translucent mode, Output is not used (writes to GBuffer + Stencil)
 			// Transparency pass runs later in PrePostProcessPass_RenderThread via ExecutePrePostProcess
-			FScreenPassRenderTarget DummyOutput;
-
 			Pipeline->ExecutePostBasePass(
 				GraphBuilder,
 				InView,
 				BatchParams,
 				Renderers,
-				SceneDepthTexture,
-				DummyOutput);
+				SceneDepthTexture);
 
 			UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: Translucent GBuffer write - %d renderers (Stencil marked)"), Renderers.Num());
 		}
