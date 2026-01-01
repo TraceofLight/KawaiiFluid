@@ -63,6 +63,9 @@ struct FFluidBrushSettings
 
 	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Randomness = 0.8f;
+
+	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "0.01", ClampMax = "0.5"))
+	float StrokeInterval = 0.03f;
 };
 
 /**

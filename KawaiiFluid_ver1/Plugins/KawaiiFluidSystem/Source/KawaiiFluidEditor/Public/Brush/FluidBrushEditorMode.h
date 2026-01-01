@@ -68,6 +68,9 @@ private:
 	/** 마지막 스트로크 시간 */
 	double LastStrokeTime = 0.0;
 
+	/** 드래그 트랜잭션 (시작~종료까지 하나의 Undo 단위) */
+	TUniquePtr<class FScopedTransaction> DragTransaction;
+
 	/** 선택 변경 델리게이트 핸들 */
 	FDelegateHandle SelectionChangedHandle;
 

@@ -106,6 +106,10 @@ bool FFluidBrushEditorMode::InputKey(FEditorViewportClient* ViewportClient, FVie
 		{
 			bPainting = true;
 			LastStrokeTime = 0.0;
+
+			// 드래그 시작 시 트랜잭션 생성 (Undo 한 번에 전체 드래그 취소)
+			DragTransaction = MakeUnique<FScopedTransaction>(LOCTEXT("FluidBrushDrag", "Fluid Brush Drag"));
+
 			if (bValidLocation)
 			{
 				ApplyBrush();
@@ -115,6 +119,10 @@ bool FFluidBrushEditorMode::InputKey(FEditorViewportClient* ViewportClient, FVie
 		else if (Event == IE_Released)
 		{
 			bPainting = false;
+
+			// 드래그 종료 시 트랜잭션 커밋
+			DragTransaction.Reset();
+
 			return true;
 		}
 	}
@@ -124,7 +132,7 @@ bool FFluidBrushEditorMode::InputKey(FEditorViewportClient* ViewportClient, FVie
 		// ESC: 종료
 		if (Key == EKeys::Escape)
 		{
-			GLevelEditorModeTools().DeactivateMode(EM_FluidBrush);
+			GetModeManager()->DeactivateMode(EM_FluidBrush);
 			return true;
 		}
 
@@ -244,18 +252,7 @@ bool FFluidBrushEditorMode::UpdateBrushLocation(FEditorViewportClient* ViewportC
 		return true;
 	}
 
-	// Z=0 평면
-	if (FMath::Abs(Direction.Z) > KINDA_SMALL_NUMBER)
-	{
-		float T = -Origin.Z / Direction.Z;
-		if (T > 0)
-		{
-			BrushLocation = Origin + Direction * T;
-			bValidLocation = true;
-			return true;
-		}
-	}
-
+	// 히트 실패 시 브러시 비활성화 (허공에선 스폰 안 함)
 	bValidLocation = false;
 	return false;
 }
@@ -267,18 +264,15 @@ void FFluidBrushEditorMode::ApplyBrush()
 		return;
 	}
 
+	const FFluidBrushSettings& Settings = TargetComponent->BrushSettings;
+
 	// 스트로크 간격
 	double Now = FPlatformTime::Seconds();
-	if (Now - LastStrokeTime < 0.03)  // 30ms
+	if (Now - LastStrokeTime < Settings.StrokeInterval)
 	{
 		return;
 	}
 	LastStrokeTime = Now;
-
-	const FFluidBrushSettings& Settings = TargetComponent->BrushSettings;
-
-	// 트랜잭션 생성 - Modify()가 작동하도록 (파티클 데이터 보존)
-	FScopedTransaction Transaction(LOCTEXT("FluidBrushStroke", "Fluid Brush Stroke"));
 
 	switch (Settings.Mode)
 	{
@@ -319,12 +313,20 @@ void FFluidBrushEditorMode::DrawBrushPreview(FPrimitiveDrawInterface* PDI)
 	const FFluidBrushSettings& Settings = TargetComponent->BrushSettings;
 	FColor Color = GetBrushColor().ToFColor(true);
 
-	// 구형 와이어프레임
-	DrawWireSphere(PDI, BrushLocation, Color, Settings.Radius, 24, SDPG_Foreground);
+	// 노말 기준 원 (실제 스폰 영역 - 반구의 바닥면)
+	FVector Tangent, Bitangent;
+	BrushNormal.FindBestAxisVectors(Tangent, Bitangent);
+	DrawCircle(PDI, BrushLocation, Tangent, Bitangent, Color, Settings.Radius, 32, SDPG_Foreground);
 
-	// 수평 원
-	DrawCircle(PDI, BrushLocation, FVector::ForwardVector, FVector::RightVector,
-	           Color, Settings.Radius, 24, SDPG_Foreground);
+	// 노말 방향 화살표 (스폰 방향 표시)
+	FVector ArrowEnd = BrushLocation + BrushNormal * Settings.Radius;
+	PDI->DrawLine(BrushLocation, ArrowEnd, Color, SDPG_Foreground, 2.0f);
+
+	// 화살표 머리
+	FVector ArrowHead1 = ArrowEnd - BrushNormal * 15.0f + Tangent * 8.0f;
+	FVector ArrowHead2 = ArrowEnd - BrushNormal * 15.0f - Tangent * 8.0f;
+	PDI->DrawLine(ArrowEnd, ArrowHead1, Color, SDPG_Foreground, 2.0f);
+	PDI->DrawLine(ArrowEnd, ArrowHead2, Color, SDPG_Foreground, 2.0f);
 
 	// 중심점
 	PDI->DrawPoint(BrushLocation, Color, 8.0f, SDPG_Foreground);
@@ -353,7 +355,7 @@ void FFluidBrushEditorMode::DrawHUD(FEditorViewportClient* ViewportClient, FView
 {
 	FEdMode::DrawHUD(ViewportClient, Viewport, View, Canvas);
 
-	if (!Canvas || !TargetComponent.IsValid())
+	if (!Canvas || !TargetComponent.IsValid() || !GEngine)
 	{
 		return;
 	}
@@ -408,7 +410,7 @@ void FFluidBrushEditorMode::Tick(FEditorViewportClient* ViewportClient, float De
 	if (!TargetComponent.IsValid())
 	{
 		UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode: Target component destroyed, exiting"));
-		GLevelEditorModeTools().DeactivateMode(EM_FluidBrush);
+		GetModeManager()->DeactivateMode(EM_FluidBrush);
 		return;
 	}
 
@@ -423,7 +425,12 @@ void FFluidBrushEditorMode::Tick(FEditorViewportClient* ViewportClient, float De
 
 void FFluidBrushEditorMode::OnSelectionChanged(UObject* Object)
 {
-	// 조건 1: 다른 액터 선택 시 종료
+	// 페인팅 중에는 선택 변경 무시
+	if (bPainting)
+	{
+		return;
+	}
+
 	if (!GEditor)
 	{
 		return;
@@ -439,7 +446,7 @@ void FFluidBrushEditorMode::OnSelectionChanged(UObject* Object)
 	if (Selection->Num() == 0)
 	{
 		UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode: Selection cleared, exiting"));
-		GLevelEditorModeTools().DeactivateMode(EM_FluidBrush);
+		GetModeManager()->DeactivateMode(EM_FluidBrush);
 		return;
 	}
 
@@ -450,7 +457,7 @@ void FFluidBrushEditorMode::OnSelectionChanged(UObject* Object)
 		if (!bTargetStillSelected)
 		{
 			UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode: Different actor selected, exiting"));
-			GLevelEditorModeTools().DeactivateMode(EM_FluidBrush);
+			GetModeManager()->DeactivateMode(EM_FluidBrush);
 			return;
 		}
 	}
