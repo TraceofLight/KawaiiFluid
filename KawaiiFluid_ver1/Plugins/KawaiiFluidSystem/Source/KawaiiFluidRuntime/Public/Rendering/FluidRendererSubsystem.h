@@ -48,7 +48,7 @@ public:
 	//========================================
 
 	/** 글로벌 렌더링 파라미터 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Rendering")
+	UPROPERTY(EditAnywhere, Transient, BlueprintReadWrite, Category = "Fluid Rendering")
 	FFluidRenderingParameters RenderingParameters;
 
 	/** View Extension 접근자 */
@@ -56,7 +56,7 @@ public:
 
 private:
 	/** 등록된 RenderingModule들 */
-	UPROPERTY()
+	UPROPERTY(Transient)
 	TArray<UKawaiiFluidRenderingModule*> RegisteredRenderingModules;
 
 	/** Scene View Extension (렌더링 파이프라인 인젝션) */
