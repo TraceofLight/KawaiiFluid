@@ -845,9 +845,14 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	// Clear active spawn requests if any remaining (shouldn't happen, but safety)
 	ActiveSpawnRequests.Empty();
 
-	// Create UAV/SRV for particle buffer
+	// Create transient position buffer for spatial hash
+	FRDGBufferDesc PositionBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), CurrentParticleCount);
+	FRDGBufferRef PositionBuffer = GraphBuilder.CreateBuffer(PositionBufferDesc, TEXT("GPUFluidPositions"));
+
 	FRDGBufferUAVRef ParticlesUAVLocal = GraphBuilder.CreateUAV(ParticleBuffer);
 	FRDGBufferSRVRef ParticlesSRVLocal = GraphBuilder.CreateSRV(ParticleBuffer);
+	FRDGBufferUAVRef PositionsUAVLocal = GraphBuilder.CreateUAV(PositionBuffer);
+	FRDGBufferSRVRef PositionsSRVLocal = GraphBuilder.CreateSRV(PositionBuffer);
 
 	// Debug: Log simulation parameters
 	static int32 SimDebugCounter = 0;
@@ -863,16 +868,19 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	// Pass 1: Predict Positions
 	AddPredictPositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 2: Build Spatial Hash directly from physics particles (FGPUFluidParticle, 64 bytes)
-	// Uses shader permutation USE_PHYSICS_PARTICLE=1 to read Position from correct offset
+	// Pass 2: Extract positions for spatial hash (use predicted positions)
+	AddExtractPositionsPass(GraphBuilder, ParticlesSRVLocal, PositionsUAVLocal, CurrentParticleCount, true);
+
+	// Pass 3: Build Spatial Hash using CreateAndBuildHash (atomic operation)
 	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: Building with ParticleCount=%d, Radius=%.2f, CellSize=%.2f"),
 		CurrentParticleCount, Params.ParticleRadius, Params.CellSize);
 
 	FSpatialHashGPUResources HashResources;
-	bool bHashBuilt = FSpatialHashBuilder::BuildSpatialHashForPhysics(
+	bool bHashBuilt = FSpatialHashBuilder::CreateAndBuildHash(
 		GraphBuilder,
-		ParticlesSRVLocal,  // FGPUFluidParticle buffer (64 bytes per particle)
+		PositionsSRVLocal,
 		CurrentParticleCount,
+		Params.ParticleRadius,
 		Params.CellSize,
 		HashResources
 	);
@@ -884,28 +892,28 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	}
 	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: Build succeeded"));
 
-	// Pass 3: Compute Density and Lambda
-	AddComputeDensityPass(GraphBuilder, ParticlesUAVLocal, HashResources.CellCountsSRV, HashResources.CellStartIndicesSRV, HashResources.ParticleIndicesSRV, Params);
+	// Pass 4: Compute Density and Lambda
+	AddComputeDensityPass(GraphBuilder, ParticlesUAVLocal, HashResources.CellCountsSRV, HashResources.ParticleIndicesSRV, Params);
 
-	// Pass 4: Solve Pressure (multiple iterations if needed)
+	// Pass 5: Solve Pressure (multiple iterations if needed)
 	for (int32 i = 0; i < Params.PressureIterations; ++i)
 	{
-		AddSolvePressurePass(GraphBuilder, ParticlesUAVLocal, HashResources.CellCountsSRV, HashResources.CellStartIndicesSRV, HashResources.ParticleIndicesSRV, Params);
+		AddSolvePressurePass(GraphBuilder, ParticlesUAVLocal, HashResources.CellCountsSRV, HashResources.ParticleIndicesSRV, Params);
 	}
 
-	// Pass 5: Apply Viscosity
-	AddApplyViscosityPass(GraphBuilder, ParticlesUAVLocal, HashResources.CellCountsSRV, HashResources.CellStartIndicesSRV, HashResources.ParticleIndicesSRV, Params);
+	// Pass 6: Apply Viscosity
+	AddApplyViscosityPass(GraphBuilder, ParticlesUAVLocal, HashResources.CellCountsSRV, HashResources.ParticleIndicesSRV, Params);
 
-	// Pass 6: Bounds Collision
+	// Pass 7: Bounds Collision
 	AddBoundsCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 6.5: Distance Field Collision (if enabled)
+	// Pass 7.5: Distance Field Collision (if enabled)
 	AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 6.6: Primitive Collision (spheres, capsules, boxes, convexes from FluidCollider)
+	// Pass 7.6: Primitive Collision (spheres, capsules, boxes, convexes from FluidCollider)
 	AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 7: Finalize Positions
+	// Pass 8: Finalize Positions
 	AddFinalizePositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
 
 	// Debug: log that we reached the end of simulation
@@ -991,7 +999,6 @@ void FGPUFluidSimulator::AddComputeDensityPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferSRVRef InCellCountsSRV,
-	FRDGBufferSRVRef InCellStartIndicesSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,
 	const FGPUFluidSimulationParams& Params)
 {
@@ -1001,7 +1008,6 @@ void FGPUFluidSimulator::AddComputeDensityPass(
 	FComputeDensityCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FComputeDensityCS::FParameters>();
 	PassParameters->Particles = InParticlesUAV;
 	PassParameters->CellCounts = InCellCountsSRV;
-	PassParameters->CellStartIndices = InCellStartIndicesSRV;
 	PassParameters->ParticleIndices = InParticleIndicesSRV;
 	PassParameters->ParticleCount = CurrentParticleCount;
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
@@ -1027,7 +1033,6 @@ void FGPUFluidSimulator::AddSolvePressurePass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferSRVRef InCellCountsSRV,
-	FRDGBufferSRVRef InCellStartIndicesSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,
 	const FGPUFluidSimulationParams& Params)
 {
@@ -1037,7 +1042,6 @@ void FGPUFluidSimulator::AddSolvePressurePass(
 	FSolvePressureCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FSolvePressureCS::FParameters>();
 	PassParameters->Particles = InParticlesUAV;
 	PassParameters->CellCounts = InCellCountsSRV;
-	PassParameters->CellStartIndices = InCellStartIndicesSRV;
 	PassParameters->ParticleIndices = InParticleIndicesSRV;
 	PassParameters->ParticleCount = CurrentParticleCount;
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
@@ -1060,7 +1064,6 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferSRVRef InCellCountsSRV,
-	FRDGBufferSRVRef InCellStartIndicesSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,
 	const FGPUFluidSimulationParams& Params)
 {
@@ -1070,7 +1073,6 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	FApplyViscosityCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FApplyViscosityCS::FParameters>();
 	PassParameters->Particles = InParticlesUAV;
 	PassParameters->CellCounts = InCellCountsSRV;
-	PassParameters->CellStartIndices = InCellStartIndicesSRV;
 	PassParameters->ParticleIndices = InParticleIndicesSRV;
 	PassParameters->ParticleCount = CurrentParticleCount;
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;

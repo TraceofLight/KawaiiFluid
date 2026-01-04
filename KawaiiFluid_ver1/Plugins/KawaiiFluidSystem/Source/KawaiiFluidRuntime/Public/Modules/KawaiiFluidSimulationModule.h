@@ -317,8 +317,9 @@ public:
 
 private:
 	//========================================
-	// Override 값들
+	// Override 값들 (private, Setter로만 수정)
 	//========================================
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fluid Simulation|Override", meta = (AllowPrivateAccess = "true", InlineEditConditionToggle))
 	bool bOverride_ParticleRadius = false;
 
@@ -407,8 +408,7 @@ private:
 	bool bSimulationEnabled = true;
 
 	/** Independent 모드 플래그 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Fluid Simulation|Independent", meta = (AllowPrivateAccess = "true"))
-	bool bIndependentSimulation = true;
+	bool bIndependentSimulation = false;
 
 	/** 초기화 여부 */
 	bool bIsInitialized = false;

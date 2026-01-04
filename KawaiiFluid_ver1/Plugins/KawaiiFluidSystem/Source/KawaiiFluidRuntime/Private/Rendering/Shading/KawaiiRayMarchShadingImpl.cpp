@@ -61,10 +61,6 @@ void KawaiiRayMarchShading::RenderTranslucentGBufferWrite(
 	PassParameters->ParticleCount = PipelineData.ParticleCount;
 	PassParameters->ParticleRadius = PipelineData.ParticleRadius;
 
-	// Particle bounding box (GPU BoundsReduction 결과)
-	PassParameters->ParticleBoundsMin = PipelineData.ParticleBoundsMin;
-	PassParameters->ParticleBoundsMax = PipelineData.ParticleBoundsMax;
-
 	// Ray marching parameters
 	PassParameters->SDFSmoothness = RenderParams.SDFSmoothness;
 	PassParameters->MaxRayMarchSteps = RenderParams.MaxRayMarchSteps;
@@ -83,8 +79,6 @@ void KawaiiRayMarchShading::RenderTranslucentGBufferWrite(
 
 	// SDF Volume (if using optimization)
 	const bool bUseSDFVolume = PipelineData.SDFVolumeData.IsValid();
-	const bool bUseSpatialHash = !bUseSDFVolume && PipelineData.SpatialHashData.IsValid();
-
 	if (bUseSDFVolume)
 	{
 		PassParameters->SDFVolumeTexture = PipelineData.SDFVolumeData.SDFVolumeTextureSRV;
@@ -92,17 +86,6 @@ void KawaiiRayMarchShading::RenderTranslucentGBufferWrite(
 		PassParameters->SDFVolumeMin = PipelineData.SDFVolumeData.VolumeMin;
 		PassParameters->SDFVolumeMax = PipelineData.SDFVolumeData.VolumeMax;
 		PassParameters->SDFVolumeResolution = PipelineData.SDFVolumeData.VolumeResolution;
-	}
-
-	// Spatial Hash data (O(k) neighbor search)
-	// 주의: RenderParticles 버퍼는 위에서 이미 바인딩됨 (ParticleBufferSRV)
-	// Spatial Hash는 동일한 RenderParticles 버퍼를 재사용
-	if (bUseSpatialHash)
-	{
-		PassParameters->CellCounts = PipelineData.SpatialHashData.CellCountsSRV;
-		PassParameters->CellStartIndices = PipelineData.SpatialHashData.CellStartIndicesSRV;
-		PassParameters->ParticleIndices = PipelineData.SpatialHashData.ParticleIndicesSRV;
-		PassParameters->SpatialHashCellSize = PipelineData.SpatialHashData.CellSize;
 	}
 
 	// SceneDepth UV mapping
@@ -137,14 +120,10 @@ void KawaiiRayMarchShading::RenderTranslucentGBufferWrite(
 
 	FFluidRayMarchGBufferPS::FPermutationDomain PermutationVector;
 	PermutationVector.Set<FUseSDFVolumeGBufferDim>(bUseSDFVolume);
-	PermutationVector.Set<FUseSpatialHashGBufferDim>(bUseSpatialHash);
 	TShaderMapRef<FFluidRayMarchGBufferPS> PixelShader(GlobalShaderMap, PermutationVector);
 
-	// Debug: Log which mode is being used
-	const TCHAR* ModeName = bUseSDFVolume ? TEXT("SDFVolume") : (bUseSpatialHash ? TEXT("SpatialHash") : TEXT("Direct"));
-
 	GraphBuilder.AddPass(
-		RDG_EVENT_NAME("MetaballTranslucent_RayMarch_GBufferWrite (%s)", ModeName),
+		RDG_EVENT_NAME("MetaballTranslucent_RayMarch_GBufferWrite"),
 		PassParameters,
 		ERDGPassFlags::Raster,
 		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)
@@ -316,9 +295,8 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 	FScreenPassRenderTarget Output)
 {
 	const bool bUseSDFVolume = PipelineData.SDFVolumeData.IsValid();
-	const bool bUseSpatialHash = !bUseSDFVolume && PipelineData.SpatialHashData.IsValid();
 
-	if (!bUseSDFVolume && !bUseSpatialHash && !PipelineData.IsValid())
+	if (!bUseSDFVolume && !PipelineData.IsValid())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("KawaiiRayMarchShading: No particle data for PostProcess"));
 		return;
@@ -338,11 +316,7 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 	PassParameters->ParticleCount = PipelineData.ParticleCount;
 	PassParameters->ParticleRadius = PipelineData.ParticleRadius;
 
-	// Particle bounding box (GPU BoundsReduction 결과)
-	PassParameters->ParticleBoundsMin = PipelineData.ParticleBoundsMin;
-	PassParameters->ParticleBoundsMax = PipelineData.ParticleBoundsMax;
-
-	// SDF Volume data (O(1) lookup)
+	// SDF Volume data
 	if (bUseSDFVolume)
 	{
 		PassParameters->SDFVolumeTexture = PipelineData.SDFVolumeData.SDFVolumeTextureSRV;
@@ -350,17 +324,6 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 		PassParameters->SDFVolumeMin = PipelineData.SDFVolumeData.VolumeMin;
 		PassParameters->SDFVolumeMax = PipelineData.SDFVolumeData.VolumeMax;
 		PassParameters->SDFVolumeResolution = PipelineData.SDFVolumeData.VolumeResolution;
-	}
-
-	// Spatial Hash data (O(k) neighbor search)
-	// 주의: RenderParticles 버퍼는 위에서 이미 바인딩됨 (ParticleBufferSRV)
-	// Spatial Hash는 동일한 RenderParticles 버퍼를 재사용
-	if (bUseSpatialHash)
-	{
-		PassParameters->CellCounts = PipelineData.SpatialHashData.CellCountsSRV;
-		PassParameters->CellStartIndices = PipelineData.SpatialHashData.CellStartIndicesSRV;
-		PassParameters->ParticleIndices = PipelineData.SpatialHashData.ParticleIndicesSRV;
-		PassParameters->SpatialHashCellSize = PipelineData.SpatialHashData.CellSize;
 	}
 
 	// Ray marching parameters
@@ -414,14 +377,10 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 
 	FFluidRayMarchPS::FPermutationDomain PermutationVector;
 	PermutationVector.Set<FUseSDFVolumeDim>(bUseSDFVolume);
-	PermutationVector.Set<FUseSpatialHashDim>(bUseSpatialHash);
 	TShaderMapRef<FFluidRayMarchPS> PixelShader(GlobalShaderMap, PermutationVector);
 
-	// Debug: Log which mode is being used
-	const TCHAR* ModeName = bUseSDFVolume ? TEXT("SDFVolume") : (bUseSpatialHash ? TEXT("SpatialHash") : TEXT("Direct"));
-
 	GraphBuilder.AddPass(
-		RDG_EVENT_NAME("MetaballPostProcess_RayMarching (%s)", ModeName),
+		RDG_EVENT_NAME("MetaballPostProcess_RayMarching (%s)", bUseSDFVolume ? TEXT("SDFVolume") : TEXT("Direct")),
 		PassParameters,
 		ERDGPassFlags::Raster,
 		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)

@@ -81,61 +81,13 @@ struct FSDFVolumeData
 };
 
 /**
- * Spatial Hash data for O(k) SDF evaluation
- * Multi-pass GPU spatial hash for neighbor search
- */
-struct FSpatialHashData
-{
-	/** Whether to use Spatial Hash acceleration */
-	bool bUseSpatialHash = false;
-
-	/** Particle positions buffer (float3) for spatial hash lookup */
-	FRDGBufferSRVRef ParticlePositionsSRV = nullptr;
-
-	/** Cell counts buffer [HASH_SIZE] */
-	FRDGBufferSRVRef CellCountsSRV = nullptr;
-
-	/** Cell start indices buffer [HASH_SIZE] (Prefix Sum result) */
-	FRDGBufferSRVRef CellStartIndicesSRV = nullptr;
-
-	/** Sorted particle indices buffer [ParticleCount] */
-	FRDGBufferSRVRef ParticleIndicesSRV = nullptr;
-
-	/** Cell size in world units */
-	float CellSize = 0.0f;
-
-	bool IsValid() const
-	{
-		return bUseSpatialHash &&
-			ParticlePositionsSRV != nullptr &&
-			CellCountsSRV != nullptr &&
-			CellStartIndicesSRV != nullptr &&
-			ParticleIndicesSRV != nullptr &&
-			CellSize > 0.0f;
-	}
-
-	void Reset()
-	{
-		bUseSpatialHash = false;
-		ParticlePositionsSRV = nullptr;
-		CellCountsSRV = nullptr;
-		CellStartIndicesSRV = nullptr;
-		ParticleIndicesSRV = nullptr;
-		CellSize = 0.0f;
-	}
-};
-
-/**
  * RayMarching Pipeline data
  * Contains particle buffer information for ray marching
  */
 struct FRayMarchingPipelineData
 {
-	/** Particle positions buffer (FKawaiiRenderParticle format) */
+	/** Particle positions buffer */
 	FRDGBufferSRVRef ParticleBufferSRV = nullptr;
-
-	/** Particle positions buffer (float3 only, for Spatial Hash) */
-	FRDGBufferSRVRef ParticlePositionsSRV = nullptr;
 
 	/** Number of particles */
 	int32 ParticleCount = 0;
@@ -143,16 +95,8 @@ struct FRayMarchingPipelineData
 	/** Average particle radius */
 	float ParticleRadius = 0.0f;
 
-	/** Particle bounding box (GPU BoundsReduction 결과) */
-	FVector3f ParticleBoundsMin = FVector3f(-1000.0f, -1000.0f, -1000.0f);
-	FVector3f ParticleBoundsMax = FVector3f(1000.0f, 1000.0f, 1000.0f);
-	bool bHasValidBounds = false;
-
-	/** SDF Volume data for optimized ray marching (O(1)) */
+	/** SDF Volume data for optimized ray marching */
 	FSDFVolumeData SDFVolumeData;
-
-	/** Spatial Hash data for accelerated SDF evaluation (O(k)) */
-	FSpatialHashData SpatialHashData;
 
 	bool IsValid() const
 	{
@@ -162,13 +106,8 @@ struct FRayMarchingPipelineData
 	void Reset()
 	{
 		ParticleBufferSRV = nullptr;
-		ParticlePositionsSRV = nullptr;
 		ParticleCount = 0;
 		ParticleRadius = 0.0f;
-		ParticleBoundsMin = FVector3f(-1000.0f, -1000.0f, -1000.0f);
-		ParticleBoundsMax = FVector3f(1000.0f, 1000.0f, 1000.0f);
-		bHasValidBounds = false;
 		SDFVolumeData.Reset();
-		SpatialHashData.Reset();
 	}
 };

@@ -63,9 +63,8 @@ public:
 		// Particle buffer (read-write)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
 
-		// Spatial hash buffers (read-only) - Multi-pass format
+		// Spatial hash buffers (read-only)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellStartIndices)  // Prefix sum result
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
 
 		// Simulation parameters
@@ -110,9 +109,7 @@ public:
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
-		// Spatial hash buffers - Multi-pass format
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellStartIndices)  // Prefix sum result
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(float, SmoothingRadius)
@@ -152,9 +149,7 @@ public:
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
-		// Spatial hash buffers - Multi-pass format
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellStartIndices)  // Prefix sum result
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(float, SmoothingRadius)

@@ -220,16 +220,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 			ClampMin = "32", ClampMax = "256"))
 	int32 SDFVolumeResolution = 64;
 
-	/**
-	 * Use Spatial Hash acceleration for Ray Marching (O(k) neighbor search)
-	 * Only used when SDF Volume is disabled.
-	 * When enabled, builds GPU spatial hash for faster SDF evaluation.
-	 * When disabled, uses direct O(N) particle iteration (slowest).
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "SSFRMode == ESSFRRenderingMode::RayMarching && !bUseSDFVolumeOptimization"))
-	bool bUseSpatialHashAcceleration = true;
-
 	//========================================
 	// Debug Visualization
 	//========================================
@@ -294,7 +284,6 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSColor.ToString()));
 	Hash = HashCombine(Hash, GetTypeHash(Params.bUseSDFVolumeOptimization));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SDFVolumeResolution));
-	Hash = HashCombine(Hash, GetTypeHash(Params.bUseSpatialHashAcceleration));
 	return Hash;
 }
 
@@ -327,6 +316,5 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 	       FMath::IsNearlyEqual(A.SSSIntensity, B.SSSIntensity, 0.001f) &&
 	       A.SSSColor.Equals(B.SSSColor, 0.001f) &&
 	       A.bUseSDFVolumeOptimization == B.bUseSDFVolumeOptimization &&
-	       A.SDFVolumeResolution == B.SDFVolumeResolution &&
-	       A.bUseSpatialHashAcceleration == B.bUseSpatialHashAcceleration;
+	       A.SDFVolumeResolution == B.SDFVolumeResolution;
 }
