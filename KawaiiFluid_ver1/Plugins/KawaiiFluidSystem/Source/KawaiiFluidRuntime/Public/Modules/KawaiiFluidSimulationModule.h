@@ -245,11 +245,12 @@ public:
 	 * @param Speed 초기 속도 크기
 	 * @param Radius 스트림 반경
 	 * @param Spacing 파티클 간격 (0이면 SmoothingRadius * 0.5 자동 계산)
+	 * @param Jitter 위치 랜덤 오프셋 비율 (0~0.5, 0=완벽한 격자, 0.5=최대 자연스러움)
 	 * @return 스폰된 파티클 수
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticleDirectionalHexLayer(FVector Position, FVector Direction, float Speed,
-	                                        float Radius, float Spacing = 0.0f);
+	                                        float Radius, float Spacing = 0.0f, float Jitter = 0.15f);
 
 	/** 모든 파티클 제거 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")

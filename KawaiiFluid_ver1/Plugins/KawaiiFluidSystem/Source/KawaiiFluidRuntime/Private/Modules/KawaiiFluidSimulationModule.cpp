@@ -579,7 +579,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectional(FVector Position, F
 }
 
 int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Position, FVector Direction, float Speed,
-                                                                      float Radius, float Spacing)
+                                                                      float Radius, float Spacing, float Jitter)
 {
 	// 방향 정규화
 	FVector Dir = Direction.GetSafeNormal();
@@ -593,6 +593,11 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Pos
 	{
 		Spacing = Preset ? Preset->SmoothingRadius * 0.5f : 10.0f;
 	}
+
+	// Jitter 범위 제한 (0 ~ 0.5)
+	Jitter = FMath::Clamp(Jitter, 0.0f, 0.5f);
+	const float MaxJitterOffset = Spacing * Jitter;
+	const bool bApplyJitter = Jitter > KINDA_SMALL_NUMBER;
 
 	// 방향에 수직인 로컬 좌표계 생성
 	FVector Right, Up;
@@ -631,12 +636,20 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Pos
 
 		for (int32 ColIdx = -NumCols; ColIdx <= NumCols; ++ColIdx)
 		{
-			const float LocalX = ColIdx * Spacing + XOffset;
+			float LocalX = ColIdx * Spacing + XOffset;
+			float LocalYFinal = LocalY;
 
-			// 원 내부 체크
-			if (LocalX * LocalX + LocalYSq <= RadiusSq)
+			// Jitter 적용: 랜덤 오프셋 추가
+			if (bApplyJitter)
 			{
-				FVector SpawnPos = Position + Right * LocalX + Up * LocalY;
+				LocalX += FMath::FRandRange(-MaxJitterOffset, MaxJitterOffset);
+				LocalYFinal += FMath::FRandRange(-MaxJitterOffset, MaxJitterOffset);
+			}
+
+			// 원 내부 체크 (jitter 후에도 원 내부에 있는지 확인)
+			if (LocalX * LocalX + LocalYFinal * LocalYFinal <= RadiusSq)
+			{
+				FVector SpawnPos = Position + Right * LocalX + Up * LocalYFinal;
 				SpawnParticle(SpawnPos, SpawnVel);
 				++SpawnedCount;
 			}

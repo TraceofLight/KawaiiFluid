@@ -158,6 +158,11 @@ struct FFluidSpawnSettings
 	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter && EmitterType == EFluidEmitterType::HexagonalStream", EditConditionHides, ClampMin = "1.0", ClampMax = "500.0"))
 	float StreamLayersPerSecond = 60.0f;
 
+	/** Random position jitter for hexagonal packing (0 = perfect grid, 0.5 = max natural look) - Hexagonal Stream only */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Spawn|Flow",
+	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter && EmitterType == EFluidEmitterType::HexagonalStream", EditConditionHides, ClampMin = "0.0", ClampMax = "0.5"))
+	float StreamJitter = 0.15f;
+
 	/** Particles spawned per second - Stream and Spray modes */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Spawn|Flow",
 	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter && (EmitterType == EFluidEmitterType::Stream || EmitterType == EFluidEmitterType::Spray)", EditConditionHides, ClampMin = "1.0", ClampMax = "1000.0"))

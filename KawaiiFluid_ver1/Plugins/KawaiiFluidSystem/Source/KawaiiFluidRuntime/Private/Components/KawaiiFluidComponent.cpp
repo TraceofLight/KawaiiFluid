@@ -462,7 +462,8 @@ void UKawaiiFluidComponent::SpawnHexagonalLayer()
 		WorldDirection,
 		SpawnSettings.SpawnSpeed,
 		SpawnSettings.StreamRadius,
-		SpawnSettings.StreamParticleSpacing
+		SpawnSettings.StreamParticleSpacing,
+		SpawnSettings.StreamJitter
 	);
 }
 
