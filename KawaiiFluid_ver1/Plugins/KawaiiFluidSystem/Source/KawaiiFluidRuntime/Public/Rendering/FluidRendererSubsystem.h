@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "FluidRenderingParameters.h"
+#include "FluidShadowHistoryManager.h"
 #include "FluidRendererSubsystem.generated.h"
 
 class FFluidSceneViewExtension;
@@ -54,6 +55,25 @@ public:
 	/** View Extension 접근자 */
 	TSharedPtr<FFluidSceneViewExtension, ESPMode::ThreadSafe> GetViewExtension() const { return ViewExtension; }
 
+	/** Shadow History Manager 접근자 */
+	FFluidShadowHistoryManager* GetShadowHistoryManager() const { return ShadowHistoryManager.Get(); }
+
+	//========================================
+	// Cached Shadow Light Data (Game Thread -> Render Thread)
+	//========================================
+
+	/** Update cached light direction from DirectionalLight (call from game thread) */
+	void UpdateCachedLightDirection();
+
+	/** Get cached light direction (safe to call from render thread) */
+	FVector3f GetCachedLightDirection() const { return CachedLightDirection; }
+
+	/** Get cached light view-projection matrix (safe to call from render thread) */
+	FMatrix44f GetCachedLightViewProjectionMatrix() const { return CachedLightViewProjectionMatrix; }
+
+	/** Check if cached light data is valid */
+	bool HasValidCachedLightData() const { return bHasCachedLightData; }
+
 private:
 	/** 등록된 RenderingModule들 */
 	UPROPERTY(Transient)
@@ -61,4 +81,20 @@ private:
 
 	/** Scene View Extension (렌더링 파이프라인 인젝션) */
 	TSharedPtr<FFluidSceneViewExtension, ESPMode::ThreadSafe> ViewExtension;
+
+	/** Shadow History Manager (이전 프레임 depth 저장) */
+	TUniquePtr<FFluidShadowHistoryManager> ShadowHistoryManager;
+
+	//========================================
+	// Cached Light Data (updated on game thread, read on render thread)
+	//========================================
+
+	/** Cached directional light direction (normalized) */
+	FVector3f CachedLightDirection = FVector3f(0.5f, 0.5f, -0.707f);
+
+	/** Cached light view-projection matrix for shadow mapping */
+	FMatrix44f CachedLightViewProjectionMatrix = FMatrix44f::Identity;
+
+	/** Whether cached light data is valid */
+	bool bHasCachedLightData = false;
 };

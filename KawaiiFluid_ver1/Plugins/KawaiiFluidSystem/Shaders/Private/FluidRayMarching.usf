@@ -291,9 +291,17 @@ void MainVS(
 
 void MainPS(
 	FVertexOutput Input,
-	out float4 OutColor : SV_Target0)
+	out float4 OutColor : SV_Target0
+#if OUTPUT_DEPTH
+	, out float OutDepth : SV_Target1
+#endif
+)
 {
 	float2 UV = Input.UV;
+
+#if OUTPUT_DEPTH
+	OutDepth = 0.0;  // Default: no hit = far plane (reversed-Z)
+#endif
 
 #if USE_SDF_VOLUME
 	// SDF Volume mode: no early exit based on ParticleCount
@@ -344,6 +352,11 @@ void MainPS(
 		discard;
 		return;
 	}
+
+#if OUTPUT_DEPTH
+	// Output fluid depth for shadow projection
+	OutDepth = HitDeviceZ;
+#endif
 
 	//=========================================================================
 	// Shading

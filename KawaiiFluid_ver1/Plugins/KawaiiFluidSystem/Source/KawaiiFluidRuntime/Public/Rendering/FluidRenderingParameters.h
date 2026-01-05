@@ -221,6 +221,34 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	int32 SDFVolumeResolution = 64;
 
 	//========================================
+	// Shadow Casting (VSM)
+	//========================================
+
+	/** Enable fluid shadow casting */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Shadow")
+	bool bEnableShadowCasting = true;
+
+	/** VSM shadow map resolution */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Shadow",
+		meta = (EditCondition = "bEnableShadowCasting", ClampMin = "256", ClampMax = "4096"))
+	int32 VSMResolution = 1024;
+
+	/** VSM blur radius (higher = softer shadows) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Shadow",
+		meta = (EditCondition = "bEnableShadowCasting", ClampMin = "0.0", ClampMax = "16.0"))
+	float VSMBlurRadius = 4.0f;
+
+	/** Number of VSM blur iterations */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Shadow",
+		meta = (EditCondition = "bEnableShadowCasting", ClampMin = "0", ClampMax = "3"))
+	int32 VSMBlurIterations = 1;
+
+	/** Shadow intensity (0 = no shadow, 1 = full black) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Shadow",
+		meta = (EditCondition = "bEnableShadowCasting", ClampMin = "0.0", ClampMax = "1.0"))
+	float ShadowIntensity = 0.5f;
+
+	//========================================
 	// Debug Visualization
 	//========================================
 
@@ -284,6 +312,12 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSColor.ToString()));
 	Hash = HashCombine(Hash, GetTypeHash(Params.bUseSDFVolumeOptimization));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SDFVolumeResolution));
+	// Shadow parameters
+	Hash = HashCombine(Hash, GetTypeHash(Params.bEnableShadowCasting));
+	Hash = HashCombine(Hash, GetTypeHash(Params.VSMResolution));
+	Hash = HashCombine(Hash, GetTypeHash(Params.VSMBlurRadius));
+	Hash = HashCombine(Hash, GetTypeHash(Params.VSMBlurIterations));
+	Hash = HashCombine(Hash, GetTypeHash(Params.ShadowIntensity));
 	return Hash;
 }
 
@@ -316,5 +350,11 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 	       FMath::IsNearlyEqual(A.SSSIntensity, B.SSSIntensity, 0.001f) &&
 	       A.SSSColor.Equals(B.SSSColor, 0.001f) &&
 	       A.bUseSDFVolumeOptimization == B.bUseSDFVolumeOptimization &&
-	       A.SDFVolumeResolution == B.SDFVolumeResolution;
+	       A.SDFVolumeResolution == B.SDFVolumeResolution &&
+	       // Shadow parameters
+	       A.bEnableShadowCasting == B.bEnableShadowCasting &&
+	       A.VSMResolution == B.VSMResolution &&
+	       FMath::IsNearlyEqual(A.VSMBlurRadius, B.VSMBlurRadius, 0.001f) &&
+	       A.VSMBlurIterations == B.VSMBlurIterations &&
+	       FMath::IsNearlyEqual(A.ShadowIntensity, B.ShadowIntensity, 0.001f);
 }

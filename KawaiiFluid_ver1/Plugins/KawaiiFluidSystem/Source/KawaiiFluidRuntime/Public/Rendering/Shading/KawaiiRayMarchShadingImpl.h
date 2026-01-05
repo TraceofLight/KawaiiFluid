@@ -102,6 +102,8 @@ namespace KawaiiRayMarchShading
 	 * @param SceneDepthTexture - Scene depth for ray start position
 	 * @param SceneColorTexture - Scene color for environment sampling
 	 * @param Output - Render target to composite onto
+	 * @param bOutputDepth - If true, output fluid depth to MRT[1] for shadow projection
+	 * @param OutFluidDepthTexture - Output parameter for fluid depth texture (requires bOutputDepth=true)
 	 */
 	void RenderPostProcessShading(
 		FRDGBuilder& GraphBuilder,
@@ -110,5 +112,7 @@ namespace KawaiiRayMarchShading
 		const FRayMarchingPipelineData& PipelineData,
 		FRDGTextureRef SceneDepthTexture,
 		FRDGTextureRef SceneColorTexture,
-		FScreenPassRenderTarget Output);
+		FScreenPassRenderTarget Output,
+		bool bOutputDepth = false,
+		FRDGTextureRef* OutFluidDepthTexture = nullptr);
 }

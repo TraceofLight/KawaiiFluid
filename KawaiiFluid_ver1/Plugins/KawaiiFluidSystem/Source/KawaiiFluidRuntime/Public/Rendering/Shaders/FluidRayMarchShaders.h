@@ -113,6 +113,12 @@ public:
 class FUseSDFVolumeDim : SHADER_PERMUTATION_BOOL("USE_SDF_VOLUME");
 
 /**
+ * @brief Shader permutation dimension for Depth output (MRT for shadow projection)
+ * When enabled, outputs fluid depth to RenderTarget[1] for VSM shadow generation.
+ */
+class FOutputDepthDim : SHADER_PERMUTATION_BOOL("OUTPUT_DEPTH");
+
+/**
  * @brief Pixel shader for Ray Marching SDF fluid rendering
  *
  * Performs ray marching through metaball SDF field to render
@@ -134,7 +140,7 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FFluidRayMarchPS, FGlobalShader);
 
 	using FParameters = FFluidRayMarchParameters;
-	using FPermutationDomain = TShaderPermutationDomain<FUseSDFVolumeDim>;
+	using FPermutationDomain = TShaderPermutationDomain<FUseSDFVolumeDim, FOutputDepthDim>;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{

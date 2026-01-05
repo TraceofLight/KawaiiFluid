@@ -71,6 +71,11 @@ public:
 		return EMetaballPipelineType::ScreenSpace;
 	}
 
+	virtual const FMetaballIntermediateTextures* GetCachedIntermediateTextures() const override
+	{
+		return CachedIntermediateTextures.IsValid() ? &CachedIntermediateTextures : nullptr;
+	}
+
 private:
 	/** Cached intermediate textures from PostBasePass for use in Tonemap */
 	FMetaballIntermediateTextures CachedIntermediateTextures;

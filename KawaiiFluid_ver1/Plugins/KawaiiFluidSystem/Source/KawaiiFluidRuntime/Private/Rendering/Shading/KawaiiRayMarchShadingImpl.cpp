@@ -292,7 +292,9 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 	const FRayMarchingPipelineData& PipelineData,
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef SceneColorTexture,
-	FScreenPassRenderTarget Output)
+	FScreenPassRenderTarget Output,
+	bool bOutputDepth,
+	FRDGTextureRef* OutFluidDepthTexture)
 {
 	const bool bUseSDFVolume = PipelineData.SDFVolumeData.IsValid();
 
@@ -308,6 +310,25 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 	}
 
 	RDG_EVENT_SCOPE(GraphBuilder, "MetaballShading_PostProcess_RayMarching");
+
+	// Create depth output texture if requested
+	FRDGTextureRef FluidDepthTexture = nullptr;
+	if (bOutputDepth)
+	{
+		FIntRect ViewRect = Output.ViewRect;
+		FRDGTextureDesc DepthDesc = FRDGTextureDesc::Create2D(
+			FIntPoint(ViewRect.Width(), ViewRect.Height()),
+			PF_R32_FLOAT,
+			FClearValueBinding::Black,
+			TexCreate_RenderTargetable | TexCreate_ShaderResource);
+
+		FluidDepthTexture = GraphBuilder.CreateTexture(DepthDesc, TEXT("FluidRayMarchDepth"));
+
+		if (OutFluidDepthTexture)
+		{
+			*OutFluidDepthTexture = FluidDepthTexture;
+		}
+	}
 
 	auto* PassParameters = GraphBuilder.AllocParameters<FFluidRayMarchPS::FParameters>();
 
@@ -368,8 +389,12 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 	PassParameters->SceneViewRect = FVector2f(ViewInfo.ViewRect.Width(), ViewInfo.ViewRect.Height());
 	PassParameters->SceneTextureSize = FVector2f(SceneDepthTexture->Desc.Extent.X, SceneDepthTexture->Desc.Extent.Y);
 
-	// Render target
+	// Render targets
 	PassParameters->RenderTargets[0] = FRenderTargetBinding(Output.Texture, ERenderTargetLoadAction::ELoad);
+	if (bOutputDepth && FluidDepthTexture)
+	{
+		PassParameters->RenderTargets[1] = FRenderTargetBinding(FluidDepthTexture, ERenderTargetLoadAction::EClear);
+	}
 
 	// Get shaders
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
@@ -377,10 +402,13 @@ void KawaiiRayMarchShading::RenderPostProcessShading(
 
 	FFluidRayMarchPS::FPermutationDomain PermutationVector;
 	PermutationVector.Set<FUseSDFVolumeDim>(bUseSDFVolume);
+	PermutationVector.Set<FOutputDepthDim>(bOutputDepth);
 	TShaderMapRef<FFluidRayMarchPS> PixelShader(GlobalShaderMap, PermutationVector);
 
 	GraphBuilder.AddPass(
-		RDG_EVENT_NAME("MetaballPostProcess_RayMarching (%s)", bUseSDFVolume ? TEXT("SDFVolume") : TEXT("Direct")),
+		RDG_EVENT_NAME("MetaballPostProcess_RayMarching (%s%s)",
+			bUseSDFVolume ? TEXT("SDFVolume") : TEXT("Direct"),
+			bOutputDepth ? TEXT(", DepthOut") : TEXT("")),
 		PassParameters,
 		ERDGPassFlags::Raster,
 		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)

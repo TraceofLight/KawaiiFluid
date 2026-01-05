@@ -73,12 +73,26 @@ public:
 		return EMetaballPipelineType::RayMarching;
 	}
 
+	/**
+	 * Get cached intermediate textures for shadow history storage.
+	 * For RayMarching, this returns the fluid depth texture from ExecuteTonemap.
+	 *
+	 * @return Pointer to cached intermediate textures.
+	 */
+	virtual const FMetaballIntermediateTextures* GetCachedIntermediateTextures() const override
+	{
+		return &CachedIntermediateTextures;
+	}
+
 private:
 	/** SDF Volume Manager for optimized ray marching */
 	FSDFVolumeManager SDFVolumeManager;
 
 	/** Cached pipeline data from PostBasePass for use in PrePostProcess/Tonemap */
 	FRayMarchingPipelineData CachedPipelineData;
+
+	/** Cached intermediate textures for shadow history storage */
+	FMetaballIntermediateTextures CachedIntermediateTextures;
 
 	/** Pooled buffer for GPU bounds readback (double-buffered for async readback) */
 	TRefCountPtr<FRDGPooledBuffer> PendingBoundsReadbackBuffer;

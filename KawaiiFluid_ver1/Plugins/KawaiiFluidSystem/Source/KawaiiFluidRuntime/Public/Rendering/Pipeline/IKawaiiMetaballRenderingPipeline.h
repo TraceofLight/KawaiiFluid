@@ -136,6 +136,14 @@ public:
 	/** Get the pipeline type */
 	virtual EMetaballPipelineType GetPipelineType() const = 0;
 
+	/**
+	 * Get cached intermediate textures for shadow history storage.
+	 * Only valid after PrepareForTonemap has been called.
+	 *
+	 * @return Pointer to cached intermediate textures, or nullptr if not available.
+	 */
+	virtual const FMetaballIntermediateTextures* GetCachedIntermediateTextures() const { return nullptr; }
+
 protected:
 	/**
 	 * Utility: Calculate particle bounding box

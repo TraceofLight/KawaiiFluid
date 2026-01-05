@@ -505,10 +505,25 @@ void FKawaiiMetaballRayMarchPipeline::ExecuteTonemap(
 
 	RDG_EVENT_SCOPE(GraphBuilder, "MetaballPipeline_RayMarching_Tonemap");
 
+	// Reset intermediate textures from previous frame
+	CachedIntermediateTextures.Reset();
+
+	// Check if shadows are enabled (need depth output for VSM shadow projection)
+	const bool bOutputDepth = RenderParams.bEnableShadowCasting && RenderParams.ShadowIntensity > 0.0f;
+	FRDGTextureRef FluidDepthTexture = nullptr;
+
 	// Delegate to separated shading implementation
 	KawaiiRayMarchShading::RenderPostProcessShading(
 		GraphBuilder, View, RenderParams, CachedPipelineData,
-		SceneDepthTexture, SceneColorTexture, Output);
+		SceneDepthTexture, SceneColorTexture, Output,
+		bOutputDepth, &FluidDepthTexture);
+
+	// Store depth texture for shadow history (reuse SmoothedDepthTexture field)
+	if (bOutputDepth && FluidDepthTexture)
+	{
+		CachedIntermediateTextures.SmoothedDepthTexture = FluidDepthTexture;
+		UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: RayMarching depth output stored for shadow projection"));
+	}
 
 	UE_LOG(LogTemp, Verbose, TEXT("KawaiiFluid: RayMarching Tonemap executed"));
 }
