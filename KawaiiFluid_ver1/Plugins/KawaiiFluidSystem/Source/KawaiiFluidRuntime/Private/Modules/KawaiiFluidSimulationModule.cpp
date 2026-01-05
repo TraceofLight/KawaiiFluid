@@ -578,6 +578,74 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectional(FVector Position, F
 	return SpawnParticle(SpawnPos, SpawnVel);
 }
 
+int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Position, FVector Direction, float Speed,
+                                                                      float Radius, float Spacing)
+{
+	// 방향 정규화
+	FVector Dir = Direction.GetSafeNormal();
+	if (Dir.IsNearlyZero())
+	{
+		Dir = FVector(0, 0, -1);  // 기본: 아래 방향
+	}
+
+	// 자동 간격 계산 (SmoothingRadius * 0.5)
+	if (Spacing <= 0.0f)
+	{
+		Spacing = Preset ? Preset->SmoothingRadius * 0.5f : 10.0f;
+	}
+
+	// 방향에 수직인 로컬 좌표계 생성
+	FVector Right, Up;
+	Dir.FindBestAxisVectors(Right, Up);
+
+	// Hexagonal Packing 상수
+	const float RowSpacing = Spacing * FMath::Sqrt(3.0f) * 0.5f;  // ~0.866 * Spacing
+	const float RadiusSq = Radius * Radius;
+
+	// 행 개수 계산
+	const int32 NumRows = FMath::CeilToInt(Radius / RowSpacing) * 2 + 1;
+	const int32 HalfRows = NumRows / 2;
+
+	int32 SpawnedCount = 0;
+	const FVector SpawnVel = Dir * Speed;
+
+	// Hexagonal grid 순회
+	for (int32 RowIdx = -HalfRows; RowIdx <= HalfRows; ++RowIdx)
+	{
+		const float LocalY = RowIdx * RowSpacing;
+		const float LocalYSq = LocalY * LocalY;
+
+		// 이 행에서 원 내부의 최대 X 범위 계산
+		if (LocalYSq > RadiusSq)
+		{
+			continue;  // 원 밖의 행
+		}
+
+		const float MaxX = FMath::Sqrt(RadiusSq - LocalYSq);
+
+		// 홀수 행은 X 오프셋 적용 (Hexagonal Packing)
+		const float XOffset = (FMath::Abs(RowIdx) % 2 != 0) ? Spacing * 0.5f : 0.0f;
+
+		// X 시작점 계산 (중심 기준 대칭)
+		const int32 NumCols = FMath::FloorToInt(MaxX / Spacing);
+
+		for (int32 ColIdx = -NumCols; ColIdx <= NumCols; ++ColIdx)
+		{
+			const float LocalX = ColIdx * Spacing + XOffset;
+
+			// 원 내부 체크
+			if (LocalX * LocalX + LocalYSq <= RadiusSq)
+			{
+				FVector SpawnPos = Position + Right * LocalX + Up * LocalY;
+				SpawnParticle(SpawnPos, SpawnVel);
+				++SpawnedCount;
+			}
+		}
+	}
+
+	return SpawnedCount;
+}
+
 void UKawaiiFluidSimulationModule::ClearAllParticles()
 {
 	Particles.Empty();
@@ -941,4 +1009,123 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinderByCount(FVector Center
 	}
 
 	return SpawnedCount;
+}
+
+//========================================
+// Containment Volume
+//========================================
+
+void UKawaiiFluidSimulationModule::SetContainment(bool bEnabled, const FVector& Center, const FVector& Extent,
+                                                   const FQuat& Rotation, float Restitution, float Friction)
+{
+	// UPROPERTY 값들은 에디터에서 설정, Center와 Rotation은 동적으로 설정됨
+	bEnableContainment = bEnabled;
+	ContainmentCenter = Center;
+	ContainmentExtent = Extent;
+	ContainmentRotation = Rotation;
+	ContainmentRestitution = FMath::Clamp(Restitution, 0.0f, 1.0f);
+	ContainmentFriction = FMath::Clamp(Friction, 0.0f, 1.0f);
+}
+
+void UKawaiiFluidSimulationModule::ResolveContainmentCollisions()
+{
+	if (!bEnableContainment)
+	{
+		return;
+	}
+
+	// OBB (Oriented Bounding Box) 충돌 처리
+	// 파티클을 로컬 공간으로 변환하여 AABB 충돌 체크 후 다시 월드로 변환
+	const FQuat InverseRotation = ContainmentRotation.Inverse();
+	const FVector LocalBoxMin = -ContainmentExtent;
+	const FVector LocalBoxMax = ContainmentExtent;
+
+	for (FFluidParticle& P : Particles)
+	{
+		// 월드 -> 로컬 변환
+		FVector LocalPos = InverseRotation.RotateVector(P.PredictedPosition - ContainmentCenter);
+		FVector LocalVel = InverseRotation.RotateVector(P.Velocity);
+		bool bCollided = false;
+
+		// 로컬 공간에서 AABB 충돌 체크
+		// X축 체크
+		if (LocalPos.X < LocalBoxMin.X)
+		{
+			LocalPos.X = LocalBoxMin.X;
+			if (LocalVel.X < 0.0f)
+			{
+				LocalVel.X = -LocalVel.X * ContainmentRestitution;
+			}
+			LocalVel.Y *= (1.0f - ContainmentFriction);
+			LocalVel.Z *= (1.0f - ContainmentFriction);
+			bCollided = true;
+		}
+		else if (LocalPos.X > LocalBoxMax.X)
+		{
+			LocalPos.X = LocalBoxMax.X;
+			if (LocalVel.X > 0.0f)
+			{
+				LocalVel.X = -LocalVel.X * ContainmentRestitution;
+			}
+			LocalVel.Y *= (1.0f - ContainmentFriction);
+			LocalVel.Z *= (1.0f - ContainmentFriction);
+			bCollided = true;
+		}
+
+		// Y축 체크
+		if (LocalPos.Y < LocalBoxMin.Y)
+		{
+			LocalPos.Y = LocalBoxMin.Y;
+			if (LocalVel.Y < 0.0f)
+			{
+				LocalVel.Y = -LocalVel.Y * ContainmentRestitution;
+			}
+			LocalVel.X *= (1.0f - ContainmentFriction);
+			LocalVel.Z *= (1.0f - ContainmentFriction);
+			bCollided = true;
+		}
+		else if (LocalPos.Y > LocalBoxMax.Y)
+		{
+			LocalPos.Y = LocalBoxMax.Y;
+			if (LocalVel.Y > 0.0f)
+			{
+				LocalVel.Y = -LocalVel.Y * ContainmentRestitution;
+			}
+			LocalVel.X *= (1.0f - ContainmentFriction);
+			LocalVel.Z *= (1.0f - ContainmentFriction);
+			bCollided = true;
+		}
+
+		// Z축 체크
+		if (LocalPos.Z < LocalBoxMin.Z)
+		{
+			LocalPos.Z = LocalBoxMin.Z;
+			if (LocalVel.Z < 0.0f)
+			{
+				LocalVel.Z = -LocalVel.Z * ContainmentRestitution;
+			}
+			LocalVel.X *= (1.0f - ContainmentFriction);
+			LocalVel.Y *= (1.0f - ContainmentFriction);
+			bCollided = true;
+		}
+		else if (LocalPos.Z > LocalBoxMax.Z)
+		{
+			LocalPos.Z = LocalBoxMax.Z;
+			if (LocalVel.Z > 0.0f)
+			{
+				LocalVel.Z = -LocalVel.Z * ContainmentRestitution;
+			}
+			LocalVel.X *= (1.0f - ContainmentFriction);
+			LocalVel.Y *= (1.0f - ContainmentFriction);
+			bCollided = true;
+		}
+
+		// 로컬 -> 월드 변환하여 Position/Velocity 업데이트
+		if (bCollided)
+		{
+			P.PredictedPosition = ContainmentCenter + ContainmentRotation.RotateVector(LocalPos);
+			P.Position = P.PredictedPosition;
+			P.Velocity = ContainmentRotation.RotateVector(LocalVel);
+		}
+	}
 }

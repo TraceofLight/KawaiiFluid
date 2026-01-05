@@ -199,6 +199,40 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	UWorld* World = GetWorld();
 	const bool bIsGameWorld = World && World->IsGameWorld();
 
+	// Containment 설정 및 충돌 처리 (시뮬레이션 후에 적용)
+	// Containment 프로퍼티는 SimulationModule에 있음
+	if (SimulationModule && SimulationModule->bEnableContainment)
+	{
+		// Center와 Rotation은 동적으로 설정 (다른 값들은 SimulationModule의 UPROPERTY)
+		SimulationModule->SetContainment(
+			SimulationModule->bEnableContainment,
+			GetComponentLocation(),
+			SimulationModule->ContainmentExtent,
+			GetComponentQuat(),  // Component의 회전 전달
+			SimulationModule->ContainmentRestitution,
+			SimulationModule->ContainmentFriction
+		);
+		SimulationModule->ResolveContainmentCollisions();
+	}
+
+	// Containment Wireframe 시각화
+	if (SimulationModule && SimulationModule->bEnableContainment && SimulationModule->bShowContainmentWireframe)
+	{
+		const FVector Center = GetComponentLocation();
+		const FQuat Rotation = GetComponentQuat();
+		DrawDebugBox(
+			World,
+			Center,
+			SimulationModule->ContainmentExtent,
+			Rotation,  // Component의 회전 적용
+			SimulationModule->ContainmentWireframeColor,
+			false,  // bPersistentLines
+			-1.0f,  // LifeTime (매 프레임 다시 그림)
+			0,      // DepthPriority
+			2.0f    // Thickness
+		);
+	}
+
 	// Emitter mode: continuous spawn (Stream, Spray)
 	if (bIsGameWorld && SpawnSettings.IsEmitterMode())
 	{
@@ -226,7 +260,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 {
-	if (!SimulationModule || SpawnSettings.ParticlesPerSecond <= 0.0f)
+	if (!SimulationModule)
 	{
 		return;
 	}
@@ -237,19 +271,49 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		return;
 	}
 
-	SpawnAccumulatedTime += DeltaTime;
-	const float SpawnInterval = 1.0f / SpawnSettings.ParticlesPerSecond;
-
-	while (SpawnAccumulatedTime >= SpawnInterval)
+	// Hexagonal Stream 모드: Hexagonal Packing 레이어 기반 스폰
+	if (SpawnSettings.EmitterType == EFluidEmitterType::HexagonalStream)
 	{
-		SpawnDirectionalParticle();
-		SpawnAccumulatedTime -= SpawnInterval;
+		// 레이어 간격 = 1 / LayersPerSecond (직접 설정)
+		const float LayerInterval = 1.0f / FMath::Max(SpawnSettings.StreamLayersPerSecond, 1.0f);
 
-		// 최대 파티클 수 체크
-		if (SpawnSettings.MaxParticleCount > 0 && SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
+		SpawnAccumulatedTime += DeltaTime;
+
+		while (SpawnAccumulatedTime >= LayerInterval)
 		{
-			SpawnAccumulatedTime = 0.0f;
-			break;
+			SpawnHexagonalLayer();
+			SpawnAccumulatedTime -= LayerInterval;
+
+			// 최대 파티클 수 체크
+			if (SpawnSettings.MaxParticleCount > 0 && SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
+			{
+				SpawnAccumulatedTime = 0.0f;
+				break;
+			}
+		}
+	}
+	// Stream / Spray 모드: ParticlesPerSecond 기반 개별 스폰
+	else
+	{
+		if (SpawnSettings.ParticlesPerSecond <= 0.0f)
+		{
+			return;
+		}
+
+		SpawnAccumulatedTime += DeltaTime;
+		const float SpawnInterval = 1.0f / SpawnSettings.ParticlesPerSecond;
+
+		while (SpawnAccumulatedTime >= SpawnInterval)
+		{
+			SpawnDirectionalParticle();
+			SpawnAccumulatedTime -= SpawnInterval;
+
+			// 최대 파티클 수 체크
+			if (SpawnSettings.MaxParticleCount > 0 && SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
+			{
+				SpawnAccumulatedTime = 0.0f;
+				break;
+			}
 		}
 	}
 }
@@ -378,6 +442,27 @@ void UKawaiiFluidComponent::SpawnDirectionalParticle()
 		SpawnSettings.SpawnSpeed,
 		SpawnSettings.StreamRadius,
 		ConeAngle
+	);
+}
+
+void UKawaiiFluidComponent::SpawnHexagonalLayer()
+{
+	if (!SimulationModule)
+	{
+		return;
+	}
+
+	// Transform offset and direction by component rotation
+	const FQuat Rotation = GetComponentQuat();
+	const FVector Location = GetComponentLocation() + Rotation.RotateVector(SpawnSettings.SpawnOffset);
+	const FVector WorldDirection = Rotation.RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
+
+	SimulationModule->SpawnParticleDirectionalHexLayer(
+		Location,
+		WorldDirection,
+		SpawnSettings.SpawnSpeed,
+		SpawnSettings.StreamRadius,
+		SpawnSettings.StreamParticleSpacing
 	);
 }
 

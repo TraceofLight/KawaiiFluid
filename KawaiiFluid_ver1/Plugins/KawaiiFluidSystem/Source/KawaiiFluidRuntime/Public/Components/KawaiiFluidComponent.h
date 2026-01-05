@@ -68,8 +68,9 @@ enum class EFluidShapeType : uint8
 UENUM(BlueprintType)
 enum class EFluidEmitterType : uint8
 {
-	Stream      UMETA(DisplayName = "Stream", ToolTip = "Straight stream emission (like a faucet)"),
-	Spray       UMETA(DisplayName = "Spray", ToolTip = "Cone-shaped spray emission"),
+	Stream            UMETA(DisplayName = "Stream", ToolTip = "Random spawn within circle, controlled by ParticlesPerSecond"),
+	HexagonalStream   UMETA(DisplayName = "Hexagonal Stream", ToolTip = "Hexagonal-packed layers for dense continuous stream (like a faucet)"),
+	Spray             UMETA(DisplayName = "Spray", ToolTip = "Cone-shaped spray emission"),
 };
 
 /**
@@ -147,9 +148,19 @@ struct FFluidSpawnSettings
 	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter", EditConditionHides, ClampMin = "0.0"))
 	float StreamRadius = 5.0f;
 
-	/** Particles spawned per second */
+	/** Spacing between particles in hexagonal cross-section (0 = auto from SmoothingRadius * 0.5) - Hexagonal Stream only */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Spawn|Flow",
-	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter", EditConditionHides, ClampMin = "1.0", ClampMax = "1000.0"))
+	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter && EmitterType == EFluidEmitterType::HexagonalStream", EditConditionHides, ClampMin = "0.0"))
+	float StreamParticleSpacing = 0.0f;
+
+	/** Number of hexagonal layers spawned per second - Hexagonal Stream only. Higher = denser stream */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Spawn|Flow",
+	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter && EmitterType == EFluidEmitterType::HexagonalStream", EditConditionHides, ClampMin = "1.0", ClampMax = "500.0"))
+	float StreamLayersPerSecond = 60.0f;
+
+	/** Particles spawned per second - Stream and Spray modes */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Spawn|Flow",
+	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter && (EmitterType == EFluidEmitterType::Stream || EmitterType == EFluidEmitterType::Spray)", EditConditionHides, ClampMin = "1.0", ClampMax = "1000.0"))
 	float ParticlesPerSecond = 30.0f;
 
 	/** Cone angle (degrees) - Spray emitter only */
@@ -387,8 +398,11 @@ private:
 	/** Execute auto spawn (called from BeginPlay) */
 	void ExecuteAutoSpawn();
 
-	/** Spawn single particle for Stream/Jet mode */
+	/** Spawn single particle for Stream/Jet mode (Spray mode) */
 	void SpawnDirectionalParticle();
+
+	/** Spawn hexagonal-packed layer of particles (Stream mode) */
+	void SpawnHexagonalLayer();
 
 	//========================================
 	// Editor Visualization

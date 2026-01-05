@@ -239,6 +239,18 @@ public:
 	int32 SpawnParticleDirectional(FVector Position, FVector Direction, float Speed,
 	                               float Radius = 0.0f, float ConeAngle = 0.0f);
 
+	/** Hexagonal Packing으로 원형 단면 레이어 스폰 (Stream 모드용)
+	 * @param Position 레이어 중심 위치
+	 * @param Direction 방출 방향 (정규화됨)
+	 * @param Speed 초기 속도 크기
+	 * @param Radius 스트림 반경
+	 * @param Spacing 파티클 간격 (0이면 SmoothingRadius * 0.5 자동 계산)
+	 * @return 스폰된 파티클 수
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Fluid")
+	int32 SpawnParticleDirectionalHexLayer(FVector Position, FVector Direction, float Speed,
+	                                        float Radius, float Spacing = 0.0f);
+
 	/** 모든 파티클 제거 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void ClearAllParticles();
@@ -369,6 +381,54 @@ public:
 	/** World Collision 사용 여부 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision")
 	bool bUseWorldCollision = true;
+
+	/** Enable containment volume - particles are confined within this box and cannot escape */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision")
+	bool bEnableContainment = false;
+
+	/** Containment volume half extent (cm) - centered on component location */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision",
+	          meta = (EditCondition = "bEnableContainment", EditConditionHides))
+	FVector ContainmentExtent = FVector(100.0f, 100.0f, 100.0f);
+
+	/** Containment wall restitution (bounciness when particles hit the wall) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision",
+	          meta = (EditCondition = "bEnableContainment", EditConditionHides, ClampMin = "0.0", ClampMax = "1.0"))
+	float ContainmentRestitution = 0.3f;
+
+	/** Containment wall friction */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision",
+	          meta = (EditCondition = "bEnableContainment", EditConditionHides, ClampMin = "0.0", ClampMax = "1.0"))
+	float ContainmentFriction = 0.1f;
+
+	/** Show containment volume wireframe in editor */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision",
+	          meta = (EditCondition = "bEnableContainment", EditConditionHides))
+	bool bShowContainmentWireframe = true;
+
+	/** Containment wireframe color */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision",
+	          meta = (EditCondition = "bEnableContainment && bShowContainmentWireframe", EditConditionHides))
+	FColor ContainmentWireframeColor = FColor::Yellow;
+
+	//========================================
+	// Containment Volume API
+	//========================================
+
+	/** Set containment volume parameters - confines particles within a box
+	 * @param bEnabled Enable/disable containment
+	 * @param Center World-space center of the containment volume
+	 * @param Extent Half-extent of the containment volume (cm)
+	 * @param Rotation World-space rotation of the containment volume
+	 * @param Restitution Bounciness when particles hit walls (0-1)
+	 * @param Friction Friction coefficient on walls (0-1)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Fluid|Containment")
+	void SetContainment(bool bEnabled, const FVector& Center, const FVector& Extent,
+	                    const FQuat& Rotation, float Restitution, float Friction);
+
+	/** Resolve containment collisions - keeps particles inside the volume */
+	void ResolveContainmentCollisions();
 
 	//========================================
 	// Event Settings
@@ -517,6 +577,12 @@ private:
 
 	/** 서브스텝 시간 누적 */
 	float AccumulatedTime = 0.0f;
+
+	/** Containment center (world space, set dynamically from Component location) */
+	FVector ContainmentCenter = FVector::ZeroVector;
+
+	/** Containment rotation (world space, set dynamically from Component rotation) */
+	FQuat ContainmentRotation = FQuat::Identity;
 
 	/** 시뮬레이션 활성화 */
 	bool bSimulationEnabled = true;
