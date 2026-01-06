@@ -301,16 +301,20 @@ void FDensityConstraint::ComputeDensityAndLambda_SIMD(
 
 		DensityPtr[i] = Density;
 
-		// Lambda 계산
+		// Lambda 계산 (XPBD)
 		const float C_i = (Density * Coeffs.InvRestDensity) - 1.0f;
 		if (C_i < 0.0f)
 		{
-			LambdaPtr[i] = 0.0f;
+			// 압축 상태에서는 보정하지 않음 - Lambda 유지 (0으로 리셋하지 않음)
 			return;
 		}
 
 		SumGradC2 += GradC_iX * GradC_iX + GradC_iY * GradC_iY + GradC_iZ * GradC_iZ;
-		LambdaPtr[i] = -C_i / (SumGradC2 + Epsilon);
+
+		// XPBD: Δλ = (-C - α̃λ_prev) / (|∇C|² + α̃)
+		const float Lambda_prev = LambdaPtr[i];
+		const float DeltaLambda = (-C_i - Epsilon * Lambda_prev) / (SumGradC2 + Epsilon);
+		LambdaPtr[i] = Lambda_prev + DeltaLambda;
 
 	}, EParallelForFlags::Unbalanced);
 }
@@ -506,7 +510,7 @@ float FDensityConstraint::ComputeParticleDensity(const FFluidParticle& Particle,
 float FDensityConstraint::ComputeParticleLambda(const FFluidParticle& Particle, const TArray<FFluidParticle>& Particles)
 {
 	float C_i = (Particle.Density / RestDensity) - 1.0f;
-	if (C_i < 0.0f) return 0.0f;
+	if (C_i < 0.0f) return Particle.Lambda;  // 압축 상태: Lambda 유지
 
 	float SumGradC2 = 0.0f;
 	FVector GradC_i = FVector::ZeroVector;
@@ -523,7 +527,11 @@ float FDensityConstraint::ComputeParticleLambda(const FFluidParticle& Particle, 
 	}
 
 	SumGradC2 += GradC_i.SizeSquared();
-	return -C_i / (SumGradC2 + Epsilon);
+
+	// XPBD: Δλ = (-C - α̃λ_prev) / (|∇C|² + α̃)
+	const float Lambda_prev = Particle.Lambda;
+	const float DeltaLambda = (-C_i - Epsilon * Lambda_prev) / (SumGradC2 + Epsilon);
+	return Lambda_prev + DeltaLambda;
 }
 
 FVector FDensityConstraint::ComputeDeltaPosition(int32 ParticleIndex, const TArray<FFluidParticle>& Particles)

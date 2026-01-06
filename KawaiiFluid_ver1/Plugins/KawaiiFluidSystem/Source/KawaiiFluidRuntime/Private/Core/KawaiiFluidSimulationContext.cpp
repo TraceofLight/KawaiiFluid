@@ -808,7 +808,20 @@ void UKawaiiFluidSimulationContext::SolveDensityConstraints(
 	const UKawaiiFluidPresetDataAsset* Preset,
 	float DeltaTime)
 {
-	if (DensityConstraint.IsValid())
+	if (!DensityConstraint.IsValid())
+	{
+		return;
+	}
+
+	// XPBD: Lambda 초기화 (매 타임스텝 시작 시 0으로 리셋)
+	ParallelFor(Particles.Num(), [&](int32 i)
+	{
+		Particles[i].Lambda = 0.0f;
+	});
+
+	// XPBD 반복 솔버 (점성 유체: 2-3회, 물: 4-6회)
+	const int32 SolverIterations = Preset->SolverIterations;
+	for (int32 Iter = 0; Iter < SolverIterations; ++Iter)
 	{
 		DensityConstraint->Solve(
 			Particles,

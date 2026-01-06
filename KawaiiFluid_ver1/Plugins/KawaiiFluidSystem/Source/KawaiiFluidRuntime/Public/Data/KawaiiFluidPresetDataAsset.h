@@ -65,6 +65,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics", meta = (ClampMin = "0.0"))
 	float Compliance = 0.01f;
 
+	/** XPBD constraint solver iterations (viscous fluid: 2-3, water: 4-6) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Physics", meta = (ClampMin = "1", ClampMax = "10"))
+	int32 SolverIterations = 3;
+
 	//========================================
 	// Viscosity Parameters
 	//========================================
