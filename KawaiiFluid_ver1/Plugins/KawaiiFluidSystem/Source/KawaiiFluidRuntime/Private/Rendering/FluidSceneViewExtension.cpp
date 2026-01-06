@@ -477,269 +477,11 @@ void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 					return InInputs.ReturnUntouchedSceneColorForPostProcessing(GraphBuilder);
 				}
 
-				RDG_EVENT_SCOPE(GraphBuilder, "KawaiiFluidRendering");
-
 				// ============================================
-				// Execute Shadow Projection using previous frame's depth
-				// This generates VSM texture from history buffer
-				// Find the first renderer with shadow casting enabled
+				// All fluid rendering and shadow processing is now in PrePostProcessPass_RenderThread (before TSR)
+				// This callback is kept for potential future use but does nothing
 				// ============================================
-				const FFluidRenderingParameters* ShadowRenderParams = nullptr;
-				const TArray<UKawaiiFluidRenderingModule*>& AllModules = SubsystemPtr->GetAllRenderingModules();
-				for (UKawaiiFluidRenderingModule* Module : AllModules)
-				{
-					if (!Module) continue;
-					UKawaiiFluidMetaballRenderer* Renderer = Module->GetMetaballRenderer();
-					if (Renderer && Renderer->IsRenderingActive())
-					{
-						const FFluidRenderingParameters& Params = Renderer->GetLocalParameters();
-						if (Params.bEnableShadowCasting)
-						{
-							ShadowRenderParams = &Params;
-							break;
-						}
-					}
-				}
-
-				if (ShadowRenderParams)
-				{
-					ExecuteFluidShadowProjection(
-						GraphBuilder,
-						View,
-						SubsystemPtr,
-						*ShadowRenderParams);
-				}
-
-				// ============================================
-				// Batch renderers by LocalParameters (new Pipeline-based approach)
-				// Separate batches by PipelineType (ScreenSpace vs RayMarching)
-				// GBuffer shading is handled in PostRenderBasePassDeferred, not here
-				// Translucent: GBuffer write in PostRenderBasePassDeferred, Transparency pass here
-				// ============================================
-				TMap<FFluidRenderingParameters, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
-				TMap<FFluidRenderingParameters, TArray<UKawaiiFluidMetaballRenderer*>> RayMarchingBatches;
-
-				const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
-				for (UKawaiiFluidRenderingModule* Module : Modules)
-				{
-					if (!Module) continue;
-
-					UKawaiiFluidMetaballRenderer* MetaballRenderer = Module->GetMetaballRenderer();
-					if (MetaballRenderer && MetaballRenderer->IsRenderingActive())
-					{
-						const FFluidRenderingParameters& Params = MetaballRenderer->GetLocalParameters();
-
-						// Route based on ShadingMode and PipelineType
-						// GBuffer and Translucent modes are handled elsewhere:
-						// - GBuffer: PostRenderBasePassDeferred
-						// - Translucent: PrePostProcessPass_RenderThread
-						if (Params.ShadingMode == EMetaballShadingMode::GBuffer ||
-							Params.ShadingMode == EMetaballShadingMode::Translucent)
-						{
-							// Skip - handled in other callbacks
-							continue;
-						}
-						else if (Params.PipelineType == EMetaballPipelineType::ScreenSpace)
-						{
-							ScreenSpaceBatches.FindOrAdd(Params).Add(MetaballRenderer);
-						}
-						else if (Params.PipelineType == EMetaballPipelineType::RayMarching)
-						{
-							RayMarchingBatches.FindOrAdd(Params).Add(MetaballRenderer);
-						}
-					}
-				}
-
-				// Check if we have any renderers for ScreenSpace/RayMarching
-				if (ScreenSpaceBatches.Num() == 0 && RayMarchingBatches.Num() == 0)
-				{
-					return InInputs.ReturnUntouchedSceneColorForPostProcessing(GraphBuilder);
-				}
-
-				// Scene Depth 가져오기
-				FRDGTextureRef SceneDepthTexture = nullptr;
-				if (InInputs.SceneTextures.SceneTextures)
-				{
-					SceneDepthTexture = InInputs.SceneTextures.SceneTextures->GetContents()->SceneDepthTexture;
-				}
-
-				// Composite Setup (공통)
-				FScreenPassTexture SceneColorInput = FScreenPassTexture(
-					InInputs.GetInput(EPostProcessMaterialInput::SceneColor));
-				if (!SceneColorInput.IsValid())
-				{
-					return InInputs.ReturnUntouchedSceneColorForPostProcessing(GraphBuilder);
-				}
-
-				// Output Target 결정
-				FScreenPassRenderTarget Output = InInputs.OverrideOutput;
-				if (!Output.IsValid())
-				{
-					Output = FScreenPassRenderTarget::CreateFromInput(
-						GraphBuilder, SceneColorInput, View.GetOverwriteLoadAction(),
-						TEXT("FluidCompositeOutput"));
-				}
-
-				// SceneColor 복사
-				if (SceneColorInput.Texture != Output.Texture)
-				{
-					AddDrawTexturePass(GraphBuilder, View, SceneColorInput, Output);
-				}
-
-				// ============================================
-				// Apply Fluid Shadow Receiver
-				// Uses VSM from previous frame to cast shadows on scene
-				// Applied before fluid rendering so fluid appears on top of shadows
-				// ============================================
-				if (ShadowRenderParams)
-				{
-					// Create a copy for shadow receiver input (can't read and write same texture)
-					// Copy desc but strip problematic flags that cause RDG assertion failures
-					FRDGTextureDesc ShadowInputDesc = Output.Texture->Desc;
-					ShadowInputDesc.Flags &= ~(TexCreate_Presentable | TexCreate_DepthStencilTargetable | TexCreate_ResolveTargetable);
-					ShadowInputDesc.Flags |= (TexCreate_RenderTargetable | TexCreate_ShaderResource);
-					FRDGTextureRef ShadowInputCopy = GraphBuilder.CreateTexture(
-						ShadowInputDesc,
-						TEXT("FluidShadowReceiverInput"));
-					AddCopyTexturePass(GraphBuilder, Output.Texture, ShadowInputCopy);
-
-					ApplyFluidShadowReceiver(
-						GraphBuilder,
-						View,
-						SubsystemPtr,
-						*ShadowRenderParams,
-						ShadowInputCopy,
-						SceneDepthTexture,
-						Output);
-				}
-
-				// ============================================
-				// ScreenSpace Pipeline Rendering
-				// PostProcess mode is fully handled here:
-				// 1. PrepareForTonemap: Generate intermediate textures (depth, normal, thickness)
-				// 2. ExecuteTonemap: Apply PostProcess shading using cached textures
-				// 3. Store depth to history for shadow projection (next frame)
-				// ============================================
-				for (auto& Batch : ScreenSpaceBatches)
-				{
-					const FFluidRenderingParameters& BatchParams = Batch.Key;
-					const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
-
-					RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_ScreenSpace");
-
-					// Get Pipeline from first renderer (all renderers in batch share same params)
-					if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
-					{
-						TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
-
-						// 1. PrepareForTonemap - generate and cache intermediate textures
-						Pipeline->PrepareForTonemap(
-							GraphBuilder,
-							View,
-							BatchParams,
-							Renderers,
-							SceneDepthTexture);
-
-						// 2. ExecuteTonemap - apply PostProcess shading
-						Pipeline->ExecuteTonemap(
-							GraphBuilder,
-							View,
-							BatchParams,
-							Renderers,
-							SceneDepthTexture,
-							SceneColorInput.Texture,
-							Output);
-
-						// 3. Store smoothed depth to history for shadow projection
-						if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->GetShadowHistoryManager())
-						{
-							if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->GetCachedIntermediateTextures())
-							{
-								if (IntermediateTextures->SmoothedDepthTexture)
-								{
-									HistoryManager->StoreCurrentFrame(
-										GraphBuilder,
-										IntermediateTextures->SmoothedDepthTexture,
-										View);
-								}
-							}
-						}
-
-						UE_LOG(LogTemp, Verbose, TEXT("KawaiiFluid: ScreenSpace Pipeline rendered %d renderers"), Renderers.Num());
-					}
-					else
-					{
-						UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid: No Pipeline found for ScreenSpace batch"));
-					}
-				}
-
-				// ============================================
-				// RayMarching Pipeline Rendering
-				// PostProcess mode is fully handled here:
-				// 1. PrepareForTonemap: Prepare particle buffer and optional SDF volume
-				// 2. ExecuteTonemap: Apply PostProcess ray march shading
-				// 3. Store depth to history for shadow projection (next frame)
-				// ============================================
-				for (auto& Batch : RayMarchingBatches)
-				{
-					const FFluidRenderingParameters& BatchParams = Batch.Key;
-					const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
-
-					RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_RayMarching");
-
-					// Get Pipeline from first renderer (all renderers in batch share same params)
-					if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
-					{
-						TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
-
-						// 1. PrepareForTonemap - prepare particle buffer and SDF
-						Pipeline->PrepareForTonemap(
-							GraphBuilder,
-							View,
-							BatchParams,
-							Renderers,
-							SceneDepthTexture);
-
-						// 2. ExecuteTonemap - apply PostProcess ray march shading
-						Pipeline->ExecuteTonemap(
-							GraphBuilder,
-							View,
-							BatchParams,
-							Renderers,
-							SceneDepthTexture,
-							SceneColorInput.Texture,
-							Output);
-
-						// 3. Store fluid depth to history for shadow projection
-						if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->GetShadowHistoryManager())
-						{
-							if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->GetCachedIntermediateTextures())
-							{
-								// RayMarching stores depth in SmoothedDepthTexture field
-								if (IntermediateTextures->SmoothedDepthTexture)
-								{
-									HistoryManager->StoreCurrentFrame(
-										GraphBuilder,
-										IntermediateTextures->SmoothedDepthTexture,
-										View);
-
-									UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: RayMarching depth stored to shadow history"));
-								}
-							}
-						}
-
-						UE_LOG(LogTemp, Verbose, TEXT("KawaiiFluid: RayMarching Pipeline rendered %d renderers"), Renderers.Num());
-					}
-					else
-					{
-						UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid: No Pipeline found for RayMarching batch"));
-					}
-				}
-
-				// Debug Keep Alive
-				GraphBuilder.QueueTextureExtraction(Output.Texture, &GFluidCompositeDebug_KeepAlive);
-
-				return FScreenPassTexture(Output);
+				return InInputs.ReturnUntouchedSceneColorForPostProcessing(GraphBuilder);
 			}
 		));
 	}
@@ -762,8 +504,14 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		return;
 	}
 
-	// Collect Translucent mode renderers for TransparencyPass
+	// Collect all renderers for PrePostProcess (before TSR)
+	// - Translucent: GBuffer write already done, transparency compositing here
+	// - ScreenSpace: Full pipeline (depth/normal/thickness generation + shading)
+	// - RayMarching: Full pipeline (SDF + ray march shading)
 	TMap<FFluidRenderingParameters, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
+	TMap<FFluidRenderingParameters, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
+	TMap<FFluidRenderingParameters, TArray<UKawaiiFluidMetaballRenderer*>> RayMarchingBatches;
+	const FFluidRenderingParameters* ShadowRenderParams = nullptr;
 
 	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
 	for (UKawaiiFluidRenderingModule* Module : Modules)
@@ -774,14 +522,35 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		if (MetaballRenderer && MetaballRenderer->IsRenderingActive())
 		{
 			const FFluidRenderingParameters& Params = MetaballRenderer->GetLocalParameters();
+
+			// Collect shadow params from first renderer with shadow casting enabled
+			if (!ShadowRenderParams && Params.bEnableShadowCasting)
+			{
+				ShadowRenderParams = &Params;
+			}
+
 			if (Params.ShadingMode == EMetaballShadingMode::Translucent)
 			{
 				TranslucentBatches.FindOrAdd(Params).Add(MetaballRenderer);
 			}
+			else if (Params.ShadingMode == EMetaballShadingMode::GBuffer)
+			{
+				// GBuffer shading is handled in PostRenderBasePassDeferred
+				continue;
+			}
+			else if (Params.PipelineType == EMetaballPipelineType::ScreenSpace)
+			{
+				ScreenSpaceBatches.FindOrAdd(Params).Add(MetaballRenderer);
+			}
+			else if (Params.PipelineType == EMetaballPipelineType::RayMarching)
+			{
+				RayMarchingBatches.FindOrAdd(Params).Add(MetaballRenderer);
+			}
 		}
 	}
 
-	if (TranslucentBatches.Num() == 0)
+	// Early return if nothing to render and no shadows
+	if (TranslucentBatches.Num() == 0 && ScreenSpaceBatches.Num() == 0 && RayMarchingBatches.Num() == 0 && !ShadowRenderParams)
 	{
 		return;
 	}
@@ -843,6 +612,41 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	// Copy SceneColor
 	AddCopyTexturePass(GraphBuilder, SceneColorTexture, LitSceneColorCopy);
 
+	// ============================================
+	// Shadow Processing (before fluid rendering)
+	// ============================================
+	if (ShadowRenderParams)
+	{
+		// 1. Shadow Projection - generates VSM texture from history buffer
+		ExecuteFluidShadowProjection(
+			GraphBuilder,
+			View,
+			SubsystemPtr,
+			*ShadowRenderParams);
+
+		// 2. Shadow Receiver - applies shadows to scene
+		// Create a copy for shadow receiver input (can't read and write same texture)
+		FRDGTextureDesc ShadowInputDesc = SceneColorTexture->Desc;
+		ShadowInputDesc.Flags &= ~(TexCreate_Presentable | TexCreate_DepthStencilTargetable | TexCreate_ResolveTargetable);
+		ShadowInputDesc.Flags |= (TexCreate_RenderTargetable | TexCreate_ShaderResource);
+		FRDGTextureRef ShadowInputCopy = GraphBuilder.CreateTexture(
+			ShadowInputDesc,
+			TEXT("FluidShadowReceiverInput_PrePostProcess"));
+		AddCopyTexturePass(GraphBuilder, SceneColorTexture, ShadowInputCopy);
+
+		ApplyFluidShadowReceiver(
+			GraphBuilder,
+			View,
+			SubsystemPtr,
+			*ShadowRenderParams,
+			ShadowInputCopy,
+			SceneDepthTexture,
+			Output);
+
+		// Update LitSceneColorCopy after shadow receiver modified SceneColor
+		AddCopyTexturePass(GraphBuilder, SceneColorTexture, LitSceneColorCopy);
+	}
+
 	// Apply TransparencyPass for each Translucent batch using Pipeline
 	for (auto& Batch : TranslucentBatches)
 	{
@@ -867,5 +671,104 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: PrePostProcess TransparencyPass rendered %d batches"), TranslucentBatches.Num());
+	// ============================================
+	// ScreenSpace Pipeline Rendering (before TSR)
+	// ============================================
+	for (auto& Batch : ScreenSpaceBatches)
+	{
+		const FFluidRenderingParameters& BatchParams = Batch.Key;
+		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
+
+		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_ScreenSpace_PreTSR");
+
+		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
+		{
+			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
+
+			// 1. PrepareRender - generate and cache intermediate textures
+			Pipeline->PrepareRender(
+				GraphBuilder,
+				View,
+				BatchParams,
+				Renderers,
+				SceneDepthTexture);
+
+			// 2. ExecuteRender - apply shading
+			Pipeline->ExecuteRender(
+				GraphBuilder,
+				View,
+				BatchParams,
+				Renderers,
+				SceneDepthTexture,
+				LitSceneColorCopy,
+				Output);
+
+			// 3. Store smoothed depth to history for shadow projection
+			if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->GetShadowHistoryManager())
+			{
+				if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->GetCachedIntermediateTextures())
+				{
+					if (IntermediateTextures->SmoothedDepthTexture)
+					{
+						HistoryManager->StoreCurrentFrame(
+							GraphBuilder,
+							IntermediateTextures->SmoothedDepthTexture,
+							View);
+					}
+				}
+			}
+		}
+	}
+
+	// ============================================
+	// RayMarching Pipeline Rendering (before TSR)
+	// ============================================
+	for (auto& Batch : RayMarchingBatches)
+	{
+		const FFluidRenderingParameters& BatchParams = Batch.Key;
+		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
+
+		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_RayMarching_PreTSR");
+
+		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
+		{
+			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
+
+			// 1. PrepareForTonemap - prepare particle buffer and SDF
+			Pipeline->PrepareRender(
+				GraphBuilder,
+				View,
+				BatchParams,
+				Renderers,
+				SceneDepthTexture);
+
+			// 2. ExecuteTonemap - apply ray march shading
+			Pipeline->ExecuteRender(
+				GraphBuilder,
+				View,
+				BatchParams,
+				Renderers,
+				SceneDepthTexture,
+				LitSceneColorCopy,
+				Output);
+
+			// 3. Store fluid depth to history for shadow projection
+			if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->GetShadowHistoryManager())
+			{
+				if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->GetCachedIntermediateTextures())
+				{
+					if (IntermediateTextures->SmoothedDepthTexture)
+					{
+						HistoryManager->StoreCurrentFrame(
+							GraphBuilder,
+							IntermediateTextures->SmoothedDepthTexture,
+							View);
+					}
+				}
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: PrePostProcess rendered - Translucent:%d ScreenSpace:%d RayMarching:%d"),
+		TranslucentBatches.Num(), ScreenSpaceBatches.Num(), RayMarchingBatches.Num());
 }

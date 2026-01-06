@@ -49,7 +49,7 @@ public:
 		FRDGTextureRef GBufferDTexture = nullptr) override;
 
 	/** Prepare intermediate textures for Tonemap shading (depth, normal, thickness) */
-	virtual void PrepareForTonemap(
+	virtual void PrepareRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
@@ -57,7 +57,7 @@ public:
 		FRDGTextureRef SceneDepthTexture) override;
 
 	/** Execute at Tonemap timing - applies PostProcess shading */
-	virtual void ExecuteTonemap(
+	virtual void ExecuteRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,

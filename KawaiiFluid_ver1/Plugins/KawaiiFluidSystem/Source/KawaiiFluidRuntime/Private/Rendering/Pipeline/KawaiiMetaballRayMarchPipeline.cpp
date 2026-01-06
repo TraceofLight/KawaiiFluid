@@ -466,7 +466,7 @@ void FKawaiiMetaballRayMarchPipeline::ExecutePostBasePass(
 		CachedPipelineData.ParticleCount, static_cast<int32>(RenderParams.ShadingMode));
 }
 
-void FKawaiiMetaballRayMarchPipeline::PrepareForTonemap(
+void FKawaiiMetaballRayMarchPipeline::PrepareRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,
@@ -530,7 +530,7 @@ void FKawaiiMetaballRayMarchPipeline::ExecutePrePostProcess(
 	UE_LOG(LogTemp, Verbose, TEXT("KawaiiFluid: RayMarching PrePostProcess executed"));
 }
 
-void FKawaiiMetaballRayMarchPipeline::ExecuteTonemap(
+void FKawaiiMetaballRayMarchPipeline::ExecuteRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,

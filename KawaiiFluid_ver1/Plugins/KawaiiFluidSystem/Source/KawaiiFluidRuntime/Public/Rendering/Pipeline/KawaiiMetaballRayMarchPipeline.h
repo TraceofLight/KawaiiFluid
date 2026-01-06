@@ -51,7 +51,7 @@ public:
 		FRDGTextureRef GBufferDTexture = nullptr) override;
 
 	/** Prepare particle buffer and SDF for Tonemap shading */
-	virtual void PrepareForTonemap(
+	virtual void PrepareRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
@@ -59,7 +59,7 @@ public:
 		FRDGTextureRef SceneDepthTexture) override;
 
 	/** Execute at Tonemap timing - PostProcess ray march shading */
-	virtual void ExecuteTonemap(
+	virtual void ExecuteRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,

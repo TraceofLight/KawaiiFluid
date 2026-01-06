@@ -156,7 +156,7 @@ void FKawaiiMetaballScreenSpacePipeline::ExecutePostBasePass(
 	}
 }
 
-void FKawaiiMetaballScreenSpacePipeline::PrepareForTonemap(
+void FKawaiiMetaballScreenSpacePipeline::PrepareRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,
@@ -194,7 +194,7 @@ void FKawaiiMetaballScreenSpacePipeline::ExecutePrePostProcess(
 	// Translucent mode requires RayMarchingPipeline
 }
 
-void FKawaiiMetaballScreenSpacePipeline::ExecuteTonemap(
+void FKawaiiMetaballScreenSpacePipeline::ExecuteRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,

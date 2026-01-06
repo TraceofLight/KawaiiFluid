@@ -100,7 +100,7 @@ public:
 	 * @param Renderers        Array of renderers to process
 	 * @param SceneDepthTexture Scene depth texture
 	 */
-	virtual void PrepareForTonemap(
+	virtual void PrepareRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
@@ -124,7 +124,7 @@ public:
 	 * @param SceneColorTexture Scene color texture
 	 * @param Output           Final render target
 	 */
-	virtual void ExecuteTonemap(
+	virtual void ExecuteRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
