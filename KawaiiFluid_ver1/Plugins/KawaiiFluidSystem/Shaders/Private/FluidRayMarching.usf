@@ -257,6 +257,19 @@ FRayMarchResult RayMarchSDF(float3 ro, float3 rd, float maxDist, float2 screenPo
 	float3 entryPos = ro + rd * t;
 	float entrySDF = SampleSDFVolume(entryPos);
 
+	// [FIX] 초기 진입점 체크 (Inside Check)
+	// 유체가 Bounds 꽉 채워서 진입점부터 내부인 경우 즉시 리턴
+	if (entrySDF < RayMarchHitThreshold)
+	{
+		result.bHit = true;
+		result.Distance = t;
+		result.Position = entryPos;
+		// 상자 표면 방향으로 노멀 근사 (또는 0,1,0)
+		result.Normal = float3(0, 1, 0); 
+		result.Thickness = ParticleRadius * 4.0; 
+		return result;
+	}
+
 	// Jitter start position within safe distance (won't overshoot surface)
 	t += entrySDF * jitterNoise * 0.5;
 #else

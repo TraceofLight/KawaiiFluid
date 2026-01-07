@@ -145,7 +145,10 @@ bool FKawaiiMetaballRayMarchPipeline::PrepareParticleBuffer(
 
 				// OPTIMIZED: Single merged pass - ExtractRenderData + CalculateBounds
 				float ParticleRadius = Renderer->GetCachedParticleRadius();
-				float BoundsMargin = ParticleRadius * 2.0f;
+				// [FIX] Calculate accurate bounds margin based on smin support radius
+				// Formula: Padding = Smoothness + Threshold
+				// We use Smoothness + Radius (safety) to ensure no clipping occurs
+				float BoundsMargin = RenderParams.SDFSmoothness + ParticleRadius + 5.0f;
 				FGPUFluidSimulatorPassBuilder::AddExtractRenderDataWithBoundsPass(
 					GraphBuilder,
 					PhysicsBufferSRV,

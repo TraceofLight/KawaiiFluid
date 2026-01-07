@@ -94,7 +94,6 @@ void SDFBakeWithGPUBoundsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         float MaxInteractionDist = ParticleRadius + (SDFSmoothness * 2.0f);
         
         int Range = (int)ceil(MaxInteractionDist / SpatialHashCellSize);
-        Range = clamp(Range, 1, 5); 
 
         for (int dz = -Range; dz <= Range; ++dz)
         {
