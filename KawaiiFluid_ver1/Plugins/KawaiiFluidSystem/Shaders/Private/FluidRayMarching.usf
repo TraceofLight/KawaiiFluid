@@ -270,8 +270,9 @@ FRayMarchResult RayMarchSDF(float3 ro, float3 rd, float maxDist, float2 screenPo
 		return result;
 	}
 
-	// Jitter start position within safe distance (won't overshoot surface)
-	t += entrySDF * jitterNoise * 0.5;
+	// [FIX] Jitter start position within safe distance
+	// entrySDF can be huge in large volumes, so we must clamp the jitter to prevent skipping the fluid
+	t += min(entrySDF, ParticleRadius * 2.0f) * jitterNoise * 0.5f;
 #else
 	float t = 0.0;
 	float marchMaxDist = maxDist;
@@ -293,7 +294,8 @@ FRayMarchResult RayMarchSDF(float3 ro, float3 rd, float maxDist, float2 screenPo
 
 		// HYBRID MODE: When close to surface, switch to Spatial Hash for precise evaluation
 		// SDF Volume is fast but approximate, Spatial Hash gives accurate surface detection
-		if (sdf < SpatialHashCellSize)
+		// [FIX] Increase detection range to prevent skipping fine details (Cell skipping issue)
+		if (sdf < SpatialHashCellSize * 1.5)
 		{
 			// Phase 2: Precise evaluation using Spatial Hash (O(k) neighbor lookup)
 		#if USE_SOA_BUFFERS
@@ -362,6 +364,12 @@ FRayMarchResult RayMarchSDF(float3 ro, float3 rd, float maxDist, float2 screenPo
 		#endif
 #endif
 
+			// [FIX] Prevent NaN normal from causing "Blow up" artifacts
+			if (any(isnan(result.Normal)) || length(result.Normal) < 0.01f)
+			{
+				result.Normal = float3(0, 1, 0);
+			}
+
 			// Estimate thickness based on SDF and particle radius (simple approximation)
 			// Avoids internal ray marching which causes visible internal boundaries
 			float estimatedThickness = ParticleRadius * 4.0 * (1.0 - saturate(abs(sdf) / ParticleRadius));
@@ -371,7 +379,12 @@ FRayMarchResult RayMarchSDF(float3 ro, float3 rd, float maxDist, float2 screenPo
 		}
 
 		// Adaptive stepping with safety factor (reference: 4rknova blog)
-		t += max(sdf * 0.95, 0.01);
+		// [FIX] Cap the step size to prevent overshooting even with bad SDF values.
+		float maxStep = ParticleRadius * 4.0f;
+#if USE_SDF_VOLUME && USE_SPATIAL_HASH
+		maxStep = SpatialHashCellSize;
+#endif
+		t += clamp(sdf * 0.8f, 0.001f, maxStep);
 	}
 
 	return result;
