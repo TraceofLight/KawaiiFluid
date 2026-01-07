@@ -162,9 +162,6 @@ public:
 	/** Set maximum velocity safety clamp (to prevent divergence) */
 	void SetMaxVelocity(float MaxVel) { MaxVelocity = FMath::Max(MaxVel, 0.0f); }
 
-	/** Set velocity damping factor (0.98-0.99 typical) */
-	void SetVelocityDamping(float Damping) { VelocityDamping = FMath::Clamp(Damping, 0.0f, 1.0f); }
-
 	//=============================================================================
 	// Distance Field Collision
 	//=============================================================================
@@ -549,7 +546,6 @@ private:
 
 	FVector3f ExternalForce;
 	float MaxVelocity;       // Safety clamp to prevent divergence (default: 50000 cm/s = 500 m/s)
-	float VelocityDamping;   // Velocity damping factor (default: 0.98)
 
 	// Distance Field Collision
 	FGPUDistanceFieldCollisionParams DFCollisionParams;

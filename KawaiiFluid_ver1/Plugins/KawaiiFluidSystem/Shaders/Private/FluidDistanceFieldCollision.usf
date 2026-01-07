@@ -26,6 +26,64 @@ float ParticleRadius;
 // DFCollisionRestitution, DFCollisionFriction, DFCollisionThreshold are defined in common header
 
 //=============================================================================
+// Position-Level Friction for Distance Field Collision
+// Based on Unified Particle Physics (Macklin et al. 2014)
+//=============================================================================
+
+void ApplyDFPositionLevelFriction(
+	inout float3 predictedPos,
+	float3 originalPos,
+	float3 normal,
+	float penetration,
+	inout float3 vel)
+{
+	// Push out of collision
+	predictedPos += normal * (penetration + 0.1f);
+
+	// Calculate total displacement from original position
+	float3 deltaX = predictedPos - originalPos;
+
+	// Decompose into normal and tangent components
+	float deltaXNormal = dot(deltaX, normal);
+	float3 deltaXNormalVec = deltaXNormal * normal;
+	float3 deltaXTangent = deltaX - deltaXNormalVec;
+
+	float tangentLength = length(deltaXTangent);
+
+	// Apply friction only if there's tangent movement
+	if (tangentLength > SMALL_NUMBER)
+	{
+		// Reference distance for friction scaling
+		float d = max(penetration, 0.1f);
+
+		// Static friction threshold
+		float staticThreshold = DFCollisionFriction * d;
+
+		if (tangentLength < staticThreshold)
+		{
+			// Static friction: stop tangent movement completely
+			deltaXTangent = float3(0, 0, 0);
+		}
+		else
+		{
+			// Kinetic friction: reduce tangent displacement
+			float frictionScale = min(DFCollisionFriction * d / tangentLength, 1.0f);
+			deltaXTangent *= (1.0f - frictionScale);
+		}
+	}
+
+	// Reconstruct position with friction-adjusted displacement
+	predictedPos = originalPos + deltaXNormalVec + deltaXTangent;
+
+	// Apply restitution to velocity for next timestep's bounce
+	float velNormal = dot(vel, normal);
+	if (velNormal < 0.0f)
+	{
+		vel -= (1.0f + DFCollisionRestitution) * velNormal * normal;
+	}
+}
+
+//=============================================================================
 // Main Compute Shader
 //=============================================================================
 
@@ -47,6 +105,7 @@ void DistanceFieldCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	float3 pos = particle.PredictedPosition;
+	float3 originalPos = particle.Position;  // Original position for position-level friction
 	float3 vel = particle.Velocity;
 
 	// Sample distance field at particle position
@@ -62,28 +121,8 @@ void DistanceFieldCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		// Calculate penetration depth
 		float Penetration = max(0.0f, -EffectiveDistance);
 
-		// Push particle out of surface (along normal)
-		pos += Normal * (Penetration + 0.1f); // Small offset to prevent re-penetration
-
-		// Velocity response
-		float VelNormal = dot(vel, Normal);
-
-		// Only apply collision response if moving into the surface
-		if (VelNormal < 0.0f)
-		{
-			// Decompose velocity
-			float3 VelNormalVec = VelNormal * Normal;
-			float3 VelTangent = vel - VelNormalVec;
-
-			// Reflect normal velocity with restitution
-			VelNormalVec = -VelNormalVec * DFCollisionRestitution;
-
-			// Apply friction to tangent velocity
-			VelTangent *= (1.0f - DFCollisionFriction);
-
-			// Reconstruct velocity
-			vel = VelNormalVec + VelTangent;
-		}
+		// Apply position-level friction (handles push-out internally)
+		ApplyDFPositionLevelFriction(pos, originalPos, Normal, Penetration, vel);
 
 		// Mark particle as near ground if collision normal is mostly upward
 		// This is used by the adhesion system

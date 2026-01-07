@@ -267,7 +267,109 @@ float3 CalcNumericalGradient_Box(float3 p, float3 center, float3 extent, float4 
 	return normalize(gradient);
 }
 
-// Apply collision response to velocity
+/**
+ * Apply position-level friction (Unified Particle Physics, Macklin et al. 2014)
+ *
+ * This function applies friction at the position level rather than velocity level.
+ * This is critical for PBF because FinalizePositions overwrites velocity with:
+ *   v = (x* - x) / dt
+ *
+ * By modifying the position displacement, we ensure friction is preserved.
+ *
+ * Static friction:  |Δx_t| < μs * d → Δx_t = 0 (particle stops)
+ * Kinetic friction: Δx_t *= min(μk * d / |Δx_t|, 1) (sliding with resistance)
+ *
+ * @param predictedPos - Predicted position (will be modified)
+ * @param originalPos - Original position before this timestep
+ * @param normal - Collision surface normal (pointing outward)
+ * @param penetration - Penetration depth (positive value)
+ * @param staticFriction - Static friction coefficient (μs)
+ * @param kineticFriction - Kinetic friction coefficient (μk), typically same as friction param
+ */
+void ApplyPositionLevelFriction(
+	inout float3 predictedPos,
+	float3 originalPos,
+	float3 normal,
+	float penetration,
+	float staticFriction,
+	float kineticFriction)
+{
+	// Push out of collision first
+	predictedPos += normal * (penetration + 0.1f);
+
+	// Calculate total displacement from original position
+	float3 deltaX = predictedPos - originalPos;
+
+	// Decompose into normal and tangent components
+	float deltaXNormal = dot(deltaX, normal);
+	float3 deltaXNormalVec = deltaXNormal * normal;
+	float3 deltaXTangent = deltaX - deltaXNormalVec;
+
+	float tangentLength = length(deltaXTangent);
+
+	// Apply friction only if there's tangent movement
+	if (tangentLength > SMALL_NUMBER)
+	{
+		// d = penetration depth (contact distance)
+		// Using penetration as the reference for friction force scaling
+		float d = max(penetration, 0.1f);
+
+		// Static friction threshold
+		float staticThreshold = staticFriction * d;
+
+		if (tangentLength < staticThreshold)
+		{
+			// Static friction: stop tangent movement completely
+			deltaXTangent = float3(0, 0, 0);
+		}
+		else
+		{
+			// Kinetic friction: reduce tangent displacement
+			float frictionScale = min(kineticFriction * d / tangentLength, 1.0f);
+			deltaXTangent *= (1.0f - frictionScale);
+		}
+	}
+
+	// Reconstruct position with friction-adjusted displacement
+	predictedPos = originalPos + deltaXNormalVec + deltaXTangent;
+}
+
+/**
+ * Apply collision response with position-level friction
+ *
+ * @param predictedPos - Predicted position (will be modified for push-out and friction)
+ * @param originalPos - Original position before this timestep (for friction calculation)
+ * @param velocity - Velocity (only used for restitution direction check, modified for bounce)
+ * @param normal - Collision surface normal
+ * @param penetration - Penetration depth
+ * @param friction - Friction coefficient (used for both static and kinetic)
+ * @param restitution - Bounce coefficient
+ */
+void ApplyCollisionResponseWithFriction(
+	inout float3 predictedPos,
+	float3 originalPos,
+	inout float3 velocity,
+	float3 normal,
+	float penetration,
+	float friction,
+	float restitution)
+{
+	// Apply position-level friction (handles push-out internally)
+	ApplyPositionLevelFriction(predictedPos, originalPos, normal, penetration, friction, friction);
+
+	// Apply restitution to velocity for bounce effect
+	// This affects the NEXT timestep's prediction, not current position
+	float velNormal = dot(velocity, normal);
+	if (velNormal < 0.0f)
+	{
+		// Reflect normal velocity component
+		velocity -= (1.0f + restitution) * velNormal * normal;
+	}
+}
+
+// Legacy: Apply collision response to velocity (kept for compatibility)
+// WARNING: This approach doesn't work correctly with PBF because FinalizePositions
+// overwrites velocity. Use ApplyCollisionResponseWithFriction instead.
 void ApplyCollisionResponse(
 	inout float3 position,
 	inout float3 velocity,

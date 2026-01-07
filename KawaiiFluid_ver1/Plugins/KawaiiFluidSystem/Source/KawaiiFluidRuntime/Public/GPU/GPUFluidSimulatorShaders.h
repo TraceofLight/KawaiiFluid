@@ -380,7 +380,6 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(float, DeltaTime)
-		SHADER_PARAMETER(float, VelocityDamping)  // Velocity damping factor (0.98-0.99 typical)
 		SHADER_PARAMETER(float, MaxVelocity)      // Safety clamp (high value, e.g., 50000 cm/s)
 	END_SHADER_PARAMETER_STRUCT()
 

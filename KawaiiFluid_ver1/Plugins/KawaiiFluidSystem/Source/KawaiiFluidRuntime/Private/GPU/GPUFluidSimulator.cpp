@@ -27,7 +27,6 @@ FGPUFluidSimulator::FGPUFluidSimulator()
 	, CurrentParticleCount(0)
 	, ExternalForce(FVector3f::ZeroVector)
 	, MaxVelocity(50000.0f)   // Safety clamp: 50000 cm/s = 500 m/s
-	, VelocityDamping(0.98f)  // Velocity damping factor
 {
 }
 
@@ -1114,22 +1113,16 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		AddSolvePressurePass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
 	}
 
-	// Pass 6: Apply Viscosity (XSPH velocity smoothing)
-	AddApplyViscosityPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
-
-	// Pass 6.5: Apply Cohesion (surface tension between particles)
-	AddApplyCohesionPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
-
-	// Pass 7: Bounds Collision
+	// Pass 6: Bounds Collision
 	AddBoundsCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 7.5: Distance Field Collision (if enabled)
+	// Pass 6.5: Distance Field Collision (if enabled)
 	AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 7.6: Primitive Collision (spheres, capsules, boxes, convexes from FluidCollider)
+	// Pass 6.6: Primitive Collision (spheres, capsules, boxes, convexes from FluidCollider)
 	AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 7.7: Adhesion - Create attachments to bone colliders (GPU-based)
+	// Pass 6.7: Adhesion - Create attachments to bone colliders (GPU-based)
 	if (IsAdhesionEnabled() && bBoneTransformsValid)
 	{
 		// Check if we need to create or resize attachment buffer
@@ -1189,10 +1182,16 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		);
 	}
 
-	// Pass 8: Finalize Positions (update Position from PredictedPosition, recalculate Velocity with blending/damping)
+	// Pass 7: Finalize Positions (update Position from PredictedPosition, recalculate Velocity: v = (x* - x) / dt)
 	AddFinalizePositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
 
-	// Pass 8.5: Clear just-detached flag at end of frame
+	// Pass 8: Apply Viscosity (XSPH velocity smoothing) - Applied AFTER velocity is finalized per PBF paper
+	AddApplyViscosityPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
+
+	// Pass 8.5: Apply Cohesion (surface tension between particles)
+	AddApplyCohesionPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
+
+	// Pass 9: Clear just-detached flag at end of frame
 	AddClearDetachedFlagPass(GraphBuilder, ParticlesUAVLocal);
 
 	// Debug: log that we reached the end of simulation
@@ -1635,7 +1634,6 @@ void FGPUFluidSimulator::AddFinalizePositionsPass(
 	PassParameters->Particles = ParticlesUAV;
 	PassParameters->ParticleCount = CurrentParticleCount;
 	PassParameters->DeltaTime = Params.DeltaTime;
-	PassParameters->VelocityDamping = VelocityDamping;
 	PassParameters->MaxVelocity = MaxVelocity;  // Safety clamp (50000 cm/s = 500 m/s)
 
 	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FFinalizePositionsCS::ThreadGroupSize);

@@ -56,6 +56,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	float3 pos = particle.PredictedPosition;
+	float3 originalPos = particle.Position;  // Original position for position-level friction
 	float3 vel = particle.Velocity;
 	bool bCollided = false;
 
@@ -70,7 +71,8 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			float3 normal = CalcNumericalGradient_Sphere(pos, sphere.Center, sphere.Radius);
 			float penetration = max(0.0f, -effectiveDist);
-			ApplyCollisionResponse(pos, vel, normal, penetration, sphere.Friction, sphere.Restitution);
+			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, sphere.Friction, sphere.Restitution);
+			originalPos = pos;  // Update for subsequent collisions
 			bCollided = true;
 		}
 	}
@@ -86,7 +88,8 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			float3 normal = CalcNumericalGradient_Capsule(pos, capsule.Start, capsule.End, capsule.Radius);
 			float penetration = max(0.0f, -effectiveDist);
-			ApplyCollisionResponse(pos, vel, normal, penetration, capsule.Friction, capsule.Restitution);
+			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, capsule.Friction, capsule.Restitution);
+			originalPos = pos;
 			bCollided = true;
 		}
 	}
@@ -102,7 +105,8 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			float3 normal = CalcNumericalGradient_Box(pos, box.Center, box.Extent, box.Rotation);
 			float penetration = max(0.0f, -effectiveDist);
-			ApplyCollisionResponse(pos, vel, normal, penetration, box.Friction, box.Restitution);
+			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, box.Friction, box.Restitution);
+			originalPos = pos;
 			bCollided = true;
 
 			// Mark as near ground if collision normal is mostly upward
@@ -146,7 +150,8 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			}
 
 			float penetration = max(0.0f, -effectiveDist);
-			ApplyCollisionResponse(pos, vel, normal, penetration, convex.Friction, convex.Restitution);
+			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, convex.Friction, convex.Restitution);
+			originalPos = pos;
 			bCollided = true;
 
 			if (normal.z > 0.5f)

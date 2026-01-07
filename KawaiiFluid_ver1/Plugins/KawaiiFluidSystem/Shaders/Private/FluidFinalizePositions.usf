@@ -13,7 +13,6 @@
 RWStructuredBuffer<FGPUFluidParticle> Particles;
 int ParticleCount;
 float DeltaTime;
-float VelocityDamping;  // Velocity damping factor (0.98-0.99 typical)
 float MaxVelocity;      // Safety clamp to prevent divergence
 
 //=============================================================================
@@ -46,18 +45,10 @@ void FinalizePositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Finalize position
 	particle.Position = particle.PredictedPosition;
 
-	// Recalculate velocity from position change
-	// v = (x_new - x_old) / dt
+	// Recalculate velocity from position change (pure PBF formula per paper Algorithm 1 line 22)
+	// v = (x* - x) / dt
 	float invDt = 1.0f / max(DeltaTime, 0.0001f);
-	float3 pbfVelocity = (particle.Position - oldPosition) * invDt;
-
-	// Blend between current velocity (from constraint solving) and PBF velocity
-	// This helps preserve momentum while respecting constraint corrections
-	const float BlendFactor = 0.8f;  // 0.8 = 80% PBF, 20% previous velocity
-	particle.Velocity = lerp(particle.Velocity, pbfVelocity, BlendFactor);
-
-	// Apply velocity damping
-	particle.Velocity *= VelocityDamping;
+	particle.Velocity = (particle.Position - oldPosition) * invDt;
 
 	// Safety clamp: prevent extreme velocities that could cause divergence
 	float velocityMag = length(particle.Velocity);

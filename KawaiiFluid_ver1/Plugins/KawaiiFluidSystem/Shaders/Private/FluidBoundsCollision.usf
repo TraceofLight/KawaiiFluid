@@ -53,56 +53,119 @@ float3 QuatRotateVectorInverse(float4 q, float3 v)
 }
 
 //=============================================================================
-// AABB Collision (Legacy)
+// Position-Level Friction Helper for Axis-Aligned Collision
+// Applies friction at position level per Unified Particle Physics (Macklin 2014)
 //=============================================================================
 
-void ApplyAABBCollision(inout float3 pos, inout float3 vel, inout uint flags)
+void ApplyAxisFriction(
+	inout float3 predictedPos,
+	float3 originalPos,
+	float3 normal,
+	float penetration,
+	inout float3 vel)
+{
+	// Push out of collision
+	predictedPos += normal * penetration;
+
+	// Calculate displacement from original position
+	float3 deltaX = predictedPos - originalPos;
+
+	// Decompose into normal and tangent
+	float deltaXN = dot(deltaX, normal);
+	float3 deltaXNormalVec = deltaXN * normal;
+	float3 deltaXTangent = deltaX - deltaXNormalVec;
+
+	float tangentLen = length(deltaXTangent);
+
+	if (tangentLen > SMALL_NUMBER)
+	{
+		// Reference distance for friction scaling
+		float d = max(penetration, 0.1f);
+
+		// Static friction threshold
+		float staticThreshold = Friction * d;
+
+		if (tangentLen < staticThreshold)
+		{
+			// Static friction: stop movement
+			deltaXTangent = float3(0, 0, 0);
+		}
+		else
+		{
+			// Kinetic friction: reduce tangent displacement
+			float frictionScale = min(Friction * d / tangentLen, 1.0f);
+			deltaXTangent *= (1.0f - frictionScale);
+		}
+	}
+
+	// Reconstruct position
+	predictedPos = originalPos + deltaXNormalVec + deltaXTangent;
+
+	// Apply restitution to velocity for next timestep's bounce
+	float velN = dot(vel, normal);
+	if (velN < 0.0f)
+	{
+		vel -= (1.0f + Restitution) * velN * normal;
+	}
+}
+
+//=============================================================================
+// AABB Collision with Position-Level Friction
+//=============================================================================
+
+void ApplyAABBCollision(inout float3 pos, float3 originalPos, inout float3 vel, inout uint flags)
 {
 	// Effective bounds considering particle radius
 	float3 effectiveMin = BoundsMin + ParticleRadius;
 	float3 effectiveMax = BoundsMax - ParticleRadius;
 
+	bool hitGround = false;
+
 	// X axis collision
 	if (pos.x < effectiveMin.x)
 	{
-		pos.x = effectiveMin.x;
-		vel.x = -vel.x * Restitution;
-		vel.yz *= (1.0f - Friction);
+		float penetration = effectiveMin.x - pos.x;
+		ApplyAxisFriction(pos, originalPos, float3(1, 0, 0), penetration, vel);
+		originalPos = pos; // Update for subsequent axis checks
 	}
 	else if (pos.x > effectiveMax.x)
 	{
-		pos.x = effectiveMax.x;
-		vel.x = -vel.x * Restitution;
-		vel.yz *= (1.0f - Friction);
+		float penetration = pos.x - effectiveMax.x;
+		ApplyAxisFriction(pos, originalPos, float3(-1, 0, 0), penetration, vel);
+		originalPos = pos;
 	}
 
 	// Y axis collision
 	if (pos.y < effectiveMin.y)
 	{
-		pos.y = effectiveMin.y;
-		vel.y = -vel.y * Restitution;
-		vel.xz *= (1.0f - Friction);
+		float penetration = effectiveMin.y - pos.y;
+		ApplyAxisFriction(pos, originalPos, float3(0, 1, 0), penetration, vel);
+		originalPos = pos;
 	}
 	else if (pos.y > effectiveMax.y)
 	{
-		pos.y = effectiveMax.y;
-		vel.y = -vel.y * Restitution;
-		vel.xz *= (1.0f - Friction);
+		float penetration = pos.y - effectiveMax.y;
+		ApplyAxisFriction(pos, originalPos, float3(0, -1, 0), penetration, vel);
+		originalPos = pos;
 	}
 
 	// Z axis collision (typically ground collision)
 	if (pos.z < effectiveMin.z)
 	{
-		pos.z = effectiveMin.z;
-		vel.z = -vel.z * Restitution;
-		vel.xy *= (1.0f - Friction);
-		flags = SetFlag(flags, GPU_PARTICLE_FLAG_NEAR_GROUND);
+		float penetration = effectiveMin.z - pos.z;
+		ApplyAxisFriction(pos, originalPos, float3(0, 0, 1), penetration, vel);
+		hitGround = true;
 	}
 	else if (pos.z > effectiveMax.z)
 	{
-		pos.z = effectiveMax.z;
-		vel.z = -vel.z * Restitution;
-		vel.xy *= (1.0f - Friction);
+		float penetration = pos.z - effectiveMax.z;
+		ApplyAxisFriction(pos, originalPos, float3(0, 0, -1), penetration, vel);
+	}
+
+	// Update ground flag
+	if (hitGround)
+	{
+		flags = SetFlag(flags, GPU_PARTICLE_FLAG_NEAR_GROUND);
 	}
 	else
 	{
@@ -111,68 +174,67 @@ void ApplyAABBCollision(inout float3 pos, inout float3 vel, inout uint flags)
 }
 
 //=============================================================================
-// OBB Collision
+// OBB Collision with Position-Level Friction
 //=============================================================================
 
-void ApplyOBBCollision(inout float3 pos, inout float3 vel, inout uint flags)
+void ApplyOBBCollision(inout float3 pos, float3 originalPos, inout float3 vel, inout uint flags)
 {
-	// Transform position from world space to OBB local space
+	// Transform positions from world space to OBB local space
 	float3 localPos = QuatRotateVectorInverse(BoundsRotation, pos - BoundsCenter);
+	float3 localOriginalPos = QuatRotateVectorInverse(BoundsRotation, originalPos - BoundsCenter);
 	float3 localVel = QuatRotateVectorInverse(BoundsRotation, vel);
 
 	// Effective extents considering particle radius
 	float3 effectiveExtent = BoundsExtent - ParticleRadius;
 	effectiveExtent = max(effectiveExtent, float3(0.001f, 0.001f, 0.001f));  // Prevent negative
 
-	bool collided = false;
+	bool hitGround = false;
 
 	// X axis collision (in local space)
 	if (localPos.x < -effectiveExtent.x)
 	{
-		localPos.x = -effectiveExtent.x;
-		localVel.x = -localVel.x * Restitution;
-		localVel.yz *= (1.0f - Friction);
-		collided = true;
+		float penetration = -effectiveExtent.x - localPos.x;
+		ApplyAxisFriction(localPos, localOriginalPos, float3(1, 0, 0), penetration, localVel);
+		localOriginalPos = localPos;
 	}
 	else if (localPos.x > effectiveExtent.x)
 	{
-		localPos.x = effectiveExtent.x;
-		localVel.x = -localVel.x * Restitution;
-		localVel.yz *= (1.0f - Friction);
-		collided = true;
+		float penetration = localPos.x - effectiveExtent.x;
+		ApplyAxisFriction(localPos, localOriginalPos, float3(-1, 0, 0), penetration, localVel);
+		localOriginalPos = localPos;
 	}
 
 	// Y axis collision (in local space)
 	if (localPos.y < -effectiveExtent.y)
 	{
-		localPos.y = -effectiveExtent.y;
-		localVel.y = -localVel.y * Restitution;
-		localVel.xz *= (1.0f - Friction);
-		collided = true;
+		float penetration = -effectiveExtent.y - localPos.y;
+		ApplyAxisFriction(localPos, localOriginalPos, float3(0, 1, 0), penetration, localVel);
+		localOriginalPos = localPos;
 	}
 	else if (localPos.y > effectiveExtent.y)
 	{
-		localPos.y = effectiveExtent.y;
-		localVel.y = -localVel.y * Restitution;
-		localVel.xz *= (1.0f - Friction);
-		collided = true;
+		float penetration = localPos.y - effectiveExtent.y;
+		ApplyAxisFriction(localPos, localOriginalPos, float3(0, -1, 0), penetration, localVel);
+		localOriginalPos = localPos;
 	}
 
 	// Z axis collision (in local space - typically floor/ceiling)
 	if (localPos.z < -effectiveExtent.z)
 	{
-		localPos.z = -effectiveExtent.z;
-		localVel.z = -localVel.z * Restitution;
-		localVel.xy *= (1.0f - Friction);
-		flags = SetFlag(flags, GPU_PARTICLE_FLAG_NEAR_GROUND);
-		collided = true;
+		float penetration = -effectiveExtent.z - localPos.z;
+		ApplyAxisFriction(localPos, localOriginalPos, float3(0, 0, 1), penetration, localVel);
+		hitGround = true;
 	}
 	else if (localPos.z > effectiveExtent.z)
 	{
-		localPos.z = effectiveExtent.z;
-		localVel.z = -localVel.z * Restitution;
-		localVel.xy *= (1.0f - Friction);
-		collided = true;
+		float penetration = localPos.z - effectiveExtent.z;
+		ApplyAxisFriction(localPos, localOriginalPos, float3(0, 0, -1), penetration, localVel);
+	}
+
+	// Update ground flag
+	if (hitGround)
+	{
+		flags = SetFlag(flags, GPU_PARTICLE_FLAG_NEAR_GROUND);
 	}
 	else
 	{
@@ -206,17 +268,18 @@ void BoundsCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	float3 pos = particle.PredictedPosition;
+	float3 originalPos = particle.Position;  // Original position for position-level friction
 	float3 vel = particle.Velocity;
 	uint flags = particle.Flags;
 
-	// Apply collision based on mode
+	// Apply collision based on mode (with position-level friction)
 	if (bUseOBB != 0)
 	{
-		ApplyOBBCollision(pos, vel, flags);
+		ApplyOBBCollision(pos, originalPos, vel, flags);
 	}
 	else
 	{
-		ApplyAABBCollision(pos, vel, flags);
+		ApplyAABBCollision(pos, originalPos, vel, flags);
 	}
 
 	// Update particle
