@@ -2,6 +2,7 @@
 
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "GPU/FluidAnisotropyComputeShader.h"
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Rendering/Shaders/FluidSpatialHashShaders.h"
@@ -1193,6 +1194,94 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 
 	// Pass 9: Clear just-detached flag at end of frame
 	AddClearDetachedFlagPass(GraphBuilder, ParticlesUAVLocal);
+
+	// Pass 10: Anisotropy calculation (for ellipsoid rendering)
+	// Runs after simulation is complete, uses spatial hash for neighbor lookup
+	if (CachedAnisotropyParams.bEnabled && CurrentParticleCount > 0)
+	{
+		// Create anisotropy output buffers
+		FRDGBufferRef Axis1Buffer = nullptr;
+		FRDGBufferRef Axis2Buffer = nullptr;
+		FRDGBufferRef Axis3Buffer = nullptr;
+		FFluidAnisotropyPassBuilder::CreateAnisotropyBuffers(
+			GraphBuilder, CurrentParticleCount, Axis1Buffer, Axis2Buffer, Axis3Buffer);
+
+		if (Axis1Buffer && Axis2Buffer && Axis3Buffer)
+		{
+			// Prepare anisotropy compute parameters
+			FAnisotropyComputeParams AnisotropyParams;
+			AnisotropyParams.PhysicsParticlesSRV = GraphBuilder.CreateSRV(ParticleBuffer);
+			AnisotropyParams.CellCountsSRV = CellCountsSRVLocal;
+			AnisotropyParams.ParticleIndicesSRV = ParticleIndicesSRVLocal;
+			AnisotropyParams.OutAxis1UAV = GraphBuilder.CreateUAV(Axis1Buffer);
+			AnisotropyParams.OutAxis2UAV = GraphBuilder.CreateUAV(Axis2Buffer);
+			AnisotropyParams.OutAxis3UAV = GraphBuilder.CreateUAV(Axis3Buffer);
+			AnisotropyParams.ParticleCount = CurrentParticleCount;
+
+			// Map anisotropy mode
+			switch (CachedAnisotropyParams.Mode)
+			{
+			case EFluidAnisotropyMode::VelocityBased:
+				AnisotropyParams.Mode = EGPUAnisotropyMode::VelocityBased;
+				break;
+			case EFluidAnisotropyMode::DensityBased:
+				AnisotropyParams.Mode = EGPUAnisotropyMode::DensityBased;
+				break;
+			case EFluidAnisotropyMode::Hybrid:
+				AnisotropyParams.Mode = EGPUAnisotropyMode::Hybrid;
+				break;
+			default:
+				AnisotropyParams.Mode = EGPUAnisotropyMode::DensityBased;
+				break;
+			}
+
+			AnisotropyParams.VelocityStretchFactor = CachedAnisotropyParams.VelocityStretchFactor;
+			AnisotropyParams.AnisotropyScale = CachedAnisotropyParams.AnisotropyScale;
+			AnisotropyParams.AnisotropyMin = CachedAnisotropyParams.AnisotropyMin;
+			AnisotropyParams.AnisotropyMax = CachedAnisotropyParams.AnisotropyMax;
+			AnisotropyParams.DensityWeight = CachedAnisotropyParams.DensityWeight;
+			// Density-based anisotropy needs wider neighbor search than simulation
+			// Use 2.5x smoothing radius to find enough neighbors for reliable covariance
+			AnisotropyParams.SmoothingRadius = Params.SmoothingRadius * 2.5f;
+			AnisotropyParams.CellSize = Params.CellSize;
+
+			// Debug log for density-based anisotropy parameters
+			static int32 AnisotropyDebugCounter = 0;
+			if (++AnisotropyDebugCounter % 60 == 0)
+			{
+				UE_LOG(LogGPUFluidSimulator, Warning,
+					TEXT("Anisotropy Pass: CachedMode=%d -> GPUMode=%d, SmoothingRadius=%.2f, CellSize=%.2f, CellRadius=%d"),
+					static_cast<int32>(CachedAnisotropyParams.Mode),
+					static_cast<int32>(AnisotropyParams.Mode),
+					AnisotropyParams.SmoothingRadius,
+					AnisotropyParams.CellSize,
+					AnisotropyParams.CellSize > 0.01f ? (int32)FMath::CeilToInt(AnisotropyParams.SmoothingRadius / AnisotropyParams.CellSize) : 0);
+			}
+
+			// Add anisotropy compute pass
+			FFluidAnisotropyPassBuilder::AddAnisotropyPass(GraphBuilder, AnisotropyParams);
+
+			// Extract anisotropy buffers for rendering
+			GraphBuilder.QueueBufferExtraction(
+				Axis1Buffer,
+				&PersistentAnisotropyAxis1Buffer,
+				ERHIAccess::SRVCompute);
+			GraphBuilder.QueueBufferExtraction(
+				Axis2Buffer,
+				&PersistentAnisotropyAxis2Buffer,
+				ERHIAccess::SRVCompute);
+			GraphBuilder.QueueBufferExtraction(
+				Axis3Buffer,
+				&PersistentAnisotropyAxis3Buffer,
+				ERHIAccess::SRVCompute);
+
+			if (bShouldLog)
+			{
+				UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> ANISOTROPY: Pass added (mode=%d, particles=%d)"),
+					static_cast<int32>(AnisotropyParams.Mode), CurrentParticleCount);
+			}
+		}
+	}
 
 	// Debug: log that we reached the end of simulation
 	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SIMULATION COMPLETE: All passes added for %d particles"), CurrentParticleCount);

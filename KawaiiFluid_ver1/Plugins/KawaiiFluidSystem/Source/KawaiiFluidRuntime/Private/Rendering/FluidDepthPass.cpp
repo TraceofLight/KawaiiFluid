@@ -118,13 +118,28 @@ void RenderFluidDepthPass(
 				ParticleBufferSRV = GraphBuilder.CreateSRV(PositionBuffer);
 
 				// Check if anisotropy is enabled and buffers are available
-				if (GPUSimulator->IsAnisotropyEnabled())
+				const bool bAnisotropyEnabled = GPUSimulator->IsAnisotropyEnabled();
+				if (bAnisotropyEnabled)
 				{
 					TRefCountPtr<FRDGPooledBuffer> Axis1Buffer = GPUSimulator->GetPersistentAnisotropyAxis1Buffer();
 					TRefCountPtr<FRDGPooledBuffer> Axis2Buffer = GPUSimulator->GetPersistentAnisotropyAxis2Buffer();
 					TRefCountPtr<FRDGPooledBuffer> Axis3Buffer = GPUSimulator->GetPersistentAnisotropyAxis3Buffer();
 
-					if (Axis1Buffer.IsValid() && Axis2Buffer.IsValid() && Axis3Buffer.IsValid())
+					const bool bBuffersValid = Axis1Buffer.IsValid() && Axis2Buffer.IsValid() && Axis3Buffer.IsValid();
+
+					// Debug logging (every 60 frames)
+					static int32 AnisotropyLogCounter = 0;
+					if (++AnisotropyLogCounter % 60 == 0)
+					{
+						UE_LOG(LogTemp, Warning, TEXT("DepthPass Anisotropy: Enabled=%d, Buffers Valid=%d (Axis1=%d, Axis2=%d, Axis3=%d)"),
+							bAnisotropyEnabled ? 1 : 0,
+							bBuffersValid ? 1 : 0,
+							Axis1Buffer.IsValid() ? 1 : 0,
+							Axis2Buffer.IsValid() ? 1 : 0,
+							Axis3Buffer.IsValid() ? 1 : 0);
+					}
+
+					if (bBuffersValid)
 					{
 						bUseAnisotropy = true;
 
@@ -138,6 +153,15 @@ void RenderFluidDepthPass(
 						AnisotropyAxis1SRV = GraphBuilder.CreateSRV(Axis1RDG);
 						AnisotropyAxis2SRV = GraphBuilder.CreateSRV(Axis2RDG);
 						AnisotropyAxis3SRV = GraphBuilder.CreateSRV(Axis3RDG);
+					}
+				}
+				else
+				{
+					// Debug: anisotropy not enabled
+					static int32 AnisotropyDisabledLogCounter = 0;
+					if (++AnisotropyDisabledLogCounter % 300 == 0)
+					{
+						UE_LOG(LogTemp, Log, TEXT("DepthPass: Anisotropy NOT enabled in GPUSimulator"));
 					}
 				}
 			}
