@@ -706,12 +706,12 @@ public:
 
 	/** Add extract render data SoA pass (Memory bandwidth optimized) */
 	static void AddExtractRenderDataSoAPass(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferSRVRef PhysicsParticlesSRV,
-		FRDGBufferUAVRef RenderPositionsUAV,
-		FRDGBufferUAVRef RenderVelocitiesUAV,
-		int32 ParticleCount,
-		float ParticleRadius);
+	   FRDGBuilder& GraphBuilder,
+	   FRDGBufferSRVRef PhysicsParticlesSRV,
+	   FRDGBufferUAVRef RenderPositionsUAV,
+	   FRDGBufferUAVRef RenderVelocitiesUAV,
+	   int32 ParticleCount,
+	   float ParticleRadius);
 };
 
 //=============================================================================
@@ -957,6 +957,156 @@ public:
 		SHADER_PARAMETER_SRV(StructuredBuffer<FAttachedParticleUpdate>, AttachmentUpdates)
 		SHADER_PARAMETER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
 		SHADER_PARAMETER(uint32, UpdateCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+//=============================================================================
+// GPU Adhesion Compute Shaders
+// Bone-based attachment tracking without CPU readback
+//=============================================================================
+
+/**
+ * Adhesion Compute Shader
+ * Checks particles near primitives and creates attachments
+ */
+class FAdhesionCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FAdhesionCS);
+	SHADER_USE_PARAMETER_STRUCT(FAdhesionCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		// Particle and attachment buffers
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUParticleAttachment>, Attachments)
+		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER(float, ParticleRadius)
+
+		// Bone transforms
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoneTransform>, BoneTransforms)
+		SHADER_PARAMETER(int32, BoneCount)
+
+		// Collision primitives
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionSphere>, CollisionSpheres)
+		SHADER_PARAMETER(int32, SphereCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionCapsule>, CollisionCapsules)
+		SHADER_PARAMETER(int32, CapsuleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionBox>, CollisionBoxes)
+		SHADER_PARAMETER(int32, BoxCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionConvex>, CollisionConvexes)
+		SHADER_PARAMETER(int32, ConvexCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUConvexPlane>, ConvexPlanes)
+
+		// Adhesion parameters
+		SHADER_PARAMETER(float, AdhesionStrength)
+		SHADER_PARAMETER(float, AdhesionRadius)
+		SHADER_PARAMETER(float, DetachAccelThreshold)
+		SHADER_PARAMETER(float, DetachDistanceThreshold)
+		SHADER_PARAMETER(float, SlidingFriction)
+		SHADER_PARAMETER(float, CurrentTime)
+		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER(int32, bEnableAdhesion)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Update Attached Positions Compute Shader
+ * Moves attached particles with bone transforms
+ */
+class FUpdateAttachedPositionsCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FUpdateAttachedPositionsCS);
+	SHADER_USE_PARAMETER_STRUCT(FUpdateAttachedPositionsCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUParticleAttachment>, Attachments)
+		SHADER_PARAMETER(int32, ParticleCount)
+
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoneTransform>, BoneTransforms)
+		SHADER_PARAMETER(int32, BoneCount)
+
+		// Primitives for surface distance check
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionSphere>, CollisionSpheres)
+		SHADER_PARAMETER(int32, SphereCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionCapsule>, CollisionCapsules)
+		SHADER_PARAMETER(int32, CapsuleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionBox>, CollisionBoxes)
+		SHADER_PARAMETER(int32, BoxCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionConvex>, CollisionConvexes)
+		SHADER_PARAMETER(int32, ConvexCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUConvexPlane>, ConvexPlanes)
+
+		SHADER_PARAMETER(float, DetachAccelThreshold)
+		SHADER_PARAMETER(float, DetachDistanceThreshold)
+		SHADER_PARAMETER(float, SlidingFriction)
+		SHADER_PARAMETER(float, DeltaTime)
+
+		// Gravity sliding parameters
+		SHADER_PARAMETER(FVector3f, Gravity)
+		SHADER_PARAMETER(float, GravitySlidingScale)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Clear Detached Flag Compute Shader
+ * Clears the JUST_DETACHED flag at end of frame
+ */
+class FClearDetachedFlagCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FClearDetachedFlagCS);
+	SHADER_USE_PARAMETER_STRUCT(FClearDetachedFlagCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER(int32, ParticleCount)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;

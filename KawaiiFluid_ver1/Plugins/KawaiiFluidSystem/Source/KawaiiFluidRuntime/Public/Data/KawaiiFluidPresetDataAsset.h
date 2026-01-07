@@ -167,8 +167,16 @@ public:
 	float AdhesionStrength = 0.5f;
 
 	/** Adhesion radius (cm) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Adhesion", meta = (ClampMin = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Adhesion", meta = (ClampMin = "0.1"))
 	float AdhesionRadius = 25.0f;
+
+	/** Detach distance threshold (cm) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Adhesion", meta = (ClampMin = "0.0"))
+	float AdhesionDetachDistance = 15.0f;
+
+	/** Detach acceleration threshold (cm/s^2) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Adhesion", meta = (ClampMin = "0.0"))
+	float AdhesionDetachAcceleration = 1000.0f;
 
 	/** Detach threshold (force above this causes detachment) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Adhesion", meta = (ClampMin = "0.0"))

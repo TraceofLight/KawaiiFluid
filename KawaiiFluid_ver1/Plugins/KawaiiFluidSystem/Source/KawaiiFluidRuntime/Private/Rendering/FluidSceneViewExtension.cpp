@@ -641,35 +641,46 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	// ============================================
 	if (ShadowRenderParams)
 	{
+		RDG_EVENT_SCOPE(GraphBuilder, "FluidShadowProcessing");
+
 		// 1. Shadow Projection - generates VSM texture from history buffer
-		ExecuteFluidShadowProjection(
-			GraphBuilder,
-			View,
-			SubsystemPtr,
-			*ShadowRenderParams);
+		{
+			RDG_EVENT_SCOPE(GraphBuilder, "ShadowProjection");
+			ExecuteFluidShadowProjection(
+				GraphBuilder,
+				View,
+				SubsystemPtr,
+				*ShadowRenderParams);
+		}
 
 		// 2. Shadow Receiver - applies shadows to scene
-		// Create a copy for shadow receiver input (can't read and write same texture)
-		FRDGTextureDesc ShadowInputDesc = SceneColorTexture->Desc;
-		ShadowInputDesc.Flags &= ~(TexCreate_Presentable | TexCreate_DepthStencilTargetable |
-			TexCreate_ResolveTargetable);
-		ShadowInputDesc.Flags |= (TexCreate_RenderTargetable | TexCreate_ShaderResource);
-		FRDGTextureRef ShadowInputCopy = GraphBuilder.CreateTexture(
-			ShadowInputDesc,
-			TEXT("FluidShadowReceiverInput_PrePostProcess"));
-		AddCopyTexturePass(GraphBuilder, SceneColorTexture, ShadowInputCopy);
+		{
+			RDG_EVENT_SCOPE(GraphBuilder, "ShadowReceiver");
+			// Create a copy for shadow receiver input (can't read and write same texture)
+			FRDGTextureDesc ShadowInputDesc = SceneColorTexture->Desc;
+			ShadowInputDesc.Flags &= ~(TexCreate_Presentable | TexCreate_DepthStencilTargetable |
+				TexCreate_ResolveTargetable);
+			ShadowInputDesc.Flags |= (TexCreate_RenderTargetable | TexCreate_ShaderResource);
+			FRDGTextureRef ShadowInputCopy = GraphBuilder.CreateTexture(
+				ShadowInputDesc,
+				TEXT("FluidShadowReceiverInput_PrePostProcess"));
+			AddCopyTexturePass(GraphBuilder, SceneColorTexture, ShadowInputCopy);
 
-		ApplyFluidShadowReceiver(
-			GraphBuilder,
-			View,
-			SubsystemPtr,
-			*ShadowRenderParams,
-			ShadowInputCopy,
-			SceneDepthTexture,
-			Output);
+			ApplyFluidShadowReceiver(
+				GraphBuilder,
+				View,
+				SubsystemPtr,
+				*ShadowRenderParams,
+				ShadowInputCopy,
+				SceneDepthTexture,
+				Output);
+		}
 
-		// Update LitSceneColorCopy after shadow receiver modified SceneColor
-		AddCopyTexturePass(GraphBuilder, SceneColorTexture, LitSceneColorCopy);
+		// 3. Update scene color copy
+		{
+			RDG_EVENT_SCOPE(GraphBuilder, "UpdateSceneColorCopy");
+			AddCopyTexturePass(GraphBuilder, SceneColorTexture, LitSceneColorCopy);
+		}
 	}
 
 	// Apply TransparencyPass for each Translucent batch using Pipeline
@@ -677,6 +688,8 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	{
 		const FFluidRenderingParameters& BatchParams = Batch.Key;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
+
+		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_Translucent(%d renderers)", Renderers.Num());
 
 		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
 		{
@@ -704,55 +717,62 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		const FFluidRenderingParameters& BatchParams = Batch.Key;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
 
-		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_ScreenSpace_PreTSR");
+		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_ScreenSpace(%d)", Renderers.Num());
 
 		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
 		{
 			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
 
 			// 1. PrepareRender - generate and cache intermediate textures
-			Pipeline->PrepareRender(
-				GraphBuilder,
-				View,
-				BatchParams,
-				Renderers,
-				SceneDepthTexture);
+			{
+				RDG_EVENT_SCOPE(GraphBuilder, "PrepareRender");
+				Pipeline->PrepareRender(
+					GraphBuilder,
+					View,
+					BatchParams,
+					Renderers,
+					SceneDepthTexture);
+			}
 
 			// 2. ExecuteRender - apply shading
-			Pipeline->ExecuteRender(
-				GraphBuilder,
-				View,
-				BatchParams,
-				Renderers,
-				SceneDepthTexture,
-				LitSceneColorCopy,
-				Output);
+			{
+				RDG_EVENT_SCOPE(GraphBuilder, "ExecuteRender");
+				Pipeline->ExecuteRender(
+					GraphBuilder,
+					View,
+					BatchParams,
+					Renderers,
+					SceneDepthTexture,
+					LitSceneColorCopy,
+					Output);
+			}
 
 			// 3. Store smoothed depth to history for shadow projection
-			// ScreenSpace outputs Linear Depth - convert to Device-Z for unified shadow processing
-			if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->
-				GetShadowHistoryManager())
 			{
-				if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->
-					GetCachedIntermediateTextures())
+				RDG_EVENT_SCOPE(GraphBuilder, "StoreDepthHistory");
+				if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->
+					GetShadowHistoryManager())
 				{
-					if (IntermediateTextures->SmoothedDepthTexture)
+					if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->
+						GetCachedIntermediateTextures())
 					{
-						// Store Linear Depth directly - shader handles conversion
-						HistoryManager->StoreCurrentFrame(
-							GraphBuilder,
-							IntermediateTextures->SmoothedDepthTexture,
-							View);
+						if (IntermediateTextures->SmoothedDepthTexture)
+						{
+							HistoryManager->StoreCurrentFrame(
+								GraphBuilder,
+								IntermediateTextures->SmoothedDepthTexture,
+								View);
+						}
+						else
+						{
+							UE_LOG(LogTemp, Warning,
+							       TEXT("KawaiiFluid: SmoothedDepthTexture is null!"));
+						}
 					}
 					else
 					{
-						UE_LOG(LogTemp, Warning,
-						       TEXT("KawaiiFluid: SmoothedDepthTexture is null!"));
+						UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid: IntermediateTextures is null!"));
 					}
-				}
-				else
-				{
-					UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid: IntermediateTextures is null!"));
 				}
 			}
 
@@ -774,43 +794,52 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		const FFluidRenderingParameters& BatchParams = Batch.Key;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
 
-		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_RayMarching_PreTSR");
+		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_RayMarching(%d)", Renderers.Num());
 
 		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
 		{
 			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
 
-			// 1. PrepareForTonemap - prepare particle buffer and SDF
-			Pipeline->PrepareRender(
-				GraphBuilder,
-				View,
-				BatchParams,
-				Renderers,
-				SceneDepthTexture);
+			// 1. PrepareRender - prepare particle buffer and SDF
+			{
+				RDG_EVENT_SCOPE(GraphBuilder, "PrepareRender");
+				Pipeline->PrepareRender(
+					GraphBuilder,
+					View,
+					BatchParams,
+					Renderers,
+					SceneDepthTexture);
+			}
 
-			// 2. ExecuteTonemap - apply ray march shading
-			Pipeline->ExecuteRender(
-				GraphBuilder,
-				View,
-				BatchParams,
-				Renderers,
-				SceneDepthTexture,
-				LitSceneColorCopy,
-				Output);
+			// 2. ExecuteRender - apply ray march shading
+			{
+				RDG_EVENT_SCOPE(GraphBuilder, "ExecuteRender");
+				Pipeline->ExecuteRender(
+					GraphBuilder,
+					View,
+					BatchParams,
+					Renderers,
+					SceneDepthTexture,
+					LitSceneColorCopy,
+					Output);
+			}
 
 			// 3. Store fluid depth to history for shadow projection
-			if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->
-				GetShadowHistoryManager())
 			{
-				if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->
-					GetCachedIntermediateTextures())
+				RDG_EVENT_SCOPE(GraphBuilder, "StoreDepthHistory");
+				if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->
+					GetShadowHistoryManager())
 				{
-					if (IntermediateTextures->SmoothedDepthTexture)
+					if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->
+						GetCachedIntermediateTextures())
 					{
-						HistoryManager->StoreCurrentFrame(
-							GraphBuilder,
-							IntermediateTextures->SmoothedDepthTexture,
-							View);
+						if (IntermediateTextures->SmoothedDepthTexture)
+						{
+							HistoryManager->StoreCurrentFrame(
+								GraphBuilder,
+								IntermediateTextures->SmoothedDepthTexture,
+								View);
+						}
 					}
 				}
 			}

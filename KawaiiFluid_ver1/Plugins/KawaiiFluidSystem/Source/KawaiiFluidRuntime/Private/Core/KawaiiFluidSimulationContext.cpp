@@ -124,6 +124,7 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 
 	// Time
 	GPUParams.DeltaTime = SubstepDT;
+	GPUParams.CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 
 	// Spatial hash
 	GPUParams.CellSize = Preset->SmoothingRadius;  // Cell size = smoothing radius
@@ -349,9 +350,11 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	CacheColliderShapes(Params.Colliders);
 
 	
-	// Collect and upload collision primitives to GPU
+	// Collect and upload collision primitives to GPU (with bone tracking for adhesion)
 	{
 		FGPUCollisionPrimitives CollisionPrimitives;
+		// Use persistent bone data for velocity calculation across frames
+		CollisionPrimitives.BoneTransforms = MoveTemp(PersistentBoneTransforms);
 		const float DefaultFriction = Preset->Friction;
 		const float DefaultRestitution = Preset->Restitution;
 
@@ -367,6 +370,9 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 				}
 			}
 		}
+
+		// Check if adhesion is enabled (Per-Polygon disabled actors can use GPU adhesion)
+		const bool bUseGPUAdhesion = Preset->AdhesionStrength > 0.0f;
 
 		for (UFluidCollider* Collider : Params.Colliders)
 		{
@@ -391,15 +397,34 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 
 				if (MeshCollider->IsCacheValid())
 				{
-					MeshCollider->ExportToGPUPrimitives(
-						CollisionPrimitives.Spheres,
-						CollisionPrimitives.Capsules,
-						CollisionPrimitives.Boxes,
-						CollisionPrimitives.Convexes,
-						CollisionPrimitives.ConvexPlanes,
-						DefaultFriction,
-						DefaultRestitution
-					);
+					// Use bone-aware export for GPU adhesion
+					if (bUseGPUAdhesion)
+					{
+						MeshCollider->ExportToGPUPrimitivesWithBones(
+							CollisionPrimitives.Spheres,
+							CollisionPrimitives.Capsules,
+							CollisionPrimitives.Boxes,
+							CollisionPrimitives.Convexes,
+							CollisionPrimitives.ConvexPlanes,
+							CollisionPrimitives.BoneTransforms,
+							PersistentBoneNameToIndex,  // Use persistent mapping
+							DefaultFriction,
+							DefaultRestitution
+						);
+					}
+					else
+					{
+						// Legacy path without bone tracking
+						MeshCollider->ExportToGPUPrimitives(
+							CollisionPrimitives.Spheres,
+							CollisionPrimitives.Capsules,
+							CollisionPrimitives.Boxes,
+							CollisionPrimitives.Convexes,
+							CollisionPrimitives.ConvexPlanes,
+							DefaultFriction,
+							DefaultRestitution
+						);
+					}
 				}
 			}
 		}
@@ -408,7 +433,35 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 		if (!CollisionPrimitives.IsEmpty())
 		{
 			GPUSimulator->UploadCollisionPrimitives(CollisionPrimitives);
+
+			// Set adhesion parameters if enabled
+			if (bUseGPUAdhesion && CollisionPrimitives.BoneTransforms.Num() > 0)
+			{
+				FGPUAdhesionParams AdhesionParams;
+				AdhesionParams.bEnableAdhesion = 1;
+				AdhesionParams.AdhesionStrength = Preset->AdhesionStrength;
+				AdhesionParams.AdhesionRadius = Preset->AdhesionRadius;
+				AdhesionParams.DetachAccelThreshold = Preset->AdhesionDetachAcceleration;  // Detach on fast acceleration
+				AdhesionParams.DetachDistanceThreshold = Preset->AdhesionDetachDistance; // Detach if too far from surface
+				AdhesionParams.SlidingFriction = DefaultFriction;
+				AdhesionParams.CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+
+				// Gravity sliding parameters - use ExternalForce as gravity
+				AdhesionParams.Gravity = FVector3f(Params.ExternalForce);
+				AdhesionParams.GravitySlidingScale = 1.0f;  // Full gravity sliding effect
+
+				GPUSimulator->SetAdhesionParams(AdhesionParams);
+			}
+			else
+			{
+				FGPUAdhesionParams AdhesionParams;
+				AdhesionParams.bEnableAdhesion = 0;
+				GPUSimulator->SetAdhesionParams(AdhesionParams);
+			}
 		}
+
+		// Save bone transforms back to persistent storage for next frame
+		PersistentBoneTransforms = MoveTemp(CollisionPrimitives.BoneTransforms);
 	}
 
 	// Run GPU simulation (spawning is handled internally by SimulateSubstep)

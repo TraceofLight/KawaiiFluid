@@ -14,6 +14,7 @@ struct FCachedCapsule
 	float Radius;
 	FName BoneName;
 	FTransform BoneTransform;
+	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
 };
 
 /** 캐싱된 스피어 데이터 */
@@ -23,6 +24,7 @@ struct FCachedSphere
 	float Radius;
 	FName BoneName;
 	FTransform BoneTransform;
+	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
 };
 
 /** 캐싱된 박스 데이터 */
@@ -33,6 +35,7 @@ struct FCachedBox
 	FQuat Rotation;
 	FName BoneName;
 	FTransform BoneTransform;
+	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
 };
 
 /** Convex 평면 데이터 */
@@ -50,6 +53,7 @@ struct FCachedConvex
 	TArray<FCachedConvexPlane> Planes;  // Convex 정의하는 평면들
 	FName BoneName;
 	FTransform BoneTransform;
+	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
 };
 
 /**
@@ -94,6 +98,19 @@ public:
 		TArray<struct FGPUCollisionBox>& OutBoxes,
 		TArray<struct FGPUCollisionConvex>& OutConvexes,
 		TArray<struct FGPUConvexPlane>& OutPlanes,
+		float Friction = 0.1f,
+		float Restitution = 0.3f
+	) const;
+
+	/** GPU 충돌용 primitive 데이터 내보내기 (본 트랜스폼 포함) */
+	void ExportToGPUPrimitivesWithBones(
+		TArray<struct FGPUCollisionSphere>& OutSpheres,
+		TArray<struct FGPUCollisionCapsule>& OutCapsules,
+		TArray<struct FGPUCollisionBox>& OutBoxes,
+		TArray<struct FGPUCollisionConvex>& OutConvexes,
+		TArray<struct FGPUConvexPlane>& OutPlanes,
+		TArray<struct FGPUBoneTransform>& OutBoneTransforms,
+		TMap<FName, int32>& BoneNameToIndex,  // Bone name to index mapping (shared across colliders)
 		float Friction = 0.1f,
 		float Restitution = 0.3f
 	) const;

@@ -15,8 +15,8 @@ struct FGPUCollisionSphere
 	float Radius;
 	float Friction;
 	float Restitution;
+	int BoneIndex;     // Index into bone transform buffer (-1 = no bone)
 	float Padding1;
-	float Padding2;
 };
 
 struct FGPUCollisionCapsule
@@ -26,9 +26,9 @@ struct FGPUCollisionCapsule
 	float3 End;
 	float Friction;
 	float Restitution;
+	int BoneIndex;     // Index into bone transform buffer (-1 = no bone)
 	float Padding1;
 	float Padding2;
-	float Padding3;
 };
 
 struct FGPUCollisionBox
@@ -38,8 +38,8 @@ struct FGPUCollisionBox
 	float3 Extent;
 	float Restitution;
 	float4 Rotation;  // Quaternion (x, y, z, w)
+	int BoneIndex;    // Index into bone transform buffer (-1 = no bone)
 	float3 Padding;
-	float Padding2;
 };
 
 struct FGPUCollisionConvex
@@ -50,6 +50,8 @@ struct FGPUCollisionConvex
 	int PlaneCount;
 	float Friction;
 	float Restitution;
+	int BoneIndex;    // Index into bone transform buffer (-1 = no bone)
+	float Padding;
 };
 
 struct FGPUConvexPlane
@@ -59,7 +61,35 @@ struct FGPUConvexPlane
 };
 
 //=============================================================================
-// Quaternion Utilities
+// Bone Transform Structure (must match C++ FGPUBoneTransform)
+//=============================================================================
+
+struct FGPUBoneTransform
+{
+	float3 Position;      // Bone world position
+	float Scale;          // Uniform scale
+	float4 Rotation;      // Quaternion (x, y, z, w)
+	float3 PreviousPos;   // Previous frame position
+	float Padding1;
+	float4 PreviousRot;   // Previous frame rotation
+};
+
+//=============================================================================
+// Particle Attachment Structure (must match C++ FGPUParticleAttachment)
+//=============================================================================
+
+struct FGPUParticleAttachment
+{
+	int PrimitiveType;      // 0=Sphere, 1=Capsule, 2=Box, 3=Convex, -1=None
+	int PrimitiveIndex;     // Index in primitive buffer
+	int BoneIndex;          // Index in bone transform buffer
+	float AdhesionStrength; // Current adhesion strength
+	float3 LocalOffset;     // Position in bone-local space
+	float AttachmentTime;   // Time when attached
+};
+
+//=============================================================================
+// Quaternion Utilities (must be defined before Bone Transform Utilities)
 //=============================================================================
 
 // Rotate vector by quaternion
@@ -74,6 +104,44 @@ float3 InverseRotateByQuat(float3 v, float4 q)
 {
 	// Conjugate of quaternion: (x,y,z,w) -> (-x,-y,-z,w)
 	return RotateByQuat(v, float4(-q.xyz, q.w));
+}
+
+//=============================================================================
+// Bone Transform Utilities
+//=============================================================================
+
+// Transform position from bone-local to world space
+float3 BoneLocalToWorld(float3 localPos, FGPUBoneTransform bone)
+{
+	float3 scaled = localPos * bone.Scale;
+	float3 rotated = RotateByQuat(scaled, bone.Rotation);
+	return rotated + bone.Position;
+}
+
+// Transform position from world to bone-local space
+float3 WorldToBoneLocal(float3 worldPos, FGPUBoneTransform bone)
+{
+	float3 relative = worldPos - bone.Position;
+	float3 rotated = InverseRotateByQuat(relative, bone.Rotation);
+	return rotated / bone.Scale;
+}
+
+// Calculate bone velocity at a local position
+float3 CalcBoneVelocity(float3 localPos, FGPUBoneTransform bone, float deltaTime)
+{
+	if (deltaTime < 0.0001f) return float3(0, 0, 0);
+
+	// Current world position
+	float3 currentWorld = BoneLocalToWorld(localPos, bone);
+
+	// Previous world position (using previous bone transform)
+	FGPUBoneTransform prevBone;
+	prevBone.Position = bone.PreviousPos;
+	prevBone.Rotation = bone.PreviousRot;
+	prevBone.Scale = bone.Scale;
+	float3 prevWorld = BoneLocalToWorld(localPos, prevBone);
+
+	return (currentWorld - prevWorld) / deltaTime;
 }
 
 //=============================================================================

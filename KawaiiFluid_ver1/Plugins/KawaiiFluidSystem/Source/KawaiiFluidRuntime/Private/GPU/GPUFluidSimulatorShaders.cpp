@@ -111,6 +111,22 @@ IMPLEMENT_GLOBAL_SHADER(FApplyAttachmentUpdatesCS,
 	"ApplyAttachmentUpdatesCS", SF_Compute);
 
 //=============================================================================
+// GPU Adhesion Shaders (Bone-based attachment)
+//=============================================================================
+
+IMPLEMENT_GLOBAL_SHADER(FAdhesionCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidAdhesion.usf",
+	"AdhesionCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FUpdateAttachedPositionsCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidAdhesion.usf",
+	"UpdateAttachedPositionsCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FClearDetachedFlagCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidAdhesion.usf",
+	"ClearDetachedFlagCS", SF_Compute);
+
+//=============================================================================
 // Pass Builder Implementation
 //=============================================================================
 

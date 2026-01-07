@@ -1246,6 +1246,7 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		GPUSphere.Radius = Sph.Radius;
 		GPUSphere.Friction = InFriction;
 		GPUSphere.Restitution = InRestitution;
+		GPUSphere.BoneIndex = -1;  // No bone tracking in legacy function
 		OutSpheres.Add(GPUSphere);
 	}
 
@@ -1258,6 +1259,7 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		GPUCapsule.Radius = Cap.Radius;
 		GPUCapsule.Friction = InFriction;
 		GPUCapsule.Restitution = InRestitution;
+		GPUCapsule.BoneIndex = -1;  // No bone tracking in legacy function
 		OutCapsules.Add(GPUCapsule);
 	}
 
@@ -1275,6 +1277,7 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		);
 		GPUBox.Friction = InFriction;
 		GPUBox.Restitution = InRestitution;
+		GPUBox.BoneIndex = -1;  // No bone tracking in legacy function
 		OutBoxes.Add(GPUBox);
 	}
 
@@ -1288,6 +1291,120 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		GPUConvex.PlaneCount = Cvx.Planes.Num();
 		GPUConvex.Friction = InFriction;
 		GPUConvex.Restitution = InRestitution;
+		GPUConvex.BoneIndex = -1;  // No bone tracking in legacy function
+		OutConvexes.Add(GPUConvex);
+
+		// Add planes to the plane buffer
+		for (const FCachedConvexPlane& Plane : Cvx.Planes)
+		{
+			FGPUConvexPlane GPUPlane;
+			GPUPlane.Normal = FVector3f(Plane.Normal);
+			GPUPlane.Distance = Plane.Distance;
+			OutPlanes.Add(GPUPlane);
+		}
+	}
+}
+
+void UMeshFluidCollider::ExportToGPUPrimitivesWithBones(
+	TArray<FGPUCollisionSphere>& OutSpheres,
+	TArray<FGPUCollisionCapsule>& OutCapsules,
+	TArray<FGPUCollisionBox>& OutBoxes,
+	TArray<FGPUCollisionConvex>& OutConvexes,
+	TArray<FGPUConvexPlane>& OutPlanes,
+	TArray<FGPUBoneTransform>& OutBoneTransforms,
+	TMap<FName, int32>& BoneNameToIndex,
+	float InFriction,
+	float InRestitution
+) const
+{
+	if (!bCacheValid)
+	{
+		return;
+	}
+
+	// Helper lambda to get or create bone index
+	auto GetOrCreateBoneIndex = [&](FName BoneName, const FTransform& BoneTransform) -> int32
+	{
+		if (BoneName == NAME_None)
+		{
+			return -1;
+		}
+
+		if (int32* ExistingIndex = BoneNameToIndex.Find(BoneName))
+		{
+			// Save current as previous before updating (for velocity calculation)
+			OutBoneTransforms[*ExistingIndex].UpdatePrevious();
+			// Update existing bone transform (in case it moved)
+			OutBoneTransforms[*ExistingIndex].SetFromTransform(BoneTransform);
+			return *ExistingIndex;
+		}
+
+		// Create new bone entry
+		int32 NewIndex = OutBoneTransforms.Num();
+		BoneNameToIndex.Add(BoneName, NewIndex);
+
+		FGPUBoneTransform GPUBone;
+		GPUBone.SetFromTransform(BoneTransform);
+		GPUBone.UpdatePrevious();  // Initialize previous to current
+		OutBoneTransforms.Add(GPUBone);
+
+		return NewIndex;
+	};
+
+	// Export spheres with bone indices
+	for (const FCachedSphere& Sph : CachedSpheres)
+	{
+		FGPUCollisionSphere GPUSphere;
+		GPUSphere.Center = FVector3f(Sph.Center);
+		GPUSphere.Radius = Sph.Radius;
+		GPUSphere.Friction = InFriction;
+		GPUSphere.Restitution = InRestitution;
+		GPUSphere.BoneIndex = GetOrCreateBoneIndex(Sph.BoneName, Sph.BoneTransform);
+		OutSpheres.Add(GPUSphere);
+	}
+
+	// Export capsules with bone indices
+	for (const FCachedCapsule& Cap : CachedCapsules)
+	{
+		FGPUCollisionCapsule GPUCapsule;
+		GPUCapsule.Start = FVector3f(Cap.Start);
+		GPUCapsule.End = FVector3f(Cap.End);
+		GPUCapsule.Radius = Cap.Radius;
+		GPUCapsule.Friction = InFriction;
+		GPUCapsule.Restitution = InRestitution;
+		GPUCapsule.BoneIndex = GetOrCreateBoneIndex(Cap.BoneName, Cap.BoneTransform);
+		OutCapsules.Add(GPUCapsule);
+	}
+
+	// Export boxes with bone indices
+	for (const FCachedBox& Box : CachedBoxes)
+	{
+		FGPUCollisionBox GPUBox;
+		GPUBox.Center = FVector3f(Box.Center);
+		GPUBox.Extent = FVector3f(Box.Extent);
+		GPUBox.Rotation = FVector4f(
+			static_cast<float>(Box.Rotation.X),
+			static_cast<float>(Box.Rotation.Y),
+			static_cast<float>(Box.Rotation.Z),
+			static_cast<float>(Box.Rotation.W)
+		);
+		GPUBox.Friction = InFriction;
+		GPUBox.Restitution = InRestitution;
+		GPUBox.BoneIndex = GetOrCreateBoneIndex(Box.BoneName, Box.BoneTransform);
+		OutBoxes.Add(GPUBox);
+	}
+
+	// Export convexes with bone indices
+	for (const FCachedConvex& Cvx : CachedConvexes)
+	{
+		FGPUCollisionConvex GPUConvex;
+		GPUConvex.Center = FVector3f(Cvx.Center);
+		GPUConvex.BoundingRadius = Cvx.BoundingRadius;
+		GPUConvex.PlaneStartIndex = OutPlanes.Num();
+		GPUConvex.PlaneCount = Cvx.Planes.Num();
+		GPUConvex.Friction = InFriction;
+		GPUConvex.Restitution = InRestitution;
+		GPUConvex.BoneIndex = GetOrCreateBoneIndex(Cvx.BoneName, Cvx.BoneTransform);
 		OutConvexes.Add(GPUConvex);
 
 		// Add planes to the plane buffer

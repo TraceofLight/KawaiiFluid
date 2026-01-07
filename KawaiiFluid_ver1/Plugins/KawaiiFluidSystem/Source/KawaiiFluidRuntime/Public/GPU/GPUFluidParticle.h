@@ -106,7 +106,8 @@ struct FGPUFluidSimulationParams
 	int32 SubstepIndex;           // Current substep index
 	int32 TotalSubsteps;          // Total substeps per frame
 	int32 PressureIterations;     // Number of pressure solve iterations
-	int32 Padding2;               // Padding for alignment
+	float CurrentTime;            // Current game time (seconds)
+	
 
 	FGPUFluidSimulationParams()
 		: RestDensity(1000.0f)
@@ -135,7 +136,7 @@ struct FGPUFluidSimulationParams
 		, SubstepIndex(0)
 		, TotalSubsteps(1)
 		, PressureIterations(1)
-		, Padding2(0)
+		, CurrentTime(0.0f)
 	{
 	}
 
@@ -231,16 +232,18 @@ struct FGPUCollisionSphere
 	float Radius;         // 4 bytes
 	float Friction;       // 4 bytes
 	float Restitution;    // 4 bytes
+	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
 	float Padding1;       // 4 bytes
-	float Padding2;       // 4 bytes
+	
 
 	FGPUCollisionSphere()
 		: Center(FVector3f::ZeroVector)
 		, Radius(10.0f)
 		, Friction(0.1f)
 		, Restitution(0.3f)
+		, BoneIndex(-1)
 		, Padding1(0.0f)
-		, Padding2(0.0f)
+		
 	{
 	}
 };
@@ -256,9 +259,10 @@ struct FGPUCollisionCapsule
 	FVector3f End;        // 12 bytes
 	float Friction;       // 4 bytes
 	float Restitution;    // 4 bytes
+	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
 	float Padding1;       // 4 bytes
 	float Padding2;       // 4 bytes
-	float Padding3;       // 4 bytes
+	
 
 	FGPUCollisionCapsule()
 		: Start(FVector3f::ZeroVector)
@@ -266,9 +270,10 @@ struct FGPUCollisionCapsule
 		, End(FVector3f(0.0f, 0.0f, 100.0f))
 		, Friction(0.1f)
 		, Restitution(0.3f)
+		, BoneIndex(-1)
 		, Padding1(0.0f)
 		, Padding2(0.0f)
-		, Padding3(0.0f)
+		
 	{
 	}
 };
@@ -284,8 +289,9 @@ struct FGPUCollisionBox
 	FVector3f Extent;     // 12 bytes (half extents)
 	float Restitution;    // 4 bytes
 	FVector4f Rotation;   // 16 bytes (quaternion: x, y, z, w)
+	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
 	FVector3f Padding;    // 12 bytes
-	float Padding2;       // 4 bytes
+	
 
 	FGPUCollisionBox()
 		: Center(FVector3f::ZeroVector)
@@ -293,8 +299,9 @@ struct FGPUCollisionBox
 		, Extent(FVector3f(50.0f))
 		, Restitution(0.3f)
 		, Rotation(FVector4f(0.0f, 0.0f, 0.0f, 1.0f))
+		, BoneIndex(-1)
 		, Padding(FVector3f::ZeroVector)
-		, Padding2(0.0f)
+		
 	{
 	}
 };
@@ -329,6 +336,8 @@ struct FGPUCollisionConvex
 	int32 PlaneCount;     // 4 bytes (number of planes)
 	float Friction;       // 4 bytes
 	float Restitution;    // 4 bytes
+	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
+	float Padding;        // 4 bytes
 
 	FGPUCollisionConvex()
 		: Center(FVector3f::ZeroVector)
@@ -337,10 +346,122 @@ struct FGPUCollisionConvex
 		, PlaneCount(0)
 		, Friction(0.1f)
 		, Restitution(0.3f)
+		, BoneIndex(-1)
+		, Padding(0.0f)
 	{
 	}
 };
-static_assert(sizeof(FGPUCollisionConvex) == 32, "FGPUCollisionConvex must be 32 bytes");
+static_assert(sizeof(FGPUCollisionConvex) == 40, "FGPUCollisionConvex must be 40 bytes");
+
+/**
+ * GPU Bone Transform (64 bytes)
+ * Stores bone world transform for GPU-based attachment tracking
+ */
+struct FGPUBoneTransform
+{
+	FVector3f Position;       // 12 bytes - Bone world position
+	float Scale;              // 4 bytes - Uniform scale (for simplicity)
+	FVector4f Rotation;       // 16 bytes - Quaternion (x, y, z, w)
+	FVector3f PreviousPos;    // 12 bytes - Previous frame position (for velocity)
+	float Padding1;           // 4 bytes
+	FVector4f PreviousRot;    // 16 bytes - Previous frame rotation
+
+	FGPUBoneTransform()
+		: Position(FVector3f::ZeroVector)
+		, Scale(1.0f)
+		, Rotation(FVector4f(0.0f, 0.0f, 0.0f, 1.0f))
+		, PreviousPos(FVector3f::ZeroVector)
+		, Padding1(0.0f)
+		, PreviousRot(FVector4f(0.0f, 0.0f, 0.0f, 1.0f))
+	{
+	}
+
+	void SetFromTransform(const FTransform& InTransform)
+	{
+		Position = FVector3f(InTransform.GetLocation());
+		Scale = InTransform.GetScale3D().GetMax();
+		FQuat Q = InTransform.GetRotation();
+		Rotation = FVector4f(Q.X, Q.Y, Q.Z, Q.W);
+	}
+
+	void UpdatePrevious()
+	{
+		PreviousPos = Position;
+		PreviousRot = Rotation;
+	}
+};
+static_assert(sizeof(FGPUBoneTransform) == 64, "FGPUBoneTransform must be 64 bytes");
+
+/**
+ * GPU Particle Attachment Data (32 bytes)
+ * Stores attachment info for particles attached to bone colliders
+ * Managed as a separate buffer indexed by particle index
+ */
+struct FGPUParticleAttachment
+{
+	int32 PrimitiveType;      // 4 bytes - 0=Sphere, 1=Capsule, 2=Box, 3=Convex, -1=None
+	int32 PrimitiveIndex;     // 4 bytes - Index in primitive buffer
+	int32 BoneIndex;          // 4 bytes - Index in bone transform buffer
+	float AdhesionStrength;   // 4 bytes - Current adhesion strength (can decay)
+	FVector3f LocalOffset;    // 12 bytes - Position in bone-local space
+	float AttachmentTime;     // 4 bytes - Time when attached
+
+	FGPUParticleAttachment()
+		: PrimitiveType(-1)
+		, PrimitiveIndex(-1)
+		, BoneIndex(-1)
+		, AdhesionStrength(0.0f)
+		, LocalOffset(FVector3f::ZeroVector)
+		, AttachmentTime(0.0f)
+	{
+	}
+
+	bool IsAttached() const { return PrimitiveType >= 0 && BoneIndex >= 0; }
+
+	void Clear()
+	{
+		PrimitiveType = -1;
+		PrimitiveIndex = -1;
+		BoneIndex = -1;
+		AdhesionStrength = 0.0f;
+		LocalOffset = FVector3f::ZeroVector;
+		AttachmentTime = 0.0f;
+	}
+};
+static_assert(sizeof(FGPUParticleAttachment) == 32, "FGPUParticleAttachment must be 32 bytes");
+
+/**
+ * GPU Adhesion Parameters
+ * Passed to adhesion compute shader
+ */
+struct FGPUAdhesionParams
+{
+	float AdhesionStrength;       // 4 bytes - Base adhesion strength
+	float AdhesionRadius;         // 4 bytes - Max distance for adhesion
+	float DetachAccelThreshold;   // 4 bytes - Acceleration threshold for detachment
+	float DetachDistanceThreshold;// 4 bytes - Distance threshold for detachment
+	float SlidingFriction;        // 4 bytes - Friction when sliding on surface
+	float CurrentTime;            // 4 bytes - Current game time
+	int32 bEnableAdhesion;        // 4 bytes - Enable flag
+	float GravitySlidingScale;    // 4 bytes - How much gravity affects sliding (0-1)
+	FVector3f Gravity;            // 12 bytes - World gravity vector
+	int32 Padding;                // 4 bytes
+
+	FGPUAdhesionParams()
+		: AdhesionStrength(1.0f)
+		, AdhesionRadius(10.0f)
+		, DetachAccelThreshold(1000.0f)
+		, DetachDistanceThreshold(15.0f)
+		, SlidingFriction(0.1f)
+		, CurrentTime(0.0f)
+		, bEnableAdhesion(0)
+		, GravitySlidingScale(1.0f)
+		, Gravity(0.0f, 0.0f, -980.0f)  // Default UE gravity (cm/s^2)
+		, Padding(0)
+	{
+	}
+};
+static_assert(sizeof(FGPUAdhesionParams) == 48, "FGPUAdhesionParams must be 48 bytes");
 
 /**
  * GPU Collision Primitives Collection
@@ -353,6 +474,7 @@ struct FGPUCollisionPrimitives
 	TArray<FGPUCollisionBox> Boxes;
 	TArray<FGPUCollisionConvex> Convexes;
 	TArray<FGPUConvexPlane> ConvexPlanes;
+	TArray<FGPUBoneTransform> BoneTransforms;  // Bone transforms for attachment
 
 	void Reset()
 	{
@@ -361,6 +483,7 @@ struct FGPUCollisionPrimitives
 		Boxes.Reset();
 		Convexes.Reset();
 		ConvexPlanes.Reset();
+		BoneTransforms.Reset();
 	}
 
 	bool IsEmpty() const

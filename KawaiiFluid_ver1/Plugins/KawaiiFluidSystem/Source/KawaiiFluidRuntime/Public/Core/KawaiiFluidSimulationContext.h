@@ -7,6 +7,7 @@
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
 #include "Collision/PerPolygonCollisionProcessor.h"
+#include "GPU/GPUFluidParticle.h"
 #include "KawaiiFluidSimulationContext.generated.h"
 
 // Forward declarations
@@ -280,4 +281,14 @@ protected:
 		const FKawaiiFluidSimulationParams& Params,
 		float SubstepDT
 	);
+
+	//========================================
+	// Persistent Bone Transform Data (for GPU adhesion)
+	//========================================
+
+	/** Bone transforms persisted across frames for velocity calculation */
+	TArray<FGPUBoneTransform> PersistentBoneTransforms;
+
+	/** Bone name to index mapping persisted across frames */
+	TMap<FName, int32> PersistentBoneNameToIndex;
 };

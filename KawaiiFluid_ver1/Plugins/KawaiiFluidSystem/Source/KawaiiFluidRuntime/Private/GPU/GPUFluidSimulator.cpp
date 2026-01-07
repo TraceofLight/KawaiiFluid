@@ -463,18 +463,21 @@ void FGPUFluidSimulator::UploadCollisionPrimitives(const FGPUCollisionPrimitives
 	CachedBoxes = Primitives.Boxes;
 	CachedConvexHeaders = Primitives.Convexes;
 	CachedConvexPlanes = Primitives.ConvexPlanes;
+	CachedBoneTransforms = Primitives.BoneTransforms;
 
 	// Check if we have any primitives
 	if (Primitives.IsEmpty())
 	{
 		bCollisionPrimitivesValid = false;
+		bBoneTransformsValid = false;
 		return;
 	}
 
 	bCollisionPrimitivesValid = true;
+	bBoneTransformsValid = CachedBoneTransforms.Num() > 0;
 
-	UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Cached collision primitives: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d, Planes=%d"),
-		CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedConvexHeaders.Num(), CachedConvexPlanes.Num());
+	UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Cached collision primitives: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d, Planes=%d, BoneTransforms=%d"),
+		CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedConvexHeaders.Num(), CachedConvexPlanes.Num(), CachedBoneTransforms.Num());
 }
 
 //=============================================================================
@@ -870,6 +873,16 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		//UE_LOG(LogGPUFluidSimulator, Log, TEXT("  PersistentBuffer Valid: %s"), PersistentParticleBuffer.IsValid() ? TEXT("YES") : TEXT("NO"));
 	}
 
+	// Pass 0.5: Update attached particles (move with bones) - before physics simulation
+	// Only run if attachment buffer exists AND matches current particle count
+	FRDGBufferRef AttachmentBufferForUpdate = nullptr;
+	if (IsAdhesionEnabled() && bBoneTransformsValid && PersistentAttachmentBuffer.IsValid() && AttachmentBufferSize >= CurrentParticleCount)
+	{
+		AttachmentBufferForUpdate = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachmentsUpdate"));
+		FRDGBufferUAVRef AttachmentUAVForUpdate = GraphBuilder.CreateUAV(AttachmentBufferForUpdate);
+		AddUpdateAttachedPositionsPassInternal(GraphBuilder, ParticlesUAVLocal, AttachmentUAVForUpdate, Params);
+	}
+
 	// Pass 1: Predict Positions
 	AddPredictPositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
 
@@ -975,8 +988,71 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	// Pass 7.6: Primitive Collision (spheres, capsules, boxes, convexes from FluidCollider)
 	AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
 
+	// Pass 7.7: Adhesion - Create attachments to bone colliders (GPU-based)
+	if (IsAdhesionEnabled() && bBoneTransformsValid)
+	{
+		// Check if we need to create or resize attachment buffer
+		const bool bNeedNewBuffer = !PersistentAttachmentBuffer.IsValid() || AttachmentBufferSize < CurrentParticleCount;
+
+		FRDGBufferRef AttachmentBuffer;
+		if (bNeedNewBuffer)
+		{
+			// Create new buffer with initialized data (PrimitiveType = -1 means no attachment)
+			TArray<FGPUParticleAttachment> InitialAttachments;
+			InitialAttachments.SetNum(CurrentParticleCount);
+			for (int32 i = 0; i < CurrentParticleCount; ++i)
+			{
+				InitialAttachments[i].PrimitiveType = -1;
+				InitialAttachments[i].PrimitiveIndex = -1;
+				InitialAttachments[i].BoneIndex = -1;
+				InitialAttachments[i].AdhesionStrength = 0.0f;
+				InitialAttachments[i].LocalOffset = FVector3f::ZeroVector;
+				InitialAttachments[i].AttachmentTime = 0.0f;
+			}
+
+			AttachmentBuffer = CreateStructuredBuffer(
+				GraphBuilder,
+				TEXT("GPUFluidAttachments"),
+				sizeof(FGPUParticleAttachment),
+				CurrentParticleCount,
+				InitialAttachments.GetData(),
+				CurrentParticleCount * sizeof(FGPUParticleAttachment),
+				ERDGInitialDataFlags::None  // Copy the data, don't use NoCopy
+			);
+
+			// If we had existing data, copy it to the new buffer
+			if (PersistentAttachmentBuffer.IsValid() && AttachmentBufferSize > 0)
+			{
+				FRDGBufferRef OldBuffer = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachmentsOld"));
+
+				// Copy existing attachment data (preserve attached particles)
+				AddCopyBufferPass(GraphBuilder, AttachmentBuffer, 0, OldBuffer, 0, AttachmentBufferSize * sizeof(FGPUParticleAttachment));
+			}
+
+			// Update tracked size
+			AttachmentBufferSize = CurrentParticleCount;
+		}
+		else
+		{
+			AttachmentBuffer = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachments"));
+		}
+		FRDGBufferUAVRef AttachmentUAV = GraphBuilder.CreateUAV(AttachmentBuffer);
+
+		AddAdhesionPass(GraphBuilder, ParticlesUAVLocal, AttachmentUAV, Params);
+
+		// Extract attachment buffer for next frame
+		GraphBuilder.QueueBufferExtraction(
+			AttachmentBuffer,
+			&PersistentAttachmentBuffer,
+			ERHIAccess::UAVCompute
+		);
+	}
+
 	// Pass 8: Finalize Positions
 	AddFinalizePositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
+
+	// Pass 8.5: Clear just-detached flag at end of frame
+	AddClearDetachedFlagPass(GraphBuilder, ParticlesUAVLocal);
 
 	// Debug: log that we reached the end of simulation
 	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SIMULATION COMPLETE: All passes added for %d particles"), CurrentParticleCount);
@@ -2040,5 +2116,291 @@ void FGPUFluidSimulator::ApplyAttachmentUpdates(const TArray<FAttachedParticleUp
 
 			UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("ApplyAttachmentUpdates: Applied %d updates"), UpdateCount);
 		}
+	);
+}
+
+//=============================================================================
+// Adhesion Pass Implementations (GPU-based bone attachment)
+//=============================================================================
+
+void FGPUFluidSimulator::AddAdhesionPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	FRDGBufferUAVRef AttachmentUAV,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (!IsAdhesionEnabled() || !bBoneTransformsValid || CachedBoneTransforms.Num() == 0)
+	{
+		return;
+	}
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FAdhesionCS> ComputeShader(ShaderMap);
+
+	// Upload bone transforms
+	FRDGBufferRef BoneTransformsBuffer = CreateStructuredBuffer(
+		GraphBuilder,
+		TEXT("GPUFluidBoneTransforms"),
+		sizeof(FGPUBoneTransform),
+		CachedBoneTransforms.Num(),
+		CachedBoneTransforms.GetData(),
+		CachedBoneTransforms.Num() * sizeof(FGPUBoneTransform),
+		ERDGInitialDataFlags::NoCopy
+	);
+	FRDGBufferSRVRef BoneTransformsSRVLocal = GraphBuilder.CreateSRV(BoneTransformsBuffer);
+
+	// Upload collision primitives for adhesion check
+	FRDGBufferRef SpheresBuffer = nullptr;
+	FRDGBufferRef CapsulesBuffer = nullptr;
+	FRDGBufferRef BoxesBuffer = nullptr;
+	FRDGBufferRef ConvexesBuffer = nullptr;
+	FRDGBufferRef ConvexPlanesBuffer = nullptr;
+
+	if (CachedSpheres.Num() > 0)
+	{
+		SpheresBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionSpheres"),
+			sizeof(FGPUCollisionSphere), CachedSpheres.Num(),
+			CachedSpheres.GetData(), CachedSpheres.Num() * sizeof(FGPUCollisionSphere),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedCapsules.Num() > 0)
+	{
+		CapsulesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionCapsules"),
+			sizeof(FGPUCollisionCapsule), CachedCapsules.Num(),
+			CachedCapsules.GetData(), CachedCapsules.Num() * sizeof(FGPUCollisionCapsule),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedBoxes.Num() > 0)
+	{
+		BoxesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionBoxes"),
+			sizeof(FGPUCollisionBox), CachedBoxes.Num(),
+			CachedBoxes.GetData(), CachedBoxes.Num() * sizeof(FGPUCollisionBox),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedConvexHeaders.Num() > 0)
+	{
+		ConvexesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionConvexes"),
+			sizeof(FGPUCollisionConvex), CachedConvexHeaders.Num(),
+			CachedConvexHeaders.GetData(), CachedConvexHeaders.Num() * sizeof(FGPUCollisionConvex),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedConvexPlanes.Num() > 0)
+	{
+		ConvexPlanesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidConvexPlanes"),
+			sizeof(FGPUConvexPlane), CachedConvexPlanes.Num(),
+			CachedConvexPlanes.GetData(), CachedConvexPlanes.Num() * sizeof(FGPUConvexPlane),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+
+	// Dummy buffers for empty arrays
+	FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(16, 1);
+	if (!SpheresBuffer) SpheresBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummySpheres"));
+	if (!CapsulesBuffer) CapsulesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyCapsules"));
+	if (!BoxesBuffer) BoxesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyBoxes"));
+	if (!ConvexesBuffer) ConvexesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyConvexes"));
+	if (!ConvexPlanesBuffer) ConvexPlanesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyPlanes"));
+
+	FAdhesionCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FAdhesionCS::FParameters>();
+	PassParameters->Particles = ParticlesUAV;
+	PassParameters->ParticleCount = CurrentParticleCount;
+	PassParameters->ParticleRadius = Params.ParticleRadius;
+	PassParameters->Attachments = AttachmentUAV;
+	PassParameters->BoneTransforms = BoneTransformsSRVLocal;
+	PassParameters->BoneCount = CachedBoneTransforms.Num();
+	PassParameters->CollisionSpheres = GraphBuilder.CreateSRV(SpheresBuffer);
+	PassParameters->SphereCount = CachedSpheres.Num();
+	PassParameters->CollisionCapsules = GraphBuilder.CreateSRV(CapsulesBuffer);
+	PassParameters->CapsuleCount = CachedCapsules.Num();
+	PassParameters->CollisionBoxes = GraphBuilder.CreateSRV(BoxesBuffer);
+	PassParameters->BoxCount = CachedBoxes.Num();
+	PassParameters->CollisionConvexes = GraphBuilder.CreateSRV(ConvexesBuffer);
+	PassParameters->ConvexCount = CachedConvexHeaders.Num();
+	PassParameters->ConvexPlanes = GraphBuilder.CreateSRV(ConvexPlanesBuffer);
+	PassParameters->AdhesionStrength = CachedAdhesionParams.AdhesionStrength;
+	PassParameters->AdhesionRadius = CachedAdhesionParams.AdhesionRadius;
+	PassParameters->DetachAccelThreshold = CachedAdhesionParams.DetachAccelThreshold;
+	PassParameters->DetachDistanceThreshold = CachedAdhesionParams.DetachDistanceThreshold;
+	PassParameters->SlidingFriction = CachedAdhesionParams.SlidingFriction;
+	PassParameters->CurrentTime = Params.CurrentTime;
+	PassParameters->DeltaTime = Params.DeltaTime;
+	PassParameters->bEnableAdhesion = CachedAdhesionParams.bEnableAdhesion;
+
+	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FAdhesionCS::ThreadGroupSize);
+
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::Adhesion"),
+		ComputeShader,
+		PassParameters,
+		FIntVector(NumGroups, 1, 1)
+	);
+}
+
+void FGPUFluidSimulator::AddUpdateAttachedPositionsPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	FRDGBufferSRVRef AttachmentSRV,
+	FRDGBufferSRVRef InBoneTransformsSRV,
+	const FGPUFluidSimulationParams& Params)
+{
+	// This signature is for external calls. We'll use the internal version.
+}
+
+void FGPUFluidSimulator::AddUpdateAttachedPositionsPassInternal(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	FRDGBufferUAVRef AttachmentUAV,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (!IsAdhesionEnabled() || !bBoneTransformsValid || CachedBoneTransforms.Num() == 0)
+	{
+		return;
+	}
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FUpdateAttachedPositionsCS> ComputeShader(ShaderMap);
+
+	// Upload bone transforms
+	FRDGBufferRef BoneTransformsBuffer = CreateStructuredBuffer(
+		GraphBuilder,
+		TEXT("GPUFluidBoneTransformsUpdate"),
+		sizeof(FGPUBoneTransform),
+		CachedBoneTransforms.Num(),
+		CachedBoneTransforms.GetData(),
+		CachedBoneTransforms.Num() * sizeof(FGPUBoneTransform),
+		ERDGInitialDataFlags::NoCopy
+	);
+	FRDGBufferSRVRef BoneTransformsSRVLocal = GraphBuilder.CreateSRV(BoneTransformsBuffer);
+
+	// Upload collision primitives for detachment distance check
+	FRDGBufferRef SpheresBuffer = nullptr;
+	FRDGBufferRef CapsulesBuffer = nullptr;
+	FRDGBufferRef BoxesBuffer = nullptr;
+	FRDGBufferRef ConvexesBuffer = nullptr;
+	FRDGBufferRef ConvexPlanesBuffer = nullptr;
+
+	if (CachedSpheres.Num() > 0)
+	{
+		SpheresBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionSpheresUpdate"),
+			sizeof(FGPUCollisionSphere), CachedSpheres.Num(),
+			CachedSpheres.GetData(), CachedSpheres.Num() * sizeof(FGPUCollisionSphere),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedCapsules.Num() > 0)
+	{
+		CapsulesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionCapsulesUpdate"),
+			sizeof(FGPUCollisionCapsule), CachedCapsules.Num(),
+			CachedCapsules.GetData(), CachedCapsules.Num() * sizeof(FGPUCollisionCapsule),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedBoxes.Num() > 0)
+	{
+		BoxesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionBoxesUpdate"),
+			sizeof(FGPUCollisionBox), CachedBoxes.Num(),
+			CachedBoxes.GetData(), CachedBoxes.Num() * sizeof(FGPUCollisionBox),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedConvexHeaders.Num() > 0)
+	{
+		ConvexesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidCollisionConvexesUpdate"),
+			sizeof(FGPUCollisionConvex), CachedConvexHeaders.Num(),
+			CachedConvexHeaders.GetData(), CachedConvexHeaders.Num() * sizeof(FGPUCollisionConvex),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+	if (CachedConvexPlanes.Num() > 0)
+	{
+		ConvexPlanesBuffer = CreateStructuredBuffer(
+			GraphBuilder, TEXT("GPUFluidConvexPlanesUpdate"),
+			sizeof(FGPUConvexPlane), CachedConvexPlanes.Num(),
+			CachedConvexPlanes.GetData(), CachedConvexPlanes.Num() * sizeof(FGPUConvexPlane),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+
+	// Dummy buffers for empty arrays
+	FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(16, 1);
+	if (!SpheresBuffer) SpheresBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummySpheresUpdate"));
+	if (!CapsulesBuffer) CapsulesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyCapsulesUpdate"));
+	if (!BoxesBuffer) BoxesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyBoxesUpdate"));
+	if (!ConvexesBuffer) ConvexesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyConvexesUpdate"));
+	if (!ConvexPlanesBuffer) ConvexPlanesBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyPlanesUpdate"));
+
+	FUpdateAttachedPositionsCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FUpdateAttachedPositionsCS::FParameters>();
+	PassParameters->Particles = ParticlesUAV;
+	PassParameters->ParticleCount = CurrentParticleCount;
+	PassParameters->Attachments = AttachmentUAV;
+	PassParameters->BoneTransforms = BoneTransformsSRVLocal;
+	PassParameters->BoneCount = CachedBoneTransforms.Num();
+	PassParameters->CollisionSpheres = GraphBuilder.CreateSRV(SpheresBuffer);
+	PassParameters->SphereCount = CachedSpheres.Num();
+	PassParameters->CollisionCapsules = GraphBuilder.CreateSRV(CapsulesBuffer);
+	PassParameters->CapsuleCount = CachedCapsules.Num();
+	PassParameters->CollisionBoxes = GraphBuilder.CreateSRV(BoxesBuffer);
+	PassParameters->BoxCount = CachedBoxes.Num();
+	PassParameters->CollisionConvexes = GraphBuilder.CreateSRV(ConvexesBuffer);
+	PassParameters->ConvexCount = CachedConvexHeaders.Num();
+	PassParameters->ConvexPlanes = GraphBuilder.CreateSRV(ConvexPlanesBuffer);
+	PassParameters->DetachAccelThreshold = CachedAdhesionParams.DetachAccelThreshold;
+	PassParameters->DetachDistanceThreshold = CachedAdhesionParams.DetachDistanceThreshold;
+	PassParameters->SlidingFriction = CachedAdhesionParams.SlidingFriction;
+	PassParameters->DeltaTime = Params.DeltaTime;
+
+	// Gravity sliding parameters
+	PassParameters->Gravity = CachedAdhesionParams.Gravity;
+	PassParameters->GravitySlidingScale = CachedAdhesionParams.GravitySlidingScale;
+
+	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateAttachedPositionsCS::ThreadGroupSize);
+
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::UpdateAttachedPositions"),
+		ComputeShader,
+		PassParameters,
+		FIntVector(NumGroups, 1, 1)
+	);
+}
+
+void FGPUFluidSimulator::AddClearDetachedFlagPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV)
+{
+	if (!IsAdhesionEnabled())
+	{
+		return;
+	}
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FClearDetachedFlagCS> ComputeShader(ShaderMap);
+
+	FClearDetachedFlagCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FClearDetachedFlagCS::FParameters>();
+	PassParameters->Particles = ParticlesUAV;
+	PassParameters->ParticleCount = CurrentParticleCount;
+
+	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FClearDetachedFlagCS::ThreadGroupSize);
+
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::ClearDetachedFlag"),
+		ComputeShader,
+		PassParameters,
+		FIntVector(NumGroups, 1, 1)
 	);
 }

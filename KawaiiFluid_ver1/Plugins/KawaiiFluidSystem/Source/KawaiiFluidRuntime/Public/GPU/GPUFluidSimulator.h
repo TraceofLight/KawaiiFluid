@@ -192,6 +192,31 @@ public:
 	}
 
 	//=============================================================================
+	// GPU Adhesion System (Bone-based attachment tracking)
+	//=============================================================================
+
+	/**
+	 * Set adhesion parameters for GPU-based attachment
+	 * @param Params - Adhesion configuration
+	 */
+	void SetAdhesionParams(const FGPUAdhesionParams& Params) { CachedAdhesionParams = Params; }
+
+	/**
+	 * Get adhesion parameters
+	 */
+	const FGPUAdhesionParams& GetAdhesionParams() const { return CachedAdhesionParams; }
+
+	/**
+	 * Check if adhesion is enabled
+	 */
+	bool IsAdhesionEnabled() const { return CachedAdhesionParams.bEnableAdhesion != 0; }
+
+	/**
+	 * Get bone transform count
+	 */
+	int32 GetBoneTransformCount() const { return CachedBoneTransforms.Num(); }
+
+	//=============================================================================
 	// Stream Compaction (Phase 2 - Per-Polygon Collision)
 	// GPU AABB filtering using parallel prefix sum
 	//=============================================================================
@@ -375,6 +400,33 @@ private:
 		FRDGBufferUAVRef ParticleCounterUAV,
 		const TArray<FGPUSpawnRequest>& SpawnRequests);
 
+	/** Add adhesion pass (bone-based attachment tracking) */
+	void AddAdhesionPass(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		FRDGBufferUAVRef AttachmentUAV,
+		const FGPUFluidSimulationParams& Params);
+
+	/** Add update attached positions pass (move attached particles with bones) */
+	void AddUpdateAttachedPositionsPass(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		FRDGBufferSRVRef AttachmentSRV,
+		FRDGBufferSRVRef InBoneTransformsSRV,
+		const FGPUFluidSimulationParams& Params);
+
+	/** Add update attached positions pass - internal version using RW attachment buffer */
+	void AddUpdateAttachedPositionsPassInternal(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		FRDGBufferUAVRef AttachmentUAV,
+		const FGPUFluidSimulationParams& Params);
+
+	/** Clear just-detached flag at end of frame */
+	void AddClearDetachedFlagPass(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV);
+
 private:
 	//=============================================================================
 	// GPU Buffers
@@ -474,6 +526,27 @@ private:
 
 	// Critical section for thread-safe buffer access
 	FCriticalSection BufferLock;
+
+	//=============================================================================
+	// Bone Transform and Adhesion Buffers
+	//=============================================================================
+
+	// Cached bone transforms (CPU side, for RDG buffer creation each frame)
+	TArray<FGPUBoneTransform> CachedBoneTransforms;
+
+	// Cached adhesion parameters
+	FGPUAdhesionParams CachedAdhesionParams;
+
+	// Attachment data buffer (one per particle)
+	TRefCountPtr<FRDGPooledBuffer> PersistentAttachmentBuffer;
+	int32 AttachmentBufferSize = 0;  // Track buffer size for resize detection
+
+	// Bone transforms buffer
+	FBufferRHIRef BoneTransformsBufferRHI;
+	FShaderResourceViewRHIRef BoneTransformsSRV;
+
+	// Flag: bone transforms valid
+	bool bBoneTransformsValid = false;
 
 	//=============================================================================
 	// GPU Particle Spawn System
