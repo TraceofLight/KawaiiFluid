@@ -7,6 +7,7 @@
 #include "RHIResources.h"
 #include "RenderResource.h"
 #include "GPU/GPUFluidParticle.h"
+#include "Core/FluidAnisotropy.h"
 #include <atomic>
 
 // Forward declarations
@@ -161,6 +162,15 @@ public:
 
 	/** Set maximum velocity safety clamp (to prevent divergence) */
 	void SetMaxVelocity(float MaxVel) { MaxVelocity = FMath::Max(MaxVel, 0.0f); }
+
+	/** Set anisotropy parameters for ellipsoid rendering */
+	void SetAnisotropyParams(const FFluidAnisotropyParams& InParams) { CachedAnisotropyParams = InParams; }
+
+	/** Get anisotropy parameters */
+	const FFluidAnisotropyParams& GetAnisotropyParams() const { return CachedAnisotropyParams; }
+
+	/** Check if anisotropy is enabled */
+	bool IsAnisotropyEnabled() const { return CachedAnisotropyParams.bEnabled; }
 
 	//=============================================================================
 	// Distance Field Collision
@@ -546,6 +556,9 @@ private:
 
 	FVector3f ExternalForce;
 	float MaxVelocity;       // Safety clamp to prevent divergence (default: 50000 cm/s = 500 m/s)
+
+	// Anisotropy parameters
+	FFluidAnisotropyParams CachedAnisotropyParams;
 
 	// Distance Field Collision
 	FGPUDistanceFieldCollisionParams DFCollisionParams;

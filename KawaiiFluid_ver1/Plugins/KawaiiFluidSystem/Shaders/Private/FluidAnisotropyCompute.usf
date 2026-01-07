@@ -1,0 +1,597 @@
+// Copyright KawaiiFluid Team. All Rights Reserved.
+
+#include "/Engine/Private/Common.ush"
+#include "FluidSpatialHash.ush"
+
+//-----------------------------------------------------------------------------
+// Anisotropy Compute Shader
+// Calculates ellipsoid orientation and scale for each particle
+// Based on NVIDIA FleX and Yu & Turk 2013
+//-----------------------------------------------------------------------------
+
+// GPU Fluid Particle Structure (must match FGPUFluidParticle in C++)
+struct FGPUFluidParticle
+{
+	float3 Position;           // 12 bytes
+	float Mass;                // 4 bytes
+
+	float3 PredictedPosition;  // 12 bytes
+	float Density;             // 4 bytes
+
+	float3 Velocity;           // 12 bytes
+	float Lambda;              // 4 bytes
+
+	int ParticleID;            // 4 bytes
+	int ClusterID;             // 4 bytes
+	uint Flags;                // 4 bytes
+	uint NeighborCount;        // 4 bytes
+};
+
+// Anisotropy Mode
+#define MODE_VELOCITY_BASED 0
+#define MODE_DENSITY_BASED 1
+#define MODE_HYBRID 2
+
+// Input: GPU Particle buffer (from simulation)
+StructuredBuffer<FGPUFluidParticle> InPhysicsParticles;
+
+// Spatial Hash buffers (for DensityBased mode)
+StructuredBuffer<uint> CellCounts;
+StructuredBuffer<uint> ParticleIndices;
+
+// Output: Anisotropy SoA buffers (float4 = direction.xyz + scale.w)
+RWStructuredBuffer<float4> OutAnisotropyAxis1;
+RWStructuredBuffer<float4> OutAnisotropyAxis2;
+RWStructuredBuffer<float4> OutAnisotropyAxis3;
+
+// Parameters
+uint ParticleCount;
+uint AnisotropyMode;  // 0=Velocity, 1=Density, 2=Hybrid
+float VelocityStretchFactor;
+float AnisotropyScale;
+float AnisotropyMin;
+float AnisotropyMax;
+float DensityWeight;  // For Hybrid mode
+float SmoothingRadius;
+float CellSize;
+
+//-----------------------------------------------------------------------------
+// FleX / Yu & Turk Style Constants
+//-----------------------------------------------------------------------------
+
+// Eigenvalue ratio clamping (prevents too-thin ellipsoids)
+// kr = 10 means minimum scale is 10% of maximum (very flat pancakes)
+#define K_R 10.0f
+
+// Minimum neighbors for reliable covariance estimation
+#define MIN_NEIGHBORS_FOR_ANISOTROPY 3
+
+// Neighbor count range for smooth sphere-to-ellipsoid blending
+// Below MIN: pure sphere, above MAX: full ellipsoid, between: linear interpolation
+#define BLEND_NEIGHBORS_MIN 3
+#define BLEND_NEIGHBORS_MAX 8
+
+// Stretch multiplier to make ellipsoids visually elongated
+// FleX uses 1.0 (no extra multiplier) - higher values cause edge artifacts
+#define STRETCH_MULTIPLIER 1.0f
+
+//-----------------------------------------------------------------------------
+// Helper: Build orthonormal basis from direction (Frisvad's method)
+//-----------------------------------------------------------------------------
+void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
+{
+	if (N.z < -0.9999999f)
+	{
+		T = float3(0.0f, -1.0f, 0.0f);
+		B = float3(-1.0f, 0.0f, 0.0f);
+	}
+	else
+	{
+		float A = 1.0f / (1.0f + N.z);
+		float D = -N.x * N.y * A;
+		T = float3(1.0f - N.x * N.x * A, D, -N.x);
+		B = float3(D, 1.0f - N.y * N.y * A, -N.y);
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Helper: SPH Kernel weight (cubic spline)
+//-----------------------------------------------------------------------------
+float KernelWeight(float Distance, float H)
+{
+	if (Distance >= H)
+	{
+		return 0.0f;
+	}
+
+	float Q = Distance / H;
+	if (Q < 0.5f)
+	{
+		return 1.0f - 6.0f * Q * Q + 6.0f * Q * Q * Q;
+	}
+	else
+	{
+		float OneMinusQ = 1.0f - Q;
+		return 2.0f * OneMinusQ * OneMinusQ * OneMinusQ;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Helper: 3x3 Symmetric Eigenvalue Decomposition (Jacobi iteration)
+//-----------------------------------------------------------------------------
+void SymmetricEigen3x3(
+	float3x3 M,
+	out float3 EigenValues,
+	out float3 EigenVec0,
+	out float3 EigenVec1,
+	out float3 EigenVec2)
+{
+	// Initialize eigenvectors to identity
+	float3x3 V = float3x3(1, 0, 0, 0, 1, 0, 0, 0, 1);
+	float3x3 A = M;
+
+	// Jacobi iteration
+	[unroll]
+	for (int iter = 0; iter < 10; ++iter)
+	{
+		// Find largest off-diagonal element
+		float maxVal = abs(A[0][1]);
+		int p = 0, q = 1;
+
+		if (abs(A[0][2]) > maxVal)
+		{
+			maxVal = abs(A[0][2]);
+			p = 0;
+			q = 2;
+		}
+		if (abs(A[1][2]) > maxVal)
+		{
+			maxVal = abs(A[1][2]);
+			p = 1;
+			q = 2;
+		}
+
+		if (maxVal < 1e-6f)
+		{
+			break;
+		}
+
+		// Compute rotation
+		float Diff = A[q][q] - A[p][p];
+		float Theta;
+		if (abs(A[p][q]) < abs(Diff) * 1e-36f)
+		{
+			Theta = A[p][q] / Diff;
+		}
+		else
+		{
+			float Phi = Diff / (2.0f * A[p][q]);
+			Theta = 1.0f / (abs(Phi) + sqrt(Phi * Phi + 1.0f));
+			if (Phi < 0.0f)
+			{
+				Theta = -Theta;
+			}
+		}
+
+		float C = 1.0f / sqrt(Theta * Theta + 1.0f);
+		float S = Theta * C;
+		float Tau = S / (1.0f + C);
+
+		// Update matrix
+		float Apq = A[p][q];
+		A[p][q] = 0.0f;
+		A[q][p] = 0.0f;
+		A[p][p] -= Theta * Apq;
+		A[q][q] += Theta * Apq;
+
+		for (int r = 0; r < 3; ++r)
+		{
+			if (r != p && r != q)
+			{
+				float Arp = A[r][p];
+				float Arq = A[r][q];
+				A[r][p] = A[p][r] = Arp - S * (Arq + Tau * Arp);
+				A[r][q] = A[q][r] = Arq + S * (Arp - Tau * Arq);
+			}
+		}
+
+		// Update eigenvectors
+		for (int r = 0; r < 3; ++r)
+		{
+			float Vrp = V[r][p];
+			float Vrq = V[r][q];
+			V[r][p] = Vrp - S * (Vrq + Tau * Vrp);
+			V[r][q] = Vrq + S * (Vrp - Tau * Vrq);
+		}
+	}
+
+	// Extract and sort eigenvalues (descending)
+	float3 EigenVals = float3(A[0][0], A[1][1], A[2][2]);
+	int idx0 = 0, idx1 = 1, idx2 = 2;
+
+	if (EigenVals[idx0] < EigenVals[idx1])
+	{
+		int t = idx0;
+		idx0 = idx1;
+		idx1 = t;
+	}
+	if (EigenVals[idx1] < EigenVals[idx2])
+	{
+		int t = idx1;
+		idx1 = idx2;
+		idx2 = t;
+	}
+	if (EigenVals[idx0] < EigenVals[idx1])
+	{
+		int t = idx0;
+		idx0 = idx1;
+		idx1 = t;
+	}
+
+	EigenValues = float3(EigenVals[idx0], EigenVals[idx1], EigenVals[idx2]);
+	EigenVec0 = float3(V[0][idx0], V[1][idx0], V[2][idx0]);
+	EigenVec1 = float3(V[0][idx1], V[1][idx1], V[2][idx1]);
+	EigenVec2 = float3(V[0][idx2], V[1][idx2], V[2][idx2]);
+}
+
+//-----------------------------------------------------------------------------
+// Velocity-Based Anisotropy
+//-----------------------------------------------------------------------------
+void CalculateVelocityBased(
+	uint ParticleIndex,
+	out float3 Axis1, out float3 Axis2, out float3 Axis3,
+	out float Scale1, out float Scale2, out float Scale3)
+{
+	// Default: identity (sphere)
+	Axis1 = float3(1, 0, 0);
+	Axis2 = float3(0, 1, 0);
+	Axis3 = float3(0, 0, 1);
+	Scale1 = Scale2 = Scale3 = 1.0f;
+
+	FGPUFluidParticle P = InPhysicsParticles[ParticleIndex];
+	float Speed = length(P.Velocity);
+
+	if (Speed > 0.001f)
+	{
+		Axis1 = P.Velocity / Speed;
+		BuildOrthonormalBasis(Axis1, Axis2, Axis3);
+
+		// Stretch along velocity
+		float Stretch = VelocityStretchFactor * AnisotropyScale;
+		Scale1 = clamp(1.0f + Speed * Stretch, AnisotropyMin, AnisotropyMax);
+
+		// Volume-preserving perpendicular compression
+		float PerpScale = clamp(1.0f / sqrt(Scale1), AnisotropyMin, AnisotropyMax);
+		Scale2 = Scale3 = PerpScale;
+
+		// Ensure volume = 1.0
+		float Volume = Scale1 * Scale2 * Scale3;
+		if (Volume > 0.001f && abs(Volume - 1.0f) > 0.001f)
+		{
+			float VolumeNorm = pow(Volume, 1.0f / 3.0f);
+			Scale1 /= VolumeNorm;
+			Scale2 /= VolumeNorm;
+			Scale3 /= VolumeNorm;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Density-Based Anisotropy (Covariance Matrix)
+// Yu & Turk 2013: "Reconstructing Surfaces of Particle-Based Fluids"
+//-----------------------------------------------------------------------------
+void CalculateDensityBased(
+	uint ParticleIndex,
+	out float3 Axis1, out float3 Axis2, out float3 Axis3,
+	out float Scale1, out float Scale2, out float Scale3,
+	out int OutNeighborCount)
+{
+	// Default: identity
+	Axis1 = float3(1, 0, 0);
+	Axis2 = float3(0, 1, 0);
+	Axis3 = float3(0, 0, 1);
+	Scale1 = Scale2 = Scale3 = AnisotropyScale;
+	OutNeighborCount = 0;
+
+	FGPUFluidParticle P = InPhysicsParticles[ParticleIndex];
+	float3 CenterPos = P.Position;
+
+	int3 CenterCell = WorldToCell(CenterPos, CellSize);
+	int CellRadius = (int)ceil(SmoothingRadius / CellSize);
+	float H2 = SmoothingRadius * SmoothingRadius;
+
+	// =========================================================================
+	// Pass 1: Compute weighted mean position (centroid)
+	// x̄ = Σ wi * xi / Σ wi
+	// =========================================================================
+	float3 WeightedSum = float3(0, 0, 0);
+	float TotalWeight = 0.0f;
+	int NeighborCount = 0;
+
+	for (int dz = -CellRadius; dz <= CellRadius; ++dz)
+	{
+		for (int dy = -CellRadius; dy <= CellRadius; ++dy)
+		{
+			for (int dx = -CellRadius; dx <= CellRadius; ++dx)
+			{
+				int3 NeighborCell = CenterCell + int3(dx, dy, dz);
+				uint Hash = HashCell(NeighborCell);
+				uint Count = min(CellCounts[Hash], (uint)MAX_PARTICLES_PER_CELL);
+				uint BaseIdx = Hash * MAX_PARTICLES_PER_CELL;
+
+				for (uint i = 0; i < Count; ++i)
+				{
+					uint NeighborIdx = ParticleIndices[BaseIdx + i];
+					if (NeighborIdx >= ParticleCount)
+					{
+						continue;
+					}
+
+					float3 NeighborPos = InPhysicsParticles[NeighborIdx].Position;
+					float3 Diff = NeighborPos - CenterPos;
+					float Dist2 = dot(Diff, Diff);
+
+					if (Dist2 < H2)
+					{
+						float Dist = sqrt(Dist2);
+						float W = KernelWeight(Dist, SmoothingRadius);
+
+						if (W > 0.0001f)
+						{
+							WeightedSum += W * NeighborPos;
+							TotalWeight += W;
+							NeighborCount++;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	OutNeighborCount = NeighborCount;
+
+	// Need minimum neighbors for reliable covariance
+	if (NeighborCount < MIN_NEIGHBORS_FOR_ANISOTROPY || TotalWeight < 0.0001f)
+	{
+		return;
+	}
+
+	// Weighted mean position
+	float3 WeightedMean = WeightedSum / TotalWeight;
+
+	// =========================================================================
+	// Pass 2: Compute covariance matrix around weighted mean
+	// Σ = Σ wi * (xi - x̄)(xi - x̄)^T / Σ wi
+	// =========================================================================
+	float3x3 CovMatrix = (float3x3)0;
+
+	for (int dz2 = -CellRadius; dz2 <= CellRadius; ++dz2)
+	{
+		for (int dy2 = -CellRadius; dy2 <= CellRadius; ++dy2)
+		{
+			for (int dx2 = -CellRadius; dx2 <= CellRadius; ++dx2)
+			{
+				int3 NeighborCell = CenterCell + int3(dx2, dy2, dz2);
+				uint Hash = HashCell(NeighborCell);
+				uint Count = min(CellCounts[Hash], (uint)MAX_PARTICLES_PER_CELL);
+				uint BaseIdx = Hash * MAX_PARTICLES_PER_CELL;
+
+				for (uint i = 0; i < Count; ++i)
+				{
+					uint NeighborIdx = ParticleIndices[BaseIdx + i];
+					if (NeighborIdx >= ParticleCount)
+					{
+						continue;
+					}
+
+					float3 NeighborPos = InPhysicsParticles[NeighborIdx].Position;
+					float3 ToCenter = NeighborPos - CenterPos;
+					float Dist2 = dot(ToCenter, ToCenter);
+
+					if (Dist2 < H2)
+					{
+						float Dist = sqrt(Dist2);
+						float W = KernelWeight(Dist, SmoothingRadius);
+
+						if (W > 0.0001f)
+						{
+							// Deviation from weighted mean (NOT from center particle!)
+							float3 Diff = NeighborPos - WeightedMean;
+
+							// Accumulate weighted outer product
+							CovMatrix[0][0] += W * Diff.x * Diff.x;
+							CovMatrix[0][1] += W * Diff.x * Diff.y;
+							CovMatrix[0][2] += W * Diff.x * Diff.z;
+							CovMatrix[1][0] += W * Diff.y * Diff.x;
+							CovMatrix[1][1] += W * Diff.y * Diff.y;
+							CovMatrix[1][2] += W * Diff.y * Diff.z;
+							CovMatrix[2][0] += W * Diff.z * Diff.x;
+							CovMatrix[2][1] += W * Diff.z * Diff.y;
+							CovMatrix[2][2] += W * Diff.z * Diff.z;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Normalize covariance
+	float InvW = 1.0f / TotalWeight;
+	CovMatrix[0][0] *= InvW;
+	CovMatrix[0][1] *= InvW;
+	CovMatrix[0][2] *= InvW;
+	CovMatrix[1][0] *= InvW;
+	CovMatrix[1][1] *= InvW;
+	CovMatrix[1][2] *= InvW;
+	CovMatrix[2][0] *= InvW;
+	CovMatrix[2][1] *= InvW;
+	CovMatrix[2][2] *= InvW;
+
+	// Eigenvalue decomposition
+	float3 EigenValues;
+	float3 EV0, EV1, EV2;
+	SymmetricEigen3x3(CovMatrix, EigenValues, EV0, EV1, EV2);
+
+	// Convert to standard deviations
+	float Sigma0 = sqrt(max(EigenValues.x, 0.0001f));
+	float Sigma1 = sqrt(max(EigenValues.y, 0.0001f));
+	float Sigma2 = sqrt(max(EigenValues.z, 0.0001f));
+
+	// Yu & Turk eigenvalue ratio clamping (prevent too thin ellipsoids)
+	float MinSigma = Sigma0 / K_R;
+	Sigma1 = max(Sigma1, MinSigma);
+	Sigma2 = max(Sigma2, MinSigma);
+
+	// =========================================================================
+	// Yu & Turk Volume-Preserving Scale Calculation
+	// Use geometric mean normalization: Scale1 * Scale2 * Scale3 = 1.0
+	// =========================================================================
+	float GeoMean = pow(Sigma0 * Sigma1 * Sigma2, 1.0f / 3.0f);
+
+	// Prevent division by zero
+	if (GeoMean < 0.0001f)
+	{
+		GeoMean = 1.0f;
+	}
+
+	// Normalized scales (volume = 1.0 guaranteed)
+	float EllipsoidScale1 = Sigma0 / GeoMean;
+	float EllipsoidScale2 = Sigma1 / GeoMean;
+	float EllipsoidScale3 = Sigma2 / GeoMean;
+
+	// Apply user-controlled anisotropy intensity
+	// Blend between sphere (1,1,1) and computed ellipsoid based on AnisotropyScale
+	EllipsoidScale1 = lerp(1.0f, EllipsoidScale1, AnisotropyScale);
+	EllipsoidScale2 = lerp(1.0f, EllipsoidScale2, AnisotropyScale);
+	EllipsoidScale3 = lerp(1.0f, EllipsoidScale3, AnisotropyScale);
+
+	// Clamp to prevent extreme shapes
+	EllipsoidScale1 = clamp(EllipsoidScale1, AnisotropyMin, AnisotropyMax);
+	EllipsoidScale2 = clamp(EllipsoidScale2, AnisotropyMin, AnisotropyMax);
+	EllipsoidScale3 = clamp(EllipsoidScale3, AnisotropyMin, AnisotropyMax);
+
+	// Re-normalize after clamp to maintain volume = 1.0
+	float ClampedVolume = EllipsoidScale1 * EllipsoidScale2 * EllipsoidScale3;
+	if (ClampedVolume > 0.001f && abs(ClampedVolume - 1.0f) > 0.001f)
+	{
+		float ClampedVolumeNorm = pow(ClampedVolume, 1.0f / 3.0f);
+		EllipsoidScale1 /= ClampedVolumeNorm;
+		EllipsoidScale2 /= ClampedVolumeNorm;
+		EllipsoidScale3 /= ClampedVolumeNorm;
+	}
+
+	// =========================================================================
+	// Smooth sphere-to-ellipsoid blending based on neighbor count
+	// Prevents visual popping when particles transition in/out of dense regions
+	// =========================================================================
+	float BlendFactor = saturate((float)(NeighborCount - BLEND_NEIGHBORS_MIN) /
+	                             (float)(BLEND_NEIGHBORS_MAX - BLEND_NEIGHBORS_MIN));
+
+	// Lerp between sphere (1.0, 1.0, 1.0) and computed ellipsoid scales
+	Scale1 = lerp(1.0f, EllipsoidScale1, BlendFactor);
+	Scale2 = lerp(1.0f, EllipsoidScale2, BlendFactor);
+	Scale3 = lerp(1.0f, EllipsoidScale3, BlendFactor);
+
+	// Volume preservation after blending (always maintain Volume = 1.0)
+	float BlendedVolume = Scale1 * Scale2 * Scale3;
+	if (BlendedVolume > 0.001f && abs(BlendedVolume - 1.0f) > 0.001f)
+	{
+		float BlendedVolumeNorm = pow(BlendedVolume, 1.0f / 3.0f);
+		Scale1 /= BlendedVolumeNorm;
+		Scale2 /= BlendedVolumeNorm;
+		Scale3 /= BlendedVolumeNorm;
+	}
+
+	// Eigenvectors as axes
+	Axis1 = normalize(EV0);
+	Axis2 = normalize(EV1);
+	Axis3 = normalize(EV2);
+}
+
+//-----------------------------------------------------------------------------
+// Apply Velocity Stretching to existing ellipsoid
+// Stretches the ellipsoid along velocity direction (Yu & Turk style)
+//-----------------------------------------------------------------------------
+void ApplyVelocityStretching(
+	uint ParticleIndex,
+	inout float3 Axis1, inout float3 Axis2, inout float3 Axis3,
+	inout float Scale1, inout float Scale2, inout float Scale3)
+{
+	FGPUFluidParticle P = InPhysicsParticles[ParticleIndex];
+	float Speed = length(P.Velocity);
+
+	if (Speed < 0.001f)
+	{
+		return;
+	}
+
+	float3 VelDir = P.Velocity / Speed;
+
+	// Calculate velocity stretch factor
+	float VelStretch = 1.0f + Speed * VelocityStretchFactor * AnisotropyScale;
+	VelStretch = clamp(VelStretch, 1.0f, AnisotropyMax);
+
+	// Project velocity onto each axis and stretch accordingly
+	float Proj1 = abs(dot(VelDir, Axis1));
+	float Proj2 = abs(dot(VelDir, Axis2));
+	float Proj3 = abs(dot(VelDir, Axis3));
+
+	// Apply stretch proportionally to projection
+	Scale1 *= lerp(1.0f, VelStretch, Proj1);
+	Scale2 *= lerp(1.0f, VelStretch, Proj2);
+	Scale3 *= lerp(1.0f, VelStretch, Proj3);
+
+	// Re-clamp scales
+	Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+	Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+	Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+
+	// Volume preservation after velocity stretching
+	float VelVolume = Scale1 * Scale2 * Scale3;
+	if (VelVolume > 0.001f && abs(VelVolume - 1.0f) > 0.001f)
+	{
+		float VelVolumeNorm = pow(VelVolume, 1.0f / 3.0f);
+		Scale1 /= VelVolumeNorm;
+		Scale2 /= VelVolumeNorm;
+		Scale3 /= VelVolumeNorm;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Main Compute Shader
+//-----------------------------------------------------------------------------
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint Idx = DispatchThreadId.x;
+	if (Idx >= ParticleCount)
+	{
+		return;
+	}
+
+	float3 Axis1, Axis2, Axis3;
+	float Scale1, Scale2, Scale3;
+	int NeighborCount = 0;
+
+	if (AnisotropyMode == MODE_VELOCITY_BASED)
+	{
+		// Pure velocity-based: axes from velocity direction
+		CalculateVelocityBased(Idx, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3);
+	}
+	else if (AnisotropyMode == MODE_DENSITY_BASED)
+	{
+		// Pure density-based: axes from covariance only
+		CalculateDensityBased(Idx, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3, NeighborCount);
+	}
+	else // MODE_HYBRID
+	{
+		// Hybrid: density axes + velocity stretching
+		CalculateDensityBased(Idx, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3, NeighborCount);
+		ApplyVelocityStretching(Idx, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3);
+	}
+
+	// Write output (direction.xyz + scale.w)
+	OutAnisotropyAxis1[Idx] = float4(Axis1, Scale1);
+	OutAnisotropyAxis2[Idx] = float4(Axis2, Scale2);
+	OutAnisotropyAxis3[Idx] = float4(Axis3, Scale3);
+}

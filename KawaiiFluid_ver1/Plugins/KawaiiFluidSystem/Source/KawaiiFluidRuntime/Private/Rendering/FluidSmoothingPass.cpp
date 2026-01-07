@@ -46,6 +46,41 @@ IMPLEMENT_GLOBAL_SHADER(FFluidBilateralBlur2DCS,
                         SF_Compute);
 
 //=============================================================================
+// Narrow-Range Filter Compute Shader (Truong & Yuksel, i3D 2018)
+//=============================================================================
+
+class FFluidNarrowRangeFilterCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FFluidNarrowRangeFilterCS);
+	SHADER_USE_PARAMETER_STRUCT(FFluidNarrowRangeFilterCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters,)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, InputTexture)
+		SHADER_PARAMETER(FVector2f, TextureSize)
+		SHADER_PARAMETER(float, BlurRadius)
+		SHADER_PARAMETER(float, BlurDepthFalloff)  // Unused but kept for consistency
+		SHADER_PARAMETER(float, ParticleRadius)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float>, OutputTexture)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters,
+	                                         FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZE"), 8);
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FFluidNarrowRangeFilterCS,
+                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "NarrowRangeFilterCS",
+                        SF_Compute);
+
+//=============================================================================
 // Smoothing Pass Implementation
 //=============================================================================
 
@@ -112,5 +147,63 @@ void RenderFluidSmoothingPass(
 	}
 
 	// Final output
+	OutSmoothedDepthTexture = CurrentInput;
+}
+
+//=============================================================================
+// Narrow-Range Filter Smoothing Pass (Truong & Yuksel 2018)
+//=============================================================================
+
+void RenderFluidNarrowRangeSmoothingPass(
+	FRDGBuilder& GraphBuilder,
+	const FSceneView& View,
+	FRDGTextureRef InputDepthTexture,
+	FRDGTextureRef& OutSmoothedDepthTexture,
+	float FilterRadius,
+	float ParticleRadius,
+	int32 NumIterations)
+{
+	RDG_EVENT_SCOPE(GraphBuilder, "FluidNarrowRangeFilter (Multi-Iteration)");
+	check(InputDepthTexture);
+
+	NumIterations = FMath::Clamp(NumIterations, 1, 5);
+
+	FIntPoint TextureSize = InputDepthTexture->Desc.Extent;
+
+	FRDGTextureDesc IntermediateDesc = FRDGTextureDesc::Create2D(
+		TextureSize,
+		PF_R32_FLOAT,
+		FClearValueBinding::None,
+		TexCreate_ShaderResource | TexCreate_UAV);
+
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FFluidNarrowRangeFilterCS> ComputeShader(GlobalShaderMap);
+
+	FRDGTextureRef CurrentInput = InputDepthTexture;
+
+	for (int32 Iteration = 0; Iteration < NumIterations; ++Iteration)
+	{
+		FRDGTextureRef IterationOutput = GraphBuilder.CreateTexture(
+			IntermediateDesc, TEXT("FluidDepthNarrowRange"));
+
+		auto* PassParameters = GraphBuilder.AllocParameters<FFluidNarrowRangeFilterCS::FParameters>();
+
+		PassParameters->InputTexture = CurrentInput;
+		PassParameters->TextureSize = FVector2f(TextureSize.X, TextureSize.Y);
+		PassParameters->BlurRadius = FilterRadius;
+		PassParameters->BlurDepthFalloff = 0.0f;  // Unused in narrow-range
+		PassParameters->ParticleRadius = ParticleRadius;
+		PassParameters->OutputTexture = GraphBuilder.CreateUAV(IterationOutput);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("Iteration%d_NarrowRange", Iteration),
+			ComputeShader,
+			PassParameters,
+			FComputeShaderUtils::GetGroupCount(TextureSize, 8));
+
+		CurrentInput = IterationOutput;
+	}
+
 	OutSmoothedDepthTexture = CurrentInput;
 }

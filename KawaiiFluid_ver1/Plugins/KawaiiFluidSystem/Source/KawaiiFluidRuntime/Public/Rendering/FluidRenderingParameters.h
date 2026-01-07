@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Core/FluidAnisotropy.h"
 #include "FluidRenderingParameters.generated.h"
 
 /**
@@ -91,6 +92,20 @@ enum class ESSFRRenderingMode : uint8
 };
 
 /**
+ * Depth smoothing filter type for SSFR.
+ * Different filters have different characteristics for edge preservation and performance.
+ */
+UENUM(BlueprintType)
+enum class EDepthSmoothingFilter : uint8
+{
+	/** Bilateral filter - classic approach with depth-aware smoothing */
+	Bilateral UMETA(DisplayName = "Bilateral Filter"),
+
+	/** Narrow-Range filter (Truong & Yuksel 2018) - better edge preservation, especially with anisotropy */
+	NarrowRange UMETA(DisplayName = "Narrow-Range Filter")
+};
+
+/**
  * 유체 렌더링 파라미터
  * SSFR 파이프라인 전반에 사용되는 설정들
  */
@@ -118,6 +133,10 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	/** 파티클 렌더링 반경 (스크린 스페이스, cm) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Depth", meta = (ClampMin = "1.0", ClampMax = "100.0"))
 	float ParticleRenderRadius = 15.0f;
+
+	/** Depth smoothing filter type */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing")
+	EDepthSmoothingFilter SmoothingFilter = EDepthSmoothingFilter::NarrowRange;
 
 	/** Depth smoothing 강도 (0=없음, 1=최대) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing", meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -170,6 +189,10 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	/** SSFR rendering mode (maps to PipelineType + ShadingMode internally) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
 	ESSFRRenderingMode SSFRMode = ESSFRRenderingMode::Custom;
+
+	/** Anisotropy parameters for ellipsoid rendering */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy")
+	FFluidAnisotropyParams AnisotropyParams;
 
 	//========================================
 	// Ray Marching SDF Mode Parameters
@@ -320,8 +343,15 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.SpecularRoughness));
 	Hash = HashCombine(Hash, GetTypeHash(Params.EnvironmentLightColor.ToString()));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ParticleRenderRadius));
+	Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Params.SmoothingFilter)));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SmoothingStrength));
 	Hash = HashCombine(Hash, GetTypeHash(Params.BilateralFilterRadius));
+	// Anisotropy parameters
+	Hash = HashCombine(Hash, GetTypeHash(Params.AnisotropyParams.bEnabled));
+	Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Params.AnisotropyParams.Mode)));
+	Hash = HashCombine(Hash, GetTypeHash(Params.AnisotropyParams.AnisotropyScale));
+	Hash = HashCombine(Hash, GetTypeHash(Params.AnisotropyParams.AnisotropyMin));
+	Hash = HashCombine(Hash, GetTypeHash(Params.AnisotropyParams.AnisotropyMax));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RenderTargetScale));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ThicknessScale));
 	Hash = HashCombine(Hash, GetTypeHash(Params.Metallic));
@@ -360,8 +390,15 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 	       FMath::IsNearlyEqual(A.SpecularRoughness, B.SpecularRoughness, 0.001f) &&
 	       A.EnvironmentLightColor.Equals(B.EnvironmentLightColor, 0.001f) &&
 	       FMath::IsNearlyEqual(A.ParticleRenderRadius, B.ParticleRenderRadius, 0.001f) &&
+	       A.SmoothingFilter == B.SmoothingFilter &&
 	       FMath::IsNearlyEqual(A.SmoothingStrength, B.SmoothingStrength, 0.001f) &&
 	       A.BilateralFilterRadius == B.BilateralFilterRadius &&
+	       // Anisotropy parameters
+	       A.AnisotropyParams.bEnabled == B.AnisotropyParams.bEnabled &&
+	       A.AnisotropyParams.Mode == B.AnisotropyParams.Mode &&
+	       FMath::IsNearlyEqual(A.AnisotropyParams.AnisotropyScale, B.AnisotropyParams.AnisotropyScale, 0.001f) &&
+	       FMath::IsNearlyEqual(A.AnisotropyParams.AnisotropyMin, B.AnisotropyParams.AnisotropyMin, 0.001f) &&
+	       FMath::IsNearlyEqual(A.AnisotropyParams.AnisotropyMax, B.AnisotropyParams.AnisotropyMax, 0.001f) &&
 	       FMath::IsNearlyEqual(A.RenderTargetScale, B.RenderTargetScale, 0.001f) &&
 	       FMath::IsNearlyEqual(A.ThicknessScale, B.ThicknessScale, 0.001f) &&
 	       FMath::IsNearlyEqual(A.Metallic, B.Metallic, 0.001f) &&

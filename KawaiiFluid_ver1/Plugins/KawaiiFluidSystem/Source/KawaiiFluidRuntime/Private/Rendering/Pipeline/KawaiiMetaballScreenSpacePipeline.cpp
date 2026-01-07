@@ -45,7 +45,18 @@ static bool GenerateIntermediateTextures(
 
 	// Use RenderParams for rendering parameters
 	float BlurRadius = static_cast<float>(RenderParams.BilateralFilterRadius);
+
+	// Calculate DepthFalloff considering anisotropy
+	// When anisotropy is enabled, ellipsoids become flat and create larger depth jumps at edges
+	// We need to increase DepthFalloff to accommodate these larger depth differences
 	float DepthFalloff = AverageParticleRadius * 0.7f;
+	if (RenderParams.AnisotropyParams.bEnabled)
+	{
+		// Anisotropy can stretch particles up to AnisotropyMax (default 2.5) ratio
+		// This creates depth jumps proportional to the stretch, so multiply DepthFalloff accordingly
+		float AnisotropyMultiplier = FMath::Max(1.0f, RenderParams.AnisotropyParams.AnisotropyMax);
+		DepthFalloff *= AnisotropyMultiplier * 2.0f;
+	}
 	int32 NumIterations = 3;
 
 	// 1. Depth Pass
@@ -58,10 +69,27 @@ static bool GenerateIntermediateTextures(
 		return false;
 	}
 
-	// 2. Smoothing Pass
+	// 2. Smoothing Pass - select filter based on parameter
 	FRDGTextureRef SmoothedDepthTexture = nullptr;
-	RenderFluidSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
-	                         BlurRadius, DepthFalloff, NumIterations);
+	if (RenderParams.SmoothingFilter == EDepthSmoothingFilter::NarrowRange)
+	{
+		// Narrow-Range Filter (Truong & Yuksel 2018) - better edge preservation
+		// Adjust particle radius for anisotropy (ellipsoids create larger depth variations)
+		float AdjustedParticleRadius = AverageParticleRadius;
+		if (RenderParams.AnisotropyParams.bEnabled)
+		{
+			float AnisotropyMultiplier = FMath::Max(1.0f, RenderParams.AnisotropyParams.AnisotropyMax);
+			AdjustedParticleRadius *= AnisotropyMultiplier;
+		}
+		RenderFluidNarrowRangeSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
+		                                    BlurRadius, AdjustedParticleRadius, NumIterations);
+	}
+	else
+	{
+		// Bilateral Filter (classic)
+		RenderFluidSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
+		                         BlurRadius, DepthFalloff, NumIterations);
+	}
 
 	if (!SmoothedDepthTexture)
 	{

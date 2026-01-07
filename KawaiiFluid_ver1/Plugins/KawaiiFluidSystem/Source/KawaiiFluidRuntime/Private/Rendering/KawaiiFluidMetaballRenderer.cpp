@@ -122,6 +122,7 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 	LocalParameters.SpecularStrength = Settings.SpecularStrength;
 	LocalParameters.SpecularRoughness = Settings.SpecularRoughness;
 	LocalParameters.ParticleRenderRadius = Settings.ParticleRenderRadius;
+	LocalParameters.SmoothingFilter = Settings.SmoothingFilter;
 	LocalParameters.BilateralFilterRadius = Settings.BilateralFilterRadius;
 	LocalParameters.RenderTargetScale = Settings.RenderTargetScale;
 	LocalParameters.ThicknessScale = Settings.ThicknessScale;
@@ -146,6 +147,9 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 	LocalParameters.VSMBlurRadius = Settings.VSMBlurRadius;
 	LocalParameters.VSMBlurIterations = Settings.VSMBlurIterations;
 	LocalParameters.ShadowIntensity = Settings.ShadowIntensity;
+
+	// Anisotropy parameters
+	LocalParameters.AnisotropyParams = Settings.AnisotropyParams;
 
 	// Debug visualization settings
 	LocalParameters.bDebugDrawSDFVolume = Settings.bDebugDrawSDFVolume;
@@ -220,6 +224,9 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 			// Store simulator reference for render thread access
 			// The Pipeline (on render thread) will directly access Simulator->GetPersistentParticleBuffer()
 			CachedGPUSimulator = Simulator;
+
+			// Update anisotropy parameters to GPU simulator
+			Simulator->SetAnisotropyParams(LocalParameters.AnisotropyParams);
 
 			// Get particle count (atomic, thread-safe read)
 			const int32 GPUParticleCount = Simulator->GetPersistentParticleCount();

@@ -10,9 +10,14 @@ RWTexture2D<float> OutputTexture;
 float2 TextureSize;
 float BlurRadius;
 float BlurDepthFalloff;
+float ParticleRadius;  // For Narrow-Range Filter threshold calculation
 
 // 배경 깊이 임계값 (Depth Pass의 Clear 값에 맞춰 설정해 둠)
-#define BACKGROUND_DEPTH_THRESH 3.0e30f 
+#define BACKGROUND_DEPTH_THRESH 3.0e30f
+
+// Narrow-Range Filter 파라미터 (Truong & Yuksel 2018)
+#define NR_THRESHOLD_RATIO 10.5f  // threshold = ParticleRadius * NR_THRESHOLD_RATIO
+#define NR_CLAMP_RATIO 1.0f       // clamp threshold = ParticleRadius * NR_CLAMP_RATIO 
 
 // 가우시안 가중치 계산 함수
 float GetGaussianWeight(float Distance, float Sigma)
@@ -105,4 +110,97 @@ void BilateralBlur2DCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	// 결과 저장
     OutputTexture[CenterCoord] = FinalDepth;
+}
+
+//=============================================================================
+// Narrow-Range Filter (Truong & Yuksel, i3D 2018)
+// "A Narrow-Range Filter for Screen-Space Fluid Rendering"
+//
+// Key idea: Instead of continuous Gaussian range weighting (bilateral),
+// use hard threshold with dynamic range expansion for better edge preservation
+//=============================================================================
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void NarrowRangeFilterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Bounds check
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+	float CenterDepth = InputTexture.Load(int3(CenterCoord, 0));
+
+	// Background: pass through
+	if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[CenterCoord] = CenterDepth;
+		return;
+	}
+
+	// Narrow-Range Filter parameters
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 3.0f;
+	const float Threshold = ParticleRadius * NR_THRESHOLD_RATIO;
+	const float ClampThreshold = ParticleRadius * NR_CLAMP_RATIO;
+
+	// Dynamic range bounds - start from center depth
+	float Upper = CenterDepth + Threshold;
+	float Lower = CenterDepth - Threshold;
+
+	float TotalWeight = 0.0f;
+	float TotalWeightedDepth = 0.0f;
+
+	// 2D kernel iteration
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
+	{
+		for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+		{
+			int2 SampleCoord = CenterCoord + int2(OffsetX, OffsetY);
+			SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
+
+			float SampleDepth = InputTexture.Load(int3(SampleCoord, 0));
+
+			// Skip background
+			if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			{
+				continue;
+			}
+
+			// Spatial Gaussian weight
+			float SpatialDist = length(float2(OffsetX, OffsetY));
+			float SpatialWeight = GetGaussianWeight(SpatialDist, Sigma);
+
+			// Narrow-Range logic: hard threshold with dynamic expansion
+			if (SampleDepth > Upper)
+			{
+				// Too far (behind): exclude completely
+				continue;
+			}
+			else if (SampleDepth < Lower)
+			{
+				// Too close (in front): clamp to lower bound
+				// This prevents holes but allows surface to extend forward
+				SampleDepth = max(SampleDepth, CenterDepth - ClampThreshold);
+			}
+			else
+			{
+				// Within range: dynamically expand bounds
+				Upper = max(Upper, SampleDepth + Threshold);
+				Lower = min(Lower, SampleDepth - Threshold);
+			}
+
+			TotalWeightedDepth += SampleDepth * SpatialWeight;
+			TotalWeight += SpatialWeight;
+		}
+	}
+
+	float FinalDepth = CenterDepth;
+	if (TotalWeight > 0.0f)
+	{
+		FinalDepth = TotalWeightedDepth / TotalWeight;
+	}
+
+	OutputTexture[CenterCoord] = FinalDepth;
 }

@@ -73,6 +73,12 @@ void RenderFluidDepthPass(
 		FRDGBufferSRVRef ParticleBufferSRV = nullptr;
 		int32 ParticleCount = 0;
 
+		// Anisotropy state
+		bool bUseAnisotropy = false;
+		FRDGBufferSRVRef AnisotropyAxis1SRV = nullptr;
+		FRDGBufferSRVRef AnisotropyAxis2SRV = nullptr;
+		FRDGBufferSRVRef AnisotropyAxis3SRV = nullptr;
+
 		// GPU 모드: GPUSimulator에서 직접 버퍼 접근 후 Position 추출
 		FGPUFluidSimulator* GPUSimulator = Renderer->GetGPUSimulator();
 		if (GPUSimulator && GPUSimulator->GetPersistentParticleBuffer().IsValid())
@@ -110,6 +116,30 @@ void RenderFluidDepthPass(
 					ParticleRadius);
 
 				ParticleBufferSRV = GraphBuilder.CreateSRV(PositionBuffer);
+
+				// Check if anisotropy is enabled and buffers are available
+				if (GPUSimulator->IsAnisotropyEnabled())
+				{
+					TRefCountPtr<FRDGPooledBuffer> Axis1Buffer = GPUSimulator->GetPersistentAnisotropyAxis1Buffer();
+					TRefCountPtr<FRDGPooledBuffer> Axis2Buffer = GPUSimulator->GetPersistentAnisotropyAxis2Buffer();
+					TRefCountPtr<FRDGPooledBuffer> Axis3Buffer = GPUSimulator->GetPersistentAnisotropyAxis3Buffer();
+
+					if (Axis1Buffer.IsValid() && Axis2Buffer.IsValid() && Axis3Buffer.IsValid())
+					{
+						bUseAnisotropy = true;
+
+						FRDGBufferRef Axis1RDG = GraphBuilder.RegisterExternalBuffer(
+							Axis1Buffer, TEXT("SSFRAnisotropyAxis1"));
+						FRDGBufferRef Axis2RDG = GraphBuilder.RegisterExternalBuffer(
+							Axis2Buffer, TEXT("SSFRAnisotropyAxis2"));
+						FRDGBufferRef Axis3RDG = GraphBuilder.RegisterExternalBuffer(
+							Axis3Buffer, TEXT("SSFRAnisotropyAxis3"));
+
+						AnisotropyAxis1SRV = GraphBuilder.CreateSRV(Axis1RDG);
+						AnisotropyAxis2SRV = GraphBuilder.CreateSRV(Axis2RDG);
+						AnisotropyAxis3SRV = GraphBuilder.CreateSRV(Axis3RDG);
+					}
+				}
 			}
 		}
 		// CPU 모드: 캐시에서 업로드
@@ -166,6 +196,11 @@ void RenderFluidDepthPass(
 		PassParameters->SceneDepthTexture = SceneDepthTexture;
 		PassParameters->SceneDepthSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
+		// Anisotropy buffers (if enabled)
+		PassParameters->AnisotropyAxis1 = AnisotropyAxis1SRV;
+		PassParameters->AnisotropyAxis2 = AnisotropyAxis2SRV;
+		PassParameters->AnisotropyAxis3 = AnisotropyAxis3SRV;
+
 		// SceneDepth UV 변환을 위한 ViewRect와 텍스처 크기
 		// FViewInfo::ViewRect = SceneDepth의 유효 영역 (Screen Percentage 적용됨)
 		const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
@@ -188,12 +223,18 @@ void RenderFluidDepthPass(
 			FExclusiveDepthStencil::DepthWrite_StencilWrite
 		);
 
+		// Select shader permutation based on anisotropy
 		FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-		TShaderMapRef<FFluidDepthVS> VertexShader(GlobalShaderMap);
-		TShaderMapRef<FFluidDepthPS> PixelShader(GlobalShaderMap);
+		FFluidDepthVS::FPermutationDomain VSPermutationDomain;
+		FFluidDepthPS::FPermutationDomain PSPermutationDomain;
+		VSPermutationDomain.Set<FUseAnisotropyDim>(bUseAnisotropy);
+		PSPermutationDomain.Set<FUseAnisotropyDim>(bUseAnisotropy);
+
+		TShaderMapRef<FFluidDepthVS> VertexShader(GlobalShaderMap, VSPermutationDomain);
+		TShaderMapRef<FFluidDepthPS> PixelShader(GlobalShaderMap, PSPermutationDomain);
 
 		GraphBuilder.AddPass(
-			RDG_EVENT_NAME("DepthDraw_Batched"),
+			RDG_EVENT_NAME("DepthDraw_Batched%s", bUseAnisotropy ? TEXT("_Anisotropic") : TEXT("")),
 			PassParameters,
 			ERDGPassFlags::Raster,
 			[VertexShader, PixelShader, PassParameters, ParticleCount](

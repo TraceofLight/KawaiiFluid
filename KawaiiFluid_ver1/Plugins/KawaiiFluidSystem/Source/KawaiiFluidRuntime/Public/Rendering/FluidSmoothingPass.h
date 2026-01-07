@@ -22,3 +22,21 @@ void RenderFluidSmoothingPass(
 	float BlurRadius = 5.0f,
 	float DepthFalloff = 0.05f,
 	int32 NumIterations = 3);
+
+/**
+ * Narrow-Range Filter for Fluid Depth Smoothing (Truong & Yuksel, i3D 2018)
+ *
+ * Uses hard threshold with dynamic range expansion instead of continuous
+ * Gaussian range weighting. Better edge preservation than bilateral filter.
+ *
+ * @param FilterRadius  Spatial filter radius in pixels
+ * @param ParticleRadius  Particle radius for threshold calculation
+ */
+void RenderFluidNarrowRangeSmoothingPass(
+	FRDGBuilder& GraphBuilder,
+	const FSceneView& View,
+	FRDGTextureRef InputDepthTexture,
+	FRDGTextureRef& OutSmoothedDepthTexture,
+	float FilterRadius = 5.0f,
+	float ParticleRadius = 10.0f,
+	int32 NumIterations = 3);
