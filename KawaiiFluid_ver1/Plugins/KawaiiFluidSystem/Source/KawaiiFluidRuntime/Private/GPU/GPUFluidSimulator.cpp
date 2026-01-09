@@ -10,6 +10,7 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "RHICommandList.h"
+#include "RHIGPUReadback.h"  // FRHIGPUBufferReadback for async GPU→CPU readback
 #include "RenderingThread.h"
 #include "GlobalShader.h"
 #include "ShaderParameterStruct.h"
@@ -590,6 +591,31 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 	FGPUFluidSimulator* Self = this;
 	FGPUFluidSimulationParams ParamsCopy = Params;
 
+	// =====================================================
+	// PRE-SIMULATION: Check IsReady() and Lock readback buffers (2 frames ago)
+	// Using FRHIGPUBufferReadback - only Lock when IsReady() == true (no flush!)
+	// =====================================================
+	ENQUEUE_RENDER_COMMAND(GPUFluidReadback)(
+		[Self](FRHICommandListImmediate& RHICmdList)
+		{
+			// Process collision feedback readback (reads from readback enqueued 2 frames ago)
+			if (Self->bCollisionFeedbackEnabled && Self->FeedbackReadbacks[0] != nullptr)
+			{
+				Self->ProcessCollisionFeedbackReadback(RHICmdList);
+			}
+
+			// Process collider contact count readback (reads from readback enqueued 2 frames ago)
+			if (Self->ContactCountReadbacks[0] != nullptr)
+			{
+				Self->ProcessColliderContactCountReadback(RHICmdList);
+			}
+		}
+	);
+
+	// =====================================================
+	// MAIN SIMULATION: Execute GPU simulation and EnqueueCopy to readback buffers
+	// Lock is NOT here - it's in the previous render command (only when IsReady)
+	// =====================================================
 	ENQUEUE_RENDER_COMMAND(GPUFluidSimulate)(
 		[Self, ParamsCopy](FRHICommandListImmediate& RHICmdList)
 		{
@@ -666,13 +692,13 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 
 			// =====================================================
 			// Phase 3: Collision Feedback Readback (Particle -> Player Interaction)
-			// Triple-buffered async readback for force calculation
+			// Using FRHIGPUBufferReadback for truly async readback (no flush!)
 			// =====================================================
 
 			if (Self->bCollisionFeedbackEnabled && Self->CollisionFeedbackBuffer.IsValid() && Self->CollisionCounterBuffer.IsValid())
 			{
-				// Ensure staging buffers are allocated
-				if (!Self->FeedbackStagingBuffers[0].IsValid())
+				// Ensure readback objects are allocated
+				if (Self->FeedbackReadbacks[0] == nullptr)
 				{
 					Self->AllocateCollisionFeedbackBuffers(RHICmdList);
 				}
@@ -690,20 +716,16 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 					ERHIAccess::UAVCompute,
 					ERHIAccess::CopySrc));
 
-				// Copy to staging buffers
-				RHICmdList.CopyBufferRegion(
-					Self->FeedbackStagingBuffers[WriteIdx],
-					0,
+				// EnqueueCopy - async copy to readback buffer (non-blocking!)
+				Self->FeedbackReadbacks[WriteIdx]->EnqueueCopy(
+					RHICmdList,
 					Self->CollisionFeedbackBuffer->GetRHI(),
-					0,
 					Self->MAX_COLLISION_FEEDBACK * sizeof(FGPUCollisionFeedback)
 				);
 
-				RHICmdList.CopyBufferRegion(
-					Self->CounterStagingBuffers[WriteIdx],
-					0,
+				Self->CounterReadbacks[WriteIdx]->EnqueueCopy(
+					RHICmdList,
 					Self->CollisionCounterBuffer->GetRHI(),
-					0,
 					sizeof(uint32)
 				);
 
@@ -718,25 +740,29 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 					ERHIAccess::CopySrc,
 					ERHIAccess::UAVCompute));
 
-				// Process readback from older frames
-				Self->ProcessCollisionFeedbackReadback(RHICmdList);
+				// Increment frame counter AFTER EnqueueCopy
+				Self->FeedbackFrameNumber++;
 
 				if (bLogThisFrame)
 				{
-					UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> COLLISION FEEDBACK: Copied to staging buffer %d"), WriteIdx);
+					UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> COLLISION FEEDBACK: EnqueueCopy to readback %d"), WriteIdx);
 				}
 			}
 
 			// =====================================================
-			// Copy Collider Contact Counts to staging (항상 실행 - 간단한 충돌 감지용)
+			// Copy Collider Contact Counts (FRHIGPUBufferReadback)
+			// EnqueueCopy → WriteIdx, IsReady+Lock → ReadIdx (2프레임 전)
 			// =====================================================
 			if (Self->ColliderContactCountBuffer.IsValid())
 			{
-				// Ensure staging buffer is allocated
-				if (!Self->ColliderContactCountStagingBuffer.IsValid())
+				// Ensure readback objects are allocated
+				if (Self->ContactCountReadbacks[0] == nullptr)
 				{
 					Self->AllocateCollisionFeedbackBuffers(RHICmdList);
 				}
+
+				// Triple buffer index for this frame
+				const int32 WriteIdx = Self->ContactCountFrameNumber % Self->NUM_FEEDBACK_BUFFERS;
 
 				// Transition for copy
 				RHICmdList.Transition(FRHITransitionInfo(
@@ -744,12 +770,10 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 					ERHIAccess::UAVCompute,
 					ERHIAccess::CopySrc));
 
-				// Copy to staging buffer
-				RHICmdList.CopyBufferRegion(
-					Self->ColliderContactCountStagingBuffer,
-					0,
+				// EnqueueCopy - async copy to readback buffer (non-blocking!)
+				Self->ContactCountReadbacks[WriteIdx]->EnqueueCopy(
+					RHICmdList,
 					Self->ColliderContactCountBuffer->GetRHI(),
-					0,
 					Self->MAX_COLLIDER_COUNT * sizeof(uint32)
 				);
 
@@ -759,8 +783,8 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 					ERHIAccess::CopySrc,
 					ERHIAccess::UAVCompute));
 
-				// Read back contact counts (직접 읽기 - 1프레임 레이턴시 허용)
-				Self->ProcessColliderContactCountReadback(RHICmdList);
+				// Increment frame counter AFTER EnqueueCopy
+				Self->ContactCountFrameNumber++;
 			}
 
 			// Mark that we have valid GPU results (buffer is ready for rendering)
@@ -2999,31 +3023,22 @@ void FGPUFluidSimulator::AddClearDetachedFlagPass(
 
 void FGPUFluidSimulator::AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList)
 {
-	// Allocate staging buffers for triple buffering
+	// Allocate FRHIGPUBufferReadback objects for truly async readback
 	for (int32 i = 0; i < NUM_FEEDBACK_BUFFERS; ++i)
 	{
-		if (!FeedbackStagingBuffers[i].IsValid())
+		if (FeedbackReadbacks[i] == nullptr)
 		{
-			FRHIResourceCreateInfo CreateInfo(*FString::Printf(TEXT("CollisionFeedbackStaging_%d"), i));
-			FeedbackStagingBuffers[i] = RHICmdList.CreateStructuredBuffer(
-				sizeof(FGPUCollisionFeedback),
-				MAX_COLLISION_FEEDBACK * sizeof(FGPUCollisionFeedback),
-				BUF_None,
-				ERHIAccess::CopyDest,
-				CreateInfo
-			);
+			FeedbackReadbacks[i] = new FRHIGPUBufferReadback(*FString::Printf(TEXT("CollisionFeedbackReadback_%d"), i));
 		}
 
-		if (!CounterStagingBuffers[i].IsValid())
+		if (CounterReadbacks[i] == nullptr)
 		{
-			FRHIResourceCreateInfo CreateInfo(*FString::Printf(TEXT("CollisionCounterStaging_%d"), i));
-			CounterStagingBuffers[i] = RHICmdList.CreateStructuredBuffer(
-				sizeof(uint32),
-				sizeof(uint32),
-				BUF_None,
-				ERHIAccess::CopyDest,
-				CreateInfo
-			);
+			CounterReadbacks[i] = new FRHIGPUBufferReadback(*FString::Printf(TEXT("CollisionCounterReadback_%d"), i));
+		}
+
+		if (ContactCountReadbacks[i] == nullptr)
+		{
+			ContactCountReadbacks[i] = new FRHIGPUBufferReadback(*FString::Printf(TEXT("ContactCountReadback_%d"), i));
 		}
 	}
 
@@ -3031,23 +3046,10 @@ void FGPUFluidSimulator::AllocateCollisionFeedbackBuffers(FRHICommandListImmedia
 	ReadyFeedback.SetNum(MAX_COLLISION_FEEDBACK);
 	ReadyFeedbackCount = 0;
 
-	// Allocate collider contact count staging buffer
-	if (!ColliderContactCountStagingBuffer.IsValid())
-	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("ColliderContactCountStaging"));
-		ColliderContactCountStagingBuffer = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32),
-			MAX_COLLIDER_COUNT * sizeof(uint32),
-			BUF_None,
-			ERHIAccess::CopyDest,
-			CreateInfo
-		);
-	}
-
 	// Initialize ready contact counts array
 	ReadyColliderContactCounts.SetNumZeroed(MAX_COLLIDER_COUNT);
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Collision Feedback buffers allocated (MaxFeedback=%d, NumBuffers=%d, MaxColliders=%d)"), MAX_COLLISION_FEEDBACK, NUM_FEEDBACK_BUFFERS, MAX_COLLIDER_COUNT);
+	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Collision Feedback readback objects allocated (MaxFeedback=%d, NumBuffers=%d, MaxColliders=%d)"), MAX_COLLISION_FEEDBACK, NUM_FEEDBACK_BUFFERS, MAX_COLLIDER_COUNT);
 }
 
 void FGPUFluidSimulator::ReleaseCollisionFeedbackBuffers()
@@ -3055,13 +3057,28 @@ void FGPUFluidSimulator::ReleaseCollisionFeedbackBuffers()
 	CollisionFeedbackBuffer.SafeRelease();
 	CollisionCounterBuffer.SafeRelease();
 	ColliderContactCountBuffer.SafeRelease();
-	ColliderContactCountStagingBuffer.SafeRelease();
 
+	// Delete readback objects
 	for (int32 i = 0; i < NUM_FEEDBACK_BUFFERS; ++i)
 	{
-		FeedbackStagingBuffers[i].SafeRelease();
-		CounterStagingBuffers[i].SafeRelease();
+		if (FeedbackReadbacks[i] != nullptr)
+		{
+			delete FeedbackReadbacks[i];
+			FeedbackReadbacks[i] = nullptr;
+		}
+		if (CounterReadbacks[i] != nullptr)
+		{
+			delete CounterReadbacks[i];
+			CounterReadbacks[i] = nullptr;
+		}
+		if (ContactCountReadbacks[i] != nullptr)
+		{
+			delete ContactCountReadbacks[i];
+			ContactCountReadbacks[i] = nullptr;
+		}
 	}
+
+	ContactCountFrameNumber = 0;
 
 	ReadyFeedback.Empty();
 	ReadyFeedbackCount = 0;
@@ -3078,94 +3095,106 @@ void FGPUFluidSimulator::ProcessCollisionFeedbackReadback(FRHICommandListImmedia
 		return;
 	}
 
-	// Ensure staging buffers are allocated
-	if (!FeedbackStagingBuffers[0].IsValid())
+	// Ensure readback objects are allocated
+	if (FeedbackReadbacks[0] == nullptr)
 	{
-		AllocateCollisionFeedbackBuffers(RHICmdList);
+		return;  // Will be allocated in SimulateSubstep
 	}
 
-	// Triple buffer write index for this frame
-	const int32 WriteIdx = FeedbackFrameNumber % NUM_FEEDBACK_BUFFERS;
-
-	// Read from buffer that was written 2 frames ago (allowing GPU latency)
+	// Read from readback that was enqueued 2 frames ago (allowing GPU latency)
 	const int32 ReadIdx = (FeedbackFrameNumber - 2 + NUM_FEEDBACK_BUFFERS) % NUM_FEEDBACK_BUFFERS;
 
 	// Only read if we have completed at least 2 frames
 	if (FeedbackFrameNumber >= 2)
 	{
-		// Read counter first
-		uint32 FeedbackCount = 0;
+		// Check if counter readback is ready (non-blocking!)
+		if (CounterReadbacks[ReadIdx]->IsReady())
 		{
-			uint32* CounterData = (uint32*)RHICmdList.LockBuffer(
-				CounterStagingBuffers[ReadIdx], 0, sizeof(uint32), RLM_ReadOnly);
-			if (CounterData)
+			// Read counter first
+			uint32 FeedbackCount = 0;
 			{
-				FeedbackCount = *CounterData;
-			}
-			RHICmdList.UnlockBuffer(CounterStagingBuffers[ReadIdx]);
-		}
-
-		// Clamp to max
-		FeedbackCount = FMath::Min(FeedbackCount, (uint32)MAX_COLLISION_FEEDBACK);
-
-		// Read feedback data if any
-		if (FeedbackCount > 0)
-		{
-			FScopeLock Lock(&FeedbackLock);
-
-			const uint32 CopySize = FeedbackCount * sizeof(FGPUCollisionFeedback);
-			FGPUCollisionFeedback* FeedbackData = (FGPUCollisionFeedback*)RHICmdList.LockBuffer(
-				FeedbackStagingBuffers[ReadIdx], 0, CopySize, RLM_ReadOnly);
-
-			if (FeedbackData)
-			{
-				ReadyFeedback.SetNum(FeedbackCount);
-				FMemory::Memcpy(ReadyFeedback.GetData(), FeedbackData, CopySize);
-				ReadyFeedbackCount = FeedbackCount;
+				const uint32* CounterData = (const uint32*)CounterReadbacks[ReadIdx]->Lock(sizeof(uint32));
+				if (CounterData)
+				{
+					FeedbackCount = *CounterData;
+				}
+				CounterReadbacks[ReadIdx]->Unlock();
 			}
 
-			RHICmdList.UnlockBuffer(FeedbackStagingBuffers[ReadIdx]);
+			// Clamp to max
+			FeedbackCount = FMath::Min(FeedbackCount, (uint32)MAX_COLLISION_FEEDBACK);
 
-			UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Collision Feedback: Read %d entries from frame %d"), FeedbackCount, FeedbackFrameNumber - 2);
+			// Read feedback data if any and if ready
+			if (FeedbackCount > 0 && FeedbackReadbacks[ReadIdx]->IsReady())
+			{
+				FScopeLock Lock(&FeedbackLock);
+
+				const uint32 CopySize = FeedbackCount * sizeof(FGPUCollisionFeedback);
+				const FGPUCollisionFeedback* FeedbackData = (const FGPUCollisionFeedback*)FeedbackReadbacks[ReadIdx]->Lock(CopySize);
+
+				if (FeedbackData)
+				{
+					ReadyFeedback.SetNum(FeedbackCount);
+					FMemory::Memcpy(ReadyFeedback.GetData(), FeedbackData, CopySize);
+					ReadyFeedbackCount = FeedbackCount;
+				}
+
+				FeedbackReadbacks[ReadIdx]->Unlock();
+
+				UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Collision Feedback: Read %d entries from readback %d"), FeedbackCount, ReadIdx);
+			}
+			else if (FeedbackCount == 0)
+			{
+				FScopeLock Lock(&FeedbackLock);
+				ReadyFeedbackCount = 0;
+			}
 		}
-		else
-		{
-			FScopeLock Lock(&FeedbackLock);
-			ReadyFeedbackCount = 0;
-		}
+		// If not ready yet, skip this frame (data will be available next frame)
 	}
 
-	// Copy current frame's feedback to staging buffer (done after RDG execute in SimulateSubstep)
-	// Note: The actual copy is done in SimulateSubstep after the shader writes to the buffers
-
-	FeedbackFrameNumber++;
+	// Note: Frame counter is incremented in SimulateSubstep AFTER EnqueueCopy, not here
 }
 
 void FGPUFluidSimulator::ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList)
 {
-	// Ensure staging buffer is valid
-	if (!ColliderContactCountStagingBuffer.IsValid())
+	// FRHIGPUBufferReadback: Check IsReady() before Lock() to avoid flush
+
+	// Ensure readback objects are valid
+	if (ContactCountReadbacks[0] == nullptr)
 	{
-		return;
+		return;  // Will be allocated in SimulateSubstep
 	}
 
-	// Read contact counts from staging buffer
-	uint32* CountData = (uint32*)RHICmdList.LockBuffer(
-		ColliderContactCountStagingBuffer, 0, MAX_COLLIDER_COUNT * sizeof(uint32), RLM_ReadOnly);
+	// Read from readback that was enqueued 2 frames ago (allowing GPU latency)
+	const int32 ReadIdx = (ContactCountFrameNumber - 2 + NUM_FEEDBACK_BUFFERS) % NUM_FEEDBACK_BUFFERS;
 
-	if (CountData)
+	// Only read if we have completed at least 2 frames
+	if (ContactCountFrameNumber >= 2)
 	{
-		FScopeLock Lock(&FeedbackLock);
-
-		// Copy to ready array
-		ReadyColliderContactCounts.SetNumUninitialized(MAX_COLLIDER_COUNT);
-		for (int32 i = 0; i < MAX_COLLIDER_COUNT; ++i)
+		// Check if readback is ready (non-blocking!)
+		if (ContactCountReadbacks[ReadIdx]->IsReady())
 		{
-			ReadyColliderContactCounts[i] = static_cast<int32>(CountData[i]);
+			// Read contact counts - GPU has already completed the copy
+			const uint32* CountData = (const uint32*)ContactCountReadbacks[ReadIdx]->Lock(MAX_COLLIDER_COUNT * sizeof(uint32));
+
+			if (CountData)
+			{
+				FScopeLock Lock(&FeedbackLock);
+
+				// Copy to ready array
+				ReadyColliderContactCounts.SetNumUninitialized(MAX_COLLIDER_COUNT);
+				for (int32 i = 0; i < MAX_COLLIDER_COUNT; ++i)
+				{
+					ReadyColliderContactCounts[i] = static_cast<int32>(CountData[i]);
+				}
+			}
+
+			ContactCountReadbacks[ReadIdx]->Unlock();
 		}
+		// If not ready yet, skip this frame (data will be available next frame)
 	}
 
-	RHICmdList.UnlockBuffer(ColliderContactCountStagingBuffer);
+	// Note: Frame counter is incremented in SimulateSubstep AFTER EnqueueCopy, not here
 }
 
 bool FGPUFluidSimulator::GetCollisionFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)

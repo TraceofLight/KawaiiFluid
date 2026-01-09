@@ -13,6 +13,7 @@
 // Forward declarations
 struct FFluidParticle;
 class FRDGBuilder;
+class FRHIGPUBufferReadback;
 
 /**
  * GPU Fluid Simulator
@@ -785,7 +786,7 @@ private:
 
 	//=============================================================================
 	// Collision Feedback Buffers (Particle -> Player Interaction)
-	// Triple buffering for async GPU -> CPU readback (2-3 frame delay)
+	// Using FRHIGPUBufferReadback for truly async GPU -> CPU readback
 	//=============================================================================
 
 	static constexpr int32 MAX_COLLISION_FEEDBACK = 1024;
@@ -797,13 +798,17 @@ private:
 
 	//=============================================================================
 	// Collider Contact Count Buffer (간단한 충돌 카운트용)
+	// FRHIGPUBufferReadback으로 비동기 readback (Flush 없음)
 	//=============================================================================
 
 	// GPU buffer: 콜라이더별 충돌 입자 수 (atomic increment)
 	TRefCountPtr<FRDGPooledBuffer> ColliderContactCountBuffer;
 
-	// Staging buffer for readback
-	FBufferRHIRef ColliderContactCountStagingBuffer;
+	// Async readback objects (replaces staging buffers)
+	FRHIGPUBufferReadback* ContactCountReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
+
+	// Frame counter for triple buffering (separate from FeedbackFrameNumber)
+	int32 ContactCountFrameNumber = 0;
 
 	// Ready contact counts (콜라이더 인덱스 → 충돌 입자 수)
 	TArray<int32> ReadyColliderContactCounts;
@@ -811,9 +816,9 @@ private:
 	// Atomic counter for feedback entries
 	TRefCountPtr<FRDGPooledBuffer> CollisionCounterBuffer;
 
-	// Staging buffers for CPU readback (triple buffering)
-	FBufferRHIRef FeedbackStagingBuffers[NUM_FEEDBACK_BUFFERS];
-	FBufferRHIRef CounterStagingBuffers[NUM_FEEDBACK_BUFFERS];
+	// Async readback objects for collision feedback (replaces staging buffers)
+	FRHIGPUBufferReadback* FeedbackReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
+	FRHIGPUBufferReadback* CounterReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
 
 	// Ready feedback data (available to game thread)
 	TArray<FGPUCollisionFeedback> ReadyFeedback;
