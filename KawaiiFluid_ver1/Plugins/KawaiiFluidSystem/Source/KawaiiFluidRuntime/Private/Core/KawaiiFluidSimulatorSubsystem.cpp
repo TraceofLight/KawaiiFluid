@@ -98,9 +98,10 @@ void UKawaiiFluidSimulatorSubsystem::RegisterModule(UKawaiiFluidSimulationModule
 		}
 
 		// Always setup Context reference (needed for rendering)
+		// Context is keyed by (Preset + SimulationMode) to allow GPU/CPU mixing
 		if (Preset)
 		{
-			UKawaiiFluidSimulationContext* Context = GetOrCreateContext(Preset);
+			UKawaiiFluidSimulationContext* Context = GetOrCreateContext(Preset, bWantsGPUSimulation);
 			if (Context)
 			{
 				// Set context reference for rendering access
@@ -242,15 +243,18 @@ int32 UKawaiiFluidSimulatorSubsystem::GetTotalParticleCount() const
 // Context Management
 //========================================
 
-UKawaiiFluidSimulationContext* UKawaiiFluidSimulatorSubsystem::GetOrCreateContext(const UKawaiiFluidPresetDataAsset* Preset)
+UKawaiiFluidSimulationContext* UKawaiiFluidSimulatorSubsystem::GetOrCreateContext(
+	UKawaiiFluidPresetDataAsset* Preset, bool bUseGPUSimulation)
 {
 	if (!Preset)
 	{
 		return DefaultContext;
 	}
 
-	// Check cache - keyed by Preset (each Preset gets its own Context/GPUSimulator)
-	if (TObjectPtr<UKawaiiFluidSimulationContext>* Found = ContextCache.Find(Preset))
+	// Check cache - keyed by (Preset + SimulationMode)
+	// This allows same Preset to have different Contexts for GPU vs CPU
+	FContextCacheKey CacheKey(Preset, bUseGPUSimulation);
+	if (TObjectPtr<UKawaiiFluidSimulationContext>* Found = ContextCache.Find(CacheKey))
 	{
 		return *Found;
 	}
@@ -264,7 +268,10 @@ UKawaiiFluidSimulationContext* UKawaiiFluidSimulatorSubsystem::GetOrCreateContex
 
 	UKawaiiFluidSimulationContext* NewContext = NewObject<UKawaiiFluidSimulationContext>(this, ContextClass);
 	NewContext->InitializeSolvers(Preset);
-	ContextCache.Add(Preset, NewContext);
+	ContextCache.Add(CacheKey, NewContext);
+
+	UE_LOG(LogTemp, Log, TEXT("Created Context for Preset '%s' (GPU=%d)"),
+		*Preset->GetName(), bUseGPUSimulation ? 1 : 0);
 
 	return NewContext;
 }
@@ -307,8 +314,15 @@ void UKawaiiFluidSimulatorSubsystem::SimulateIndependentFluidComponents(float De
 			continue;
 		}
 
-		// Get or create context
-		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(EffectivePreset);
+		// Get GPU setting from owner component
+		bool bWantsGPUSimulation = false;
+		if (UKawaiiFluidComponent* OwnerComp = Cast<UKawaiiFluidComponent>(Module->GetOuter()))
+		{
+			bWantsGPUSimulation = OwnerComp->bUseGPUSimulation;
+		}
+
+		// Get or create context (keyed by Preset + SimulationMode)
+		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(EffectivePreset, bWantsGPUSimulation);
 		if (!Context)
 		{
 			continue;
@@ -367,22 +381,23 @@ void UKawaiiFluidSimulatorSubsystem::SimulateIndependentFluidComponents(float De
 
 void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaTime)
 {
-	// Group modules by preset (only non-independent)
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidSimulationModule*>> PresetGroups = GroupModulesByPreset();
+	// Group modules by (Preset + SimulationMode) - allows GPU/CPU mixing
+	TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>> ContextGroups = GroupModulesByContext();
 
-	// Process each preset group
-	for (auto& Pair : PresetGroups)
+	// Process each context group
+	for (auto& Pair : ContextGroups)
 	{
-		UKawaiiFluidPresetDataAsset* Preset = Pair.Key;
+		const FContextCacheKey& CacheKey = Pair.Key;
 		TArray<UKawaiiFluidSimulationModule*>& Modules = Pair.Value;
 
+		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
 		if (!Preset || Modules.Num() == 0)
 		{
 			continue;
 		}
 
-		// Get context for this preset
-		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(Preset);
+		// Get context for this (Preset + SimulationMode) combination
+		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(Preset, CacheKey.bUseGPUSimulation);
 		if (!Context)
 		{
 			continue;
@@ -403,6 +418,7 @@ void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaT
 		FKawaiiFluidSimulationParams Params = BuildMergedModuleSimulationParams(Modules);
 		Params.Colliders.Append(GlobalColliders);
 		Params.InteractionComponents.Append(GlobalInteractionComponents);
+		Params.bUseGPUSimulation = CacheKey.bUseGPUSimulation;
 
 		// Phase 1: Setup GPU state BEFORE Simulate so spawn calls go to GPU
 		if (Params.bUseGPUSimulation)
@@ -461,10 +477,10 @@ void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaT
 	}
 }
 
-TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidSimulationModule*>>
-UKawaiiFluidSimulatorSubsystem::GroupModulesByPreset() const
+TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>>
+UKawaiiFluidSimulatorSubsystem::GroupModulesByContext() const
 {
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidSimulationModule*>> Result;
+	TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>> Result;
 
 	for (UKawaiiFluidSimulationModule* Module : AllModules)
 	{
@@ -479,7 +495,16 @@ UKawaiiFluidSimulatorSubsystem::GroupModulesByPreset() const
 		    Module->GetParticleCount() > 0 &&
 		    Module->GetPreset())
 		{
-			Result.FindOrAdd(Module->GetPreset()).Add(Module);
+			// Get GPU setting from owner component
+			bool bUseGPU = false;
+			if (UKawaiiFluidComponent* OwnerComp = Cast<UKawaiiFluidComponent>(Module->GetOuter()))
+			{
+				bUseGPU = OwnerComp->bUseGPUSimulation;
+			}
+
+			// Group by (Preset + GPUMode)
+			FContextCacheKey Key(Module->GetPreset(), bUseGPU);
+			Result.FindOrAdd(Key).Add(Module);
 		}
 	}
 

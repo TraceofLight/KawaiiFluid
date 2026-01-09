@@ -62,6 +62,10 @@ void RenderFluidDepthPass(
 	// (all renderers in batch have identical parameters - that's why they're batched)
 	float ParticleRadius = Renderers[0]->GetLocalParameters().ParticleRenderRadius;
 
+	// Track processed GPU simulators to avoid duplicate rendering
+	// (same Preset = same Context = same GPUSimulator, so we only need to render once)
+	TSet<FGPUFluidSimulator*> ProcessedGPUSimulators;
+
 	// Render each renderer's particles (batch-specific only)
 	for (UKawaiiFluidMetaballRenderer* Renderer : Renderers)
 	{
@@ -69,6 +73,19 @@ void RenderFluidDepthPass(
 
 		FKawaiiFluidRenderResource* RR = Renderer->GetFluidRenderResource();
 		if (!RR || !RR->IsValid()) continue;
+
+		// GPU 모드: 중복 GPUSimulator 체크
+		FGPUFluidSimulator* GPUSimulator = Renderer->GetGPUSimulator();
+		if (GPUSimulator && GPUSimulator->GetPersistentParticleBuffer().IsValid())
+		{
+			// Skip if this GPUSimulator was already processed
+			// (multiple renderers with same Preset share the same GPUSimulator)
+			if (ProcessedGPUSimulators.Contains(GPUSimulator))
+			{
+				continue;
+			}
+			ProcessedGPUSimulators.Add(GPUSimulator);
+		}
 
 		FRDGBufferSRVRef ParticleBufferSRV = nullptr;
 		int32 ParticleCount = 0;
@@ -80,7 +97,6 @@ void RenderFluidDepthPass(
 		FRDGBufferSRVRef AnisotropyAxis3SRV = nullptr;
 
 		// GPU 모드: GPUSimulator에서 직접 버퍼 접근 후 Position 추출
-		FGPUFluidSimulator* GPUSimulator = Renderer->GetGPUSimulator();
 		if (GPUSimulator && GPUSimulator->GetPersistentParticleBuffer().IsValid())
 		{
 			TRefCountPtr<FRDGPooledBuffer> PhysicsPooledBuffer = GPUSimulator->GetPersistentParticleBuffer();

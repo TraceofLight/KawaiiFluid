@@ -104,12 +104,23 @@ bool FKawaiiMetaballRayMarchPipeline::PrepareParticleBuffer(
 	bool bUsingGPUBuffer = false;
 	TArray<FVector3f> AllParticlePositions; // For CPU mode bounding box calculation
 
+	// Track processed GPU simulators to avoid duplicate rendering
+	// (same Preset = same Context = same GPUSimulator, so we only need to render once)
+	TSet<FGPUFluidSimulator*> ProcessedGPUSimulators;
+
 	// First pass: check for GPU simulation mode and access simulator buffer directly
 	// This runs on RENDER THREAD - safe to access GPU simulator's PersistentParticleBuffer
 	for (UKawaiiFluidMetaballRenderer* Renderer : Renderers)
 	{
 		// ========== GPU SIMULATION MODE: Direct buffer access (render thread safe) ==========
 		FGPUFluidSimulator* GPUSimulator = Renderer->GetGPUSimulator();
+
+		// Skip if this GPUSimulator was already processed
+		// (multiple renderers with same Preset share the same GPUSimulator)
+		if (GPUSimulator && ProcessedGPUSimulators.Contains(GPUSimulator))
+		{
+			continue;
+		}
 
 		UE_LOG(LogTemp, Warning, TEXT("[RayMarchPipeline] Renderer=%s, GPUSimulator=%s"),
 			*Renderer->GetName(),
@@ -233,7 +244,9 @@ bool FKawaiiMetaballRayMarchPipeline::PrepareParticleBuffer(
 
 				UE_LOG(LogTemp, Verbose, TEXT("  >>> GPU MODE: ExtractRenderData+Bounds MERGED (%d particles, radius: %.2f)"),
 					TotalParticleCount, ParticleRadius);
-				break; // Use first valid GPU simulator (batching not supported in GPU mode yet)
+
+				// Mark this GPUSimulator as processed (continue to check other renderers)
+				ProcessedGPUSimulators.Add(GPUSimulator);
 			}
 			else
 			{

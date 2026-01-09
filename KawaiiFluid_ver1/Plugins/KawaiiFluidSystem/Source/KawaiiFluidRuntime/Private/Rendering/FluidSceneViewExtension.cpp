@@ -25,6 +25,7 @@
 
 // Context-based batching
 #include "Core/KawaiiFluidSimulationContext.h"
+#include "Core/KawaiiFluidSimulatorSubsystem.h"  // For FContextCacheKey
 #include "Data/KawaiiFluidPresetDataAsset.h"
 
 static TRefCountPtr<IPooledRenderTarget> GFluidCompositeDebug_KeepAlive;
@@ -361,12 +362,12 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 	RDG_EVENT_SCOPE(GraphBuilder, "KawaiiFluid_PostBasePass");
 
 	// Collect GBuffer/Translucent renderers only
-	// Batching by Preset - same preset = same GPU buffer = one render
+	// Batching by (Preset + GPUMode) - allows GPU/CPU mixing with same Preset
 	// PostProcess mode is handled entirely in SubscribeToPostProcessingPass
 	// - GBuffer: writes to GBuffer
 	// - Translucent: writes to GBuffer + Stencil marking
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidMetaballRenderer*>> GBufferBatches;
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
+	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> GBufferBatches;
+	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
 
 	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
 	for (UKawaiiFluidRenderingModule* Module : Modules)
@@ -376,12 +377,16 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 		UKawaiiFluidMetaballRenderer* MetaballRenderer = Module->GetMetaballRenderer();
 		if (MetaballRenderer && MetaballRenderer->IsRenderingActive())
 		{
-			// Get preset for batching (same preset = same rendering params = one render)
+			// Get preset for batching
 			UKawaiiFluidPresetDataAsset* Preset = MetaballRenderer->GetPreset();
 			if (!Preset)
 			{
 				continue;
 			}
+
+			// Determine GPU mode from renderer's GPUSimulator
+			bool bUseGPU = (MetaballRenderer->GetGPUSimulator() != nullptr);
+			FContextCacheKey BatchKey(Preset, bUseGPU);
 
 			// Get rendering params from preset
 			const FFluidRenderingParameters& Params = Preset->RenderingParameters;
@@ -391,10 +396,10 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 			{
 			case EMetaballShadingMode::GBuffer:
 			case EMetaballShadingMode::Opaque:
-				GBufferBatches.FindOrAdd(Preset).Add(MetaballRenderer);
+				GBufferBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
 				break;
 			case EMetaballShadingMode::Translucent:
-				TranslucentBatches.FindOrAdd(Preset).Add(MetaballRenderer);
+				TranslucentBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
 				break;
 			case EMetaballShadingMode::PostProcess:
 				// Handled in SubscribeToPostProcessingPass
@@ -418,10 +423,11 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 	FRDGTextureRef SceneDepthTexture = RenderTargets.DepthStencil.GetTexture();
 
 	// Process GBuffer batches using new Pipeline architecture
-	// Batched by Preset - same preset renders only once
+	// Batched by (Preset + GPUMode) - same context renders only once
 	for (auto& Batch : GBufferBatches)
 	{
-		UKawaiiFluidPresetDataAsset* Preset = Batch.Key;
+		const FContextCacheKey& CacheKey = Batch.Key;
+		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
 
 		// Get rendering params directly from preset
@@ -454,10 +460,11 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 
 	// Process Translucent batches - ExecutePostBasePass for GBuffer write with Stencil marking
 	// This writes to GBuffer with Stencil=0x01 marking for TransparencyComposite
-	// Batched by Preset - same preset renders only once
+	// Batched by (Preset + GPUMode) - same context renders only once
 	for (auto& Batch : TranslucentBatches)
 	{
-		UKawaiiFluidPresetDataAsset* Preset = Batch.Key;
+		const FContextCacheKey& CacheKey = Batch.Key;
+		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
 
 		// Get rendering params directly from preset
@@ -550,13 +557,13 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	}
 
 	// Collect all renderers for PrePostProcess (before TSR)
-	// Batching by Preset - same preset = same GPU buffer = one render
+	// Batching by (Preset + GPUMode) - allows GPU/CPU mixing with same Preset
 	// - Translucent: GBuffer write already done, transparency compositing here
 	// - ScreenSpace: Full pipeline (depth/normal/thickness generation + shading)
 	// - RayMarching: Full pipeline (SDF + ray march shading)
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidMetaballRenderer*>> RayMarchingBatches;
+	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
+	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
+	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> RayMarchingBatches;
 	const FFluidRenderingParameters* ShadowRenderParams = nullptr;
 
 	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
@@ -567,12 +574,16 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		UKawaiiFluidMetaballRenderer* MetaballRenderer = Module->GetMetaballRenderer();
 		if (MetaballRenderer && MetaballRenderer->IsRenderingActive())
 		{
-			// Get preset for batching (same preset = same rendering params = one render)
+			// Get preset for batching
 			UKawaiiFluidPresetDataAsset* Preset = MetaballRenderer->GetPreset();
 			if (!Preset)
 			{
 				continue;
 			}
+
+			// Determine GPU mode from renderer's GPUSimulator
+			bool bUseGPU = (MetaballRenderer->GetGPUSimulator() != nullptr);
+			FContextCacheKey BatchKey(Preset, bUseGPU);
 
 			// Get rendering params from preset
 			const FFluidRenderingParameters& Params = Preset->RenderingParameters;
@@ -585,7 +596,7 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 
 			if (Params.ShadingMode == EMetaballShadingMode::Translucent)
 			{
-				TranslucentBatches.FindOrAdd(Preset).Add(MetaballRenderer);
+				TranslucentBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
 			}
 			else if (Params.ShadingMode == EMetaballShadingMode::GBuffer)
 			{
@@ -594,11 +605,11 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 			}
 			else if (Params.PipelineType == EMetaballPipelineType::ScreenSpace)
 			{
-				ScreenSpaceBatches.FindOrAdd(Preset).Add(MetaballRenderer);
+				ScreenSpaceBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
 			}
 			else if (Params.PipelineType == EMetaballPipelineType::RayMarching)
 			{
-				RayMarchingBatches.FindOrAdd(Preset).Add(MetaballRenderer);
+				RayMarchingBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
 			}
 		}
 	}
@@ -716,10 +727,11 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	}
 
 	// Apply TransparencyPass for each Translucent batch using Pipeline
-	// Batched by Preset - same preset renders only once
+	// Batched by (Preset + GPUMode) - same context renders only once
 	for (auto& Batch : TranslucentBatches)
 	{
-		UKawaiiFluidPresetDataAsset* Preset = Batch.Key;
+		const FContextCacheKey& CacheKey = Batch.Key;
+		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
 
 		// Get rendering params directly from preset
@@ -747,11 +759,12 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 
 	// ============================================
 	// ScreenSpace Pipeline Rendering (before TSR)
-	// Batched by Preset - same preset renders only once
+	// Batched by (Preset + GPUMode) - same context renders only once
 	// ============================================
 	for (auto& Batch : ScreenSpaceBatches)
 	{
-		UKawaiiFluidPresetDataAsset* Preset = Batch.Key;
+		const FContextCacheKey& CacheKey = Batch.Key;
+		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
 
 		// Get rendering params directly from preset
@@ -828,11 +841,12 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 
 	// ============================================
 	// RayMarching Pipeline Rendering (before TSR)
-	// Batched by Preset - same preset renders only once
+	// Batched by (Preset + GPUMode) - same context renders only once
 	// ============================================
 	for (auto& Batch : RayMarchingBatches)
 	{
-		UKawaiiFluidPresetDataAsset* Preset = Batch.Key;
+		const FContextCacheKey& CacheKey = Batch.Key;
+		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
 
 		// Get rendering params directly from preset

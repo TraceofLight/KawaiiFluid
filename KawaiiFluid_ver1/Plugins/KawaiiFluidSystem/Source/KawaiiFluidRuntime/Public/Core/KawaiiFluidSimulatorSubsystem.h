@@ -17,6 +17,36 @@ class FSpatialHash;
 struct FFluidParticle;
 
 /**
+ * Cache key for Context lookup
+ * Allows same Preset to have different Contexts for GPU vs CPU simulation
+ */
+USTRUCT()
+struct FContextCacheKey
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UKawaiiFluidPresetDataAsset> Preset = nullptr;
+
+	UPROPERTY()
+	bool bUseGPUSimulation = false;
+
+	FContextCacheKey() = default;
+	FContextCacheKey(UKawaiiFluidPresetDataAsset* InPreset, bool bInUseGPU)
+		: Preset(InPreset), bUseGPUSimulation(bInUseGPU) {}
+
+	bool operator==(const FContextCacheKey& Other) const
+	{
+		return Preset == Other.Preset && bUseGPUSimulation == Other.bUseGPUSimulation;
+	}
+
+	friend uint32 GetTypeHash(const FContextCacheKey& Key)
+	{
+		return HashCombine(GetTypeHash(Key.Preset), GetTypeHash(Key.bUseGPUSimulation));
+	}
+};
+
+/**
  * Kawaii Fluid Simulator Subsystem
  *
  * Orchestration (Conductor) - manages all fluid simulations in the world
@@ -121,8 +151,10 @@ public:
 	// Context Management
 	//========================================
 
-	/** Get or create context for preset */
-	UKawaiiFluidSimulationContext* GetOrCreateContext(const UKawaiiFluidPresetDataAsset* Preset);
+	/** Get or create context for preset and simulation mode
+	 *  Same Preset can have different Contexts for GPU vs CPU simulation
+	 */
+	UKawaiiFluidSimulationContext* GetOrCreateContext(UKawaiiFluidPresetDataAsset* Preset, bool bUseGPUSimulation);
 
 private:
 	//========================================
@@ -149,9 +181,12 @@ private:
 	UPROPERTY()
 	TArray<UFluidInteractionComponent*> GlobalInteractionComponents;
 
-	/** Context cache (Preset -> Instance) - each Preset gets its own Context/GPUSimulator */
+	/** Context cache (Preset + SimulationMode -> Instance)
+	 *  Same Preset can have different Contexts for GPU vs CPU simulation
+	 *  This allows mixing GPU and CPU components with the same Preset
+	 */
 	UPROPERTY()
-	TMap<TObjectPtr<const UKawaiiFluidPresetDataAsset>, TObjectPtr<UKawaiiFluidSimulationContext>> ContextCache;
+	TMap<FContextCacheKey, TObjectPtr<UKawaiiFluidSimulationContext>> ContextCache;
 
 	/** Default context for presets without custom context */
 	UPROPERTY()
@@ -183,8 +218,8 @@ private:
 	/** Simulate batched modules */
 	void SimulateBatchedFluidComponents(float DeltaTime);
 
-	/** Group modules by preset */
-	TMap<UKawaiiFluidPresetDataAsset*, TArray<UKawaiiFluidSimulationModule*>> GroupModulesByPreset() const;
+	/** Group modules by (Preset + SimulationMode) - allows GPU/CPU mixing with same Preset */
+	TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>> GroupModulesByContext() const;
 
 	/** Merge particles from modules */
 	void MergeModuleParticles(const TArray<UKawaiiFluidSimulationModule*>& Modules);
