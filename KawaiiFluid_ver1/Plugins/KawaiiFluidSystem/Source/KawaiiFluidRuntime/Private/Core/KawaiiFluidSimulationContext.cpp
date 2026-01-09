@@ -319,6 +319,9 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	// Set external force from simulation params (wind, player force, etc.)
 	GPUSimulator->SetExternalForce(FVector3f(Params.ExternalForce));
 
+	// Set primitive collision threshold from Preset
+	GPUSimulator->SetPrimitiveCollisionThreshold(Preset->PrimitiveCollisionThreshold);
+
 	// =====================================================
 	// GPU-Only Mode: No CPU Particles array dependency
 	// - Spawning: Handled directly by SpawnParticle() → GPUSimulator->AddSpawnRequest()

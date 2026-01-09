@@ -251,6 +251,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision")
 	TEnumAsByte<ECollisionChannel> CollisionChannel = ECC_GameTraceChannel1;
 
+	/**
+	 * Primitive collision threshold (cm)
+	 * 입자 중심이 콜라이더 표면에서 (ParticleRadius + 이 값) 이내면 충돌 처리됨
+	 * 값이 클수록 더 일찍 충돌 감지, 작을수록 더 가깝게 접근해야 충돌
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+	float PrimitiveCollisionThreshold = 1.0f;
+
 	//========================================
 	// Distance Field Collision (GPU)
 	//========================================
