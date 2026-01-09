@@ -7,6 +7,7 @@
 #include "ShaderParameterStruct.h"
 #include "RenderGraphDefinitions.h"
 #include "Core/KawaiiRenderParticle.h"
+#include "Rendering/FluidDepthShaders.h"  // For FUseAnisotropyDim
 
 /**
  * @brief Shared parameter structure for Ray Marching SDF shaders
@@ -179,13 +180,7 @@ class FUseGPUBoundsDim : SHADER_PERMUTATION_BOOL("USE_GPU_BOUNDS");
  */
 class FUseSoABuffersDim : SHADER_PERMUTATION_BOOL("USE_SOA_BUFFERS");
 
-/**
- * @brief Shader permutation dimension for Anisotropic rendering
- * When enabled, uses ellipsoid SDF (precomputed anisotropy matrices) instead of sphere SDF.
- * Produces "baduk stone" shaped particles that align with fluid flow direction.
- * Requires AnisotropyAxis1/2/3 buffers from FluidAnisotropyCompute pass.
- */
-class FUseAnisotropyDim : SHADER_PERMUTATION_BOOL("USE_ANISOTROPY");
+// FUseAnisotropyDim is defined in FluidDepthShaders.h (shared with SSFR pipeline)
 
 /**
  * @brief Pixel shader for Ray Marching SDF fluid rendering
