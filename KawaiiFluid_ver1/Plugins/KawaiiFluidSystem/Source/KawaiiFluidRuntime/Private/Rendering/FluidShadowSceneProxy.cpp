@@ -41,7 +41,7 @@ FFluidShadowSceneProxy::FFluidShadowSceneProxy(const UFluidShadowProxyComponent*
 	{
 		MaterialProxy = ShadowMaterial->GetRenderProxy();
 		DynamicData.MaterialRenderProxy = MaterialProxy;
-		MaterialRelevance = ShadowMaterial->GetRelevance_Concurrent(GetScene().GetFeatureLevel());
+		MaterialRelevance = ShadowMaterial->GetRelevance_Concurrent(GetScene().GetShaderPlatform());
 	}
 
 	// Set flags for shadow casting

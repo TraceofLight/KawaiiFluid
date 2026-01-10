@@ -293,7 +293,7 @@ int32 FSkeletalMeshBVH::BuildBVH(TArray<int32>& TriangleIndices, int32 Start, in
 	if (Extent.Z > Extent[SplitAxis]) SplitAxis = 2;
 
 	// Sort triangles by centroid along split axis
-	::Sort(&TriangleIndices[Start], Count, [this, SplitAxis](int32 A, int32 B)
+	Algo::Sort(MakeArrayView(&TriangleIndices[Start], Count), [this, SplitAxis](int32 A, int32 B)
 	{
 		return SkinnedTriangles[A].Centroid[SplitAxis] < SkinnedTriangles[B].Centroid[SplitAxis];
 	});
