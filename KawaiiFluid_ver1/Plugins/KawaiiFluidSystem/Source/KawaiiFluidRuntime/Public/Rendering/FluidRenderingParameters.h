@@ -8,18 +8,6 @@
 #include "FluidRenderingParameters.generated.h"
 
 /**
- * SSFR (Screen Space Fluid Rendering) 품질 설정
- */
-UENUM(BlueprintType)
-enum class EFluidRenderingQuality : uint8
-{
-	Low       UMETA(DisplayName = "Low"),
-	Medium    UMETA(DisplayName = "Medium"),
-	High      UMETA(DisplayName = "High"),
-	Ultra     UMETA(DisplayName = "Ultra")
-};
-
-/**
  * Metaball Pipeline Type
  * Defines how the fluid surface is computed.
  */
@@ -112,10 +100,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	/** 렌더링 활성화 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
 	bool bEnableRendering = true;
-
-	/** 렌더링 품질 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-	EFluidRenderingQuality Quality = EFluidRenderingQuality::Medium;
 
 	/** Pipeline type (how surface is computed) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")

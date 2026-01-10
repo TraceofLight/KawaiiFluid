@@ -1408,9 +1408,12 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 			else
 			{
 				// Create dummy attachment buffer (shader requires valid SRV)
+				// Must upload data so RDG marks buffer as "produced" (bQueuedForUpload = true)
 				FRDGBufferRef DummyAttachmentBuffer = GraphBuilder.CreateBuffer(
 					FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUParticleAttachment), 1),
 					TEXT("DummyAttachmentBuffer"));
+				FGPUParticleAttachment ZeroData = {};
+				GraphBuilder.QueueBufferUpload(DummyAttachmentBuffer, &ZeroData, sizeof(FGPUParticleAttachment));
 				AnisotropyParams.AttachmentsSRV = GraphBuilder.CreateSRV(DummyAttachmentBuffer);
 			}
 

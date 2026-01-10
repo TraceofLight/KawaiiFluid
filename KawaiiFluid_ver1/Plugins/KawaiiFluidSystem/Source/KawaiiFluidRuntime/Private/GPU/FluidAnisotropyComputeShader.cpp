@@ -1,6 +1,7 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "GPU/FluidAnisotropyComputeShader.h"
+#include "GPU/GPUFluidParticle.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ShaderParameterUtils.h"
@@ -43,11 +44,46 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 	FFluidAnisotropyCS::FParameters* PassParameters =
 		GraphBuilder.AllocParameters<FFluidAnisotropyCS::FParameters>();
 
+	// Create dummy buffers for optional inputs that are null
+	// RDG requires all shader parameters to have valid buffers
+	// Must use QueueBufferUpload to mark buffer as "produced"
+	FRDGBufferSRVRef AttachmentsSRV = Params.AttachmentsSRV;
+	FRDGBufferSRVRef CellCountsSRV = Params.CellCountsSRV;
+	FRDGBufferSRVRef ParticleIndicesSRV = Params.ParticleIndicesSRV;
+
+	if (!AttachmentsSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(
+			sizeof(FGPUParticleAttachment), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyAttachmentBuffer"));
+		FGPUParticleAttachment ZeroData;
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroData, sizeof(FGPUParticleAttachment));
+		AttachmentsSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	if (!CellCountsSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyCellCountBuffer"));
+		uint32 ZeroData = 0;
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroData, sizeof(uint32));
+		CellCountsSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	if (!ParticleIndicesSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyParticleIndicesBuffer"));
+		uint32 ZeroData = 0;
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroData, sizeof(uint32));
+		ParticleIndicesSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
 	// Input buffers
 	PassParameters->InPhysicsParticles = Params.PhysicsParticlesSRV;
-	PassParameters->InAttachments = Params.AttachmentsSRV;
-	PassParameters->CellCounts = Params.CellCountsSRV;
-	PassParameters->ParticleIndices = Params.ParticleIndicesSRV;
+	PassParameters->InAttachments = AttachmentsSRV;
+	PassParameters->CellCounts = CellCountsSRV;
+	PassParameters->ParticleIndices = ParticleIndicesSRV;
 
 	// Output buffers
 	PassParameters->OutAnisotropyAxis1 = Params.OutAxis1UAV;
