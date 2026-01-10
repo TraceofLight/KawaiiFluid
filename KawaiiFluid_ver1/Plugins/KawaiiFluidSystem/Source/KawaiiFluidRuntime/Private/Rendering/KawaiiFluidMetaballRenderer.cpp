@@ -6,7 +6,6 @@
 #include "Rendering/KawaiiFluidRenderResource.h"
 #include "Core/KawaiiFluidSimulationContext.h"
 #include "Core/KawaiiRenderParticle.h"
-#include "DrawDebugHelpers.h"
 #include "RenderGraphResources.h"
 #include "RenderingThread.h"
 #include "GPU/GPUFluidSimulator.h"
@@ -14,7 +13,6 @@
 // Pipeline architecture (Pipeline handles ShadingMode internally)
 #include "Rendering/Pipeline/IKawaiiMetaballRenderingPipeline.h"
 #include "Rendering/Pipeline/KawaiiMetaballScreenSpacePipeline.h"
-#include "Rendering/Pipeline/KawaiiMetaballRayMarchPipeline.h"
 
 UKawaiiFluidMetaballRenderer::UKawaiiFluidMetaballRenderer()
 {
@@ -109,17 +107,6 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 	LocalParameters.Roughness = Settings.Roughness;
 	LocalParameters.SubsurfaceOpacity = Settings.SubsurfaceOpacity;
 
-	// Ray Marching SDF parameters
-	LocalParameters.SDFSmoothness = Settings.SDFSmoothness;
-	LocalParameters.MaxRayMarchSteps = Settings.MaxRayMarchSteps;
-	LocalParameters.RayMarchHitThreshold = Settings.RayMarchHitThreshold;
-	LocalParameters.RayMarchMaxDistance = Settings.RayMarchMaxDistance;
-	LocalParameters.SSSIntensity = Settings.SSSIntensity;
-	LocalParameters.SSSColor = Settings.SSSColor;
-	LocalParameters.bUseSDFVolumeOptimization = Settings.bUseSDFVolumeOptimization;
-	LocalParameters.SDFVolumeResolution = Settings.SDFVolumeResolution;
-	LocalParameters.bUseSpatialHash = Settings.bUseSpatialHash;
-
 	// Shadow parameters
 	LocalParameters.bEnableShadowCasting = Settings.bEnableShadowCasting;
 	LocalParameters.VSMResolution = Settings.VSMResolution;
@@ -129,10 +116,6 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 
 	// Anisotropy parameters
 	LocalParameters.AnisotropyParams = Settings.AnisotropyParams;
-
-	// Debug visualization settings
-	LocalParameters.bDebugDrawSDFVolume = Settings.bDebugDrawSDFVolume;
-	LocalParameters.SDFVolumeDebugColor = Settings.SDFVolumeDebugColor;
 
 	// MaxRenderParticles stays as member variable (not in LocalParameters)
 	MaxRenderParticles = Settings.MaxRenderParticles;
@@ -219,7 +202,6 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 					GPUParticleCount, RenderRadius);
 			}
 
-			DrawDebugVisualization();
 			return;
 		}
 	}
@@ -250,9 +232,6 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 	// Update stats
 	LastRenderedParticleCount = NumParticles;
 	bIsRenderingActive = true;
-
-	// Draw debug visualization if enabled
-	DrawDebugVisualization();
 }
 
 void UKawaiiFluidMetaballRenderer::UpdateGPUResources(const TArray<FFluidParticle>& Particles, float ParticleRadius)
@@ -372,86 +351,15 @@ void UKawaiiFluidMetaballRenderer::UpdatePipeline()
 			UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Created ScreenSpace Pipeline"));
 			break;
 
-		case EMetaballPipelineType::RayMarching:
-			Pipeline = MakeShared<FKawaiiMetaballRayMarchPipeline>();
-			UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Created RayMarching Pipeline"));
-			break;
 		}
 
 		CachedPipelineType = Params.PipelineType;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Pipeline=%s, Shading=%s"),
-		Params.PipelineType == EMetaballPipelineType::ScreenSpace ? TEXT("ScreenSpace") : TEXT("RayMarching"),
+	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Pipeline=ScreenSpace, Shading=%s"),
 		Params.ShadingMode == EMetaballShadingMode::PostProcess ? TEXT("PostProcess") :
 		Params.ShadingMode == EMetaballShadingMode::GBuffer ? TEXT("GBuffer") :
 		Params.ShadingMode == EMetaballShadingMode::Opaque ? TEXT("Opaque") : TEXT("Translucent"));
-}
-
-void UKawaiiFluidMetaballRenderer::SetSDFVolumeBounds(const FVector& VolumeMin, const FVector& VolumeMax)
-{
-	// Called from render thread - use atomic or game thread task for thread safety
-	AsyncTask(ENamedThreads::GameThread, [this, VolumeMin, VolumeMax]()
-	{
-		if (IsValid(this))
-		{
-			CachedSDFVolumeMin = VolumeMin;
-			CachedSDFVolumeMax = VolumeMax;
-			bHasValidSDFVolumeBounds = true;
-		}
-	});
-}
-
-void UKawaiiFluidMetaballRenderer::DrawDebugVisualization()
-{
-	const FFluidRenderingParameters& Params = GetLocalParameters();
-
-	if (!Params.bDebugDrawSDFVolume || !bHasValidSDFVolumeBounds)
-	{
-		return;
-	}
-
-	if (!CachedWorld)
-	{
-		return;
-	}
-
-	// Calculate box center and extent from min/max
-	FVector BoxCenter = (CachedSDFVolumeMin + CachedSDFVolumeMax) * 0.5f;
-	FVector BoxExtent = (CachedSDFVolumeMax - CachedSDFVolumeMin) * 0.5f;
-
-	// Draw debug box
-	DrawDebugBox(
-		CachedWorld,
-		BoxCenter,
-		BoxExtent,
-		Params.SDFVolumeDebugColor,
-		false,  // bPersistentLines
-		-1.0f,  // LifeTime (negative = one frame)
-		0,      // DepthPriority
-		2.0f    // Thickness
-	);
-
-	// Optional: Draw corner markers for better visibility
-	const FColor CornerColor = FColor::Yellow;
-	const float MarkerSize = 5.0f;
-
-	// Draw small crosses at corners
-	TArray<FVector> Corners = {
-		FVector(CachedSDFVolumeMin.X, CachedSDFVolumeMin.Y, CachedSDFVolumeMin.Z),
-		FVector(CachedSDFVolumeMax.X, CachedSDFVolumeMin.Y, CachedSDFVolumeMin.Z),
-		FVector(CachedSDFVolumeMin.X, CachedSDFVolumeMax.Y, CachedSDFVolumeMin.Z),
-		FVector(CachedSDFVolumeMax.X, CachedSDFVolumeMax.Y, CachedSDFVolumeMin.Z),
-		FVector(CachedSDFVolumeMin.X, CachedSDFVolumeMin.Y, CachedSDFVolumeMax.Z),
-		FVector(CachedSDFVolumeMax.X, CachedSDFVolumeMin.Y, CachedSDFVolumeMax.Z),
-		FVector(CachedSDFVolumeMin.X, CachedSDFVolumeMax.Y, CachedSDFVolumeMax.Z),
-		FVector(CachedSDFVolumeMax.X, CachedSDFVolumeMax.Y, CachedSDFVolumeMax.Z)
-	};
-
-	for (const FVector& Corner : Corners)
-	{
-		DrawDebugPoint(CachedWorld, Corner, MarkerSize, CornerColor, false, -1.0f, 0);
-	}
 }
 
 void UKawaiiFluidMetaballRenderer::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
@@ -463,7 +371,6 @@ void UKawaiiFluidMetaballRenderer::SetPreset(UKawaiiFluidPresetDataAsset* InPres
 		// Update Pipeline based on Preset's PipelineType
 		UpdatePipeline();
 
-		UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: SetPreset - PipelineType=%s"),
-			GetLocalParameters().PipelineType == EMetaballPipelineType::ScreenSpace ? TEXT("ScreenSpace") : TEXT("RayMarching"));
+		UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: SetPreset - PipelineType=ScreenSpace"));
 	}
 }

@@ -772,7 +772,7 @@ void FFluidSceneViewExtension::SubscribeToPostProcessingPass(
 	FPostProcessingPassDelegateArray& InOutPassCallbacks,
 	bool bIsPassEnabled)
 {
-	// Custom mode: Tonemap pass (ScreenSpace/RayMarching pipelines)
+	// Custom mode: Tonemap pass (ScreenSpace pipeline)
 	// Note: Translucent mode is handled in PrePostProcessPass_RenderThread
 	if (Pass == EPostProcessingPass::Tonemap)
 	{
@@ -829,10 +829,8 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	// Batching by (Preset + GPUMode) - allows GPU/CPU mixing with same Preset
 	// - Translucent: GBuffer write already done, transparency compositing here
 	// - ScreenSpace: Full pipeline (depth/normal/thickness generation + shading)
-	// - RayMarching: Full pipeline (SDF + ray march shading)
 	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
 	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
-	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> RayMarchingBatches;
 	const FFluidRenderingParameters* ShadowRenderParams = nullptr;
 
 	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
@@ -877,16 +875,11 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 			{
 				ScreenSpaceBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
 			}
-			else if (Params.PipelineType == EMetaballPipelineType::RayMarching)
-			{
-				RayMarchingBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
-			}
 		}
 	}
 
 	// Early return if nothing to render and no shadows
-	if (TranslucentBatches.Num() == 0 && ScreenSpaceBatches.Num() == 0 && RayMarchingBatches.Num()
-		== 0 && !ShadowRenderParams)
+	if (TranslucentBatches.Num() == 0 && ScreenSpaceBatches.Num() == 0 && !ShadowRenderParams)
 	{
 		return;
 	}
@@ -1109,74 +1102,7 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		}
 	}
 
-	// ============================================
-	// RayMarching Pipeline Rendering (before TSR)
-	// Batched by (Preset + GPUMode) - same context renders only once
-	// ============================================
-	for (auto& Batch : RayMarchingBatches)
-	{
-		const FContextCacheKey& CacheKey = Batch.Key;
-		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
-
-		// Get rendering params directly from preset
-		const FFluidRenderingParameters& BatchParams = Preset->RenderingParameters;
-
-		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_RayMarching(%d)", Renderers.Num());
-
-		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
-		{
-			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
-
-			// 1. PrepareRender - prepare particle buffer and SDF
-			{
-				RDG_EVENT_SCOPE(GraphBuilder, "PrepareRender");
-				Pipeline->PrepareRender(
-					GraphBuilder,
-					View,
-					BatchParams,
-					Renderers,
-					SceneDepthTexture);
-			}
-
-			// 2. ExecuteRender - apply ray march shading
-			{
-				RDG_EVENT_SCOPE(GraphBuilder, "ExecuteRender");
-				Pipeline->ExecuteRender(
-					GraphBuilder,
-					View,
-					BatchParams,
-					Renderers,
-					SceneDepthTexture,
-					LitSceneColorCopy,
-					Output);
-			}
-
-			// 3. Store fluid depth to history for shadow projection
-			{
-				RDG_EVENT_SCOPE(GraphBuilder, "StoreDepthHistory");
-				if (FFluidShadowHistoryManager* HistoryManager = SubsystemPtr->
-					GetShadowHistoryManager())
-				{
-					if (const FMetaballIntermediateTextures* IntermediateTextures = Pipeline->
-						GetCachedIntermediateTextures())
-					{
-						if (IntermediateTextures->SmoothedDepthTexture)
-						{
-							HistoryManager->StoreCurrentFrame(
-								GraphBuilder,
-								IntermediateTextures->SmoothedDepthTexture,
-								View);
-						}
-					}
-				}
-			}
-		}
-	}
-
 	UE_LOG(LogTemp, Log,
-	       TEXT(
-		       "KawaiiFluid: PrePostProcess rendered - Translucent:%d ScreenSpace:%d RayMarching:%d"
-	       ),
-	       TranslucentBatches.Num(), ScreenSpaceBatches.Num(), RayMarchingBatches.Num());
+	       TEXT("KawaiiFluid: PrePostProcess rendered - Translucent:%d ScreenSpace:%d"),
+	       TranslucentBatches.Num(), ScreenSpaceBatches.Num());
 }

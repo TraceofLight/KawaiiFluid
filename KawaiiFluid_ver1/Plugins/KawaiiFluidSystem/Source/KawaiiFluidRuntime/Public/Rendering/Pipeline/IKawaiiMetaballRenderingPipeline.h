@@ -18,7 +18,6 @@ class UKawaiiFluidMetaballRenderer;
  *
  * A Pipeline handles surface computation (how the fluid surface is determined):
  * - ScreenSpace: Depth -> Smoothing -> Normal -> Thickness passes
- * - RayMarching: Direct SDF ray marching from particles
  *
  * Each Pipeline provides three execution points matching UE render callbacks:
  * - ExecutePostBasePass(): PostRenderBasePassDeferred_RenderThread (GBuffer write)
@@ -88,7 +87,6 @@ public:
 	 * Called for:
 	 * - PostProcess mode: Generate intermediate textures/buffers
 	 *   - ScreenSpace: Depth, Normal, Thickness textures
-	 *   - RayMarching: Particle buffer, optional SDF volume
 	 *
 	 * NOTE: This is NOT the same as ExecutePostBasePass.
 	 *       ExecutePostBasePass is for GBuffer/Translucent modes at PostBasePass timing.

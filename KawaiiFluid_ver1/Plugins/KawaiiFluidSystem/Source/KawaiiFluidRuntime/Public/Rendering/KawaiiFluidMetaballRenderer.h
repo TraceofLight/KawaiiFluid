@@ -156,21 +156,6 @@ public:
 	/** Metaball rendering active status */
 	bool bIsRenderingActive = false;
 
-	//========================================
-	// Debug Visualization
-	//========================================
-
-	/** Cached SDF volume bounds (for debug drawing) */
-	FVector CachedSDFVolumeMin = FVector::ZeroVector;
-	FVector CachedSDFVolumeMax = FVector::ZeroVector;
-	bool bHasValidSDFVolumeBounds = false;
-
-	/** Set SDF volume bounds (called from render thread) */
-	void SetSDFVolumeBounds(const FVector& VolumeMin, const FVector& VolumeMax);
-
-	/** Draw debug visualization (called from game thread) */
-	void DrawDebugVisualization();
-
 protected:
 	//========================================
 	// Common State (from removed base class)
@@ -221,7 +206,7 @@ private:
 	// Pipeline Architecture
 	//========================================
 
-	/** Rendering pipeline (ScreenSpace or RayMarching) - handles ShadingMode internally */
+	/** Rendering pipeline (ScreenSpace) - handles ShadingMode internally */
 	TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline;
 
 	/** Cached pipeline type (to detect changes) */

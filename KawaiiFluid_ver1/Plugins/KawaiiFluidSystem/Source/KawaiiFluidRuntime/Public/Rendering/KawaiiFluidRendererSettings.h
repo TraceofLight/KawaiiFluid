@@ -78,7 +78,7 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	/** Pipeline type - how the fluid surface is computed */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering",
 		meta = (EditCondition = "bEnabled", DisplayName = "Pipeline Type"))
-	EMetaballPipelineType PipelineType = EMetaballPipelineType::RayMarching;
+	EMetaballPipelineType PipelineType = EMetaballPipelineType::ScreenSpace;
 
 	/** Shading mode - how the fluid surface is lit/rendered */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering",
@@ -162,74 +162,6 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	float ThicknessScale = 1.0f;
 
 	//========================================
-	// Ray Marching SDF Mode Parameters
-	//========================================
-
-	/** SDF smoothness for metaball blending (higher = more stretchy/blobby) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "1.0", ClampMax = "64.0"))
-	float SDFSmoothness = 12.0f;
-
-	/** Maximum ray marching steps */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "16", ClampMax = "256"))
-	int32 MaxRayMarchSteps = 128;
-
-	/** Ray march hit threshold (surface detection) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "0.0001", ClampMax = "1.0"))
-	float RayMarchHitThreshold = 1.0f;
-
-	/** Maximum ray march distance */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "100.0", ClampMax = "10000.0"))
-	float RayMarchMaxDistance = 2000.0f;
-
-	/** Subsurface scattering intensity (jelly effect) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "0.0", ClampMax = "2.0"))
-	float SSSIntensity = 1.0f;
-
-	/** Subsurface scattering color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching"))
-	FLinearColor SSSColor = FLinearColor(1.0f, 0.5f, 0.3f, 1.0f);
-
-	/**
-	 * Use SDF Volume optimization for Ray Marching
-	 * When enabled, bakes SDF to 3D texture using compute shader (~400x faster)
-	 * When disabled, uses direct particle iteration (legacy mode)
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching"))
-	bool bUseSDFVolumeOptimization = true;
-
-	/** SDF Volume resolution (64 = 64x64x64 voxels) - higher = more precise but slower compute */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching && bUseSDFVolumeOptimization",
-			ClampMin = "32", ClampMax = "256"))
-	int32 SDFVolumeResolution = 64;
-
-	/**
-	 * Use Spatial Hash for hybrid SDF evaluation (with SDF Volume)
-	 * HYBRID MODE: SDF Volume for fast 90% ray march + Spatial Hash for precise 10% final evaluation
-	 * HybridSwitchThreshold is auto-calculated: ParticleRadius * 2.0 + SDFSmoothness
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching && bUseSDFVolumeOptimization"))
-	bool bUseSpatialHash = false;
-
-	/** Number of history samples per particle (1 = current only, 2 = include previous frame). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "1", ClampMax = "2"))
-	int32 AttachedRenderSampleCount = 2;
-
-	/** Blend weight between previous and current position for history samples (0 = exact previous, 1 = near current). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "0.0", ClampMax = "1.0"))
-	float AttachedRenderSpread = 0.25f;
-
-	//========================================
 	// G-Buffer Mode Parameters
 	//========================================
 
@@ -276,20 +208,6 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Shadow",
 		meta = (EditCondition = "bEnabled && bEnableShadowCasting", ClampMin = "0.0", ClampMax = "1.0"))
 	float ShadowIntensity = 0.5f;
-
-	//========================================
-	// Debug Visualization
-	//========================================
-
-	/** Draw SDF Volume bounding box as debug lines */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug",
-		meta = (EditCondition = "bEnabled && PipelineType == EMetaballPipelineType::RayMarching && bUseSDFVolumeOptimization"))
-	bool bDebugDrawSDFVolume = false;
-
-	/** SDF Volume debug box color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug",
-		meta = (EditCondition = "bEnabled && bDebugDrawSDFVolume"))
-	FColor SDFVolumeDebugColor = FColor::Green;
 };
 
 // Backwards compatibility alias

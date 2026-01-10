@@ -27,10 +27,7 @@ UENUM(BlueprintType)
 enum class EMetaballPipelineType : uint8
 {
 	/** Screen Space pipeline: Depth -> Smoothing -> Normal -> Thickness */
-	ScreenSpace UMETA(DisplayName = "Screen Space"),
-
-	/** Ray Marching pipeline: Direct SDF computation from particle buffer */
-	RayMarching UMETA(DisplayName = "Ray Marching")
+	ScreenSpace UMETA(DisplayName = "Screen Space")
 };
 
 /**
@@ -86,10 +83,7 @@ enum class ESSFRRenderingMode : uint8
 	Custom UMETA(DisplayName = "Custom"),
 
 	/** Write to GBuffer for Lumen/VSM integration */
-	GBuffer UMETA(DisplayName = "G-Buffer"),
-
-	/** Ray Marching SDF - smooth metaball surfaces for slime-like fluids */
-	RayMarching UMETA(DisplayName = "Ray Marching SDF")
+	GBuffer UMETA(DisplayName = "G-Buffer")
 };
 
 /**
@@ -272,75 +266,13 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy")
 	FFluidAnisotropyParams AnisotropyParams;
 
-	//========================================
-	// Ray Marching SDF Mode Parameters
-	//========================================
-
-	/** SDF smoothness for metaball blending (higher = more stretchy/blobby) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "1.0", ClampMax = "64.0"))
-	float SDFSmoothness = 12.0f;
-
-	/** Maximum ray marching steps */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "16", ClampMax = "256"))
-	int32 MaxRayMarchSteps = 128;
-
-	/** Ray march hit threshold (surface detection) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "0.0001", ClampMax = "1.0"))
-	float RayMarchHitThreshold = 1.0f;
-
-	/** Maximum ray march distance */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "100.0", ClampMax = "10000.0"))
-	float RayMarchMaxDistance = 2000.0f;
-
-	/** Subsurface scattering intensity (jelly effect) - Works in both ScreenSpace and RayMarching */
+	/** Subsurface scattering intensity (jelly effect) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance", meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float SSSIntensity = 1.0f;
 
-	/** Subsurface scattering color - Works in both ScreenSpace and RayMarching */
+	/** Subsurface scattering color */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
 	FLinearColor SSSColor = FLinearColor(1.0f, 0.5f, 0.3f, 1.0f);
-
-	/**
-	 * Use SDF Volume optimization for Ray Marching
-	 * When enabled, bakes SDF to 3D texture using compute shader (~400x faster)
-	 * When disabled, uses direct particle iteration (legacy mode)
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching"))
-	bool bUseSDFVolumeOptimization = true;
-
-	/** SDF Volume resolution (64 = 64x64x64 voxels) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching && bUseSDFVolumeOptimization",
-			ClampMin = "32", ClampMax = "256"))
-	int32 SDFVolumeResolution = 64;
-
-	/**
-	 * Use Spatial Hash for hybrid SDF evaluation (with SDF Volume)
-	 * HYBRID MODE: SDF Volume for fast 90% ray march + Spatial Hash for precise 10% final evaluation
-	 * SDF Volume: O(1) texture sampling for fast approach to surface
-	 * Spatial Hash: O(k) neighbor lookup for accurate final surface detection
-	 * Note: Only available when bUseSDFVolumeOptimization is enabled
-	 *
-	 * HybridSwitchThreshold is auto-calculated: ParticleRadius * 2.0 + SDFSmoothness
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching && bUseSDFVolumeOptimization"))
-	bool bUseSpatialHash = false;
-
-	/** Number of history samples per particle (1 = current only, 2 = include previous frame). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "1", ClampMax = "2"))
-	int32 AttachedRenderSampleCount = 2;
-
-	/** Blend weight between previous and current position when spawning history samples (0 = exact previous, 1 = near current). */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching", ClampMin = "0.0", ClampMax = "1.0"))
-	float AttachedRenderSpread = 0.25f;
 
 	//========================================
 	// Shadow Casting (VSM) - Legacy
@@ -370,18 +302,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Shadow",
 		meta = (EditCondition = "bEnableShadowCasting", ClampMin = "0.0", ClampMax = "1.0"))
 	float ShadowIntensity = 0.5f;
-
-	//========================================
-	// Debug Visualization
-	//========================================
-
-	/** Draw SDF Volume bounding box as debug lines */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-	bool bDebugDrawSDFVolume = false;
-
-	/** SDF Volume debug box color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-	FColor SDFVolumeDebugColor = FColor::Green;
 
 	//========================================
 	// G-Buffer Mode Parameters
@@ -445,16 +365,9 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.Metallic));
 	Hash = HashCombine(Hash, GetTypeHash(Params.Roughness));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SubsurfaceOpacity));
-	// Ray Marching parameters
-	Hash = HashCombine(Hash, GetTypeHash(Params.SDFSmoothness));
-	Hash = HashCombine(Hash, GetTypeHash(Params.MaxRayMarchSteps));
-	Hash = HashCombine(Hash, GetTypeHash(Params.RayMarchHitThreshold));
-	Hash = HashCombine(Hash, GetTypeHash(Params.RayMarchMaxDistance));
+	// SSS parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSIntensity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSColor.ToString()));
-	Hash = HashCombine(Hash, GetTypeHash(Params.bUseSDFVolumeOptimization));
-	Hash = HashCombine(Hash, GetTypeHash(Params.SDFVolumeResolution));
-	Hash = HashCombine(Hash, GetTypeHash(Params.bUseSpatialHash));
 	// Shadow parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.bEnableShadowCasting));
 	Hash = HashCombine(Hash, GetTypeHash(Params.VSMResolution));
@@ -504,16 +417,9 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 	       FMath::IsNearlyEqual(A.Metallic, B.Metallic, 0.001f) &&
 	       FMath::IsNearlyEqual(A.Roughness, B.Roughness, 0.001f) &&
 	       FMath::IsNearlyEqual(A.SubsurfaceOpacity, B.SubsurfaceOpacity, 0.001f) &&
-	       // Ray Marching parameters
-	       FMath::IsNearlyEqual(A.SDFSmoothness, B.SDFSmoothness, 0.001f) &&
-	       A.MaxRayMarchSteps == B.MaxRayMarchSteps &&
-	       FMath::IsNearlyEqual(A.RayMarchHitThreshold, B.RayMarchHitThreshold, 0.0001f) &&
-	       FMath::IsNearlyEqual(A.RayMarchMaxDistance, B.RayMarchMaxDistance, 0.001f) &&
+	       // SSS parameters
 	       FMath::IsNearlyEqual(A.SSSIntensity, B.SSSIntensity, 0.001f) &&
 	       A.SSSColor.Equals(B.SSSColor, 0.001f) &&
-	       A.bUseSDFVolumeOptimization == B.bUseSDFVolumeOptimization &&
-	       A.SDFVolumeResolution == B.SDFVolumeResolution &&
-	       A.bUseSpatialHash == B.bUseSpatialHash &&
 	       // Shadow parameters
 	       A.bEnableShadowCasting == B.bEnableShadowCasting &&
 	       A.VSMResolution == B.VSMResolution &&
