@@ -1215,16 +1215,60 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 
 	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: GPU clear+build completed"));
 
-	// Pass 4-5: XPBD Density Constraint Solver (OPTIMIZED: Combined Density + Pressure)
+	// Pass 4-5: XPBD Density Constraint Solver (OPTIMIZED: Combined Density + Pressure + Neighbor Caching)
+	// Neighbor Caching: First iteration builds neighbor list, subsequent iterations reuse
 	// Each iteration:
 	//   - Single neighbor traversal computes both Density/Lambda AND Position corrections
 	//   - Uses previous iteration's Lambda for Jacobi-style update (parallel-safe)
-	// Performance: 2x fewer neighbor searches per iteration
+	// Performance: Hash lookup only in first iteration, cached for subsequent iterations
+
+	// Create/resize neighbor caching buffers if needed
+	FRDGBufferRef NeighborListRDGBuffer = nullptr;
+	FRDGBufferRef NeighborCountsRDGBuffer = nullptr;
+	FRDGBufferUAVRef NeighborListUAVLocal = nullptr;
+	FRDGBufferUAVRef NeighborCountsUAVLocal = nullptr;
+	FRDGBufferSRVRef NeighborListSRVLocal = nullptr;
+	FRDGBufferSRVRef NeighborCountsSRVLocal = nullptr;
+
+	const int32 NeighborListSize = CurrentParticleCount * GPU_MAX_NEIGHBORS_PER_PARTICLE;
+
+	if (NeighborBufferParticleCapacity < CurrentParticleCount || !NeighborListBuffer.IsValid())
+	{
+		// Create new buffers
+		NeighborListRDGBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), NeighborListSize),
+			TEXT("GPUFluidNeighborList"));
+		NeighborCountsRDGBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), CurrentParticleCount),
+			TEXT("GPUFluidNeighborCounts"));
+
+		NeighborBufferParticleCapacity = CurrentParticleCount;
+	}
+	else
+	{
+		// Reuse existing buffers
+		NeighborListRDGBuffer = GraphBuilder.RegisterExternalBuffer(NeighborListBuffer, TEXT("GPUFluidNeighborList"));
+		NeighborCountsRDGBuffer = GraphBuilder.RegisterExternalBuffer(NeighborCountsBuffer, TEXT("GPUFluidNeighborCounts"));
+	}
+
+	NeighborListUAVLocal = GraphBuilder.CreateUAV(NeighborListRDGBuffer);
+	NeighborCountsUAVLocal = GraphBuilder.CreateUAV(NeighborCountsRDGBuffer);
+
 	for (int32 i = 0; i < Params.SolverIterations; ++i)
 	{
 		// Combined pass: Compute Density + Lambda + Apply Position Corrections
-		AddSolveDensityPressurePass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
+		// First iteration (i=0) builds neighbor cache, subsequent iterations reuse it
+		AddSolveDensityPressurePass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal,
+			NeighborListUAVLocal, NeighborCountsUAVLocal, i, Params);
 	}
+
+	// Create SRVs from neighbor cache buffers for use in Viscosity and Cohesion passes
+	NeighborListSRVLocal = GraphBuilder.CreateSRV(NeighborListRDGBuffer);
+	NeighborCountsSRVLocal = GraphBuilder.CreateSRV(NeighborCountsRDGBuffer);
+
+	// Extract neighbor buffers for next frame (persist across substeps)
+	GraphBuilder.QueueBufferExtraction(NeighborListRDGBuffer, &NeighborListBuffer, ERHIAccess::UAVCompute);
+	GraphBuilder.QueueBufferExtraction(NeighborCountsRDGBuffer, &NeighborCountsBuffer, ERHIAccess::UAVCompute);
 
 	// Pass 6: Bounds Collision
 	AddBoundsCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
@@ -1299,10 +1343,14 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	AddFinalizePositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
 
 	// Pass 8: Apply Viscosity (XSPH velocity smoothing) - Applied AFTER velocity is finalized per PBF paper
-	AddApplyViscosityPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
+	// Uses cached neighbor list from DensityPressure pass for faster lookup
+	AddApplyViscosityPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal,
+		NeighborListSRVLocal, NeighborCountsSRVLocal, Params);
 
 	// Pass 8.5: Apply Cohesion (surface tension between particles)
-	AddApplyCohesionPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal, Params);
+	// Uses cached neighbor list from DensityPressure pass for faster lookup
+	AddApplyCohesionPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal,
+		NeighborListSRVLocal, NeighborCountsSRVLocal, Params);
 
 	// Pass 8.6: Apply Stack Pressure (weight transfer from stacked attached particles)
 	if (Params.StackPressureScale > 0.0f && IsAdhesionEnabled() && PersistentAttachmentBuffer.IsValid())
@@ -1610,6 +1658,9 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferSRVRef InCellCountsSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,
+	FRDGBufferUAVRef InNeighborListUAV,
+	FRDGBufferUAVRef InNeighborCountsUAV,
+	int32 IterationIndex,
 	const FGPUFluidSimulationParams& Params)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
@@ -1619,6 +1670,9 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	PassParameters->Particles = InParticlesUAV;
 	PassParameters->CellCounts = InCellCountsSRV;
 	PassParameters->ParticleIndices = InParticleIndicesSRV;
+	// Neighbor caching buffers
+	PassParameters->NeighborList = InNeighborListUAV;
+	PassParameters->NeighborCounts = InNeighborCountsUAV;
 	PassParameters->ParticleCount = CurrentParticleCount;
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
 	PassParameters->RestDensity = Params.RestDensity;
@@ -1632,12 +1686,14 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	PassParameters->TensileK = Params.TensileK;
 	PassParameters->TensileN = Params.TensileN;
 	PassParameters->InvW_DeltaQ = Params.InvW_DeltaQ;
+	// Iteration control for neighbor caching
+	PassParameters->IterationIndex = IterationIndex;
 
 	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FSolveDensityPressureCS::ThreadGroupSize);
 
 	FComputeShaderUtils::AddPass(
 		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::SolveDensityPressure"),
+		RDG_EVENT_NAME("GPUFluid::SolveDensityPressure (Iter %d)", IterationIndex),
 		ComputeShader,
 		PassParameters,
 		FIntVector(NumGroups, 1, 1)
@@ -1649,6 +1705,8 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferSRVRef InCellCountsSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,
+	FRDGBufferSRVRef InNeighborListSRV,
+	FRDGBufferSRVRef InNeighborCountsSRV,
 	const FGPUFluidSimulationParams& Params)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
@@ -1658,11 +1716,14 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	PassParameters->Particles = InParticlesUAV;
 	PassParameters->CellCounts = InCellCountsSRV;
 	PassParameters->ParticleIndices = InParticleIndicesSRV;
+	PassParameters->NeighborList = InNeighborListSRV;
+	PassParameters->NeighborCounts = InNeighborCountsSRV;
 	PassParameters->ParticleCount = CurrentParticleCount;
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
 	PassParameters->ViscosityCoefficient = Params.ViscosityCoefficient;
 	PassParameters->Poly6Coeff = Params.Poly6Coeff;
 	PassParameters->CellSize = Params.CellSize;
+	PassParameters->bUseNeighborCache = (InNeighborListSRV != nullptr && InNeighborCountsSRV != nullptr) ? 1 : 0;
 
 	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FApplyViscosityCS::ThreadGroupSize);
 
@@ -1680,6 +1741,8 @@ void FGPUFluidSimulator::AddApplyCohesionPass(
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferSRVRef InCellCountsSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,
+	FRDGBufferSRVRef InNeighborListSRV,
+	FRDGBufferSRVRef InNeighborCountsSRV,
 	const FGPUFluidSimulationParams& Params)
 {
 	// Skip if cohesion is disabled
@@ -1695,10 +1758,13 @@ void FGPUFluidSimulator::AddApplyCohesionPass(
 	PassParameters->Particles = InParticlesUAV;
 	PassParameters->CellCounts = InCellCountsSRV;
 	PassParameters->ParticleIndices = InParticleIndicesSRV;
+	PassParameters->NeighborList = InNeighborListSRV;
+	PassParameters->NeighborCounts = InNeighborCountsSRV;
 	PassParameters->ParticleCount = CurrentParticleCount;
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
 	PassParameters->CohesionStrength = Params.CohesionStrength;
 	PassParameters->CellSize = Params.CellSize;
+	PassParameters->bUseNeighborCache = (InNeighborListSRV != nullptr && InNeighborCountsSRV != nullptr) ? 1 : 0;
 	// Akinci 2013 surface tension parameters
 	PassParameters->DeltaTime = Params.DeltaTime;
 	PassParameters->RestDensity = Params.RestDensity;

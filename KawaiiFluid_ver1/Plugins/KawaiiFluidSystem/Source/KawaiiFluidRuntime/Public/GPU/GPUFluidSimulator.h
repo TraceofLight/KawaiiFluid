@@ -481,12 +481,15 @@ private:
 		FRDGBufferSRVRef ParticleIndicesSRV,
 		const FGPUFluidSimulationParams& Params);
 
-	/** Add combined density + pressure pass (OPTIMIZED: single neighbor traversal) */
+	/** Add combined density + pressure pass (OPTIMIZED: single neighbor traversal + neighbor caching) */
 	void AddSolveDensityPressurePass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
 		FRDGBufferSRVRef CellCountsSRV,
 		FRDGBufferSRVRef ParticleIndicesSRV,
+		FRDGBufferUAVRef NeighborListUAV,
+		FRDGBufferUAVRef NeighborCountsUAV,
+		int32 IterationIndex,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add apply viscosity pass */
@@ -495,6 +498,8 @@ private:
 		FRDGBufferUAVRef ParticlesUAV,
 		FRDGBufferSRVRef CellCountsSRV,
 		FRDGBufferSRVRef ParticleIndicesSRV,
+		FRDGBufferSRVRef NeighborListSRV,
+		FRDGBufferSRVRef NeighborCountsSRV,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add apply cohesion pass (surface tension / cohesion forces) */
@@ -503,6 +508,8 @@ private:
 		FRDGBufferUAVRef ParticlesUAV,
 		FRDGBufferSRVRef CellCountsSRV,
 		FRDGBufferSRVRef ParticleIndicesSRV,
+		FRDGBufferSRVRef NeighborListSRV,
+		FRDGBufferSRVRef NeighborCountsSRV,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add stack pressure pass (weight transfer from stacked attached particles) */
@@ -635,6 +642,13 @@ private:
 	// Persistent Spatial Hash buffers - reused across frames (GPU clear instead of CPU upload)
 	TRefCountPtr<FRDGPooledBuffer> PersistentCellCountsBuffer;
 	TRefCountPtr<FRDGPooledBuffer> PersistentParticleIndicesBuffer;
+
+	// Neighbor caching buffers - reuse neighbor list across solver iterations
+	// NeighborList: [ParticleCount * MAX_NEIGHBORS_PER_PARTICLE] - cached neighbor indices
+	// NeighborCounts: [ParticleCount] - number of neighbors per particle
+	TRefCountPtr<FRDGPooledBuffer> NeighborListBuffer;
+	TRefCountPtr<FRDGPooledBuffer> NeighborCountsBuffer;
+	int32 NeighborBufferParticleCapacity = 0;  // Track capacity for resize detection
 
 	// Flag: need to upload all particles from CPU (initial or after resize)
 	bool bNeedsFullUpload = true;

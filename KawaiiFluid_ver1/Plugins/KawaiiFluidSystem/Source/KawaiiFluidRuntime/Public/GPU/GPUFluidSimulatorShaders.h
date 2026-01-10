@@ -13,6 +13,10 @@
 #define GPU_SPATIAL_HASH_SIZE 65536
 #define GPU_MAX_PARTICLES_PER_CELL 16
 
+// Neighbor caching constants
+// 64 neighbors is sufficient for typical SPH simulations (avg ~30-40 neighbors)
+#define GPU_MAX_NEIGHBORS_PER_PARTICLE 64
+
 //=============================================================================
 // Predict Positions Compute Shader
 // Pass 1: Apply forces and predict positions
@@ -153,7 +157,12 @@ public:
 //=============================================================================
 // Combined Density + Pressure Compute Shader (OPTIMIZED)
 // Pass 3+4 Combined: Single neighbor traversal for both density and pressure
-// Reduces neighbor search from 2x to 1x per iteration
+//
+// Optimizations:
+// 1. Pass Integration: Reduces neighbor search from 2x to 1x per iteration
+// 2. rsqrt: Uses fast inverse square root
+// 3. Loop Unroll: 27-cell explicit unrolling
+// 4. Neighbor Caching: First iteration builds neighbor list, subsequent iterations reuse
 //=============================================================================
 
 class FSolveDensityPressureCS : public FGlobalShader
@@ -166,6 +175,9 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
+		// Neighbor caching buffers
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, NeighborList)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, NeighborCounts)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(float, SmoothingRadius)
 		SHADER_PARAMETER(float, RestDensity)
@@ -179,6 +191,8 @@ public:
 		SHADER_PARAMETER(float, TensileK)
 		SHADER_PARAMETER(int32, TensileN)
 		SHADER_PARAMETER(float, InvW_DeltaQ)
+		// Iteration control for neighbor caching
+		SHADER_PARAMETER(int32, IterationIndex)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -196,11 +210,12 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
 		OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
 		OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
+		OutEnvironment.SetDefine(TEXT("MAX_NEIGHBORS_PER_PARTICLE"), GPU_MAX_NEIGHBORS_PER_PARTICLE);
 	}
 };
 
 //=============================================================================
-// Apply Viscosity Compute Shader
+// Apply Viscosity Compute Shader (OPTIMIZED: Uses cached neighbor list)
 // Pass 5: Apply XSPH viscosity
 //=============================================================================
 
@@ -214,11 +229,16 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
+		// Neighbor caching buffers (reuse from DensityPressure pass)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborList)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborCounts)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(float, SmoothingRadius)
 		SHADER_PARAMETER(float, ViscosityCoefficient)
 		SHADER_PARAMETER(float, Poly6Coeff)
 		SHADER_PARAMETER(float, CellSize)
+		// Flag to use cached neighbors (1 = use cache, 0 = use hash)
+		SHADER_PARAMETER(int32, bUseNeighborCache)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -236,11 +256,12 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
 		OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
 		OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
+		OutEnvironment.SetDefine(TEXT("MAX_NEIGHBORS_PER_PARTICLE"), GPU_MAX_NEIGHBORS_PER_PARTICLE);
 	}
 };
 
 //=============================================================================
-// Apply Cohesion Compute Shader
+// Apply Cohesion Compute Shader (OPTIMIZED: Uses cached neighbor list)
 // Pass 5.5: Apply surface tension / cohesion forces (Akinci 2013)
 //=============================================================================
 
@@ -254,6 +275,9 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
+		// Neighbor caching buffers (reuse from DensityPressure pass)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborList)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborCounts)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(float, SmoothingRadius)
 		SHADER_PARAMETER(float, CohesionStrength)
@@ -263,6 +287,8 @@ public:
 		SHADER_PARAMETER(float, RestDensity)
 		SHADER_PARAMETER(float, Poly6Coeff)           // For normal calculation
 		SHADER_PARAMETER(float, MaxSurfaceTensionForce)  // Force clamping
+		// Flag to use cached neighbors (1 = use cache, 0 = use hash)
+		SHADER_PARAMETER(int32, bUseNeighborCache)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -280,6 +306,7 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
 		OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
 		OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
+		OutEnvironment.SetDefine(TEXT("MAX_NEIGHBORS_PER_PARTICLE"), GPU_MAX_NEIGHBORS_PER_PARTICLE);
 	}
 };
 
