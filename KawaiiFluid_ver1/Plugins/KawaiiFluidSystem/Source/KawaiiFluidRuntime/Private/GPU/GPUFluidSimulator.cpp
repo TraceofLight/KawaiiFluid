@@ -165,70 +165,59 @@ void FGPUFluidSimulator::ResizeBuffers(FRHICommandListBase& RHICmdList, int32 Ne
 
 	// Create main particle buffer (UAV + SRV)
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("GPUFluidParticleBuffer"));
-		ParticleBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(FGPUFluidParticle),
-			NewCapacity * sizeof(FGPUFluidParticle),
-			BUF_UnorderedAccess | BUF_ShaderResource,
-			CreateInfo
-		);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("GPUFluidParticleBuffer"), NewCapacity * sizeof(FGPUFluidParticle), sizeof(FGPUFluidParticle))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		ParticleBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 
-		ParticleSRV = RHICmdList.CreateShaderResourceView(ParticleBufferRHI);
-		ParticleUAV = RHICmdList.CreateUnorderedAccessView(ParticleBufferRHI, false, false);
+		ParticleSRV = RHICmdList.CreateShaderResourceView(ParticleBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(ParticleBufferRHI));
+		ParticleUAV = RHICmdList.CreateUnorderedAccessView(ParticleBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(ParticleBufferRHI));
 	}
 
 	// Create position buffer for spatial hash (float3 only)
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("GPUFluidPositionBuffer"));
-		PositionBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(FVector3f),
-			NewCapacity * sizeof(FVector3f),
-			BUF_UnorderedAccess | BUF_ShaderResource,
-			CreateInfo
-		);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("GPUFluidPositionBuffer"), NewCapacity * sizeof(FVector3f), sizeof(FVector3f))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		PositionBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 
-		PositionSRV = RHICmdList.CreateShaderResourceView(PositionBufferRHI);
-		PositionUAV = RHICmdList.CreateUnorderedAccessView(PositionBufferRHI, false, false);
+		PositionSRV = RHICmdList.CreateShaderResourceView(PositionBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(PositionBufferRHI));
+		PositionUAV = RHICmdList.CreateUnorderedAccessView(PositionBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(PositionBufferRHI));
 	}
 
 	// Create staging buffer for CPU readback
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("GPUFluidStagingBuffer"));
-		StagingBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(FGPUFluidParticle),
-			NewCapacity * sizeof(FGPUFluidParticle),
-			BUF_None,
-			ERHIAccess::CopyDest,
-			CreateInfo
-		);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("GPUFluidStagingBuffer"), NewCapacity * sizeof(FGPUFluidParticle), sizeof(FGPUFluidParticle))
+			.AddUsage(BUF_None)
+			.SetInitialState(ERHIAccess::CopyDest);
+		StagingBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 	}
 
 	// Create spatial hash buffers
 	{
 		// Cell counts buffer
-		FRHIResourceCreateInfo CreateInfo(TEXT("GPUFluidCellCounts"));
-		CellCountsBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32),
-			GPU_SPATIAL_HASH_SIZE * sizeof(uint32),
-			BUF_UnorderedAccess | BUF_ShaderResource,
-			CreateInfo
-		);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("GPUFluidCellCounts"), GPU_SPATIAL_HASH_SIZE * sizeof(uint32), sizeof(uint32))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		CellCountsBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 
-		CellCountsSRV = RHICmdList.CreateShaderResourceView(CellCountsBufferRHI);
-		CellCountsUAV = RHICmdList.CreateUnorderedAccessView(CellCountsBufferRHI, false, false);
+		CellCountsSRV = RHICmdList.CreateShaderResourceView(CellCountsBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(CellCountsBufferRHI));
+		CellCountsUAV = RHICmdList.CreateUnorderedAccessView(CellCountsBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(CellCountsBufferRHI));
 
 		// Particle indices buffer
 		const uint32 TotalSlots = GPU_SPATIAL_HASH_SIZE * GPU_MAX_PARTICLES_PER_CELL;
-		FRHIResourceCreateInfo CreateInfo2(TEXT("GPUFluidParticleIndices"));
-		ParticleIndicesBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32),
-			TotalSlots * sizeof(uint32),
-			BUF_UnorderedAccess | BUF_ShaderResource,
-			CreateInfo2
-		);
+		const FRHIBufferCreateDesc BufferDesc2 =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("GPUFluidParticleIndices"), TotalSlots * sizeof(uint32), sizeof(uint32))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		ParticleIndicesBufferRHI = RHICmdList.CreateBuffer(BufferDesc2);
 
-		ParticleIndicesSRV = RHICmdList.CreateShaderResourceView(ParticleIndicesBufferRHI);
-		ParticleIndicesUAV = RHICmdList.CreateUnorderedAccessView(ParticleIndicesBufferRHI, false, false);
+		ParticleIndicesSRV = RHICmdList.CreateShaderResourceView(ParticleIndicesBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(ParticleIndicesBufferRHI));
+		ParticleIndicesUAV = RHICmdList.CreateUnorderedAccessView(ParticleIndicesBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(ParticleIndicesBufferRHI));
 	}
 
 	// Resize cached array
@@ -2264,74 +2253,82 @@ void FGPUFluidSimulator::AllocateStreamCompactionBuffers(FRHICommandListImmediat
 
 	// Marked flags buffer (uint per particle)
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_MarkedFlags"));
-		MarkedFlagsBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32), MaxParticleCount * sizeof(uint32),
-			BUF_UnorderedAccess | BUF_ShaderResource, CreateInfo);
-		MarkedFlagsSRV = RHICmdList.CreateShaderResourceView(MarkedFlagsBufferRHI);
-		MarkedFlagsUAV = RHICmdList.CreateUnorderedAccessView(MarkedFlagsBufferRHI, false, false);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_MarkedFlags"), MaxParticleCount * sizeof(uint32), sizeof(uint32))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		MarkedFlagsBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
+		MarkedFlagsSRV = RHICmdList.CreateShaderResourceView(MarkedFlagsBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(MarkedFlagsBufferRHI));
+		MarkedFlagsUAV = RHICmdList.CreateUnorderedAccessView(MarkedFlagsBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(MarkedFlagsBufferRHI));
 	}
 
 	// Marked AABB index buffer (int per particle)
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_MarkedAABBIndex"));
-		MarkedAABBIndexBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(int32), MaxParticleCount * sizeof(int32),
-			BUF_UnorderedAccess | BUF_ShaderResource, CreateInfo);
-		MarkedAABBIndexSRV = RHICmdList.CreateShaderResourceView(MarkedAABBIndexBufferRHI);
-		MarkedAABBIndexUAV = RHICmdList.CreateUnorderedAccessView(MarkedAABBIndexBufferRHI, false, false);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_MarkedAABBIndex"), MaxParticleCount * sizeof(int32), sizeof(int32))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		MarkedAABBIndexBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
+		MarkedAABBIndexSRV = RHICmdList.CreateShaderResourceView(MarkedAABBIndexBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(MarkedAABBIndexBufferRHI));
+		MarkedAABBIndexUAV = RHICmdList.CreateUnorderedAccessView(MarkedAABBIndexBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(MarkedAABBIndexBufferRHI));
 	}
 
 	// Prefix sums buffer
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_PrefixSums"));
-		PrefixSumsBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32), MaxParticleCount * sizeof(uint32),
-			BUF_UnorderedAccess | BUF_ShaderResource, CreateInfo);
-		PrefixSumsSRV = RHICmdList.CreateShaderResourceView(PrefixSumsBufferRHI);
-		PrefixSumsUAV = RHICmdList.CreateUnorderedAccessView(PrefixSumsBufferRHI, false, false);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_PrefixSums"), MaxParticleCount * sizeof(uint32), sizeof(uint32))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		PrefixSumsBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
+		PrefixSumsSRV = RHICmdList.CreateShaderResourceView(PrefixSumsBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(PrefixSumsBufferRHI));
+		PrefixSumsUAV = RHICmdList.CreateUnorderedAccessView(PrefixSumsBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(PrefixSumsBufferRHI));
 	}
 
 	// Block sums buffer
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_BlockSums"));
-		BlockSumsBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32), NumBlocks * sizeof(uint32),
-			BUF_UnorderedAccess | BUF_ShaderResource, CreateInfo);
-		BlockSumsSRV = RHICmdList.CreateShaderResourceView(BlockSumsBufferRHI);
-		BlockSumsUAV = RHICmdList.CreateUnorderedAccessView(BlockSumsBufferRHI, false, false);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_BlockSums"), NumBlocks * sizeof(uint32), sizeof(uint32))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		BlockSumsBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
+		BlockSumsSRV = RHICmdList.CreateShaderResourceView(BlockSumsBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(BlockSumsBufferRHI));
+		BlockSumsUAV = RHICmdList.CreateUnorderedAccessView(BlockSumsBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(BlockSumsBufferRHI));
 	}
 
 	// Compacted candidates buffer (worst case: all particles)
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_CompactedCandidates"));
-		CompactedCandidatesBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(FGPUCandidateParticle), MaxParticleCount * sizeof(FGPUCandidateParticle),
-			BUF_UnorderedAccess | BUF_ShaderResource, CreateInfo);
-		CompactedCandidatesUAV = RHICmdList.CreateUnorderedAccessView(CompactedCandidatesBufferRHI, false, false);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_CompactedCandidates"), MaxParticleCount * sizeof(FGPUCandidateParticle), sizeof(FGPUCandidateParticle))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		CompactedCandidatesBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
+		CompactedCandidatesUAV = RHICmdList.CreateUnorderedAccessView(CompactedCandidatesBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(CompactedCandidatesBufferRHI));
 	}
 
 	// Total count buffer (single uint)
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_TotalCount"));
-		TotalCountBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32), sizeof(uint32),
-			BUF_UnorderedAccess | BUF_ShaderResource, CreateInfo);
-		TotalCountUAV = RHICmdList.CreateUnorderedAccessView(TotalCountBufferRHI, false, false);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_TotalCount"), sizeof(uint32), sizeof(uint32))
+			.AddUsage(BUF_UnorderedAccess | BUF_ShaderResource)
+			.SetInitialState(ERHIAccess::UAVMask);
+		TotalCountBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
+		TotalCountUAV = RHICmdList.CreateUnorderedAccessView(TotalCountBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(TotalCountBufferRHI));
 	}
 
 	// Staging buffers for readback
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_TotalCountStaging"));
-		TotalCountStagingBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(uint32), sizeof(uint32),
-			BUF_None, ERHIAccess::CopyDest, CreateInfo);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_TotalCountStaging"), sizeof(uint32), sizeof(uint32))
+			.AddUsage(BUF_None)
+			.SetInitialState(ERHIAccess::CopyDest);
+		TotalCountStagingBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 	}
 	{
-		FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_CandidatesStaging"));
-		CandidatesStagingBufferRHI = RHICmdList.CreateStructuredBuffer(
-			sizeof(FGPUCandidateParticle), MaxParticleCount * sizeof(FGPUCandidateParticle),
-			BUF_None, ERHIAccess::CopyDest, CreateInfo);
+		const FRHIBufferCreateDesc BufferDesc =
+			FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_CandidatesStaging"), MaxParticleCount * sizeof(FGPUCandidateParticle), sizeof(FGPUCandidateParticle))
+			.AddUsage(BUF_None)
+			.SetInitialState(ERHIAccess::CopyDest);
+		CandidatesStagingBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 	}
 
 	bStreamCompactionBuffersAllocated = true;
@@ -2402,11 +2399,12 @@ void FGPUFluidSimulator::ExecuteAABBFiltering(const TArray<FGPUFilterAABB>& Filt
 				Self->FilterAABBsBufferRHI.SafeRelease();
 				Self->FilterAABBsSRV.SafeRelease();
 
-				FRHIResourceCreateInfo CreateInfo(TEXT("StreamCompaction_FilterAABBs"));
-				Self->FilterAABBsBufferRHI = RHICmdList.CreateStructuredBuffer(
-					sizeof(FGPUFilterAABB), NumAABBs * sizeof(FGPUFilterAABB),
-					BUF_ShaderResource, CreateInfo);
-				Self->FilterAABBsSRV = RHICmdList.CreateShaderResourceView(Self->FilterAABBsBufferRHI);
+				const FRHIBufferCreateDesc BufferDesc =
+					FRHIBufferCreateDesc::CreateStructured(TEXT("StreamCompaction_FilterAABBs"), NumAABBs * sizeof(FGPUFilterAABB), sizeof(FGPUFilterAABB))
+					.AddUsage(BUF_ShaderResource)
+					.SetInitialState(ERHIAccess::SRVMask);
+				Self->FilterAABBsBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
+				Self->FilterAABBsSRV = RHICmdList.CreateShaderResourceView(Self->FilterAABBsBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(Self->FilterAABBsBufferRHI));
 				Self->CurrentFilterAABBCount = NumAABBs;
 			}
 
@@ -2423,7 +2421,7 @@ void FGPUFluidSimulator::ExecuteAABBFiltering(const TArray<FGPUFilterAABB>& Filt
 				FBufferRHIRef PersistentRHI = Self->PersistentParticleBuffer->GetRHI();
 				if (PersistentRHI.IsValid())
 				{
-					ParticleSRVToUse = RHICmdList.CreateShaderResourceView(PersistentRHI);
+					ParticleSRVToUse = RHICmdList.CreateShaderResourceView(PersistentRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(PersistentRHI));
 					UE_LOG(LogGPUFluidSimulator, Log, TEXT("AABB Filtering: Using PersistentParticleBuffer SRV (GPU simulation mode)"));
 				}
 			}
@@ -2655,13 +2653,11 @@ void FGPUFluidSimulator::ApplyCorrections(const TArray<FParticleCorrection>& Cor
 			}
 
 			// Create corrections buffer
-			FRHIResourceCreateInfo CreateInfo(TEXT("PerPolygonCorrections"));
-			FBufferRHIRef CorrectionsBufferRHI = RHICmdList.CreateStructuredBuffer(
-				sizeof(FParticleCorrection),
-				CorrectionCount * sizeof(FParticleCorrection),
-				BUF_ShaderResource,
-				CreateInfo
-			);
+			const FRHIBufferCreateDesc BufferDesc =
+				FRHIBufferCreateDesc::CreateStructured(TEXT("PerPolygonCorrections"), CorrectionCount * sizeof(FParticleCorrection), sizeof(FParticleCorrection))
+				.AddUsage(BUF_ShaderResource)
+				.SetInitialState(ERHIAccess::SRVMask);
+			FBufferRHIRef CorrectionsBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 
 			// Upload corrections data
 			void* CorrectionData = RHICmdList.LockBuffer(CorrectionsBufferRHI, 0,
@@ -2670,7 +2666,7 @@ void FGPUFluidSimulator::ApplyCorrections(const TArray<FParticleCorrection>& Cor
 			RHICmdList.UnlockBuffer(CorrectionsBufferRHI);
 
 			// Create SRV for corrections
-			FShaderResourceViewRHIRef CorrectionsSRV = RHICmdList.CreateShaderResourceView(CorrectionsBufferRHI);
+			FShaderResourceViewRHIRef CorrectionsSRV = RHICmdList.CreateShaderResourceView(CorrectionsBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(CorrectionsBufferRHI));
 
 			// Create UAV for particles from PersistentParticleBuffer
 			FBufferRHIRef ParticleRHI = Self->PersistentParticleBuffer->GetRHI();
@@ -2679,7 +2675,7 @@ void FGPUFluidSimulator::ApplyCorrections(const TArray<FParticleCorrection>& Cor
 				UE_LOG(LogGPUFluidSimulator, Warning, TEXT("ApplyCorrections: Failed to get ParticleRHI from PersistentParticleBuffer"));
 				return;
 			}
-			FUnorderedAccessViewRHIRef ParticlesUAV = RHICmdList.CreateUnorderedAccessView(ParticleRHI, false, false);
+			FUnorderedAccessViewRHIRef ParticlesUAV = RHICmdList.CreateUnorderedAccessView(ParticleRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(ParticleRHI));
 
 			// Dispatch ApplyCorrections compute shader
 			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
@@ -2725,13 +2721,11 @@ void FGPUFluidSimulator::ApplyAttachmentUpdates(const TArray<FAttachedParticleUp
 			}
 
 			// Create updates buffer
-			FRHIResourceCreateInfo CreateInfo(TEXT("AttachmentUpdates"));
-			FBufferRHIRef UpdatesBufferRHI = RHICmdList.CreateStructuredBuffer(
-				sizeof(FAttachedParticleUpdate),
-				UpdateCount * sizeof(FAttachedParticleUpdate),
-				BUF_ShaderResource,
-				CreateInfo
-			);
+			const FRHIBufferCreateDesc BufferDesc =
+				FRHIBufferCreateDesc::CreateStructured(TEXT("AttachmentUpdates"), UpdateCount * sizeof(FAttachedParticleUpdate), sizeof(FAttachedParticleUpdate))
+				.AddUsage(BUF_ShaderResource)
+				.SetInitialState(ERHIAccess::SRVMask);
+			FBufferRHIRef UpdatesBufferRHI = RHICmdList.CreateBuffer(BufferDesc);
 
 			// Upload updates data
 			void* UpdateData = RHICmdList.LockBuffer(UpdatesBufferRHI, 0,
@@ -2740,7 +2734,7 @@ void FGPUFluidSimulator::ApplyAttachmentUpdates(const TArray<FAttachedParticleUp
 			RHICmdList.UnlockBuffer(UpdatesBufferRHI);
 
 			// Create SRV for updates
-			FShaderResourceViewRHIRef UpdatesSRV = RHICmdList.CreateShaderResourceView(UpdatesBufferRHI);
+			FShaderResourceViewRHIRef UpdatesSRV = RHICmdList.CreateShaderResourceView(UpdatesBufferRHI, FRHIViewDesc::CreateBufferSRV().SetTypeFromBuffer(UpdatesBufferRHI));
 
 			// Create UAV for particles from PersistentParticleBuffer
 			FBufferRHIRef ParticleRHI = Self->PersistentParticleBuffer->GetRHI();
@@ -2749,7 +2743,7 @@ void FGPUFluidSimulator::ApplyAttachmentUpdates(const TArray<FAttachedParticleUp
 				UE_LOG(LogGPUFluidSimulator, Warning, TEXT("ApplyAttachmentUpdates: Failed to get ParticleRHI from PersistentParticleBuffer"));
 				return;
 			}
-			FUnorderedAccessViewRHIRef ParticlesUAV = RHICmdList.CreateUnorderedAccessView(ParticleRHI, false, false);
+			FUnorderedAccessViewRHIRef ParticlesUAV = RHICmdList.CreateUnorderedAccessView(ParticleRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(ParticleRHI));
 
 			// Dispatch ApplyAttachmentUpdates compute shader
 			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
