@@ -2879,7 +2879,7 @@ void FGPUFluidSimulator::AddAdhesionPass(
 	FRDGBufferUAVRef AttachmentUAV,
 	const FGPUFluidSimulationParams& Params)
 {
-	if (!IsAdhesionEnabled() || !bBoneTransformsValid || CachedBoneTransforms.Num() == 0)
+	if (!IsAdhesionEnabled() || !bBoneTransformsValid || CachedBoneTransforms.Num() == 0 || CurrentParticleCount <= 0)
 	{
 		return;
 	}

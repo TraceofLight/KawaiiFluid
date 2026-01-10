@@ -3,8 +3,6 @@
 #include "Rendering/Pipeline/KawaiiMetaballRayMarchPipeline.h"
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
 #include "Rendering/KawaiiFluidRenderResource.h"
-#include "GPU/GPUFluidSimulator.h"
-#include "GPU/GPUFluidSimulatorShaders.h"
 #include "GPU/FluidAnisotropyComputeShader.h"
 #include "Core/KawaiiRenderParticle.h"
 #include "Rendering/Shaders/FluidSpatialHashShaders.h"
@@ -72,287 +70,111 @@ bool FKawaiiMetaballRayMarchPipeline::PrepareParticleBuffer(
 	const FFluidRenderingParameters& RenderParams,
 	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers)
 {
-	// ========== DEBUG LOGGING ==========
-	static uint64 FrameCounter = 0;
-	static uint64 LastFrameNumber = 0;
-	static int32 CallsThisFrame = 0;
-
-	uint64 CurrentFrame = GFrameCounter;
-	if (CurrentFrame != LastFrameNumber)
-	{
-		LastFrameNumber = CurrentFrame;
-		CallsThisFrame = 0;
-	}
-	CallsThisFrame++;
-
-	//UE_LOG(LogTemp, Warning, TEXT("=== PrepareParticleBuffer [Frame %llu, Call #%d] ==="), CurrentFrame, CallsThisFrame);
-	// ====================================
-
 	// Process readback from previous frame first
 	ProcessPendingBoundsReadback();
 
-	// Phase 2: Try to use GPU buffer directly (no CPU involvement)
-	// This ensures GPU simulation results are used for SDF baking
+	// =====================================================
+	// 통합 경로: RenderResource에서 일원화된 데이터 접근
+	// GPU/CPU 모두 동일한 버퍼 사용 (ViewExtension에서 추출됨)
+	// =====================================================
 
 	float AverageParticleRadius = 10.0f;
 	float TotalRadius = 0.0f;
 	int32 ValidCount = 0;
 	int32 TotalParticleCount = 0;
 	FRDGBufferSRVRef ParticleBufferSRV = nullptr;
-	FRDGBufferSRVRef CachedGPUBoundsBufferSRV = nullptr;  // GPU bounds buffer for same-frame use
-	FRDGBufferSRVRef PhysicsBufferSRVForAnisotropy = nullptr;  // FGPUFluidParticle buffer for anisotropy
-	bool bUsingGPUBuffer = false;
-	TArray<FVector3f> AllParticlePositions; // For CPU mode bounding box calculation
+	FRDGBufferSRVRef CachedGPUBoundsBufferSRV = nullptr;
 
-	// Track processed GPU simulators to avoid duplicate rendering
-	// (same Preset = same Context = same GPUSimulator, so we only need to render once)
-	TSet<FGPUFluidSimulator*> ProcessedGPUSimulators;
+	// 중복 처리 방지를 위해 처리된 RenderResource 추적
+	TSet<FKawaiiFluidRenderResource*> ProcessedResources;
 
-	// First pass: check for GPU simulation mode and access simulator buffer directly
-	// This runs on RENDER THREAD - safe to access GPU simulator's PersistentParticleBuffer
 	for (UKawaiiFluidMetaballRenderer* Renderer : Renderers)
 	{
-		// ========== GPU SIMULATION MODE: Direct buffer access (render thread safe) ==========
-		FGPUFluidSimulator* GPUSimulator = Renderer->GetGPUSimulator();
+		if (!Renderer) continue;
 
-		// Skip if this GPUSimulator was already processed
-		// (multiple renderers with same Preset share the same GPUSimulator)
-		if (GPUSimulator && ProcessedGPUSimulators.Contains(GPUSimulator))
+		FKawaiiFluidRenderResource* RR = Renderer->GetFluidRenderResource();
+		if (!RR || !RR->IsValid()) continue;
+
+		// 이미 처리된 RenderResource는 스킵
+		if (ProcessedResources.Contains(RR))
+		{
+			continue;
+		}
+		ProcessedResources.Add(RR);
+
+		// 통합 파티클 수 가져오기
+		int32 ParticleCount = RR->GetUnifiedParticleCount();
+		if (ParticleCount <= 0)
 		{
 			continue;
 		}
 
-		UE_LOG(LogTemp, Warning, TEXT("[RayMarchPipeline] Renderer=%s, GPUSimulator=%s"),
-			*Renderer->GetName(),
-			GPUSimulator ? TEXT("VALID") : TEXT("NULL"));
-
-		if (GPUSimulator)
-		{
-			// Get the persistent particle buffer directly from GPU simulator
-			// This is thread-safe: both simulation and rendering run on render thread
-			TRefCountPtr<FRDGPooledBuffer> PhysicsPooledBuffer = GPUSimulator->GetPersistentParticleBuffer();
-			const int32 PhysicsParticleCount = GPUSimulator->GetPersistentParticleCount();
-
-			UE_LOG(LogTemp, Warning, TEXT("[RayMarchPipeline] GPU Mode: PooledValid=%d, ParticleCount=%d"),
-				PhysicsPooledBuffer.IsValid() ? 1 : 0, PhysicsParticleCount);
-
-			if (PhysicsPooledBuffer.IsValid() && PhysicsParticleCount > 0)
-			{
-				// Register the physics buffer (FGPUFluidParticle format - 64 bytes)
-				FRDGBufferRef PhysicsBuffer = GraphBuilder.RegisterExternalBuffer(
-					PhysicsPooledBuffer,
-					TEXT("GPUPhysicsParticles"));
-				FRDGBufferSRVRef PhysicsBufferSRV = GraphBuilder.CreateSRV(PhysicsBuffer);
-
-				// Store for anisotropy computation (needs FGPUFluidParticle format)
-				PhysicsBufferSRVForAnisotropy = PhysicsBufferSRV;
-
-				// Create render buffer for converted data (FKawaiiRenderParticle format - 32 bytes)
-				FRDGBufferRef RenderBuffer = GraphBuilder.CreateBuffer(
-					FRDGBufferDesc::CreateStructuredDesc(sizeof(FKawaiiRenderParticle), PhysicsParticleCount),
-					TEXT("GPURenderParticles"));
-				FRDGBufferUAVRef RenderBufferUAV = GraphBuilder.CreateUAV(RenderBuffer);
-
-				// Create bounds buffer for same-frame GPU bounds (no readback needed)
-				FRDGBufferRef GPUBoundsBuffer = GraphBuilder.CreateBuffer(
-					FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), 2),
-					TEXT("GPUParticleBounds"));
-				FRDGBufferUAVRef GPUBoundsBufferUAV = GraphBuilder.CreateUAV(GPUBoundsBuffer);
-
-				// OPTIMIZED: Single merged pass - ExtractRenderData + CalculateBounds
-				float ParticleRadius = Renderer->GetCachedParticleRadius();
-				// [FIX] Calculate accurate bounds margin based on smin support radius
-				// Formula: Padding = Smoothness + Threshold
-				// We use Smoothness + Radius (safety) to ensure no clipping occurs
-				float BoundsMargin = RenderParams.SDFSmoothness + ParticleRadius + 5.0f;
-				FGPUFluidSimulatorPassBuilder::AddExtractRenderDataWithBoundsPass(
-					GraphBuilder,
-					PhysicsBufferSRV,
-					RenderBufferUAV,
-					GPUBoundsBufferUAV,
-					PhysicsParticleCount,
-					ParticleRadius,
-					BoundsMargin);
-
-				// Create SRVs for subsequent passes
-				ParticleBufferSRV = GraphBuilder.CreateSRV(RenderBuffer);
-				TotalParticleCount = PhysicsParticleCount;
-				AverageParticleRadius = ParticleRadius;
-				bUsingGPUBuffer = true;
-
-				// Store bounds buffer SRV for SDF baking and ray marching
-				CachedGPUBoundsBufferSRV = GraphBuilder.CreateSRV(GPUBoundsBuffer);
-
-				// Create SoA Position buffer and extract directly (GPU mode optimization)
-				FRDGBufferRef PositionSoABuffer = GraphBuilder.CreateBuffer(
-					FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), PhysicsParticleCount),
-					TEXT("RenderPositionsSoA"));
-				FRDGBufferUAVRef PositionSoAUAV = GraphBuilder.CreateUAV(PositionSoABuffer);
-
-				// Velocity dummy buffer (required by AddExtractRenderDataSoAPass)
-				FRDGBufferRef VelocitySoABuffer = GraphBuilder.CreateBuffer(
-					FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), PhysicsParticleCount),
-					TEXT("RenderVelocitiesSoA"));
-				FRDGBufferUAVRef VelocitySoAUAV = GraphBuilder.CreateUAV(VelocitySoABuffer);
-
-				// Extract SoA data directly from Physics buffer (62% bandwidth reduction)
-				FGPUFluidSimulatorPassBuilder::AddExtractRenderDataSoAPass(
-					GraphBuilder,
-					PhysicsBufferSRV,
-					PositionSoAUAV,
-					VelocitySoAUAV,
-					PhysicsParticleCount,
-					ParticleRadius);
-
-				CachedPipelineData.PositionBufferSRV = GraphBuilder.CreateSRV(PositionSoABuffer);
-				CachedPipelineData.bUseSoABuffers = true;
-
-				UE_LOG(LogTemp, Verbose, TEXT("  >>> SoA Buffers extracted directly (GPU mode, %d particles)"),
-					PhysicsParticleCount);
-
-				// ========== ANISOTROPY: Get precomputed buffers from GPU Simulator ==========
-				// Anisotropy is computed during simulation (FluidAnisotropyCS), reuse those buffers
-				if (RenderParams.AnisotropyParams.bEnabled)
-				{
-					TRefCountPtr<FRDGPooledBuffer> Axis1Pooled = GPUSimulator->GetPersistentAnisotropyAxis1Buffer();
-					TRefCountPtr<FRDGPooledBuffer> Axis2Pooled = GPUSimulator->GetPersistentAnisotropyAxis2Buffer();
-					TRefCountPtr<FRDGPooledBuffer> Axis3Pooled = GPUSimulator->GetPersistentAnisotropyAxis3Buffer();
-
-					if (Axis1Pooled.IsValid() && Axis2Pooled.IsValid() && Axis3Pooled.IsValid())
-					{
-						FRDGBufferRef Axis1Buffer = GraphBuilder.RegisterExternalBuffer(Axis1Pooled, TEXT("AnisotropyAxis1"));
-						FRDGBufferRef Axis2Buffer = GraphBuilder.RegisterExternalBuffer(Axis2Pooled, TEXT("AnisotropyAxis2"));
-						FRDGBufferRef Axis3Buffer = GraphBuilder.RegisterExternalBuffer(Axis3Pooled, TEXT("AnisotropyAxis3"));
-
-						CachedPipelineData.AnisotropyData.bUseAnisotropy = true;
-						CachedPipelineData.AnisotropyData.AnisotropyAxis1SRV = GraphBuilder.CreateSRV(Axis1Buffer);
-						CachedPipelineData.AnisotropyData.AnisotropyAxis2SRV = GraphBuilder.CreateSRV(Axis2Buffer);
-						CachedPipelineData.AnisotropyData.AnisotropyAxis3SRV = GraphBuilder.CreateSRV(Axis3Buffer);
-
-						UE_LOG(LogTemp, Verbose, TEXT("  >>> ANISOTROPY: Buffers from GPUSimulator (ellipsoid rendering enabled)"));
-					}
-					else
-					{
-						UE_LOG(LogTemp, Warning, TEXT("  >>> ANISOTROPY: Buffers not ready yet (disabled for this frame)"));
-						CachedPipelineData.AnisotropyData.Reset();
-					}
-				}
-				else
-				{
-					CachedPipelineData.AnisotropyData.Reset();
-				}
-
-				UE_LOG(LogTemp, Verbose, TEXT("  >>> GPU MODE: ExtractRenderData+Bounds MERGED (%d particles, radius: %.2f)"),
-					TotalParticleCount, ParticleRadius);
-
-				// Mark this GPUSimulator as processed (continue to check other renderers)
-				ProcessedGPUSimulators.Add(GPUSimulator);
-			}
-			else
-			{
-				// GPU mode but buffer not ready yet - skip rendering this frame
-				UE_LOG(LogTemp, Warning, TEXT("  >>> GPU MODE - BUFFER NOT READY YET"));
-				CachedPipelineData.Reset();
-				return false;
-			}
-		}
-
-		// ========== CPU SIMULATION MODE: Fall through to RenderResource path ==========
-		FKawaiiFluidRenderResource* RenderResource = Renderer->GetFluidRenderResource();
-
-		// DEBUG: Log buffer state
-		if (RenderResource)
-		{
-			int32 CachedCount = RenderResource->GetCachedParticles().Num();
-
-			UE_LOG(LogTemp, Warning, TEXT("  RenderResource (CPU mode): CachedCount=%d"), CachedCount);
-
-			if (CachedCount > 0)
-			{
-				const FKawaiiRenderParticle& FirstCached = RenderResource->GetCachedParticles()[0];
-				UE_LOG(LogTemp, Warning, TEXT("  -> CachedParticle[0] Position: (%.1f, %.1f, %.1f)"),
-					FirstCached.Position.X, FirstCached.Position.Y, FirstCached.Position.Z);
-			}
-		}
-
-		TotalRadius += Renderer->GetCachedParticleRadius();
+		float ParticleRadius = RR->GetUnifiedParticleRadius();
+		TotalRadius += ParticleRadius;
 		ValidCount++;
-	}
 
-	// CPU mode fallback: use CPU cache
-	// Note: If we reach here, we're definitely NOT in GPU mode
-	// (GPU mode would have returned early with buffer or "not ready")
-	if (!bUsingGPUBuffer)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("  >>> USING CPU CACHE (CPU simulation mode)"));
+		// =====================================================
+		// 통합 경로: RenderResource에서 버퍼 가져오기
+		// GPU/CPU 모두 ViewExtension에서 버퍼 생성됨
+		// =====================================================
+		TRefCountPtr<FRDGPooledBuffer> RenderParticlePooled = RR->GetPooledRenderParticleBuffer();
+		TRefCountPtr<FRDGPooledBuffer> BoundsPooled = RR->GetPooledBoundsBuffer();
+		TRefCountPtr<FRDGPooledBuffer> PositionPooled = RR->GetPooledPositionBuffer();
 
-		TArray<FKawaiiRenderParticle> AllParticles;
-
-		for (UKawaiiFluidMetaballRenderer* Renderer : Renderers)
+		// ViewExtension에서 버퍼가 생성되지 않았으면 스킵
+		if (!RenderParticlePooled.IsValid() || !BoundsPooled.IsValid() || !PositionPooled.IsValid())
 		{
-			FKawaiiFluidRenderResource* RenderResource = Renderer->GetFluidRenderResource();
-			if (RenderResource && RenderResource->IsValid())
-			{
-				const TArray<FKawaiiRenderParticle>& CachedParticles = RenderResource->GetCachedParticles();
-				AllParticles.Append(CachedParticles);
-
-				// Log first cached particle position
-				if (CachedParticles.Num() > 0)
-				{
-					UE_LOG(LogTemp, Warning, TEXT("  CPU Fallback using %d cached particles, First: (%.1f, %.1f, %.1f)"),
-						CachedParticles.Num(),
-						CachedParticles[0].Position.X,
-						CachedParticles[0].Position.Y,
-						CachedParticles[0].Position.Z);
-				}
-			}
+			UE_LOG(LogTemp, Warning, TEXT("[RayMarchPipeline] Buffers not ready for Renderer=%s"), *Renderer->GetName());
+			continue;
 		}
 
-		if (AllParticles.Num() == 0)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballRayMarchPipeline: No particles - skipping"));
-			CachedPipelineData.Reset();
-			return false;
-		}
+		bool bIsGPUMode = RR->HasGPUSimulator();
+		UE_LOG(LogTemp, Verbose, TEXT("[RayMarchPipeline] Renderer=%s, Mode=%s, ParticleCount=%d"),
+			*Renderer->GetName(),
+			bIsGPUMode ? TEXT("GPU") : TEXT("CPU"),
+			ParticleCount);
 
-		// Extract positions for bounding box calculation (CPU mode only)
-		AllParticlePositions.Reserve(AllParticles.Num());
-		for (const FKawaiiRenderParticle& Particle : AllParticles)
-		{
-			AllParticlePositions.Add(Particle.Position);
-		}
+		// Register buffers (GPU/CPU 공통)
+		FRDGBufferRef RenderParticleBuffer = GraphBuilder.RegisterExternalBuffer(
+			RenderParticlePooled, TEXT("RenderParticles_FromRR"));
+		FRDGBufferRef BoundsBuffer = GraphBuilder.RegisterExternalBuffer(
+			BoundsPooled, TEXT("ParticleBounds_FromRR"));
+		FRDGBufferRef PositionBuffer = GraphBuilder.RegisterExternalBuffer(
+			PositionPooled, TEXT("PositionsSoA_FromRR"));
 
-		// Create RDG buffer for particles (FKawaiiRenderParticle format)
-		const uint32 BufferSize = AllParticles.Num() * sizeof(FKawaiiRenderParticle);
-		FRDGBufferRef ParticleBuffer = GraphBuilder.CreateBuffer(
-			FRDGBufferDesc::CreateStructuredDesc(sizeof(FKawaiiRenderParticle), AllParticles.Num()),
-			TEXT("RayMarchRenderParticles"));
-
-		GraphBuilder.QueueBufferUpload(
-			ParticleBuffer,
-			AllParticles.GetData(),
-			BufferSize,
-			ERDGInitialDataFlags::None);
-
-		ParticleBufferSRV = GraphBuilder.CreateSRV(ParticleBuffer);
-		TotalParticleCount = AllParticles.Num();
-
-		// ========== CPU 모드 SoA 버퍼 생성 ==========
-		FRDGBufferRef PositionBuffer = GraphBuilder.CreateBuffer(
-			FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), AllParticlePositions.Num()),
-			TEXT("CPUModePositionsSoA"));
-
-		GraphBuilder.QueueBufferUpload(
-			PositionBuffer,
-			AllParticlePositions.GetData(),
-			AllParticlePositions.Num() * sizeof(FVector3f),
-			ERDGInitialDataFlags::None);
-
+		ParticleBufferSRV = GraphBuilder.CreateSRV(RenderParticleBuffer);
+		CachedGPUBoundsBufferSRV = GraphBuilder.CreateSRV(BoundsBuffer);
 		CachedPipelineData.PositionBufferSRV = GraphBuilder.CreateSRV(PositionBuffer);
 		CachedPipelineData.bUseSoABuffers = true;
 
-		// CPU mode doesn't support anisotropy (requires GPU simulation)
-		CachedPipelineData.AnisotropyData.Reset();
+		TotalParticleCount = ParticleCount;
+		AverageParticleRadius = ParticleRadius;
+
+		// Anisotropy (GPU 모드에서만 유효)
+		if (RenderParams.AnisotropyParams.bEnabled && bIsGPUMode)
+		{
+			FRDGBufferSRVRef Axis1SRV, Axis2SRV, Axis3SRV;
+			bool bHasAnisotropy = RR->GetAnisotropyBufferSRVs(GraphBuilder, Axis1SRV, Axis2SRV, Axis3SRV);
+
+			if (bHasAnisotropy)
+			{
+				CachedPipelineData.AnisotropyData.bUseAnisotropy = true;
+				CachedPipelineData.AnisotropyData.AnisotropyAxis1SRV = Axis1SRV;
+				CachedPipelineData.AnisotropyData.AnisotropyAxis2SRV = Axis2SRV;
+				CachedPipelineData.AnisotropyData.AnisotropyAxis3SRV = Axis3SRV;
+				UE_LOG(LogTemp, Verbose, TEXT("  >>> ANISOTROPY: Enabled via RenderResource"));
+			}
+			else
+			{
+				CachedPipelineData.AnisotropyData.Reset();
+			}
+		}
+		else
+		{
+			CachedPipelineData.AnisotropyData.Reset();
+		}
+
+		UE_LOG(LogTemp, Verbose, TEXT("  >>> Using unified buffers from RenderResource (%d particles)"), ParticleCount);
 	}
 
 	if (ValidCount > 0)
@@ -457,9 +279,10 @@ bool FKawaiiMetaballRayMarchPipeline::PrepareParticleBuffer(
 		FRDGBufferSRVRef ParticleIndicesSRV = CachedPipelineData.SpatialHashData.bUseSpatialHash ? CachedPipelineData.SpatialHashData.ParticleIndicesSRV : nullptr;
 		float SpatialHashCellSize = CachedPipelineData.SpatialHashData.bUseSpatialHash ? CachedPipelineData.SpatialHashData.CellSize : 0.0f;
 
-		if (bUsingGPUBuffer && CachedGPUBoundsBufferSRV)
+		// 통합 경로: GPU/CPU 모두 BoundsBuffer 사용
+		if (CachedGPUBoundsBufferSRV)
 		{
-			// GPU MODE: Use bounds from GPU buffer directly (no readback latency!)
+			// Use bounds from GPU buffer directly (no readback latency!)
 			// Both SDF Bake and Ray March will read bounds from the same GPU buffer
 			SDFVolumeSRV = SDFVolumeManager.BakeSDFVolumeWithGPUBoundsDirect(
 				GraphBuilder,
@@ -479,27 +302,14 @@ bool FKawaiiMetaballRayMarchPipeline::PrepareParticleBuffer(
 			VolumeMax = FVector3f(500.0f, 500.0f, 500.0f);
 			bUseGPUBoundsForRayMarch = true;
 
-			UE_LOG(LogTemp, Verbose, TEXT("GPU Mode: SDF Bake + Ray March using GPU bounds buffer (zero latency)"));
+			UE_LOG(LogTemp, Verbose, TEXT("SDF Bake + Ray March using GPU bounds buffer (zero latency)"));
 		}
 		else
 		{
-			// CPU mode: Calculate bounds from particle positions
-			float Margin = AverageParticleRadius * 2.0f;
-			CalculateParticleBoundingBox(AllParticlePositions, AverageParticleRadius, Margin, VolumeMin, VolumeMax);
-
-			// Bake SDF volume using compute shader (CPU bounds path)
-			SDFVolumeSRV = SDFVolumeManager.BakeSDFVolume(
-				GraphBuilder,
-				ParticleBufferSRV,
-				TotalParticleCount,
-				AverageParticleRadius,
-				RenderParams.SDFSmoothness,
-				VolumeMin,
-				VolumeMax,
-				CachedPipelineData.PositionBufferSRV,
-				CellDataSRV,
-				ParticleIndicesSRV,
-				SpatialHashCellSize);
+			// BoundsBuffer가 없으면 스킵 (ViewExtension에서 생성되어야 함)
+			UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid: BoundsBuffer not ready, skipping SDF bake"));
+			CachedPipelineData.Reset();
+			return false;
 		}
 
 		// Store SDF volume data

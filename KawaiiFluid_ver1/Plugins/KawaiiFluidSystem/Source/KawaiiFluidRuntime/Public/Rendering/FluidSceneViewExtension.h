@@ -24,6 +24,12 @@ public:
 	virtual void BeginRenderViewFamily(FSceneViewFamily& InViewFamily) override;
 
 	/**
+	 * 렌더 스레드에서 ViewFamily 렌더링 전에 호출
+	 * GPU 시뮬레이터에서 RenderResource로 데이터 추출 수행
+	 */
+	virtual void PreRenderViewFamily_RenderThread(FRDGBuilder& GraphBuilder, FSceneViewFamily& InViewFamily) override;
+
+	/**
 	 * PostProcessing Pass 구독
 	 * Tonemap: Custom mode (post-lighting)
 	 */

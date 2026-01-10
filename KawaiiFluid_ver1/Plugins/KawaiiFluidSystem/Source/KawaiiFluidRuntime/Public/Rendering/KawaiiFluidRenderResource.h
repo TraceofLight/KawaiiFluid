@@ -9,6 +9,10 @@
 #include "Core/KawaiiRenderParticle.h"
 #include <atomic>
 
+// Forward declaration
+class FGPUFluidSimulator;
+class FRDGBuilder;
+
 /**
  * 유체 입자 데이터를 GPU 버퍼로 관리하는 렌더 리소스
  * CPU 시뮬레이션 데이터를 GPU에 업로드하여 Niagara/SSFR에서 사용 가능하게 함
@@ -121,6 +125,105 @@ public:
 		return PooledPositionBuffer.IsValid() && ParticleCount > 0 && bBufferReadyForRendering.load();
 	}
 
+	//========================================
+	// 통합 인터페이스 (CPU/GPU 일원화)
+	// - 렌더 스레드에서 호출
+	// - 모드에 따라 적절한 버퍼 반환
+	//========================================
+
+	/**
+	 * GPU 시뮬레이터 참조 설정 (게임 스레드에서 호출)
+	 * GPU 모드에서 렌더 스레드가 직접 시뮬레이터 버퍼에 접근할 수 있도록 함
+	 * @param InSimulator GPU 시뮬레이터 참조 (nullptr이면 CPU 모드)
+	 * @param InParticleCount GPU 파티클 수
+	 * @param InParticleRadius 파티클 반경
+	 */
+	void SetGPUSimulatorReference(FGPUFluidSimulator* InSimulator, int32 InParticleCount, float InParticleRadius);
+
+	/** GPU 시뮬레이터 참조 해제 (CPU 모드로 전환) */
+	void ClearGPUSimulatorReference();
+
+	/** 현재 GPU 시뮬레이터 참조 반환 */
+	FGPUFluidSimulator* GetGPUSimulator() const { return CachedGPUSimulator; }
+
+	/** GPU 시뮬레이터 모드인지 확인 */
+	bool HasGPUSimulator() const { return CachedGPUSimulator != nullptr; }
+
+	/**
+	 * 통합 파티클 수 반환 (렌더 스레드에서 호출)
+	 * GPU 모드: GPU 시뮬레이터의 파티클 수
+	 * CPU 모드: 캐시된 파티클 수
+	 */
+	int32 GetUnifiedParticleCount() const;
+
+	/**
+	 * 통합 파티클 반경 반환
+	 */
+	float GetUnifiedParticleRadius() const { return CachedParticleRadius; }
+
+	/**
+	 * Physics 버퍼 SRV 반환 (렌더 스레드에서 호출)
+	 * GPU 모드: GPUSimulator의 PersistentParticleBuffer (FGPUFluidParticle 형식)
+	 * CPU 모드: nullptr (Physics 버퍼 없음)
+	 * @param GraphBuilder RDG 빌더
+	 * @return Physics 버퍼 SRV 또는 nullptr
+	 */
+	FRDGBufferSRVRef GetPhysicsBufferSRV(FRDGBuilder& GraphBuilder) const;
+
+	/**
+	 * Anisotropy Axis 버퍼들 반환 (GPU 모드에서만 유효)
+	 * @param GraphBuilder RDG 빌더
+	 * @param OutAxis1SRV Axis1 버퍼 SRV
+	 * @param OutAxis2SRV Axis2 버퍼 SRV
+	 * @param OutAxis3SRV Axis3 버퍼 SRV
+	 * @return Anisotropy 버퍼가 유효하면 true
+	 */
+	bool GetAnisotropyBufferSRVs(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferSRVRef& OutAxis1SRV,
+		FRDGBufferSRVRef& OutAxis2SRV,
+		FRDGBufferSRVRef& OutAxis3SRV) const;
+
+	/** Anisotropy가 활성화되어 있는지 확인 */
+	bool IsAnisotropyEnabled() const;
+
+	//========================================
+	// Bounds 데이터 (SDF 볼륨용)
+	//========================================
+
+	/**
+	 * GPU Bounds 버퍼 설정 (렌더 스레드에서 호출)
+	 * ViewExtension에서 ExtractRenderDataWithBoundsPass 후 설정
+	 */
+	void SetBoundsBuffer(TRefCountPtr<FRDGPooledBuffer> InBoundsBuffer);
+
+	/** GPU Bounds 버퍼 반환 */
+	TRefCountPtr<FRDGPooledBuffer> GetPooledBoundsBuffer() const { return PooledBoundsBuffer; }
+
+	/** Bounds 버퍼가 유효한지 확인 */
+	bool HasValidBoundsBuffer() const { return PooledBoundsBuffer.IsValid(); }
+
+	/**
+	 * FKawaiiRenderParticle 버퍼 설정 (렌더 스레드에서 호출)
+	 * ViewExtension에서 ExtractRenderDataPass 후 설정
+	 */
+	void SetRenderParticleBuffer(TRefCountPtr<FRDGPooledBuffer> InBuffer);
+
+	/** FKawaiiRenderParticle 버퍼 반환 (SDF iteration용) */
+	TRefCountPtr<FRDGPooledBuffer> GetPooledRenderParticleBuffer() const { return PooledRenderParticleBuffer; }
+
+	/** Bounds 버퍼 포인터 반환 (QueueBufferExtraction용) */
+	TRefCountPtr<FRDGPooledBuffer>* GetPooledBoundsBufferPtr() { return &PooledBoundsBuffer; }
+
+	/** RenderParticle 버퍼 포인터 반환 (QueueBufferExtraction용) */
+	TRefCountPtr<FRDGPooledBuffer>* GetPooledRenderParticleBufferPtr() { return &PooledRenderParticleBuffer; }
+
+	/** Position 버퍼 포인터 반환 (QueueBufferExtraction용) */
+	TRefCountPtr<FRDGPooledBuffer>* GetPooledPositionBufferPtr() { return &PooledPositionBuffer; }
+
+	/** Velocity 버퍼 포인터 반환 (QueueBufferExtraction용) */
+	TRefCountPtr<FRDGPooledBuffer>* GetPooledVelocityBufferPtr() { return &PooledVelocityBuffer; }
+
 private:
 	//========================================
 	// GPU 리소스
@@ -148,6 +251,12 @@ private:
 	/** Velocity 전용 버퍼 (float3 * N, 12B each) - 모션블러용 */
 	TRefCountPtr<FRDGPooledBuffer> PooledVelocityBuffer;
 
+	/** Bounds 버퍼 (float3 * 2: Min, Max) - SDF 볼륨 범위 */
+	TRefCountPtr<FRDGPooledBuffer> PooledBoundsBuffer;
+
+	/** FKawaiiRenderParticle 버퍼 (SDF iteration용) */
+	TRefCountPtr<FRDGPooledBuffer> PooledRenderParticleBuffer;
+
 	/** 현재 버퍼에 저장된 파티클 수 */
 	int32 ParticleCount;
 
@@ -159,6 +268,23 @@ private:
 
 	/** Flag indicating GPU mode is active (UpdateFromGPUBuffer was called) */
 	std::atomic<bool> bIsInGPUMode{false};
+
+	//========================================
+	// GPU 시뮬레이터 참조 (통합 인터페이스용)
+	//========================================
+
+	/**
+	 * GPU 시뮬레이터 참조 (렌더 스레드에서 직접 버퍼 접근용)
+	 * 게임 스레드에서 설정, 렌더 스레드에서 읽기
+	 * nullptr이면 CPU 모드
+	 */
+	std::atomic<FGPUFluidSimulator*> CachedGPUSimulator{nullptr};
+
+	/** GPU 모드에서 캐시된 파티클 수 */
+	std::atomic<int32> CachedGPUParticleCount{0};
+
+	/** 캐시된 파티클 반경 (GPU/CPU 공용) */
+	std::atomic<float> CachedParticleRadius{10.0f};
 
 	//========================================
 	// CPU 측 데이터 캐시 (게임 스레드)

@@ -214,9 +214,8 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 	}
 
 	// =====================================================
-	// Phase 2: Check if GPU simulation is active
-	// If active, store simulator reference for render thread direct access
-	// NO game thread buffer access - eliminates race condition!
+	// GPU/CPU 통합 경로: RenderResource에 시뮬레이터 참조 설정
+	// 렌더 스레드에서 RenderResource를 통해 일원화된 접근 가능
 	// =====================================================
 	if (DataProvider->IsGPUSimulationActive())
 	{
@@ -224,15 +223,17 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 
 		if (Simulator)
 		{
-			// Store simulator reference for render thread access
-			// The Pipeline (on render thread) will directly access Simulator->GetPersistentParticleBuffer()
-			CachedGPUSimulator = Simulator;
-
 			// Update anisotropy parameters to GPU simulator
 			Simulator->SetAnisotropyParams(GetLocalParameters().AnisotropyParams);
 
 			// Get particle count (atomic, thread-safe read)
 			const int32 GPUParticleCount = Simulator->GetPersistentParticleCount();
+
+			// 렌더 스레드에서 RenderResource를 통해 GPU 버퍼에 접근
+			if (RenderResource.IsValid())
+			{
+				RenderResource->SetGPUSimulatorReference(Simulator, GPUParticleCount, RenderRadius);
+			}
 
 			// Update stats
 			LastRenderedParticleCount = FMath::Min(GPUParticleCount, MaxRenderParticles);
@@ -245,7 +246,7 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 			static int32 FrameCounter = 0;
 			if (++FrameCounter % 60 == 0)
 			{
-				UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: GPU mode active - simulator reference set (%d particles, radius: %.2f)"),
+				UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: GPU mode - RenderResource에 시뮬레이터 참조 설정 (%d particles, radius: %.2f)"),
 					GPUParticleCount, RenderRadius);
 			}
 
@@ -254,8 +255,11 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 		}
 	}
 
-	// Clear GPU simulator reference when not in GPU mode
-	CachedGPUSimulator = nullptr;
+	// CPU 모드: GPU 시뮬레이터 참조 해제
+	if (RenderResource.IsValid())
+	{
+		RenderResource->ClearGPUSimulatorReference();
+	}
 
 	// =====================================================
 	// CPU path: Traditional CPU → GPU upload

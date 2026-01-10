@@ -9,6 +9,7 @@
 #include "ShaderParameterUtils.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "GPU/GPUFluidParticle.h"
+#include "GPU/GPUFluidSimulator.h"
 
 FKawaiiFluidRenderResource::FKawaiiFluidRenderResource()
 	: ParticleCount(0)
@@ -60,96 +61,33 @@ void FKawaiiFluidRenderResource::UpdateParticleData(const TArray<FKawaiiRenderPa
 	if (NewCount == 0)
 	{
 		ParticleCount = 0;
-		CachedParticles.Empty();  // ✅ 캐시 비우기
+		CachedParticles.Empty();
+		bBufferReadyForRendering.store(false);
 		return;
 	}
 
-	// ✅ CPU 측 캐시 업데이트 (게임 스레드)
+	// CPU 측 캐시 업데이트 (게임 스레드)
+	// ViewExtension에서 렌더 스레드에서 GPU 버퍼로 업로드됨
 	CachedParticles = InParticles;
+	CachedParticleRadius.store(InParticles[0].Radius);
 
-	// 데이터 복사 (렌더 스레드로 전달하기 위해)
-	TArray<FKawaiiRenderParticle> ParticlesCopy = InParticles;
+	// 버퍼 크기 조정 필요 시 렌더 스레드에서 ResizeBuffer 호출
+	const bool bNeedsResizeNow = NeedsResize(NewCount);
+	if (bNeedsResizeNow)
+	{
+		FKawaiiFluidRenderResource* RenderResource = this;
 
-	// 렌더 스레드로 전송
-	FKawaiiFluidRenderResource* RenderResource = this;
-	ENQUEUE_RENDER_COMMAND(UpdateFluidParticleBuffer)(
-		[RenderResource, ParticlesCopy, NewCount](FRHICommandListImmediate& RHICmdList)
-		{
-			// 버퍼 크기 조정 필요 시 재생성
-			if (RenderResource->NeedsResize(NewCount))
+		ENQUEUE_RENDER_COMMAND(ResizeBufferForCPUMode)(
+			[RenderResource, NewCount](FRHICommandListImmediate& RHICmdList)
 			{
 				int32 NewCapacity = FMath::Max(NewCount, RenderResource->BufferCapacity * 2);
 				RenderResource->ResizeBuffer(RHICmdList, NewCapacity);
 			}
+		);
+	}
 
-			// GPU 버퍼에 데이터 업로드
-			if (RenderResource->ParticleBuffer.IsValid())
-			{
-				// 상태 전환: SRVMask → CopyDest
-				RHICmdList.Transition(FRHITransitionInfo(
-					RenderResource->ParticleBuffer,
-					ERHIAccess::SRVMask,
-					ERHIAccess::CopyDest
-				));
-
-				void* BufferData = RHICmdList.LockBuffer(
-					RenderResource->ParticleBuffer,
-					0,
-					NewCount * sizeof(FKawaiiRenderParticle),
-					RLM_WriteOnly
-				);
-
-				FMemory::Memcpy(BufferData, ParticlesCopy.GetData(), NewCount * sizeof(FKawaiiRenderParticle));
-
-				RHICmdList.UnlockBuffer(RenderResource->ParticleBuffer);
-
-				// 상태 전환: CopyDest → SRVMask
-				RHICmdList.Transition(FRHITransitionInfo(
-					RenderResource->ParticleBuffer,
-					ERHIAccess::CopyDest,
-					ERHIAccess::SRVMask
-				));
-			}
-
-			// ========== SoA Position 버퍼 업로드 (12B per particle) ==========
-			if (RenderResource->PooledPositionBuffer.IsValid())
-			{
-				FBufferRHIRef PosBuffer = RenderResource->PooledPositionBuffer->GetRHI();
-				if (PosBuffer.IsValid())
-				{
-					RHICmdList.Transition(FRHITransitionInfo(
-						PosBuffer,
-						ERHIAccess::SRVMask,
-						ERHIAccess::CopyDest
-					));
-
-					void* PosData = RHICmdList.LockBuffer(
-						PosBuffer,
-						0,
-						NewCount * sizeof(FVector3f),
-						RLM_WriteOnly
-					);
-
-					// Position만 추출해서 복사
-					FVector3f* PosPtr = static_cast<FVector3f*>(PosData);
-					for (int32 i = 0; i < NewCount; ++i)
-					{
-						PosPtr[i] = ParticlesCopy[i].Position;
-					}
-
-					RHICmdList.UnlockBuffer(PosBuffer);
-
-					RHICmdList.Transition(FRHITransitionInfo(
-						PosBuffer,
-						ERHIAccess::CopyDest,
-						ERHIAccess::SRVMask
-					));
-				}
-			}
-
-			RenderResource->ParticleCount = NewCount;
-		}
-	);
+	// ParticleCount는 ViewExtension에서 설정됨
+	// 여기서는 캐시만 업데이트
 }
 
 bool FKawaiiFluidRenderResource::NeedsResize(int32 NewCount) const
@@ -179,6 +117,10 @@ void FKawaiiFluidRenderResource::ResizeBuffer(FRHICommandListBase& RHICmdList, i
 	// SoA 버퍼 해제
 	PooledPositionBuffer.SafeRelease();
 	PooledVelocityBuffer.SafeRelease();
+
+	// Bounds/RenderParticle 버퍼 해제
+	PooledBoundsBuffer.SafeRelease();
+	PooledRenderParticleBuffer.SafeRelease();
 
 	BufferCapacity = NewCapacity;
 
@@ -225,6 +167,28 @@ void FKawaiiFluidRenderResource::ResizeBuffer(FRHICommandListBase& RHICmdList, i
 	FRDGBufferUAVRef VelocityUAV = GraphBuilder.CreateUAV(VelocityRDGBuffer);
 	AddClearUAVPass(GraphBuilder, VelocityUAV, 0u);
 	GraphBuilder.QueueBufferExtraction(VelocityRDGBuffer, &PooledVelocityBuffer, ERHIAccess::SRVMask);
+
+	//========================================
+	// Bounds 버퍼 (float3 * 2 = Min, Max)
+	//========================================
+	FRDGBufferDesc BoundsBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), 2);
+	BoundsBufferDesc.Usage |= EBufferUsageFlags::UnorderedAccess;
+	FRDGBufferRef BoundsRDGBuffer = GraphBuilder.CreateBuffer(BoundsBufferDesc, TEXT("ParticleBounds"));
+
+	FRDGBufferUAVRef BoundsUAV = GraphBuilder.CreateUAV(BoundsRDGBuffer);
+	AddClearUAVPass(GraphBuilder, BoundsUAV, 0u);
+	GraphBuilder.QueueBufferExtraction(BoundsRDGBuffer, &PooledBoundsBuffer, ERHIAccess::SRVMask);
+
+	//========================================
+	// RenderParticle 버퍼 (FKawaiiRenderParticle)
+	//========================================
+	FRDGBufferDesc RenderParticleBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FKawaiiRenderParticle), NewCapacity);
+	RenderParticleBufferDesc.Usage |= EBufferUsageFlags::UnorderedAccess;
+	FRDGBufferRef RenderParticleRDGBuffer = GraphBuilder.CreateBuffer(RenderParticleBufferDesc, TEXT("RenderParticlesSDF"));
+
+	FRDGBufferUAVRef RenderParticleUAV = GraphBuilder.CreateUAV(RenderParticleRDGBuffer);
+	AddClearUAVPass(GraphBuilder, RenderParticleUAV, 0u);
+	GraphBuilder.QueueBufferExtraction(RenderParticleRDGBuffer, &PooledRenderParticleBuffer, ERHIAccess::SRVMask);
 
 	GraphBuilder.Execute();
 
@@ -372,4 +336,146 @@ void FKawaiiFluidRenderResource::UpdateFromGPUBuffer(
 			}
 		}
 	);
+}
+
+//========================================
+// 통합 인터페이스 구현 (CPU/GPU 일원화)
+//========================================
+
+void FKawaiiFluidRenderResource::SetGPUSimulatorReference(
+	FGPUFluidSimulator* InSimulator,
+	int32 InParticleCount,
+	float InParticleRadius)
+{
+	CachedGPUSimulator.store(InSimulator);
+	CachedGPUParticleCount.store(InParticleCount);
+	CachedParticleRadius.store(InParticleRadius);
+
+	if (InSimulator)
+	{
+		bIsInGPUMode.store(true);
+
+		// GPU 모드에서는 CPU 캐시 비우기
+		if (CachedParticles.Num() > 0)
+		{
+			CachedParticles.Empty();
+		}
+
+		// 버퍼 크기 조정 필요 시 렌더 스레드에서 ResizeBuffer 호출
+		const bool bNeedsResizeNow = NeedsResize(InParticleCount);
+		if (bNeedsResizeNow)
+		{
+			FKawaiiFluidRenderResource* RenderResource = this;
+			const int32 NewCount = InParticleCount;
+
+			ENQUEUE_RENDER_COMMAND(ResizeBufferForGPUMode)(
+				[RenderResource, NewCount](FRHICommandListImmediate& RHICmdList)
+				{
+					int32 NewCapacity = FMath::Max(NewCount, RenderResource->BufferCapacity * 2);
+					RenderResource->ResizeBuffer(RHICmdList, NewCapacity);
+				}
+			);
+		}
+	}
+}
+
+void FKawaiiFluidRenderResource::ClearGPUSimulatorReference()
+{
+	CachedGPUSimulator.store(nullptr);
+	CachedGPUParticleCount.store(0);
+	bIsInGPUMode.store(false);
+}
+
+int32 FKawaiiFluidRenderResource::GetUnifiedParticleCount() const
+{
+	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	if (Simulator)
+	{
+		// GPU 모드: 시뮬레이터에서 최신 파티클 수 가져오기
+		return Simulator->GetPersistentParticleCount();
+	}
+	else
+	{
+		// CPU 모드: 캐시된 파티클 수
+		return CachedParticles.Num();
+	}
+}
+
+FRDGBufferSRVRef FKawaiiFluidRenderResource::GetPhysicsBufferSRV(FRDGBuilder& GraphBuilder) const
+{
+	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	if (!Simulator)
+	{
+		return nullptr;
+	}
+
+	TRefCountPtr<FRDGPooledBuffer> PhysicsPooledBuffer = Simulator->GetPersistentParticleBuffer();
+	if (!PhysicsPooledBuffer.IsValid())
+	{
+		return nullptr;
+	}
+
+	FRDGBufferRef PhysicsBuffer = GraphBuilder.RegisterExternalBuffer(
+		PhysicsPooledBuffer,
+		TEXT("UnifiedPhysicsParticles")
+	);
+	return GraphBuilder.CreateSRV(PhysicsBuffer);
+}
+
+bool FKawaiiFluidRenderResource::GetAnisotropyBufferSRVs(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferSRVRef& OutAxis1SRV,
+	FRDGBufferSRVRef& OutAxis2SRV,
+	FRDGBufferSRVRef& OutAxis3SRV) const
+{
+	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	if (!Simulator || !Simulator->IsAnisotropyEnabled())
+	{
+		OutAxis1SRV = nullptr;
+		OutAxis2SRV = nullptr;
+		OutAxis3SRV = nullptr;
+		return false;
+	}
+
+	TRefCountPtr<FRDGPooledBuffer> Axis1Pooled = Simulator->GetPersistentAnisotropyAxis1Buffer();
+	TRefCountPtr<FRDGPooledBuffer> Axis2Pooled = Simulator->GetPersistentAnisotropyAxis2Buffer();
+	TRefCountPtr<FRDGPooledBuffer> Axis3Pooled = Simulator->GetPersistentAnisotropyAxis3Buffer();
+
+	if (!Axis1Pooled.IsValid() || !Axis2Pooled.IsValid() || !Axis3Pooled.IsValid())
+	{
+		OutAxis1SRV = nullptr;
+		OutAxis2SRV = nullptr;
+		OutAxis3SRV = nullptr;
+		return false;
+	}
+
+	FRDGBufferRef Axis1Buffer = GraphBuilder.RegisterExternalBuffer(Axis1Pooled, TEXT("UnifiedAnisotropyAxis1"));
+	FRDGBufferRef Axis2Buffer = GraphBuilder.RegisterExternalBuffer(Axis2Pooled, TEXT("UnifiedAnisotropyAxis2"));
+	FRDGBufferRef Axis3Buffer = GraphBuilder.RegisterExternalBuffer(Axis3Pooled, TEXT("UnifiedAnisotropyAxis3"));
+
+	OutAxis1SRV = GraphBuilder.CreateSRV(Axis1Buffer);
+	OutAxis2SRV = GraphBuilder.CreateSRV(Axis2Buffer);
+	OutAxis3SRV = GraphBuilder.CreateSRV(Axis3Buffer);
+
+	return true;
+}
+
+bool FKawaiiFluidRenderResource::IsAnisotropyEnabled() const
+{
+	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	return Simulator && Simulator->IsAnisotropyEnabled();
+}
+
+//========================================
+// Bounds 및 RenderParticle 버퍼 관리
+//========================================
+
+void FKawaiiFluidRenderResource::SetBoundsBuffer(TRefCountPtr<FRDGPooledBuffer> InBoundsBuffer)
+{
+	PooledBoundsBuffer = InBoundsBuffer;
+}
+
+void FKawaiiFluidRenderResource::SetRenderParticleBuffer(TRefCountPtr<FRDGPooledBuffer> InBuffer)
+{
+	PooledRenderParticleBuffer = InBuffer;
 }
