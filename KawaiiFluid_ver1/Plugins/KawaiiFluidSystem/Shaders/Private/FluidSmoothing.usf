@@ -228,7 +228,10 @@ void NarrowRangeFilterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 }
 
 //=============================================================================
-// Simple Gaussian Blur for Thickness (no bilateral/range weighting)
+// Separable Gaussian Blur for Thickness (Optimized)
+//
+// Split into Horizontal + Vertical passes for O(2n) instead of O(n²)
+// 41x41 = 1,681 samples → 41+41 = 82 samples (20x faster)
 //
 // Unlike depth smoothing, thickness uses simple Gaussian blur because:
 // 1. Thickness values are additive (no sharp edges to preserve)
@@ -237,19 +240,14 @@ void NarrowRangeFilterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 //=============================================================================
 
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
-void ThicknessGaussianBlurCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+void ThicknessGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	// Bounds check
 	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
 	{
 		return;
 	}
 
 	int2 CenterCoord = int2(DispatchThreadId.xy);
-	float CenterThickness = InputTexture.Load(int3(CenterCoord, 0));
-
-	// If center has no thickness, check if we should expand from neighbors
-	// (This helps fill small gaps at particle edges)
 
 	const int KernelRadius = int(BlurRadius);
 	const float Sigma = BlurRadius / 2.0f;
@@ -257,32 +255,48 @@ void ThicknessGaussianBlurCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float TotalWeight = 0.0f;
 	float TotalWeightedThickness = 0.0f;
 
-	// 2D Gaussian blur
+	// Horizontal 1D Gaussian blur
+	for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+	{
+		int SampleX = clamp(CenterCoord.x + OffsetX, 0, int(TextureSize.x) - 1);
+		float SampleThickness = InputTexture.Load(int3(SampleX, CenterCoord.y, 0));
+
+		float Weight = GetGaussianWeight(abs(float(OffsetX)), Sigma);
+		TotalWeightedThickness += SampleThickness * Weight;
+		TotalWeight += Weight;
+	}
+
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedThickness / TotalWeight) : 0.0f;
+}
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void ThicknessGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 2.0f;
+
+	float TotalWeight = 0.0f;
+	float TotalWeightedThickness = 0.0f;
+
+	// Vertical 1D Gaussian blur
 	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
 	{
-		for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
-		{
-			int2 SampleCoord = CenterCoord + int2(OffsetX, OffsetY);
-			SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
+		int SampleY = clamp(CenterCoord.y + OffsetY, 0, int(TextureSize.y) - 1);
+		float SampleThickness = InputTexture.Load(int3(CenterCoord.x, SampleY, 0));
 
-			float SampleThickness = InputTexture.Load(int3(SampleCoord, 0));
-
-			// Spatial Gaussian weight
-			float SpatialDist = length(float2(OffsetX, OffsetY));
-			float Weight = GetGaussianWeight(SpatialDist, Sigma);
-
-			TotalWeightedThickness += SampleThickness * Weight;
-			TotalWeight += Weight;
-		}
+		float Weight = GetGaussianWeight(abs(float(OffsetY)), Sigma);
+		TotalWeightedThickness += SampleThickness * Weight;
+		TotalWeight += Weight;
 	}
 
-	float FinalThickness = 0.0f;
-	if (TotalWeight > 0.0f)
-	{
-		FinalThickness = TotalWeightedThickness / TotalWeight;
-	}
-
-	OutputTexture[CenterCoord] = FinalThickness;
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedThickness / TotalWeight) : 0.0f;
 }
 
 //=============================================================================
