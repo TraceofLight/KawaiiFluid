@@ -1251,70 +1251,26 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_Sweep(
 				// Therefore: Position = PredictedPosition - DesiredVelocity * dt
 				Particle.Position = Particle.PredictedPosition - DesiredVelocity * SubstepDT;
 
-				// Fire collision event if enabled
-				if (Params.bEnableCollisionEvents && Params.OnCollisionEvent.IsBound() && Params.EventCountPtr)
+				// 충돌 이벤트 버퍼에 추가 (나중에 ProcessCollisionFeedback에서 처리)
+				if (Params.bEnableCollisionEvents && Params.CPUCollisionFeedbackBufferPtr && Params.CPUCollisionFeedbackLockPtr)
 				{
 					const float Speed = Particle.Velocity.Size();
-					const int32 CurrentEventCount = Params.EventCountPtr->load(std::memory_order_relaxed);
-					if (Speed >= Params.MinVelocityForEvent &&
-					    CurrentEventCount < Params.MaxEventsPerFrame)
+					if (Speed >= Params.MinVelocityForEvent)
 					{
-						// Check cooldown (read-only during ParallelFor - safe since writes happen on game thread)
-						bool bCanEmitEvent = true;
-						if (Params.EventCooldownPerParticle > 0.0f && Params.ParticleLastEventTimePtr)
-						{
-							const float* LastEventTime = Params.ParticleLastEventTimePtr->Find(Particle.ParticleID);
-							if (LastEventTime && (Params.CurrentGameTime - *LastEventTime) < Params.EventCooldownPerParticle)
-							{
-								bCanEmitEvent = false;
-							}
-						}
+						FKawaiiFluidCollisionEvent Event;
+						Event.ParticleIndex = Particle.ParticleID;
+						Event.SourceID = Particle.SourceID;
+						Event.ColliderOwnerID = HitResult.GetActor() ? HitResult.GetActor()->GetUniqueID() : -1;
+						Event.BoneIndex = -1;  // CPU path doesn't have bone info
+						Event.HitActor = HitResult.GetActor();
+						Event.HitLocation = HitResult.Location;
+						Event.HitNormal = HitResult.ImpactNormal;
+						Event.HitSpeed = Speed;
+						// HitInteractionComponent는 ProcessCollisionFeedback에서 조회
 
-						// SourceID 필터링: Params.SourceID가 설정되어 있으면 일치하는 파티클만 콜백
-						if (Params.SourceID >= 0 && Particle.SourceID != Params.SourceID)
-						{
-							bCanEmitEvent = false;
-						}
-
-						if (bCanEmitEvent)
-						{
-							FKawaiiFluidCollisionEvent Event(
-								Particle.ParticleID,
-								Particle.SourceID,
-								HitResult.GetActor(),
-								HitResult.Location,
-								HitResult.ImpactNormal,
-								Speed
-							);
-
-							// Execute on game thread with safety checks
-							TWeakObjectPtr<UWorld> WeakWorld(Params.World);
-							FOnFluidCollisionEvent Callback = Params.OnCollisionEvent;
-							TMap<int32, float>* CooldownMapPtr = Params.ParticleLastEventTimePtr;
-							const int32 ParticleID = Particle.ParticleID;
-							const float CooldownValue = Params.EventCooldownPerParticle;
-							AsyncTask(ENamedThreads::GameThread, [WeakWorld, Callback, Event, CooldownMapPtr, ParticleID, CooldownValue]()
-							{
-								if (!WeakWorld.IsValid())
-								{
-									return;
-								}
-								if (Callback.IsBound())
-								{
-									Callback.Execute(Event);
-								}
-								// Update cooldown map on game thread (safe - single thread write)
-								if (CooldownMapPtr && CooldownValue > 0.0f)
-								{
-									if (UWorld* World = WeakWorld.Get())
-									{
-										CooldownMapPtr->Add(ParticleID, World->GetTimeSeconds());
-									}
-								}
-							});
-
-							Params.EventCountPtr->fetch_add(1, std::memory_order_relaxed);
-						}
+						// 버퍼에 추가 (thread-safe)
+						FScopeLock Lock(Params.CPUCollisionFeedbackLockPtr);
+						Params.CPUCollisionFeedbackBufferPtr->Add(Event);
 					}
 				}
 
@@ -1633,67 +1589,26 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_SDF(
 				// Back-calculate Position so FinalizePositions derives DesiredVelocity
 				Particle.Position = Particle.PredictedPosition - DesiredVelocity * SubstepDT;
 
-				// Fire collision event if enabled
-				if (Params.bEnableCollisionEvents && Params.OnCollisionEvent.IsBound() && Params.EventCountPtr)
+				// 충돌 이벤트 버퍼에 추가 (나중에 ProcessCollisionFeedback에서 처리)
+				if (Params.bEnableCollisionEvents && Params.CPUCollisionFeedbackBufferPtr && Params.CPUCollisionFeedbackLockPtr)
 				{
 					const float Speed = Particle.Velocity.Size();
-					const int32 CurrentEventCount = Params.EventCountPtr->load(std::memory_order_relaxed);
-					if (Speed >= Params.MinVelocityForEvent &&
-					    CurrentEventCount < Params.MaxEventsPerFrame)
+					if (Speed >= Params.MinVelocityForEvent)
 					{
-						bool bCanEmitEvent = true;
-						if (Params.EventCooldownPerParticle > 0.0f && Params.ParticleLastEventTimePtr)
-						{
-							const float* LastEventTime = Params.ParticleLastEventTimePtr->Find(Particle.ParticleID);
-							if (LastEventTime && (Params.CurrentGameTime - *LastEventTime) < Params.EventCooldownPerParticle)
-							{
-								bCanEmitEvent = false;
-							}
-						}
+						FKawaiiFluidCollisionEvent Event;
+						Event.ParticleIndex = Particle.ParticleID;
+						Event.SourceID = Particle.SourceID;
+						Event.ColliderOwnerID = HitActor ? HitActor->GetUniqueID() : -1;
+						Event.BoneIndex = -1;  // CPU path doesn't have bone info
+						Event.HitActor = HitActor;
+						Event.HitLocation = BestClosestPoint;
+						Event.HitNormal = BestNormal;
+						Event.HitSpeed = Speed;
+						// HitInteractionComponent는 ProcessCollisionFeedback에서 조회
 
-						// SourceID 필터링: Params.SourceID가 설정되어 있으면 일치하는 파티클만 콜백
-						if (Params.SourceID >= 0 && Particle.SourceID != Params.SourceID)
-						{
-							bCanEmitEvent = false;
-						}
-
-						if (bCanEmitEvent)
-						{
-							FKawaiiFluidCollisionEvent Event(
-								Particle.ParticleID,
-								Particle.SourceID,
-								HitActor,
-								BestClosestPoint,
-								BestNormal,
-								Speed
-							);
-
-							TWeakObjectPtr<UWorld> WeakWorld(Params.World);
-							FOnFluidCollisionEvent Callback = Params.OnCollisionEvent;
-							TMap<int32, float>* CooldownMapPtr = Params.ParticleLastEventTimePtr;
-							const int32 ParticleID = Particle.ParticleID;
-							const float CooldownValue = Params.EventCooldownPerParticle;
-							AsyncTask(ENamedThreads::GameThread, [WeakWorld, Callback, Event, CooldownMapPtr, ParticleID, CooldownValue]()
-							{
-								if (!WeakWorld.IsValid())
-								{
-									return;
-								}
-								if (Callback.IsBound())
-								{
-									Callback.Execute(Event);
-								}
-								if (CooldownMapPtr && CooldownValue > 0.0f)
-								{
-									if (UWorld* W = WeakWorld.Get())
-									{
-										CooldownMapPtr->Add(ParticleID, W->GetTimeSeconds());
-									}
-								}
-							});
-
-							Params.EventCountPtr->fetch_add(1, std::memory_order_relaxed);
-						}
+						// 버퍼에 추가 (thread-safe)
+						FScopeLock Lock(Params.CPUCollisionFeedbackLockPtr);
+						Params.CPUCollisionFeedbackBufferPtr->Add(Event);
 					}
 				}
 

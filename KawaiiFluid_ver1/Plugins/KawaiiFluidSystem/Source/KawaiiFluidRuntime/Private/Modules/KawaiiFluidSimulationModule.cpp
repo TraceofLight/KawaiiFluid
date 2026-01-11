@@ -84,7 +84,6 @@ void UKawaiiFluidSimulationModule::Shutdown()
 
 	Particles.Empty();
 	Colliders.Empty();
-	InteractionComponents.Empty();
 	SpatialHash.Reset();
 	Preset = nullptr;
 	RuntimePreset = nullptr;
@@ -268,7 +267,6 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 
 	// 콜라이더 / 상호작용 컴포넌트
 	Params.Colliders = Colliders;
-	Params.InteractionComponents = InteractionComponents;
 
 	// Preset에서 콜리전 설정 가져오기
 	if (Preset)
@@ -352,99 +350,129 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 	return Params;
 }
 
-void UKawaiiFluidSimulationModule::ProcessGPUCollisionFeedback()
+void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
+	const TMap<int32, UFluidInteractionComponent*>& OwnerIDToIC,
+	const TArray<FKawaiiFluidCollisionEvent>& CPUFeedbackBuffer)
 {
-	// GPU 모드가 아니거나 콜백이 없으면 스킵
-	if (!bGPUSimulationActive || !CachedGPUSimulator || !OnCollisionEventCallback.IsBound())
+	// 콜백이 없거나 충돌 이벤트 비활성화면 스킵
+	if (!OnCollisionEventCallback.IsBound() || !bEnableCollisionEvents)
 	{
 		return;
 	}
 
-	// 충돌 이벤트가 비활성화되어 있으면 스킵
-	if (!bEnableCollisionEvents)
-	{
-		return;
-	}
-
-	// GPU에서 충돌 피드백 가져오기
-	TArray<FGPUCollisionFeedback> Feedbacks;
-	int32 FeedbackCount = 0;
-	CachedGPUSimulator->GetAllCollisionFeedback(Feedbacks, FeedbackCount);
-
-	if (FeedbackCount == 0)
-	{
-		return;
-	}
-
-	// 현재 시간 (쿨다운 체크용)
+	// SourceComponent 캐시
+	UKawaiiFluidComponent* OwnerComponent = GetTypedOuter<UKawaiiFluidComponent>();
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+	int32 EventCount = 0;
 
-	// Phase 1: ParallelFor로 유효한 피드백 필터링
-	struct FValidFeedback
+	//========================================
+	// GPU 피드백 처리
+	//========================================
+	if (bGPUSimulationActive && CachedGPUSimulator)
 	{
-		int32 Index;
-		float HitSpeed;
-	};
-	TArray<FValidFeedback> ValidFeedbacks;
-	ValidFeedbacks.Reserve(FMath::Min(FeedbackCount, MaxEventsPerFrame));
-	FCriticalSection ValidFeedbackLock;
+		TArray<FGPUCollisionFeedback> GPUFeedbacks;
+		int32 GPUFeedbackCount = 0;
+		CachedGPUSimulator->GetAllCollisionFeedback(GPUFeedbacks, GPUFeedbackCount);
 
-	const int32 LocalSourceID = CachedSourceID;
-	const float LocalMinVelocity = MinVelocityForEvent;
-	const float LocalCooldown = EventCooldownPerParticle;
-
-	ParallelFor(FeedbackCount, [&](int32 i)
-	{
-		const FGPUCollisionFeedback& Feedback = Feedbacks[i];
-
-		// SourceID 필터링
-		if (LocalSourceID >= 0 && Feedback.ParticleSourceID != LocalSourceID)
+		for (int32 i = 0; i < GPUFeedbackCount && EventCount < MaxEventsPerFrame; ++i)
 		{
-			return;
+			const FGPUCollisionFeedback& Feedback = GPUFeedbacks[i];
+
+			// SourceID 필터링
+			if (CachedSourceID >= 0 && Feedback.ParticleSourceID != CachedSourceID)
+			{
+				continue;
+			}
+
+			// 속도 체크
+			const float HitSpeed = FVector3f(Feedback.ParticleVelocity).Length();
+			if (HitSpeed < MinVelocityForEvent)
+			{
+				continue;
+			}
+
+			// 쿨다운 체크
+			if (const float* LastTime = ParticleLastEventTime.Find(Feedback.ParticleIndex))
+			{
+				if (CurrentTime - *LastTime < EventCooldownPerParticle)
+				{
+					continue;
+				}
+			}
+
+			// 쿨다운 업데이트
+			ParticleLastEventTime.Add(Feedback.ParticleIndex, CurrentTime);
+
+			// 이벤트 생성
+			FKawaiiFluidCollisionEvent Event;
+			Event.ParticleIndex = Feedback.ParticleIndex;
+			Event.SourceID = Feedback.ParticleSourceID;
+			Event.ColliderOwnerID = Feedback.ColliderOwnerID;
+			Event.BoneIndex = Feedback.BoneIndex;
+			Event.HitLocation = FVector(Feedback.ImpactNormal * (-Feedback.Penetration));
+			Event.HitNormal = FVector(Feedback.ImpactNormal);
+			Event.HitSpeed = HitSpeed;
+			Event.SourceComponent = OwnerComponent;
+
+			// IC 조회 (O(1))
+			if (const UFluidInteractionComponent* const* FoundIC = OwnerIDToIC.Find(Feedback.ColliderOwnerID))
+			{
+				Event.HitInteractionComponent = const_cast<UFluidInteractionComponent*>(*FoundIC);
+				Event.HitActor = (*FoundIC)->GetOwner();
+			}
+
+			OnCollisionEventCallback.Execute(Event);
+			++EventCount;
+		}
+	}
+
+	//========================================
+	// CPU 피드백 처리 (Subsystem 버퍼에서 SourceID로 필터링)
+	//========================================
+	for (const FKawaiiFluidCollisionEvent& BufferEvent : CPUFeedbackBuffer)
+	{
+		if (EventCount >= MaxEventsPerFrame)
+		{
+			break;
 		}
 
-		// 속도 계산 및 체크
-		const float HitSpeed = FVector3f(Feedback.ParticleVelocity).Length();
-		if (HitSpeed < LocalMinVelocity)
+		// SourceID 필터링 - 이 Module의 파티클만 처리
+		if (CachedSourceID >= 0 && BufferEvent.SourceID != CachedSourceID)
 		{
-			return;
+			continue;
 		}
 
-		// 유효한 피드백 수집 (thread-safe)
-		FScopeLock Lock(&ValidFeedbackLock);
-		if (ValidFeedbacks.Num() < MaxEventsPerFrame)
+		// 쿨다운 체크
+		if (const float* LastTime = ParticleLastEventTime.Find(BufferEvent.ParticleIndex))
 		{
-			ValidFeedbacks.Add({ i, HitSpeed });
-		}
-	});
-
-	// Phase 2: 순차적으로 쿨다운 체크 및 콜백 호출 (game thread)
-	for (const FValidFeedback& Valid : ValidFeedbacks)
-	{
-		const FGPUCollisionFeedback& Feedback = Feedbacks[Valid.Index];
-		const int32 ParticleIndex = Feedback.ParticleIndex;
-
-		// 파티클별 쿨다운 체크
-		if (const float* LastTime = ParticleLastEventTime.Find(ParticleIndex))
-		{
-			if (CurrentTime - *LastTime < LocalCooldown)
+			if (CurrentTime - *LastTime < EventCooldownPerParticle)
 			{
 				continue;
 			}
 		}
 
 		// 쿨다운 업데이트
-		ParticleLastEventTime.Add(ParticleIndex, CurrentTime);
+		ParticleLastEventTime.Add(BufferEvent.ParticleIndex, CurrentTime);
 
-		// 이벤트 생성 및 콜백 호출
-		FKawaiiFluidCollisionEvent Event;
-		Event.ParticleIndex = ParticleIndex;
-		Event.SourceID = Feedback.ParticleSourceID;
-		Event.HitLocation = FVector(Feedback.ImpactNormal * (-Feedback.Penetration));
-		Event.HitNormal = FVector(Feedback.ImpactNormal);
-		Event.HitSpeed = Valid.HitSpeed;
+		// 이벤트 복사 및 추가 정보 설정
+		FKawaiiFluidCollisionEvent Event = BufferEvent;
+		Event.SourceComponent = OwnerComponent;
+
+		// IC 조회 (O(1)) - CPU 버퍼에는 IC가 없을 수 있음
+		if (!Event.HitInteractionComponent && Event.ColliderOwnerID >= 0)
+		{
+			if (const UFluidInteractionComponent* const* FoundIC = OwnerIDToIC.Find(Event.ColliderOwnerID))
+			{
+				Event.HitInteractionComponent = const_cast<UFluidInteractionComponent*>(*FoundIC);
+				if (!Event.HitActor)
+				{
+					Event.HitActor = (*FoundIC)->GetOwner();
+				}
+			}
+		}
 
 		OnCollisionEventCallback.Execute(Event);
+		++EventCount;
 	}
 }
 
@@ -956,19 +984,6 @@ void UKawaiiFluidSimulationModule::RegisterCollider(UFluidCollider* Collider)
 void UKawaiiFluidSimulationModule::UnregisterCollider(UFluidCollider* Collider)
 {
 	Colliders.Remove(Collider);
-}
-
-void UKawaiiFluidSimulationModule::RegisterInteractionComponent(UFluidInteractionComponent* Component)
-{
-	if (Component && !InteractionComponents.Contains(Component))
-	{
-		InteractionComponents.Add(Component);
-	}
-}
-
-void UKawaiiFluidSimulationModule::UnregisterInteractionComponent(UFluidInteractionComponent* Component)
-{
-	InteractionComponents.Remove(Component);
 }
 
 TArray<int32> UKawaiiFluidSimulationModule::GetParticlesInRadius(FVector Location, float Radius) const

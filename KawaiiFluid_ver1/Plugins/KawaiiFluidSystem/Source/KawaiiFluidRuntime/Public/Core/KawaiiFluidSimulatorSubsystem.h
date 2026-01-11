@@ -209,6 +209,16 @@ private:
 	std::atomic<int32> EventCountThisFrame{0};
 
 	//========================================
+	// CPU Collision Feedback Buffer
+	//========================================
+
+	/** CPU 충돌 피드백 버퍼 (Context에서 추가, 시뮬레이션 후 처리) */
+	TArray<FKawaiiFluidCollisionEvent> CPUCollisionFeedbackBuffer;
+
+	/** CPU 충돌 피드백 버퍼 락 (ParallelFor 안전) */
+	FCriticalSection CPUCollisionFeedbackLock;
+
+	//========================================
 	// Simulation Methods
 	//========================================
 

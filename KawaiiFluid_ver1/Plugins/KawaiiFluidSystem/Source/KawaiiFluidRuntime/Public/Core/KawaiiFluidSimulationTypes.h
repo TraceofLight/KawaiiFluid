@@ -28,18 +28,43 @@ enum class EWorldCollisionMethod : uint8
 /**
  * Collision event data
  */
-struct FKawaiiFluidCollisionEvent
+USTRUCT(BlueprintType)
+struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidCollisionEvent
 {
-	int32 ParticleIndex;
-	int32 SourceID;  // Source Component ID (for filtering)
-	TWeakObjectPtr<AActor> HitActor;
-	FVector HitLocation;
-	FVector HitNormal;
-	float HitSpeed;
+	GENERATED_BODY()
 
-	FKawaiiFluidCollisionEvent() : ParticleIndex(0), SourceID(-1), HitSpeed(0.0f) {}
-	FKawaiiFluidCollisionEvent(int32 InIndex, int32 InSourceID, AActor* InActor, const FVector& InLocation, const FVector& InNormal, float InSpeed)
-		: ParticleIndex(InIndex), SourceID(InSourceID), HitActor(InActor), HitLocation(InLocation), HitNormal(InNormal), HitSpeed(InSpeed) {}
+	// ID-based (from GPU)
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	int32 ParticleIndex = 0;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	int32 SourceID = -1;              // Particle source Component ID
+
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	int32 ColliderOwnerID = -1;       // Hit target Actor ID
+
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	int32 BoneIndex = -1;             // Hit bone index (-1 = none)
+
+	// Pointer-based (looked up)
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	TObjectPtr<AActor> HitActor = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	TObjectPtr<UKawaiiFluidComponent> SourceComponent = nullptr;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	TObjectPtr<UFluidInteractionComponent> HitInteractionComponent = nullptr;
+
+	// Collision data
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	FVector HitLocation = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	FVector HitNormal = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Collision")
+	float HitSpeed = 0.0f;
 };
 
 /** Collision event callback signature */
@@ -172,6 +197,16 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 
 	/** Neighbor count threshold for surface detection (fewer neighbors = surface particle) */
 	int32 SurfaceNeighborThreshold = 25;
+
+	//========================================
+	// CPU Collision Feedback Buffer (for deferred processing)
+	//========================================
+
+	/** CPU 충돌 피드백 버퍼 포인터 (Subsystem이 소유, Context가 추가) */
+	TArray<FKawaiiFluidCollisionEvent>* CPUCollisionFeedbackBufferPtr = nullptr;
+
+	/** CPU 충돌 피드백 버퍼 락 (ParallelFor 안전) */
+	FCriticalSection* CPUCollisionFeedbackLockPtr = nullptr;
 
 	FKawaiiFluidSimulationParams() = default;
 };

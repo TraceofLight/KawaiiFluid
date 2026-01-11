@@ -76,6 +76,32 @@ void UKawaiiFluidSimulatorSubsystem::Tick(float DeltaTime)
 	{
 		SimulateIndependentFluidComponents(DeltaTime);
 		SimulateBatchedFluidComponents(DeltaTime);
+
+		//========================================
+		// Collision Feedback Processing (GPU + CPU)
+		//========================================
+		// OwnerID → InteractionComponent 맵 빌드 (한 번만, O(1) 조회용)
+		TMap<int32, UFluidInteractionComponent*> OwnerIDToIC;
+		OwnerIDToIC.Reserve(GlobalInteractionComponents.Num());
+		for (UFluidInteractionComponent* IC : GlobalInteractionComponents)
+		{
+			if (IC && IC->GetOwner())
+			{
+				OwnerIDToIC.Add(IC->GetOwner()->GetUniqueID(), IC);
+			}
+		}
+
+		// 각 Module에 대해 ProcessCollisionFeedback 호출
+		for (UKawaiiFluidSimulationModule* Module : AllModules)
+		{
+			if (Module && Module->bEnableCollisionEvents)
+			{
+				Module->ProcessCollisionFeedback(OwnerIDToIC, CPUCollisionFeedbackBuffer);
+			}
+		}
+
+		// CPU 버퍼 클리어
+		CPUCollisionFeedbackBuffer.Reset();
 	}
 }
 
@@ -363,6 +389,10 @@ void UKawaiiFluidSimulatorSubsystem::SimulateIndependentFluidComponents(float De
 		Params.Colliders.Append(GlobalColliders);
 		Params.InteractionComponents.Append(GlobalInteractionComponents);
 
+		// CPU 충돌 피드백 버퍼 포인터 설정 (Context에서 사용)
+		Params.CPUCollisionFeedbackBufferPtr = &CPUCollisionFeedbackBuffer;
+		Params.CPUCollisionFeedbackLockPtr = &CPUCollisionFeedbackLock;
+
 		// Phase 1: Setup GPU state BEFORE Simulate so spawn calls go to GPU
 		// This ensures SpawnParticle() during this frame will use GPU path
 		if (Params.bUseGPUSimulation)
@@ -442,6 +472,10 @@ void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaT
 		Params.Colliders.Append(GlobalColliders);
 		Params.InteractionComponents.Append(GlobalInteractionComponents);
 		Params.bUseGPUSimulation = CacheKey.bUseGPUSimulation;
+
+		// CPU 충돌 피드백 버퍼 포인터 설정 (Context에서 사용)
+		Params.CPUCollisionFeedbackBufferPtr = &CPUCollisionFeedbackBuffer;
+		Params.CPUCollisionFeedbackLockPtr = &CPUCollisionFeedbackLock;
 
 		// Phase 1: Setup GPU state BEFORE Simulate so spawn calls go to GPU
 		if (Params.bUseGPUSimulation)
@@ -625,9 +659,6 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulatorSubsystem::BuildMergedModuleSi
 		// Merge colliders
 		Params.Colliders.Append(Module->GetColliders());
 
-		// Merge interaction components
-		Params.InteractionComponents.Append(Module->GetInteractionComponents());
-
 		// Use world collision if any module wants it
 		if (Module->bUseWorldCollision)
 		{
@@ -640,6 +671,7 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulatorSubsystem::BuildMergedModuleSi
 	}
 
 	Params.ExternalForce = TotalForce;
+	Params.InteractionComponents.Append(GlobalInteractionComponents);
 	Params.bUseWorldCollision = bAnyUseWorldCollision;
 	Params.CollisionChannel = MergedChannel;
 

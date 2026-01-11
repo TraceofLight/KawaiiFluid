@@ -271,13 +271,9 @@ struct FFluidBrushSettings
  * Particle hit event delegate
  * Called when a particle collides with an actor
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FOnFluidParticleHitComponent,
-	int32, ParticleIndex,
-	AActor*, HitActor,
-	FVector, HitLocation,
-	FVector, HitNormal,
-	float, HitSpeed
+	const FKawaiiFluidCollisionEvent&, CollisionEvent
 );
 
 /**

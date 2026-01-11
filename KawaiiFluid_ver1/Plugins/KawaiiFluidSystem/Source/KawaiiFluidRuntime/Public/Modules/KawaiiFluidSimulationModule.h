@@ -310,22 +310,7 @@ public:
 
 	/** 등록된 콜라이더 목록 */
 	const TArray<UFluidCollider*>& GetColliders() const { return Colliders; }
-
-	//========================================
-	// 상호작용 컴포넌트 관리
-	//========================================
-
-	/** 상호작용 컴포넌트 등록 */
-	UFUNCTION(BlueprintCallable, Category = "Fluid")
-	void RegisterInteractionComponent(UFluidInteractionComponent* Component);
-
-	/** 상호작용 컴포넌트 해제 */
-	UFUNCTION(BlueprintCallable, Category = "Fluid")
-	void UnregisterInteractionComponent(UFluidInteractionComponent* Component);
-
-	/** 등록된 상호작용 컴포넌트 목록 */
-	const TArray<UFluidInteractionComponent*>& GetInteractionComponents() const { return InteractionComponents; }
-
+	
 	//========================================
 	// SpatialHash (Independent 모드용)
 	//========================================
@@ -468,10 +453,14 @@ public:
 	/** 충돌 이벤트 콜백 가져오기 */
 	const FOnModuleCollisionEvent& GetCollisionEventCallback() const { return OnCollisionEventCallback; }
 
-	/** GPU 충돌 피드백을 처리하고 콜백 호출 (GPU 모드 전용)
-	 * SourceID로 필터링하여 자신의 파티클 충돌만 콜백
+	/** 충돌 피드백 처리 (GPU + CPU 통합)
+	 * Subsystem에서 시뮬레이션 후 호출. GPU 버퍼 + CPU 버퍼 모두 처리.
+	 * @param OwnerIDToIC - Subsystem에서 빌드한 OwnerID→IC 맵 (O(1) 조회용)
+	 * @param CPUFeedbackBuffer - Subsystem의 CPU 충돌 피드백 버퍼 (SourceID로 필터링)
 	 */
-	void ProcessGPUCollisionFeedback();
+	void ProcessCollisionFeedback(
+		const TMap<int32, UFluidInteractionComponent*>& OwnerIDToIC,
+		const TArray<FKawaiiFluidCollisionEvent>& CPUFeedbackBuffer);
 
 	//========================================
 	// Preset (내부 캐시 - Component에서 설정)
@@ -575,10 +564,6 @@ private:
 	/** 등록된 콜라이더 */
 	UPROPERTY()
 	TArray<UFluidCollider*> Colliders;
-
-	/** 등록된 상호작용 컴포넌트 */
-	UPROPERTY()
-	TArray<UFluidInteractionComponent*> InteractionComponents;
 
 	/** Override 적용된 런타임 Preset (Transient) */
 	UPROPERTY(Transient)

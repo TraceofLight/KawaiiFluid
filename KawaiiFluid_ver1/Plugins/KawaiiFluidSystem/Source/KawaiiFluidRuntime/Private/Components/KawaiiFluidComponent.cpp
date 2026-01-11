@@ -1,6 +1,7 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Components/KawaiiFluidComponent.h"
+#include "Components/FluidInteractionComponent.h"
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
 #include "Core/KawaiiFluidSimulationContext.h"
@@ -212,12 +213,6 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			SimulationModule->ContainmentFriction
 		);
 		SimulationModule->ResolveContainmentCollisions();
-	}
-
-	// GPU 충돌 피드백 처리 (GPU 모드에서 OnParticleHit 이벤트 발생)
-	if (bIsGameWorld && SimulationModule)
-	{
-		SimulationModule->ProcessGPUCollisionFeedback();
 	}
 
 	// Containment Wireframe 시각화
@@ -731,16 +726,20 @@ void UKawaiiFluidComponent::DrawSpawnAreaVisualization()
 
 void UKawaiiFluidComponent::HandleCollisionEvent(const FKawaiiFluidCollisionEvent& Event)
 {
+	// 테스트 로그
+	UE_LOG(LogTemp, Warning, TEXT("[ParticleHit] Particle=%d, HitActor=%s, SourceComp=%s, HitIC=%s, Bone=%d, Speed=%.1f, ColliderOwnerID=%d"),
+		Event.ParticleIndex,
+		Event.HitActor ? *Event.HitActor->GetName() : TEXT("NULL"),
+		Event.SourceComponent ? *Event.SourceComponent->GetName() : TEXT("NULL"),
+		Event.HitInteractionComponent ? *Event.HitInteractionComponent->GetName() : TEXT("NULL"),
+		Event.BoneIndex,
+		Event.HitSpeed,
+		Event.ColliderOwnerID);
+
 	// Module에서 필터링 완료 후 호출됨 - 바로 브로드캐스트
 	if (OnParticleHit.IsBound())
 	{
-		OnParticleHit.Broadcast(
-			Event.ParticleIndex,
-			Event.HitActor.Get(),
-			Event.HitLocation,
-			Event.HitNormal,
-			Event.HitSpeed
-		);
+		OnParticleHit.Broadcast(Event);
 	}
 }
 
