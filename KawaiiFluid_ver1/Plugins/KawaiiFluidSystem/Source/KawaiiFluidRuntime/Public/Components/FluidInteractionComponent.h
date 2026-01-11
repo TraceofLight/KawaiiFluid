@@ -441,4 +441,105 @@ private:
 
 	/** GPU Collision Feedback 자동 활성화 */
 	void EnableGPUCollisionFeedbackIfNeeded();
+
+	//========================================
+	// Boundary Particles (Flex-style Adhesion)
+	//========================================
+
+public:
+	/**
+	 * 경계 입자 시스템 활성화
+	 * 메시 표면에 입자를 생성하여 Flex 스타일의 자연스러운 Adhesion 구현
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Boundary Particles",
+	          meta = (ToolTip = "경계 입자 시스템 활성화.\n메시 표면에 보이지 않는 입자를 생성하여\nFlex 스타일의 자연스러운 Adhesion/Cohesion을 구현합니다."))
+	bool bEnableBoundaryParticles = false;
+
+	/**
+	 * 경계 입자 간격 (cm)
+	 * ParticleRadius의 0.5~1.0배 권장
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Boundary Particles",
+	          meta = (EditCondition = "bEnableBoundaryParticles", ClampMin = "1.0", ClampMax = "50.0",
+	                  ToolTip = "경계 입자 간격 (cm).\n작을수록 정밀하지만 입자 수 증가.\nParticleRadius의 0.5~1.0배 권장."))
+	float BoundaryParticleSpacing = 5.0f;
+
+	/**
+	 * 경계 입자 디버그 표시
+	 * 체크 시 경계 입자를 화면에 시각화
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Boundary Particles",
+	          meta = (EditCondition = "bEnableBoundaryParticles",
+	                  ToolTip = "경계 입자 디버그 표시.\n체크 시 경계 입자 위치를 작은 구체로 시각화합니다."))
+	bool bShowBoundaryParticles = false;
+
+	/**
+	 * 디버그 입자 색상
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Boundary Particles",
+	          meta = (EditCondition = "bShowBoundaryParticles"))
+	FColor BoundaryParticleDebugColor = FColor::Cyan;
+
+	/**
+	 * 디버그 입자 크기 (cm)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Boundary Particles",
+	          meta = (EditCondition = "bShowBoundaryParticles", ClampMin = "0.5", ClampMax = "10.0"))
+	float BoundaryParticleDebugSize = 2.0f;
+
+	/** 경계 입자 수 반환 */
+	UFUNCTION(BlueprintPure, Category = "Fluid Interaction|Boundary Particles")
+	int32 GetBoundaryParticleCount() const { return BoundaryParticlePositions.Num(); }
+
+	/** 경계 입자 위치 배열 반환 (월드 좌표) */
+	UFUNCTION(BlueprintPure, Category = "Fluid Interaction|Boundary Particles")
+	const TArray<FVector>& GetBoundaryParticlePositions() const { return BoundaryParticlePositions; }
+
+	/** 경계 입자 수동 재생성 */
+	UFUNCTION(BlueprintCallable, Category = "Fluid Interaction|Boundary Particles")
+	void RegenerateBoundaryParticles();
+
+	/** GPU용 경계 입자 데이터 수집 */
+	void CollectGPUBoundaryParticles(struct FGPUBoundaryParticles& OutBoundaryParticles) const;
+
+	/** Boundary Adhesion 활성화 여부 */
+	bool IsBoundaryAdhesionEnabled() const { return bEnableBoundaryParticles && bBoundaryParticlesInitialized && BoundaryParticlePositions.Num() > 0; }
+
+private:
+	/** 경계 입자 월드 위치 (매 프레임 업데이트됨) */
+	TArray<FVector> BoundaryParticlePositions;
+
+	/** 경계 입자 로컬 위치 (메시 표면 기준, 초기화 시 생성) */
+	TArray<FVector> BoundaryParticleLocalPositions;
+
+	/** 경계 입자 표면 노멀 (월드 좌표, 매 프레임 업데이트됨) */
+	TArray<FVector> BoundaryParticleNormals;
+
+	/** 경계 입자 로컬 노멀 (메시 표면 기준, 초기화 시 생성) */
+	TArray<FVector> BoundaryParticleLocalNormals;
+
+	/** 경계 입자가 속한 본 인덱스 (-1 = 스태틱) */
+	TArray<int32> BoundaryParticleBoneIndices;
+
+	/** 스켈레탈 메시용: 정점 인덱스 (GetSkinnedVertexPosition 호출용) */
+	TArray<int32> BoundaryParticleVertexIndices;
+
+	/** 스켈레탈 메시 사용 여부 */
+	bool bIsSkeletalMesh = false;
+
+	/** 경계 입자 초기화 여부 */
+	bool bBoundaryParticlesInitialized = false;
+
+	/** 경계 입자 생성 (메시 표면 샘플링) */
+	void GenerateBoundaryParticles();
+
+	/** 경계 입자 위치 업데이트 (스켈레탈 메시의 경우 본 트랜스폼 적용) */
+	void UpdateBoundaryParticlePositions();
+
+	/** 디버그 경계 입자 그리기 */
+	void DrawDebugBoundaryParticles();
+
+	/** 삼각형 표면 샘플링 */
+	void SampleTriangleSurface(const FVector& V0, const FVector& V1, const FVector& V2,
+	                           float Spacing, TArray<FVector>& OutPoints);
 };

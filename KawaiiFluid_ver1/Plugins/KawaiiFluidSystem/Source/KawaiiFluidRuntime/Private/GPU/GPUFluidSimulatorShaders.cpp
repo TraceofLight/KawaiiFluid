@@ -141,6 +141,22 @@ IMPLEMENT_GLOBAL_SHADER(FStackPressureCS,
 	"StackPressureCS", SF_Compute);
 
 //=============================================================================
+// Boundary Adhesion Shaders (Flex-style with Spatial Hash)
+//=============================================================================
+
+IMPLEMENT_GLOBAL_SHADER(FClearBoundaryHashCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryAdhesion.usf",
+	"ClearBoundaryHashCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FBuildBoundaryHashCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryAdhesion.usf",
+	"BuildBoundaryHashCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FBoundaryAdhesionCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryAdhesion.usf",
+	"BoundaryAdhesionCS", SF_Compute);
+
+//=============================================================================
 // Pass Builder Implementation
 //=============================================================================
 

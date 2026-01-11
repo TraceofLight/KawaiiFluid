@@ -970,3 +970,134 @@ struct FAttachedParticleUpdate
 	}
 };
 static_assert(sizeof(FAttachedParticleUpdate) == 32, "FAttachedParticleUpdate must be 32 bytes");
+
+//=============================================================================
+// GPU Boundary Particles (Flex-style Adhesion)
+// Surface-sampled particles for adhesion interaction
+//=============================================================================
+
+/**
+ * GPU Boundary Particle Structure (32 bytes)
+ * Represents a point on the mesh surface for Flex-style adhesion
+ * Uploaded from FluidInteractionComponent each frame
+ */
+struct FGPUBoundaryParticle
+{
+	FVector3f Position;       // 12 bytes - World position (updated each frame)
+	float Psi;                // 4 bytes  - Boundary particle "mass" (volume contribution)
+	FVector3f Normal;         // 12 bytes - Surface normal at this position
+	int32 OwnerID;            // 4 bytes  - Owner FluidInteractionComponent ID
+
+	FGPUBoundaryParticle()
+		: Position(FVector3f::ZeroVector)
+		, Psi(1.0f)
+		, Normal(FVector3f(0.0f, 0.0f, 1.0f))
+		, OwnerID(-1)
+	{
+	}
+
+	FGPUBoundaryParticle(const FVector3f& InPosition, const FVector3f& InNormal, int32 InOwnerID, float InPsi = 1.0f)
+		: Position(InPosition)
+		, Psi(InPsi)
+		, Normal(InNormal)
+		, OwnerID(InOwnerID)
+	{
+	}
+};
+static_assert(sizeof(FGPUBoundaryParticle) == 32, "FGPUBoundaryParticle must be 32 bytes");
+
+/**
+ * GPU Boundary Adhesion Parameters
+ * Passed to boundary adhesion compute shader
+ */
+struct FGPUBoundaryAdhesionParams
+{
+	float AdhesionStrength;       // 4 bytes - Attraction strength to boundary particles
+	float AdhesionRadius;         // 4 bytes - Max distance for adhesion effect
+	float CohesionStrength;       // 4 bytes - Fluid-fluid cohesion near boundaries
+	float SmoothingRadius;        // 4 bytes - SPH kernel radius
+	int32 BoundaryParticleCount;  // 4 bytes - Number of boundary particles
+	int32 FluidParticleCount;     // 4 bytes - Number of fluid particles
+	float DeltaTime;              // 4 bytes - Time step
+	int32 bEnabled;               // 4 bytes - Enable flag
+
+	FGPUBoundaryAdhesionParams()
+		: AdhesionStrength(1.0f)
+		, AdhesionRadius(10.0f)
+		, CohesionStrength(0.5f)
+		, SmoothingRadius(20.0f)
+		, BoundaryParticleCount(0)
+		, FluidParticleCount(0)
+		, DeltaTime(0.016f)
+		, bEnabled(0)
+	{
+	}
+};
+static_assert(sizeof(FGPUBoundaryAdhesionParams) == 32, "FGPUBoundaryAdhesionParams must be 32 bytes");
+
+/**
+ * GPU Boundary Attachment (Flex-style)
+ * Tracks which boundary particle a fluid particle is attached to
+ * 32 bytes, 16-byte aligned
+ */
+struct FGPUBoundaryAttachment
+{
+	int32 BoundaryIndex;      // 4 bytes - Index of boundary particle (-1 = not attached)
+	float AdhesionStrength;   // 4 bytes - Current adhesion strength (decays over time)
+	float AttachmentTime;     // 4 bytes - Time when attached (for decay calculation)
+	float SurfaceDistance;    // 4 bytes - Distance from surface (for constraint)
+	FVector3f LocalOffset;    // 12 bytes - Offset in tangent space (using normal as Z)
+	float Padding;            // 4 bytes - Alignment
+
+	FGPUBoundaryAttachment()
+		: BoundaryIndex(-1)
+		, AdhesionStrength(0.0f)
+		, AttachmentTime(0.0f)
+		, SurfaceDistance(0.0f)
+		, LocalOffset(FVector3f::ZeroVector)
+		, Padding(0.0f)
+	{
+	}
+
+	bool IsAttached() const { return BoundaryIndex >= 0; }
+
+	void Clear()
+	{
+		BoundaryIndex = -1;
+		AdhesionStrength = 0.0f;
+		AttachmentTime = 0.0f;
+		SurfaceDistance = 0.0f;
+		LocalOffset = FVector3f::ZeroVector;
+		Padding = 0.0f;
+	}
+};
+static_assert(sizeof(FGPUBoundaryAttachment) == 32, "FGPUBoundaryAttachment must be 32 bytes");
+
+/**
+ * GPU Boundary Particles Collection
+ * All boundary particles for GPU upload from multiple FluidInteractionComponents
+ */
+struct FGPUBoundaryParticles
+{
+	TArray<FGPUBoundaryParticle> Particles;
+
+	void Reset()
+	{
+		Particles.Reset();
+	}
+
+	bool IsEmpty() const
+	{
+		return Particles.Num() == 0;
+	}
+
+	int32 GetCount() const
+	{
+		return Particles.Num();
+	}
+
+	void Add(const FVector3f& Position, const FVector3f& Normal, int32 OwnerID, float Psi = 1.0f)
+	{
+		Particles.Emplace(Position, Normal, OwnerID, Psi);
+	}
+};

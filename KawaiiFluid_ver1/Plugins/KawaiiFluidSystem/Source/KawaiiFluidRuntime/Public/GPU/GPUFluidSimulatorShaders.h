@@ -1216,6 +1216,184 @@ public:
 // Particles higher up transfer their weight to particles below
 //=============================================================================
 
+//=============================================================================
+// Boundary Adhesion Compute Shaders (Flex-style Adhesion)
+// Applies adhesion forces between fluid particles and boundary particles
+// Based on Akinci 2012 "Versatile Rigid-Fluid Coupling"
+// Optimized with Spatial Hash for O(N) complexity
+//=============================================================================
+
+// Clear boundary spatial hash
+class FClearBoundaryHashCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FClearBoundaryHashCS);
+	SHADER_USE_PARAMETER_STRUCT(FClearBoundaryHashCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, RWBoundaryCellCounts)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+// Build boundary spatial hash
+class FBuildBoundaryHashCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FBuildBoundaryHashCS);
+	SHADER_USE_PARAMETER_STRUCT(FBuildBoundaryHashCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		SHADER_PARAMETER(float, BoundaryCellSize)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, RWBoundaryCellCounts)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, RWBoundaryParticleIndices)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+// Boundary Attachment (Flex-style - check and attach)
+class FBoundaryAttachCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FBoundaryAttachCS);
+	SHADER_USE_PARAMETER_STRUCT(FBoundaryAttachCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUBoundaryAttachment>, BoundaryAttachments)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellCounts)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryParticleIndices)
+		SHADER_PARAMETER(float, BoundaryCellSize)
+		SHADER_PARAMETER(float, AdhesionStrength)
+		SHADER_PARAMETER(float, AdhesionRadius)
+		SHADER_PARAMETER(float, CurrentTime)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{ return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5); }
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{ FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment); OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize); }
+};
+
+// Update Boundary Attached (Flex-style - position constraint)
+class FUpdateBoundaryAttachedCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FUpdateBoundaryAttachedCS);
+	SHADER_USE_PARAMETER_STRUCT(FUpdateBoundaryAttachedCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryAttachment>, BoundaryAttachments)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{ return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5); }
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{ FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment); OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize); }
+};
+
+// Boundary Detach (Flex-style - detachment check)
+class FBoundaryDetachCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FBoundaryDetachCS);
+	SHADER_USE_PARAMETER_STRUCT(FBoundaryDetachCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUBoundaryAttachment>, BoundaryAttachments)
+		SHADER_PARAMETER(float, AdhesionRadius)
+		SHADER_PARAMETER(float, DetachThreshold)
+		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER(float, CurrentTime)
+		SHADER_PARAMETER(FVector3f, Gravity)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{ return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5); }
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{ FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment); OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize); }
+};
+
+// Boundary adhesion (Force-based, Akinci 2013)
+class FBoundaryAdhesionCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FBoundaryAdhesionCS);
+	SHADER_USE_PARAMETER_STRUCT(FBoundaryAdhesionCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellCounts)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryParticleIndices)
+		SHADER_PARAMETER(float, BoundaryCellSize)
+		SHADER_PARAMETER(float, AdhesionStrength)
+		SHADER_PARAMETER(float, AdhesionRadius)
+		SHADER_PARAMETER(float, CohesionStrength)
+		SHADER_PARAMETER(float, SmoothingRadius)
+		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER(float, RestDensity)
+		SHADER_PARAMETER(float, Poly6Coeff)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{ return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5); }
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters, FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+		OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
+		OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
+	}
+};
+
 class FStackPressureCS : public FGlobalShader
 {
 public:

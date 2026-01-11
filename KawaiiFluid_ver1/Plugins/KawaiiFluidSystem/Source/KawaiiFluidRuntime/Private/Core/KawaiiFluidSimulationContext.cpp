@@ -541,6 +541,47 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	}
 
 	// =====================================================
+	// Collect and upload Boundary Particles (Flex-style Adhesion)
+	// From FluidInteractionComponents with boundary particles enabled
+	// =====================================================
+	{
+		FGPUBoundaryParticles BoundaryParticles;
+
+		for (UFluidInteractionComponent* Interaction : Params.InteractionComponents)
+		{
+			if (Interaction && Interaction->IsBoundaryAdhesionEnabled())
+			{
+				Interaction->CollectGPUBoundaryParticles(BoundaryParticles);
+			}
+		}
+
+		// Upload to GPU and set parameters if we have boundary particles
+		if (!BoundaryParticles.IsEmpty())
+		{
+			GPUSimulator->UploadBoundaryParticles(BoundaryParticles);
+
+			// Set boundary adhesion parameters
+			FGPUBoundaryAdhesionParams BoundaryAdhesionParams;
+			BoundaryAdhesionParams.bEnabled = 1;
+			BoundaryAdhesionParams.AdhesionStrength = Preset->AdhesionStrength;
+			BoundaryAdhesionParams.AdhesionRadius = Preset->AdhesionRadius;
+			BoundaryAdhesionParams.CohesionStrength = Preset->CohesionStrength;
+			BoundaryAdhesionParams.SmoothingRadius = Preset->SmoothingRadius;
+			BoundaryAdhesionParams.BoundaryParticleCount = BoundaryParticles.GetCount();
+			BoundaryAdhesionParams.FluidParticleCount = GPUSimulator->GetParticleCount();
+			BoundaryAdhesionParams.DeltaTime = Preset->SubstepDeltaTime;
+
+			GPUSimulator->SetBoundaryAdhesionParams(BoundaryAdhesionParams);
+		}
+		else
+		{
+			FGPUBoundaryAdhesionParams BoundaryAdhesionParams;
+			BoundaryAdhesionParams.bEnabled = 0;
+			GPUSimulator->SetBoundaryAdhesionParams(BoundaryAdhesionParams);
+		}
+	}
+
+	// =====================================================
 	// Run GPU simulation with Accumulator method
 	// Simulate with fixed dt substeps for frame-rate independence
 	// =====================================================

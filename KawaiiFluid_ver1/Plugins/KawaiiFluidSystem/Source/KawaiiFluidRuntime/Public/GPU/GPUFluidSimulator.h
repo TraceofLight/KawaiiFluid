@@ -270,6 +270,38 @@ public:
 	int32 GetBoneTransformCount() const { return CachedBoneTransforms.Num(); }
 
 	//=============================================================================
+	// GPU Boundary Particles (Flex-style Adhesion from FluidInteractionComponent)
+	//=============================================================================
+
+	/**
+	 * Upload boundary particles to GPU
+	 * Call this before simulation each frame with boundary particle data from FluidInteractionComponents
+	 * @param BoundaryParticles - Collection of boundary particles
+	 */
+	void UploadBoundaryParticles(const FGPUBoundaryParticles& BoundaryParticles);
+
+	/**
+	 * Set boundary adhesion parameters
+	 * @param Params - Boundary adhesion configuration
+	 */
+	void SetBoundaryAdhesionParams(const FGPUBoundaryAdhesionParams& Params) { CachedBoundaryAdhesionParams = Params; }
+
+	/**
+	 * Get boundary adhesion parameters
+	 */
+	const FGPUBoundaryAdhesionParams& GetBoundaryAdhesionParams() const { return CachedBoundaryAdhesionParams; }
+
+	/**
+	 * Check if boundary adhesion is enabled
+	 */
+	bool IsBoundaryAdhesionEnabled() const { return CachedBoundaryAdhesionParams.bEnabled != 0 && CachedBoundaryParticles.Num() > 0; }
+
+	/**
+	 * Get boundary particle count
+	 */
+	int32 GetBoundaryParticleCount() const { return CachedBoundaryParticles.Num(); }
+
+	//=============================================================================
 	// Stream Compaction (Phase 2 - Per-Polygon Collision)
 	// GPU AABB filtering using parallel prefix sum
 	//=============================================================================
@@ -587,6 +619,12 @@ private:
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV);
 
+	/** Add boundary adhesion pass (Flex-style adhesion to surface particles) */
+	void AddBoundaryAdhesionPass(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		const FGPUFluidSimulationParams& Params);
+
 private:
 	//=============================================================================
 	// GPU Buffers
@@ -727,6 +765,19 @@ private:
 
 	// Flag: bone transforms valid
 	bool bBoneTransformsValid = false;
+
+	//=============================================================================
+	// Boundary Particles (Flex-style Adhesion)
+	//=============================================================================
+
+	// Cached boundary particles (CPU side, for RDG buffer creation each frame)
+	TArray<FGPUBoundaryParticle> CachedBoundaryParticles;
+
+	// Boundary adhesion parameters
+	FGPUBoundaryAdhesionParams CachedBoundaryAdhesionParams;
+
+	// Flag: boundary particles need upload
+	bool bBoundaryParticlesValid = false;
 
 	//=============================================================================
 	// GPU Particle Spawn System

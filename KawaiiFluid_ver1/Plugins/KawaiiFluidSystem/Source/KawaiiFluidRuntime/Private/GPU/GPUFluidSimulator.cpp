@@ -559,6 +559,35 @@ void FGPUFluidSimulator::UploadCollisionPrimitives(const FGPUCollisionPrimitives
 }
 
 //=============================================================================
+// Boundary Particles Upload (Flex-style Adhesion)
+//=============================================================================
+
+void FGPUFluidSimulator::UploadBoundaryParticles(const FGPUBoundaryParticles& BoundaryParticles)
+{
+	if (!bIsInitialized)
+	{
+		return;
+	}
+
+	FScopeLock Lock(&BufferLock);
+
+	// Cache the boundary particle data (will be uploaded to GPU during simulation)
+	CachedBoundaryParticles = BoundaryParticles.Particles;
+
+	// Check if we have any boundary particles
+	if (BoundaryParticles.IsEmpty())
+	{
+		bBoundaryParticlesValid = false;
+		return;
+	}
+
+	bBoundaryParticlesValid = true;
+
+	UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Cached boundary particles: Count=%d"),
+		CachedBoundaryParticles.Num());
+}
+
+//=============================================================================
 // Simulation Execution
 //=============================================================================
 
@@ -1379,6 +1408,12 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 
 	// Pass 9: Clear just-detached flag at end of frame
 	AddClearDetachedFlagPass(GraphBuilder, ParticlesUAVLocal);
+
+	// Pass 9.5: Boundary Adhesion (Flex-style adhesion from mesh surface particles)
+	if (IsBoundaryAdhesionEnabled())
+	{
+		AddBoundaryAdhesionPass(GraphBuilder, ParticlesUAVLocal, Params);
+	}
 
 	// Pass 10: Anisotropy calculation (for ellipsoid rendering)
 	// Runs after simulation is complete, uses spatial hash for neighbor lookup
@@ -3177,6 +3212,121 @@ void FGPUFluidSimulator::AddClearDetachedFlagPass(
 		PassParameters,
 		FIntVector(NumGroups, 1, 1)
 	);
+}
+
+//=============================================================================
+// Boundary Adhesion Pass (Flex-style with Spatial Hash Optimization)
+//=============================================================================
+
+// Spatial hash constants (must match shader)
+static constexpr int32 BOUNDARY_HASH_SIZE = 65536;  // 2^16 cells
+static constexpr int32 BOUNDARY_MAX_PARTICLES_PER_CELL = 16;
+
+void FGPUFluidSimulator::AddBoundaryAdhesionPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (!IsBoundaryAdhesionEnabled() || CachedBoundaryParticles.Num() == 0 || CurrentParticleCount <= 0)
+	{
+		return;
+	}
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	const int32 BoundaryParticleCount = CachedBoundaryParticles.Num();
+
+	// Upload boundary particles
+	FRDGBufferRef BoundaryParticleBuffer = CreateStructuredBuffer(
+		GraphBuilder,
+		TEXT("GPUFluidBoundaryParticles"),
+		sizeof(FGPUBoundaryParticle),
+		BoundaryParticleCount,
+		CachedBoundaryParticles.GetData(),
+		BoundaryParticleCount * sizeof(FGPUBoundaryParticle),
+		ERDGInitialDataFlags::NoCopy
+	);
+	FRDGBufferSRVRef BoundaryParticlesSRV = GraphBuilder.CreateSRV(BoundaryParticleBuffer);
+
+	// Cell size = AdhesionRadius (particles within this range can interact)
+	const float BoundaryCellSize = CachedBoundaryAdhesionParams.AdhesionRadius;
+
+	// Create spatial hash buffers
+	FRDGBufferRef BoundaryCellCountsBuffer = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), BOUNDARY_HASH_SIZE),
+		TEXT("GPUFluidBoundaryCellCounts")
+	);
+	FRDGBufferRef BoundaryParticleIndicesBuffer = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), BOUNDARY_HASH_SIZE * BOUNDARY_MAX_PARTICLES_PER_CELL),
+		TEXT("GPUFluidBoundaryParticleIndices")
+	);
+
+	// Pass 1: Clear spatial hash
+	{
+		TShaderMapRef<FClearBoundaryHashCS> ClearShader(ShaderMap);
+		FClearBoundaryHashCS::FParameters* ClearParams = GraphBuilder.AllocParameters<FClearBoundaryHashCS::FParameters>();
+		ClearParams->RWBoundaryCellCounts = GraphBuilder.CreateUAV(BoundaryCellCountsBuffer);
+
+		const uint32 ClearGroups = FMath::DivideAndRoundUp(BOUNDARY_HASH_SIZE, FClearBoundaryHashCS::ThreadGroupSize);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ClearBoundaryHash"),
+			ClearShader,
+			ClearParams,
+			FIntVector(ClearGroups, 1, 1)
+		);
+	}
+
+	// Pass 2: Build spatial hash
+	{
+		TShaderMapRef<FBuildBoundaryHashCS> BuildShader(ShaderMap);
+		FBuildBoundaryHashCS::FParameters* BuildParams = GraphBuilder.AllocParameters<FBuildBoundaryHashCS::FParameters>();
+		BuildParams->BoundaryParticles = BoundaryParticlesSRV;
+		BuildParams->BoundaryParticleCount = BoundaryParticleCount;
+		BuildParams->BoundaryCellSize = BoundaryCellSize;
+		BuildParams->RWBoundaryCellCounts = GraphBuilder.CreateUAV(BoundaryCellCountsBuffer);
+		BuildParams->RWBoundaryParticleIndices = GraphBuilder.CreateUAV(BoundaryParticleIndicesBuffer);
+
+		const uint32 BuildGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FBuildBoundaryHashCS::ThreadGroupSize);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::BuildBoundaryHash"),
+			BuildShader,
+			BuildParams,
+			FIntVector(BuildGroups, 1, 1)
+		);
+	}
+
+	// Pass 3: Boundary adhesion (using spatial hash)
+	{
+		TShaderMapRef<FBoundaryAdhesionCS> AdhesionShader(ShaderMap);
+		FBoundaryAdhesionCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FBoundaryAdhesionCS::FParameters>();
+		PassParameters->Particles = ParticlesUAV;
+		PassParameters->ParticleCount = CurrentParticleCount;
+		PassParameters->BoundaryParticles = BoundaryParticlesSRV;
+		PassParameters->BoundaryParticleCount = BoundaryParticleCount;
+		PassParameters->BoundaryCellCounts = GraphBuilder.CreateSRV(BoundaryCellCountsBuffer);
+		PassParameters->BoundaryParticleIndices = GraphBuilder.CreateSRV(BoundaryParticleIndicesBuffer);
+		PassParameters->BoundaryCellSize = BoundaryCellSize;
+		PassParameters->AdhesionStrength = CachedBoundaryAdhesionParams.AdhesionStrength;
+		PassParameters->AdhesionRadius = CachedBoundaryAdhesionParams.AdhesionRadius;
+		PassParameters->CohesionStrength = CachedBoundaryAdhesionParams.CohesionStrength;
+		PassParameters->SmoothingRadius = Params.SmoothingRadius;
+		PassParameters->DeltaTime = Params.DeltaTime;
+		PassParameters->RestDensity = Params.RestDensity;
+		PassParameters->Poly6Coeff = Params.Poly6Coeff;
+
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FBoundaryAdhesionCS::ThreadGroupSize);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::BoundaryAdhesion"),
+			AdhesionShader,
+			PassParameters,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
 }
 
 //=============================================================================
