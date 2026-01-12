@@ -11,6 +11,7 @@ class UKawaiiFluidComponent;
 class UKawaiiFluidSimulationModule;
 class UKawaiiFluidSimulationContext;
 class UKawaiiFluidPresetDataAsset;
+class UKawaiiFluidSimulationVolumeComponent;
 class UFluidCollider;
 class UFluidInteractionComponent;
 class FSpatialHash;
@@ -19,11 +20,16 @@ struct FFluidParticle;
 /**
  * Cache key for Context lookup
  * Allows same Preset to have different Contexts for GPU vs CPU simulation
+ * and different Solvers for different Z-Order spaces
  */
 USTRUCT()
 struct FContextCacheKey
 {
 	GENERATED_BODY()
+
+	/** Target Volume for Z-Order space bounds (nullptr = component-relative bounds) */
+	UPROPERTY()
+	TObjectPtr<UKawaiiFluidSimulationVolumeComponent> VolumeComponent = nullptr;
 
 	UPROPERTY()
 	TObjectPtr<UKawaiiFluidPresetDataAsset> Preset = nullptr;
@@ -32,17 +38,24 @@ struct FContextCacheKey
 	bool bUseGPUSimulation = false;
 
 	FContextCacheKey() = default;
+	FContextCacheKey(UKawaiiFluidSimulationVolumeComponent* InVolumeComponent, UKawaiiFluidPresetDataAsset* InPreset, bool bInUseGPU)
+		: VolumeComponent(InVolumeComponent), Preset(InPreset), bUseGPUSimulation(bInUseGPU) {}
+
+	// Legacy constructor for backward compatibility
 	FContextCacheKey(UKawaiiFluidPresetDataAsset* InPreset, bool bInUseGPU)
-		: Preset(InPreset), bUseGPUSimulation(bInUseGPU) {}
+		: VolumeComponent(nullptr), Preset(InPreset), bUseGPUSimulation(bInUseGPU) {}
 
 	bool operator==(const FContextCacheKey& Other) const
 	{
-		return Preset == Other.Preset && bUseGPUSimulation == Other.bUseGPUSimulation;
+		return VolumeComponent == Other.VolumeComponent && Preset == Other.Preset && bUseGPUSimulation == Other.bUseGPUSimulation;
 	}
 
 	friend uint32 GetTypeHash(const FContextCacheKey& Key)
 	{
-		return HashCombine(GetTypeHash(Key.Preset), GetTypeHash(Key.bUseGPUSimulation));
+		uint32 Hash = GetTypeHash(Key.VolumeComponent);
+		Hash = HashCombine(Hash, GetTypeHash(Key.Preset));
+		Hash = HashCombine(Hash, GetTypeHash(Key.bUseGPUSimulation));
+		return Hash;
 	}
 };
 
@@ -89,6 +102,19 @@ public:
 
 	/** Get all registered modules */
 	const TArray<UKawaiiFluidSimulationModule*>& GetAllModules() const { return AllModules; }
+
+	//========================================
+	// Volume Registration
+	//========================================
+
+	/** Register a simulation volume component (defines Z-Order space bounds) */
+	void RegisterVolumeComponent(UKawaiiFluidSimulationVolumeComponent* VolumeComponent);
+
+	/** Unregister a simulation volume component */
+	void UnregisterVolumeComponent(UKawaiiFluidSimulationVolumeComponent* VolumeComponent);
+
+	/** Get all registered volume components */
+	const TArray<UKawaiiFluidSimulationVolumeComponent*>& GetAllVolumeComponents() const { return AllVolumeComponents; }
 
 	//========================================
 	// Component Registration (for backward compatibility)
@@ -151,10 +177,17 @@ public:
 	// Context Management
 	//========================================
 
-	/** Get or create context for preset and simulation mode
+	/** Get or create context for volume component, preset and simulation mode
 	 *  Same Preset can have different Contexts for GPU vs CPU simulation
+	 *  Same VolumeComponent = same Z-Order space = particles can interact
 	 */
-	UKawaiiFluidSimulationContext* GetOrCreateContext(UKawaiiFluidPresetDataAsset* Preset, bool bUseGPUSimulation);
+	UKawaiiFluidSimulationContext* GetOrCreateContext(UKawaiiFluidSimulationVolumeComponent* VolumeComponent, UKawaiiFluidPresetDataAsset* Preset, bool bUseGPUSimulation);
+
+	/** Legacy: Get or create context without volume (uses component-relative bounds) */
+	UKawaiiFluidSimulationContext* GetOrCreateContext(UKawaiiFluidPresetDataAsset* Preset, bool bUseGPUSimulation)
+	{
+		return GetOrCreateContext(nullptr, Preset, bUseGPUSimulation);
+	}
 
 private:
 	//========================================
@@ -164,6 +197,14 @@ private:
 	/** All registered simulation modules */
 	UPROPERTY()
 	TArray<UKawaiiFluidSimulationModule*> AllModules;
+
+	//========================================
+	// Volume Component Management
+	//========================================
+
+	/** All registered simulation volume components */
+	UPROPERTY()
+	TArray<UKawaiiFluidSimulationVolumeComponent*> AllVolumeComponents;
 
 	//========================================
 	// Component Management (Deprecated)

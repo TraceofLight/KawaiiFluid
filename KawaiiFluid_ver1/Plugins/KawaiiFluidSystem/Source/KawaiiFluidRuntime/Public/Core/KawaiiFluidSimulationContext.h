@@ -9,6 +9,7 @@
 #include "Collision/PerPolygonCollisionProcessor.h"
 #include "GPU/GPUFluidParticle.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
+#include "Components/KawaiiFluidSimulationVolumeComponent.h"
 #include "KawaiiFluidSimulationContext.generated.h"
 
 // Forward declarations
@@ -88,6 +89,22 @@ public:
 	 * Set the preset associated with this context
 	 */
 	void SetCachedPreset(UKawaiiFluidPresetDataAsset* InPreset) { CachedPreset = InPreset; }
+
+	//========================================
+	// Target Volume Component (Z-Order Space Bounds)
+	//========================================
+
+	/**
+	 * Get the target volume component for Z-Order space bounds
+	 * When set, this context uses the Volume's bounds instead of Preset bounds
+	 */
+	UKawaiiFluidSimulationVolumeComponent* GetTargetVolumeComponent() const { return TargetVolumeComponent.Get(); }
+
+	/**
+	 * Set the target volume component for Z-Order space bounds
+	 * @param InVolumeComponent The volume component to use (nullptr = use Preset bounds)
+	 */
+	void SetTargetVolumeComponent(UKawaiiFluidSimulationVolumeComponent* InVolumeComponent) { TargetVolumeComponent = InVolumeComponent; }
 
 	//========================================
 	// Render Resource (배치 렌더링용)
@@ -364,4 +381,7 @@ protected:
 
 	/** Weak reference to the preset associated with this context */
 	TWeakObjectPtr<UKawaiiFluidPresetDataAsset> CachedPreset;
+
+	/** Weak reference to the target volume component for Z-Order space bounds */
+	TWeakObjectPtr<UKawaiiFluidSimulationVolumeComponent> TargetVolumeComponent;
 };

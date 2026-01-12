@@ -42,43 +42,6 @@ void UKawaiiFluidPresetDataAsset::RecalculateDerivedParameters()
 	// Estimate neighbor count: N ≈ (4/3)π × (h/d)³ = (4/3)π × (1/SpacingRatio)³
 	const float HOverD = 1.0f / SpacingRatio;
 	EstimatedNeighborCount = FMath::RoundToInt((4.0f / 3.0f) * PI * HOverD * HOverD * HOverD);
-
-	//========================================
-	// Z-Order Sorting Parameters (Auto-calculated)
-	//========================================
-	// GridAxisBits is a GLOBAL CONSTANT from GPUFluidSimulatorShaders.h
-	// All presets use the same value because it's a shader compile-time constant.
-	//
-	// Formulas:
-	//   GridResolution = 2^GridAxisBits (GPU_MORTON_GRID_SIZE)
-	//   MortonBits = GridAxisBits × 3
-	//   MaxCells = GridResolution³ (GPU_MAX_CELLS)
-	//   CellSize = SmoothingRadius (optimal for SPH)
-	//   BoundsExtent = GridResolution × CellSize
-	//   SimulationBounds = ±BoundsExtent/2
-
-	// Use global shader constant (NOT per-preset editable)
-	GridAxisBits = GPU_MORTON_GRID_AXIS_BITS;
-
-	// Grid Resolution = 2^GridAxisBits (from shader constant)
-	ZOrderGridResolution = GPU_MORTON_GRID_SIZE;
-
-	// Morton Code bits = GridAxisBits × 3 (X, Y, Z each get GridAxisBits)
-	ZOrderMortonBits = GPU_MORTON_GRID_AXIS_BITS * 3;
-
-	// Max Cells = GridResolution³ (from shader constant)
-	ZOrderMaxCells = GPU_MAX_CELLS;
-
-	// Cell Size = SmoothingRadius (optimal for SPH neighbor search: CellSize = h)
-	ZOrderCellSize = SmoothingRadius;
-
-	// Bounds Extent = GridResolution × CellSize (total simulation domain size per axis)
-	ZOrderBoundsExtent = static_cast<float>(ZOrderGridResolution) * ZOrderCellSize;
-
-	// Simulation Bounds = ±BoundsExtent/2 (centered around component origin)
-	const float HalfExtent = ZOrderBoundsExtent * 0.5f;
-	SimulationBoundsMin = FVector(-HalfExtent, -HalfExtent, -HalfExtent);
-	SimulationBoundsMax = FVector(HalfExtent, HalfExtent, HalfExtent);
 }
 
 #if WITH_EDITOR

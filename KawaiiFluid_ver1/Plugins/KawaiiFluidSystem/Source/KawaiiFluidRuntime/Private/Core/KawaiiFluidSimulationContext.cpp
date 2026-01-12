@@ -3,6 +3,7 @@
 #include "Core/KawaiiFluidSimulationContext.h"
 #include "Core/SpatialHash.h"
 #include "Core/KawaiiFluidSimulationStats.h"
+#include "Components/KawaiiFluidSimulationVolumeComponent.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "Physics/DensityConstraint.h"
 #include "Physics/ViscositySolver.h"
@@ -366,9 +367,26 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	GPUSimulator->SetPrimitiveCollisionThreshold(Preset->PrimitiveCollisionThreshold);
 
 	// Set simulation bounds for Z-Order sorting (Morton code)
-	// Bounds are defined relative to component origin, so add SimulationOrigin offset
-	const FVector3f WorldBoundsMin = FVector3f(Preset->SimulationBoundsMin) + FVector3f(Params.SimulationOrigin);
-	const FVector3f WorldBoundsMax = FVector3f(Preset->SimulationBoundsMax) + FVector3f(Params.SimulationOrigin);
+	// Priority: TargetVolumeComponent bounds > Preset bounds + SimulationOrigin
+	FVector3f WorldBoundsMin, WorldBoundsMax;
+
+	if (UKawaiiFluidSimulationVolumeComponent* Volume = TargetVolumeComponent.Get())
+	{
+		// Use Volume's world-space bounds directly
+		WorldBoundsMin = FVector3f(Volume->GetWorldBoundsMin());
+		WorldBoundsMax = FVector3f(Volume->GetWorldBoundsMax());
+	}
+	else
+	{
+		// Fallback: Calculate bounds from SmoothingRadius
+		// GridAxisBits=7 → GridResolution=128, BoundsExtent = 128 * SmoothingRadius
+		constexpr int32 GridResolution = 128;
+		const float BoundsExtent = GridResolution * Preset->SmoothingRadius;
+		const float HalfExtent = BoundsExtent * 0.5f;
+		WorldBoundsMin = FVector3f(-HalfExtent) + FVector3f(Params.SimulationOrigin);
+		WorldBoundsMax = FVector3f(HalfExtent) + FVector3f(Params.SimulationOrigin);
+	}
+
 	GPUSimulator->SetSimulationBounds(WorldBoundsMin, WorldBoundsMax);
 
 	// =====================================================

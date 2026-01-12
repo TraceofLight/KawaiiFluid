@@ -12,6 +12,8 @@
 class UKawaiiFluidRenderingModule;
 class UKawaiiFluidComponent;
 class UKawaiiFluidPresetDataAsset;
+class UKawaiiFluidSimulationVolumeComponent;
+class AKawaiiFluidSimulationVolume;
 
 /**
  * Instance data for preserving particle data during re-construction
@@ -332,6 +334,24 @@ public:
 	/** Fluid preset data asset - contains physics and rendering parameters */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Configuration")
 	TObjectPtr<UKawaiiFluidPresetDataAsset> Preset;
+
+	//========================================
+	// Simulation Volume Access (Delegated to SimulationModule)
+	// Configure Simulation Volume settings in the "Fluid|Simulation Volume" category
+	// of the SimulationModule property below.
+	//========================================
+
+	/** Get the target simulation volume actor (from SimulationModule) */
+	UFUNCTION(BlueprintPure, Category = "Fluid|Simulation Volume")
+	AKawaiiFluidSimulationVolume* GetTargetSimulationVolume() const;
+
+	/** Get the effective volume component (from SimulationModule) */
+	UFUNCTION(BlueprintPure, Category = "Fluid|Simulation Volume")
+	UKawaiiFluidSimulationVolumeComponent* GetTargetVolumeComponent() const;
+
+	/** Set the target simulation volume at runtime (delegates to SimulationModule) */
+	UFUNCTION(BlueprintCallable, Category = "Fluid|Simulation Volume")
+	void SetTargetSimulationVolume(AKawaiiFluidSimulationVolume* NewSimulationVolume);
 
 	//========================================
 	// GPU Simulation

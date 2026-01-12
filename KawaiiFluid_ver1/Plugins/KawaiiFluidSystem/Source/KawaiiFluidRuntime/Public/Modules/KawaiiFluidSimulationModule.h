@@ -18,6 +18,8 @@ class UKawaiiFluidPresetDataAsset;
 class UFluidCollider;
 class UFluidInteractionComponent;
 class UKawaiiFluidSimulationContext;
+class UKawaiiFluidSimulationVolumeComponent;
+class AKawaiiFluidSimulationVolume;
 
 /**
  * 유체 시뮬레이션 데이터 모듈 (UObject 기반)
@@ -94,6 +96,91 @@ public:
 	/** Override 존재 여부 */
 	UFUNCTION(BlueprintPure, Category = "Fluid|Module")
 	bool HasAnyOverride() const;
+
+	//========================================
+	// Simulation Volume (Z-Order Space)
+	//========================================
+
+	/**
+	 * Target Simulation Volume Actor for Z-Order space bounds
+	 *
+	 * When set, this module will use the external Volume's Z-Order space for simulation.
+	 * Multiple modules sharing the same Volume can interact with each other.
+	 *
+	 * When nullptr, the module uses its own internal volume settings
+	 * configured below (CellSize).
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Simulation Volume", meta = (DisplayName = "Target Volume (External)"))
+	TObjectPtr<AKawaiiFluidSimulationVolume> TargetSimulationVolume = nullptr;
+
+	/**
+	 * Cell size for Z-Order grid (when using internal volume)
+	 * Should match SmoothingRadius of your fluid preset.
+	 * Only editable when TargetSimulationVolume is not set.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Simulation Volume",
+		meta = (EditCondition = "TargetSimulationVolume == nullptr", ClampMin = "1.0", ClampMax = "1000.0"))
+	float CellSize = 20.0f;
+
+	/**
+	 * Grid resolution bits per axis (shader constant, read-only)
+	 * Current: 7 bits = 128 grid resolution per axis
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Simulation Volume|Info")
+	int32 GridAxisBits = 7;
+
+	/**
+	 * Grid resolution per axis (2^GridAxisBits)
+	 * Current: 128 cells per axis
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Simulation Volume|Info")
+	int32 GridResolution = 128;
+
+	/**
+	 * Total number of cells (GridResolution^3)
+	 * Current: 2,097,152 cells
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Simulation Volume|Info")
+	int32 MaxCells = 2097152;
+
+	/**
+	 * Simulation bounds extent (GridResolution * CellSize)
+	 * This is the total size of the Z-Order space per axis.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Simulation Volume|Info")
+	float BoundsExtent = 2560.0f;
+
+	/**
+	 * World-space minimum bounds
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Simulation Volume|Info")
+	FVector WorldBoundsMin = FVector(-1280.0f, -1280.0f, -1280.0f);
+
+	/**
+	 * World-space maximum bounds
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Simulation Volume|Info")
+	FVector WorldBoundsMax = FVector(1280.0f, 1280.0f, 1280.0f);
+
+	/** Get the target simulation volume actor (can be nullptr) */
+	UFUNCTION(BlueprintPure, Category = "Fluid|Simulation Volume")
+	AKawaiiFluidSimulationVolume* GetTargetSimulationVolume() const { return TargetSimulationVolume; }
+
+	/** Set the target simulation volume at runtime */
+	UFUNCTION(BlueprintCallable, Category = "Fluid|Simulation Volume")
+	void SetTargetSimulationVolume(AKawaiiFluidSimulationVolume* NewSimulationVolume);
+
+	/** Recalculate internal volume bounds (call after changing CellSize or owner location)
+	 * Called automatically when properties change in editor
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Fluid|Simulation Volume")
+	void RecalculateVolumeBounds();
+
+	/** Update volume info display from current effective source
+	 * When TargetSimulationVolume is set, reads from external volume
+	 * Otherwise uses internal CellSize to calculate
+	 */
+	void UpdateVolumeInfoDisplay();
 
 	//========================================
 	// 파티클 데이터 접근 (IKawaiiFluidDataProvider 구현)
@@ -319,7 +406,7 @@ public:
 	FSpatialHash* GetSpatialHash() const { return SpatialHash.Get(); }
 
 	/** SpatialHash 초기화 */
-	void InitializeSpatialHash(float CellSize);
+	void InitializeSpatialHash(float InCellSize);
 
 	//========================================
 	// 시간 관리 (Substep용)
@@ -406,7 +493,7 @@ public:
 	/** Containment wireframe color */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Collision",
 	          meta = (EditCondition = "bEnableContainment && bShowContainmentWireframe", EditConditionHides))
-	FColor ContainmentWireframeColor = FColor::Yellow;
+	FColor ContainmentWireframeColor = FColor::Green;
 
 	//========================================
 	// Containment Volume API
@@ -658,6 +745,30 @@ public:
 	void SetSimulationContext(UKawaiiFluidSimulationContext* InContext) { CachedSimulationContext = InContext; }
 
 	//========================================
+	// Volume Component Access (Internal)
+	//========================================
+
+	/**
+	 * Get the effective volume component for Z-Order space bounds
+	 * Returns external TargetSimulationVolume's component if set,
+	 * otherwise returns internal OwnedVolumeComponent
+	 */
+	UFUNCTION(BlueprintPure, Category = "Fluid|Simulation Volume")
+	UKawaiiFluidSimulationVolumeComponent* GetTargetVolumeComponent() const;
+
+	/**
+	 * Get the internally owned volume component (always valid after initialization)
+	 * This is used when no external TargetSimulationVolume is set
+	 */
+	UKawaiiFluidSimulationVolumeComponent* GetOwnedVolumeComponent() const { return OwnedVolumeComponent; }
+
+	/**
+	 * Check if using external volume (TargetSimulationVolume is set)
+	 */
+	UFUNCTION(BlueprintPure, Category = "Fluid|Simulation Volume")
+	bool IsUsingExternalVolume() const { return TargetSimulationVolume != nullptr; }
+
+	//========================================
 	// Source Identification
 	//========================================
 
@@ -676,6 +787,37 @@ private:
 
 	/** Cached simulation context pointer (owned by SimulatorSubsystem) */
 	UKawaiiFluidSimulationContext* CachedSimulationContext = nullptr;
+
+	/**
+	 * Internally owned volume component for Z-Order space bounds
+	 * Created automatically during Initialize(), used when TargetSimulationVolume is nullptr
+	 */
+	UPROPERTY(Transient)
+	TObjectPtr<UKawaiiFluidSimulationVolumeComponent> OwnedVolumeComponent = nullptr;
+
+	/**
+	 * Backup of internal CellSize value
+	 * When TargetSimulationVolume is set, CellSize displays external volume's value
+	 * When TargetSimulationVolume is cleared, CellSize is restored from this backup
+	 */
+	float InternalCellSize = 20.0f;
+
+	/**
+	 * Previously registered volume component (for editor unregistration tracking)
+	 * Used to properly unregister when TargetSimulationVolume changes in editor
+	 */
+	TWeakObjectPtr<UKawaiiFluidSimulationVolumeComponent> PreviousRegisteredVolume = nullptr;
+
+	/** Called when the TargetSimulationVolume actor is destroyed */
+	UFUNCTION()
+	void OnTargetVolumeDestroyed(AActor* DestroyedActor);
+
+	/** Bind/Unbind to TargetSimulationVolume's OnDestroyed delegate */
+	void BindToVolumeDestroyedEvent();
+	void UnbindFromVolumeDestroyedEvent();
+
+	/** Whether we're currently bound to the volume's OnDestroyed event */
+	bool bBoundToVolumeDestroyed = false;
 
 	/** Cached source ID for spawned particles (Component's unique ID, -1 = invalid) */
 	int32 CachedSourceID = -1;

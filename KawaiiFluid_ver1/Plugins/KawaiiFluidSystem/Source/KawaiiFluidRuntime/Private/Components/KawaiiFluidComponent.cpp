@@ -1,6 +1,8 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Components/KawaiiFluidComponent.h"
+#include "Components/KawaiiFluidSimulationVolumeComponent.h"
+#include "Components/KawaiiFluidSimulationVolume.h"
 #include "Components/FluidInteractionComponent.h"
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
@@ -95,6 +97,13 @@ void UKawaiiFluidComponent::BeginPlay()
 		SimulationModule->SetCollisionEventCallback(
 			FOnModuleCollisionEvent::CreateUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent)
 		);
+
+		// Volume registration is now handled internally by SimulationModule
+		// When Module has TargetSimulationVolume set, it auto-registers with the volume
+		if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
+		{
+			Volume->RegisterModule(SimulationModule);
+		}
 	}
 
 	// 렌더링 모듈 초기화 (중복 초기화 방지)
@@ -136,6 +145,15 @@ void UKawaiiFluidComponent::BeginPlay()
 
 void UKawaiiFluidComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// Unregister module from TargetVolumeComponent
+	if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
+	{
+		if (SimulationModule)
+		{
+			Volume->UnregisterModule(SimulationModule);
+		}
+	}
+
 	// Subsystem에서 등록 해제
 	UnregisterFromSubsystem();
 
@@ -231,28 +249,29 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		);
 	}
 
-	// Simulation Bounds Wireframe 시각화 (Z-Order Sorting region)
+	// Simulation Volume Wireframe Visualization (Z-Order Sorting region)
 	// Always visible in EDITOR ONLY when GPU simulation is active
 	// Uses preset bounds directly (not cached GPU bounds) for immediate preset change feedback
+	// Skip if external TargetSimulationVolume is set - the Volume will draw its own bounds instead
 #if WITH_EDITOR
-	if (Preset && bUseGPUSimulation && !bIsGameWorld)
+	if (Preset && bUseGPUSimulation && !bIsGameWorld && !GetTargetSimulationVolume())
 	{
-		// Preset bounds are relative to component, so add component location
+		// Calculate bounds from SmoothingRadius (GridAxisBits=7 → GridResolution=128)
+		constexpr int32 GridResolution = 128;
+		const float BoundsExtent = GridResolution * Preset->SmoothingRadius;
+		const FVector HalfExtent = FVector(BoundsExtent * 0.5f);
 		const FVector ComponentLocation = GetComponentLocation();
-		const FVector WorldBoundsMin = Preset->SimulationBoundsMin + ComponentLocation;
-		const FVector WorldBoundsMax = Preset->SimulationBoundsMax + ComponentLocation;
 
-		// Compute AABB center and half-extent for DrawDebugBox
-		const FVector Center = (WorldBoundsMin + WorldBoundsMax) * 0.5f;
-		const FVector HalfExtent = (WorldBoundsMax - WorldBoundsMin) * 0.5f;
+		// Yellow when selected, Red otherwise for Z-Order sorting bounds visualization
+		AActor* Owner = GetOwner();
+		const FColor BoundsColor = (Owner && Owner->IsSelected()) ? FColor::Yellow : FColor::Red;
 
-		// Red color for Z-Order sorting bounds visualization
 		DrawDebugBox(
 			World,
-			Center,
+			ComponentLocation,  // Center at component location
 			HalfExtent,
 			FQuat::Identity,  // Simulation bounds are axis-aligned
-			FColor::Red,
+			BoundsColor,
 			false,  // bPersistentLines
 			-1.0f,  // LifeTime (redraw each frame)
 			0,      // DepthPriority
@@ -822,6 +841,28 @@ void UKawaiiFluidComponent::UnregisterFromSubsystem()
 		{
 			RendererSubsystem->UnregisterRenderingModule(RenderingModule);
 		}
+	}
+}
+
+//========================================
+// Simulation Volume Access (Delegated to SimulationModule)
+//========================================
+
+AKawaiiFluidSimulationVolume* UKawaiiFluidComponent::GetTargetSimulationVolume() const
+{
+	return SimulationModule ? SimulationModule->GetTargetSimulationVolume() : nullptr;
+}
+
+UKawaiiFluidSimulationVolumeComponent* UKawaiiFluidComponent::GetTargetVolumeComponent() const
+{
+	return SimulationModule ? SimulationModule->GetTargetVolumeComponent() : nullptr;
+}
+
+void UKawaiiFluidComponent::SetTargetSimulationVolume(AKawaiiFluidSimulationVolume* NewSimulationVolume)
+{
+	if (SimulationModule)
+	{
+		SimulationModule->SetTargetSimulationVolume(NewSimulationVolume);
 	}
 }
 

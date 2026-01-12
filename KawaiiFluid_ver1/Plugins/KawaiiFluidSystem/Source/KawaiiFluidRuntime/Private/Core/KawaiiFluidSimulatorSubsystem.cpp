@@ -5,6 +5,7 @@
 #include "Core/SpatialHash.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "Components/KawaiiFluidComponent.h"
+#include "Components/KawaiiFluidSimulationVolumeComponent.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
@@ -44,6 +45,7 @@ void UKawaiiFluidSimulatorSubsystem::Initialize(FSubsystemCollectionBase& Collec
 void UKawaiiFluidSimulatorSubsystem::Deinitialize()
 {
 	AllModules.Empty();
+	AllVolumeComponents.Empty();
 	AllFluidComponents.Empty();
 	GlobalColliders.Empty();
 	GlobalInteractionComponents.Empty();
@@ -127,10 +129,12 @@ void UKawaiiFluidSimulatorSubsystem::RegisterModule(UKawaiiFluidSimulationModule
 		}
 
 		// Always setup Context reference (needed for rendering)
-		// Context is keyed by (Preset + SimulationMode) to allow GPU/CPU mixing
+		// Context is keyed by (VolumeComponent + Preset + SimulationMode)
+		// Same VolumeComponent = same Z-Order space = particles can interact
 		if (Preset)
 		{
-			UKawaiiFluidSimulationContext* Context = GetOrCreateContext(Preset, bWantsGPUSimulation);
+			UKawaiiFluidSimulationVolumeComponent* TargetVolume = Module->GetTargetVolumeComponent();
+			UKawaiiFluidSimulationContext* Context = GetOrCreateContext(TargetVolume, Preset, bWantsGPUSimulation);
 			if (Context)
 			{
 				// Set context reference for rendering access
@@ -207,6 +211,25 @@ void UKawaiiFluidSimulatorSubsystem::UnregisterComponent(UKawaiiFluidComponent* 
 {
 	AllFluidComponents.Remove(Component);
 	UE_LOG(LogTemp, Verbose, TEXT("FluidComponent unregistered: %s"), Component ? *Component->GetName() : TEXT("nullptr"));
+}
+
+//========================================
+// Volume Component Registration
+//========================================
+
+void UKawaiiFluidSimulatorSubsystem::RegisterVolumeComponent(UKawaiiFluidSimulationVolumeComponent* VolumeComponent)
+{
+	if (VolumeComponent && !AllVolumeComponents.Contains(VolumeComponent))
+	{
+		AllVolumeComponents.Add(VolumeComponent);
+		UE_LOG(LogTemp, Log, TEXT("SimulationVolumeComponent registered: %s"), *VolumeComponent->GetName());
+	}
+}
+
+void UKawaiiFluidSimulatorSubsystem::UnregisterVolumeComponent(UKawaiiFluidSimulationVolumeComponent* VolumeComponent)
+{
+	AllVolumeComponents.Remove(VolumeComponent);
+	UE_LOG(LogTemp, Log, TEXT("SimulationVolumeComponent unregistered: %s"), VolumeComponent ? *VolumeComponent->GetName() : TEXT("nullptr"));
 }
 
 //========================================
@@ -293,16 +316,18 @@ int32 UKawaiiFluidSimulatorSubsystem::GetTotalParticleCount() const
 //========================================
 
 UKawaiiFluidSimulationContext* UKawaiiFluidSimulatorSubsystem::GetOrCreateContext(
-	UKawaiiFluidPresetDataAsset* Preset, bool bUseGPUSimulation)
+	UKawaiiFluidSimulationVolumeComponent* VolumeComponent, UKawaiiFluidPresetDataAsset* Preset, bool bUseGPUSimulation)
 {
 	if (!Preset)
 	{
 		return DefaultContext;
 	}
 
-	// Check cache - keyed by (Preset + SimulationMode)
-	// This allows same Preset to have different Contexts for GPU vs CPU
-	FContextCacheKey CacheKey(Preset, bUseGPUSimulation);
+	// Check cache - keyed by (VolumeComponent + Preset + SimulationMode)
+	// Same VolumeComponent = same Z-Order space = particles can interact
+	// Same Preset = same physics parameters
+	// Same GPU mode = same simulation path
+	FContextCacheKey CacheKey(VolumeComponent, Preset, bUseGPUSimulation);
 	if (TObjectPtr<UKawaiiFluidSimulationContext>* Found = ContextCache.Find(CacheKey))
 	{
 		return *Found;
@@ -317,9 +342,14 @@ UKawaiiFluidSimulationContext* UKawaiiFluidSimulatorSubsystem::GetOrCreateContex
 
 	UKawaiiFluidSimulationContext* NewContext = NewObject<UKawaiiFluidSimulationContext>(this, ContextClass);
 	NewContext->InitializeSolvers(Preset);
+
+	// Store VolumeComponent reference in Context for bounds access
+	NewContext->SetTargetVolumeComponent(VolumeComponent);
+
 	ContextCache.Add(CacheKey, NewContext);
 
-	UE_LOG(LogTemp, Log, TEXT("Created Context for Preset '%s' (GPU=%d)"),
+	UE_LOG(LogTemp, Log, TEXT("Created Context for VolumeComponent '%s' + Preset '%s' (GPU=%d)"),
+		VolumeComponent ? *VolumeComponent->GetName() : TEXT("None"),
 		*Preset->GetName(), bUseGPUSimulation ? 1 : 0);
 
 	return NewContext;
@@ -370,8 +400,11 @@ void UKawaiiFluidSimulatorSubsystem::SimulateIndependentFluidComponents(float De
 			bWantsGPUSimulation = OwnerComp->bUseGPUSimulation;
 		}
 
-		// Get or create context (keyed by Preset + SimulationMode)
-		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(EffectivePreset, bWantsGPUSimulation);
+		// Get target volume component for Z-Order space bounds
+		UKawaiiFluidSimulationVolumeComponent* TargetVolume = Module->GetTargetVolumeComponent();
+
+		// Get or create context (keyed by VolumeComponent + Preset + SimulationMode)
+		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(TargetVolume, EffectivePreset, bWantsGPUSimulation);
 		if (!Context)
 		{
 			continue;
@@ -449,8 +482,8 @@ void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaT
 			continue;
 		}
 
-		// Get context for this (Preset + SimulationMode) combination
-		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(Preset, CacheKey.bUseGPUSimulation);
+		// Get context for this (VolumeComponent + Preset + SimulationMode) combination
+		UKawaiiFluidSimulationContext* Context = GetOrCreateContext(CacheKey.VolumeComponent, Preset, CacheKey.bUseGPUSimulation);
 		if (!Context)
 		{
 			continue;
@@ -559,8 +592,12 @@ UKawaiiFluidSimulatorSubsystem::GroupModulesByContext() const
 				bUseGPU = OwnerComp->bUseGPUSimulation;
 			}
 
-			// Group by (Preset + GPUMode)
-			FContextCacheKey Key(Module->GetPreset(), bUseGPU);
+			// Get target volume component for Z-Order space bounds
+			UKawaiiFluidSimulationVolumeComponent* TargetVolume = Module->GetTargetVolumeComponent();
+
+			// Group by (VolumeComponent + Preset + GPUMode)
+			// Same VolumeComponent = same Z-Order space = particles can interact
+			FContextCacheKey Key(TargetVolume, Module->GetPreset(), bUseGPU);
 			Result.FindOrAdd(Key).Add(Module);
 		}
 	}

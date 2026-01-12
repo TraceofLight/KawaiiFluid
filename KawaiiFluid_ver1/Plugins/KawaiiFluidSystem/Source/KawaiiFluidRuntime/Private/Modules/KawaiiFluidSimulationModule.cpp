@@ -5,12 +5,25 @@
 #include "Collision/FluidCollider.h"
 #include "Components/FluidInteractionComponent.h"
 #include "Components/KawaiiFluidComponent.h"
+#include "Components/KawaiiFluidSimulationVolumeComponent.h"
+#include "Components/KawaiiFluidSimulationVolume.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "GPU/GPUFluidSimulator.h"
+#include "GPU/GPUFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
 #include "GPU/GPUFluidParticle.h"  // For FGPUSpawnRequest
 
 UKawaiiFluidSimulationModule::UKawaiiFluidSimulationModule()
 {
+	// Initialize grid values from shader constants
+	GridAxisBits = GPU_MORTON_GRID_AXIS_BITS;
+	GridResolution = GPU_MORTON_GRID_SIZE;
+	MaxCells = GPU_MAX_CELLS;
+
+	// Initialize internal CellSize backup
+	InternalCellSize = CellSize;
+
+	// Calculate initial bounds
+	RecalculateVolumeBounds();
 }
 
 #if WITH_EDITOR
@@ -29,6 +42,66 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 		{
 			SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
 		}
+	}
+	// CellSize 변경 시 bounds 재계산
+	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, CellSize))
+	{
+		// Only sync InternalCellSize when not using external volume
+		// (When external volume is set, CellSize is read-only display of external value)
+		if (!TargetSimulationVolume)
+		{
+			InternalCellSize = CellSize;
+		}
+
+		RecalculateVolumeBounds();
+		// OwnedVolumeComponent의 CellSize도 업데이트
+		if (OwnedVolumeComponent)
+		{
+			OwnedVolumeComponent->CellSize = CellSize;
+			OwnedVolumeComponent->RecalculateBounds();
+		}
+	}
+	// TargetSimulationVolume 변경 시 정보 업데이트
+	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, TargetSimulationVolume))
+	{
+		// Unbind from previous volume's OnDestroyed event
+		UnbindFromVolumeDestroyedEvent();
+
+		// Unregister from previous volume
+		if (UKawaiiFluidSimulationVolumeComponent* PrevVolume = PreviousRegisteredVolume.Get())
+		{
+			PrevVolume->UnregisterModule(this);
+		}
+
+		// Backup CellSize before setting external volume
+		if (TargetSimulationVolume && !PreviousRegisteredVolume.IsValid())
+		{
+			// Switching from internal to external: backup current CellSize
+			InternalCellSize = CellSize;
+		}
+		// Restore CellSize from backup when clearing external volume
+		else if (!TargetSimulationVolume)
+		{
+			CellSize = InternalCellSize;
+		}
+
+		// Register with new volume and update tracking
+		if (TargetSimulationVolume)
+		{
+			if (UKawaiiFluidSimulationVolumeComponent* NewVolume = TargetSimulationVolume->GetVolumeComponent())
+			{
+				NewVolume->RegisterModule(this);
+				PreviousRegisteredVolume = NewVolume;
+			}
+			// Bind to new volume's OnDestroyed event
+			BindToVolumeDestroyedEvent();
+		}
+		else
+		{
+			PreviousRegisteredVolume = nullptr;
+		}
+
+		UpdateVolumeInfoDisplay();
 	}
 	// Override 값 변경 시
 	else if (PropertyName.ToString().StartsWith(TEXT("bOverride_")) ||
@@ -63,12 +136,29 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 	bRuntimePresetDirty = true;
 
 	// SpatialHash 초기화 (Independent 모드용)
-	float CellSize = 20.0f;
+	float SpatialHashCellSize = 20.0f;
 	if (Preset)
 	{
-		CellSize = Preset->SmoothingRadius;
+		SpatialHashCellSize = Preset->SmoothingRadius;
+		// Use Preset's SmoothingRadius as default CellSize if not set
+		if (CellSize == 20.0f && Preset->SmoothingRadius > 0.0f)
+		{
+			CellSize = Preset->SmoothingRadius;
+		}
 	}
-	InitializeSpatialHash(CellSize);
+	InitializeSpatialHash(SpatialHashCellSize);
+
+	// Create owned volume component for internal bounds
+	if (!OwnedVolumeComponent)
+	{
+		OwnedVolumeComponent = NewObject<UKawaiiFluidSimulationVolumeComponent>(this, NAME_None, RF_Transient);
+		OwnedVolumeComponent->CellSize = CellSize;
+		OwnedVolumeComponent->bShowBoundsInEditor = false;  // Module controls its own visualization
+		OwnedVolumeComponent->bShowBoundsAtRuntime = false;
+	}
+
+	// Update volume bounds
+	RecalculateVolumeBounds();
 
 	bIsInitialized = true;
 
@@ -87,6 +177,8 @@ void UKawaiiFluidSimulationModule::Shutdown()
 	SpatialHash.Reset();
 	Preset = nullptr;
 	RuntimePreset = nullptr;
+	OwnedVolumeComponent = nullptr;
+	TargetSimulationVolume = nullptr;
 
 	bIsInitialized = false;
 
@@ -105,9 +197,9 @@ void UKawaiiFluidSimulationModule::SetPreset(UKawaiiFluidPresetDataAsset* InPres
 	}
 }
 
-void UKawaiiFluidSimulationModule::InitializeSpatialHash(float CellSize)
+void UKawaiiFluidSimulationModule::InitializeSpatialHash(float InCellSize)
 {
-	SpatialHash = MakeShared<FSpatialHash>(CellSize);
+	SpatialHash = MakeShared<FSpatialHash>(InCellSize);
 }
 
 bool UKawaiiFluidSimulationModule::HasAnyOverride() const
@@ -209,8 +301,8 @@ void UKawaiiFluidSimulationModule::SetOverride_SmoothingRadius(bool bEnable, flo
 	// SpatialHash 재생성
 	if (SpatialHash.IsValid())
 	{
-		float CellSize = bEnable ? Value : (Preset ? Preset->SmoothingRadius : 20.0f);
-		SpatialHash = MakeShared<FSpatialHash>(CellSize);
+		float NewCellSize = bEnable ? Value : (Preset ? Preset->SmoothingRadius : 20.0f);
+		SpatialHash = MakeShared<FSpatialHash>(NewCellSize);
 	}
 }
 
@@ -1416,4 +1508,175 @@ void UKawaiiFluidSimulationModule::SetSourceID(int32 InSourceID)
 {
 	CachedSourceID = InSourceID;
 	UE_LOG(LogTemp, Log, TEXT("SimulationModule::SetSourceID = %d"), CachedSourceID);
+}
+
+//========================================
+// Simulation Volume
+//========================================
+
+UKawaiiFluidSimulationVolumeComponent* UKawaiiFluidSimulationModule::GetTargetVolumeComponent() const
+{
+	// If external volume actor is set, use its component
+	if (TargetSimulationVolume)
+	{
+		return TargetSimulationVolume->GetVolumeComponent();
+	}
+
+	// Otherwise return internal owned volume component
+	return OwnedVolumeComponent;
+}
+
+void UKawaiiFluidSimulationModule::SetTargetSimulationVolume(AKawaiiFluidSimulationVolume* NewSimulationVolume)
+{
+	if (TargetSimulationVolume == NewSimulationVolume)
+	{
+		return;
+	}
+
+	// Backup CellSize before setting external volume
+	// (CellSize will be overwritten by external volume's CellSize in UpdateVolumeInfoDisplay)
+	if (!TargetSimulationVolume && NewSimulationVolume)
+	{
+		// Switching from internal to external: backup current CellSize
+		InternalCellSize = CellSize;
+	}
+
+	// Unbind from old volume's OnDestroyed event
+	UnbindFromVolumeDestroyedEvent();
+
+	// Unregister from old volume
+	if (TargetSimulationVolume)
+	{
+		if (UKawaiiFluidSimulationVolumeComponent* OldVolume = TargetSimulationVolume->GetVolumeComponent())
+		{
+			OldVolume->UnregisterModule(this);
+		}
+	}
+
+	TargetSimulationVolume = NewSimulationVolume;
+
+	// Register to new volume and update tracking
+	if (TargetSimulationVolume)
+	{
+		if (UKawaiiFluidSimulationVolumeComponent* NewVolume = TargetSimulationVolume->GetVolumeComponent())
+		{
+			NewVolume->RegisterModule(this);
+			PreviousRegisteredVolume = NewVolume;
+		}
+		// Bind to new volume's OnDestroyed event
+		BindToVolumeDestroyedEvent();
+	}
+	else
+	{
+		// Switching from external to internal: restore CellSize from backup
+		CellSize = InternalCellSize;
+		PreviousRegisteredVolume = nullptr;
+	}
+
+	// Update volume info display
+	UpdateVolumeInfoDisplay();
+}
+
+void UKawaiiFluidSimulationModule::RecalculateVolumeBounds()
+{
+	// Ensure valid CellSize
+	CellSize = FMath::Max(CellSize, 1.0f);
+
+	// Calculate bounds extent from grid resolution and cell size
+	BoundsExtent = static_cast<float>(GridResolution) * CellSize;
+
+	// Get owner location for bounds center
+	FVector OwnerLocation = FVector::ZeroVector;
+	if (AActor* Owner = GetOwnerActor())
+	{
+		OwnerLocation = Owner->GetActorLocation();
+	}
+
+	// Calculate world bounds (centered on owner)
+	const float HalfExtent = BoundsExtent * 0.5f;
+	WorldBoundsMin = OwnerLocation - FVector(HalfExtent, HalfExtent, HalfExtent);
+	WorldBoundsMax = OwnerLocation + FVector(HalfExtent, HalfExtent, HalfExtent);
+
+	// Update owned volume component if exists
+	if (OwnedVolumeComponent)
+	{
+		OwnedVolumeComponent->CellSize = CellSize;
+		// Note: OwnedVolumeComponent doesn't have a transform, so bounds are calculated here
+	}
+}
+
+void UKawaiiFluidSimulationModule::UpdateVolumeInfoDisplay()
+{
+	if (TargetSimulationVolume)
+	{
+		// Read info from external volume
+		if (UKawaiiFluidSimulationVolumeComponent* ExternalVolume = TargetSimulationVolume->GetVolumeComponent())
+		{
+			// Copy read-only info from external volume
+			GridAxisBits = ExternalVolume->GridAxisBits;
+			GridResolution = ExternalVolume->GridResolution;
+			MaxCells = ExternalVolume->MaxCells;
+			BoundsExtent = ExternalVolume->BoundsExtent;
+			WorldBoundsMin = ExternalVolume->GetWorldBoundsMin();
+			WorldBoundsMax = ExternalVolume->GetWorldBoundsMax();
+			// Also sync CellSize display (though it's read-only when external is set)
+			CellSize = ExternalVolume->CellSize;
+		}
+	}
+	else
+	{
+		// Calculate from internal settings
+		RecalculateVolumeBounds();
+	}
+}
+
+void UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed(AActor* DestroyedActor)
+{
+	// The TargetSimulationVolume actor was deleted
+	// Restore CellSize to internal value and clear references
+	if (DestroyedActor == TargetSimulationVolume)
+	{
+		// Unregister from the volume component before it's destroyed
+		if (UKawaiiFluidSimulationVolumeComponent* VolumeComp = PreviousRegisteredVolume.Get())
+		{
+			VolumeComp->UnregisterModule(this);
+		}
+
+		// Restore internal CellSize
+		CellSize = InternalCellSize;
+
+		// Clear references (don't unbind - the actor is being destroyed)
+		TargetSimulationVolume = nullptr;
+		PreviousRegisteredVolume = nullptr;
+		bBoundToVolumeDestroyed = false;
+
+		// Update display to show internal values
+		UpdateVolumeInfoDisplay();
+	}
+}
+
+void UKawaiiFluidSimulationModule::BindToVolumeDestroyedEvent()
+{
+	// First unbind any existing binding
+	UnbindFromVolumeDestroyedEvent();
+
+	// Bind to the new volume's OnDestroyed
+	if (TargetSimulationVolume && IsValid(TargetSimulationVolume))
+	{
+		TargetSimulationVolume->OnDestroyed.AddDynamic(this, &UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed);
+		bBoundToVolumeDestroyed = true;
+	}
+}
+
+void UKawaiiFluidSimulationModule::UnbindFromVolumeDestroyedEvent()
+{
+	if (bBoundToVolumeDestroyed)
+	{
+		// Need to check if the actor is still valid before unbinding
+		if (TargetSimulationVolume && IsValid(TargetSimulationVolume))
+		{
+			TargetSimulationVolume->OnDestroyed.RemoveDynamic(this, &UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed);
+		}
+		bBoundToVolumeDestroyed = false;
+	}
 }
