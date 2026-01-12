@@ -1844,6 +1844,15 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 			AnisotropyParams.AnisotropyMin = CachedAnisotropyParams.AnisotropyMin;
 			AnisotropyParams.AnisotropyMax = CachedAnisotropyParams.AnisotropyMax;
 			AnisotropyParams.DensityWeight = CachedAnisotropyParams.DensityWeight;
+
+			// Isolated particle handling params
+			AnisotropyParams.MinNeighborsForAnisotropy = CachedAnisotropyParams.MinNeighborsForAnisotropy;
+			AnisotropyParams.bFadeIsolatedParticles = CachedAnisotropyParams.bFadeIsolatedParticles;
+			AnisotropyParams.MinIsolatedScale = CachedAnisotropyParams.MinIsolatedScale;
+			AnisotropyParams.bStretchIsolatedByVelocity = CachedAnisotropyParams.bStretchIsolatedByVelocity;
+			AnisotropyParams.bFadeSlowIsolated = CachedAnisotropyParams.bFadeSlowIsolated;
+			AnisotropyParams.IsolationFadeSpeed = CachedAnisotropyParams.IsolationFadeSpeed;
+
 			// Density-based anisotropy needs wider neighbor search than simulation
 			// Use 2.5x smoothing radius to find enough neighbors for reliable covariance
 			AnisotropyParams.SmoothingRadius = Params.SmoothingRadius * 2.5f;
