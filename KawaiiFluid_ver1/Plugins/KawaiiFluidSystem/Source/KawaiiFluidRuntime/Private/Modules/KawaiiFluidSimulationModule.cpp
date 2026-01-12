@@ -284,6 +284,9 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 	if (UKawaiiFluidComponent* OwnerComp = Cast<UKawaiiFluidComponent>(GetOuter()))
 	{
 		Params.bUseGPUSimulation = OwnerComp->bUseGPUSimulation;
+
+		// Set simulation origin for bounds offset (preset bounds are relative to component)
+		Params.SimulationOrigin = OwnerComp->GetComponentLocation();
 	}
 
 	// Containment bounds for GPU collision (supports OBB with rotation)

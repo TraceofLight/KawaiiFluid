@@ -156,6 +156,13 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 	/** Use GPU compute shaders for physics simulation */
 	bool bUseGPUSimulation = false;
 
+	/**
+	 * Simulation origin (component world location)
+	 * Used to offset preset simulation bounds to world space
+	 * Preset bounds are defined relative to component, not absolute world coordinates
+	 */
+	FVector SimulationOrigin = FVector::ZeroVector;
+
 	/** World bounds for GPU AABB collision (optional) */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
 	FBox WorldBounds = FBox(EForceInit::ForceInit);

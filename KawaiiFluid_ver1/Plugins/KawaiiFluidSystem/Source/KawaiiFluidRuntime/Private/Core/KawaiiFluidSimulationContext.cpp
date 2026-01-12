@@ -365,6 +365,12 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	// Set primitive collision threshold from Preset
 	GPUSimulator->SetPrimitiveCollisionThreshold(Preset->PrimitiveCollisionThreshold);
 
+	// Set simulation bounds for Z-Order sorting (Morton code)
+	// Bounds are defined relative to component origin, so add SimulationOrigin offset
+	const FVector3f WorldBoundsMin = FVector3f(Preset->SimulationBoundsMin) + FVector3f(Params.SimulationOrigin);
+	const FVector3f WorldBoundsMax = FVector3f(Preset->SimulationBoundsMax) + FVector3f(Params.SimulationOrigin);
+	GPUSimulator->SetSimulationBounds(WorldBoundsMin, WorldBoundsMax);
+
 	// =====================================================
 	// GPU-Only Mode: No CPU Particles array dependency
 	// - Spawning: Handled directly by SpawnParticle() → GPUSimulator->AddSpawnRequest()

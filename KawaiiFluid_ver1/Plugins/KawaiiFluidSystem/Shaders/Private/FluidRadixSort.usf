@@ -2,7 +2,7 @@
 // GPU Fluid Physics - Radix Sort for Morton Code Sorting
 //
 // Implements parallel radix sort on GPU for sorting particles by Morton code.
-// Uses 4-bit radix (16 buckets) with 8 passes for 32-bit keys.
+// Uses 4-bit radix (16 buckets) with 6 passes for 21-bit Morton codes (24-bit coverage).
 //
 // Pipeline:
 // 1. Local Sort + Histogram: Each thread group sorts locally and computes histogram

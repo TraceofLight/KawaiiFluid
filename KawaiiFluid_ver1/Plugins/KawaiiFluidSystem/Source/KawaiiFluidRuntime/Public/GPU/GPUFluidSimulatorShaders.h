@@ -1511,8 +1511,41 @@ public:
 // Pipeline: Morton Code → Radix Sort → Reorder → CellStart/End
 //=============================================================================
 
-// Morton grid constants (must match FluidMortonCode.usf)
-#define GPU_MORTON_GRID_SIZE 1024  // 10 bits per axis for 30-bit Morton code
+//=============================================================================
+// Z-Order Sorting Configuration
+//
+// Key Design: Only TWO parameters drive everything:
+//   1. GridAxisBits (GPU_MORTON_GRID_AXIS_BITS) - bits per axis
+//   2. SmoothingRadius (from Preset) - determines Cell Size
+//
+// All other values are auto-calculated:
+//   - GridResolution = 2^GridAxisBits (e.g., 2^7 = 128)
+//   - MortonCodeBits = GridAxisBits × 3 (e.g., 7 × 3 = 21 bits)
+//   - MaxCells = GridResolution^3 (e.g., 128^3 = 2,097,152)
+//   - CellSize = SmoothingRadius (1:1 ratio, optimal for SPH neighbor search)
+//   - SimulationBounds = GridResolution × CellSize (e.g., 128 × 20 = 2560cm)
+//
+// Example with GridAxisBits=7, SmoothingRadius=20cm:
+//   - GridResolution = 128
+//   - MortonCodeBits = 21-bit
+//   - MaxCells = 2,097,152
+//   - CellSize = 20cm
+//   - SimulationBounds = ±1280cm (25.6m total)
+//=============================================================================
+
+// Morton grid constants (must match FluidMortonCode.usf and FluidCellStartEnd.usf)
+// 7 bits per axis → 21-bit Morton code → 2M cells max
+#define GPU_MORTON_GRID_AXIS_BITS 7
+#define GPU_MORTON_GRID_SIZE (1 << GPU_MORTON_GRID_AXIS_BITS)  // 128 (2^7)
+
+//=============================================================================
+// Cell Start/End Index Shaders
+// Build grid lookup structure from sorted Morton codes
+//=============================================================================
+
+// MAX_CELLS = GridResolution^3 (must match FluidCellStartEnd.usf)
+// 128^3 = 2,097,152 cells (21-bit Morton code = Cell ID)
+#define GPU_MAX_CELLS (GPU_MORTON_GRID_SIZE * GPU_MORTON_GRID_SIZE * GPU_MORTON_GRID_SIZE)  // 2,097,152
 
 /**
  * Compute Morton Codes Compute Shader
@@ -1549,13 +1582,15 @@ public:
 	{
 		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), GPU_MORTON_GRID_AXIS_BITS);
 		OutEnvironment.SetDefine(TEXT("MORTON_GRID_SIZE"), GPU_MORTON_GRID_SIZE);
+		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), GPU_MAX_CELLS);
 	}
 };
 
 //=============================================================================
 // GPU Radix Sort Shaders
-// 4-bit radix (16 buckets), 8 passes for 32-bit keys
+// 4-bit radix (16 buckets), auto-calculated passes for Morton code coverage
 // Algorithm: Histogram → Global Prefix Sum → Scatter
 //=============================================================================
 
@@ -1564,6 +1599,12 @@ public:
 #define GPU_RADIX_THREAD_GROUP_SIZE 256
 #define GPU_RADIX_ELEMENTS_PER_THREAD 4
 #define GPU_RADIX_ELEMENTS_PER_GROUP (GPU_RADIX_THREAD_GROUP_SIZE * GPU_RADIX_ELEMENTS_PER_THREAD)  // 1024
+
+// Auto-calculated: Morton code bits and required sort passes
+// Morton code bits = GridAxisBits × 3 (X, Y, Z interleaved)
+// Sort passes = ceil(MortonCodeBits / RadixBits)
+#define GPU_MORTON_CODE_BITS (GPU_MORTON_GRID_AXIS_BITS * 3)  // 7 × 3 = 21 bits
+#define GPU_RADIX_SORT_PASSES ((GPU_MORTON_CODE_BITS + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS)  // ceil(21/4) = 6 passes
 
 /**
  * Radix Sort Histogram Compute Shader
@@ -1808,14 +1849,6 @@ public:
 	}
 };
 
-//=============================================================================
-// Cell Start/End Index Shaders
-// Build grid lookup structure from sorted Morton codes
-//=============================================================================
-
-// MAX_CELLS must match FluidCellStartEnd.usf
-#define GPU_MAX_CELLS 65536
-
 /**
  * Clear Cell Indices Compute Shader
  * Initializes CellStart/End arrays to invalid values
@@ -1844,6 +1877,7 @@ public:
 	{
 		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), GPU_MORTON_GRID_AXIS_BITS);
 		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), GPU_MAX_CELLS);
 	}
 };
@@ -1878,6 +1912,7 @@ public:
 	{
 		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), GPU_MORTON_GRID_AXIS_BITS);
 		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), GPU_MAX_CELLS);
 	}
 };

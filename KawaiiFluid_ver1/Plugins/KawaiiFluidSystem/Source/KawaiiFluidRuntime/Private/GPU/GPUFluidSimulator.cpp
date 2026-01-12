@@ -396,55 +396,17 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 		// Full upload needed: first frame, buffer invalid, or particles reduced
 		CachedGPUParticles.SetNumUninitialized(NewCount);
 
-		// Compute bounds from particle positions for Morton code
-		FVector3f BoundsMin(FLT_MAX, FLT_MAX, FLT_MAX);
-		FVector3f BoundsMax(-FLT_MAX, -FLT_MAX, -FLT_MAX);
-
+		// Convert particles to GPU format
 		for (int32 i = 0; i < NewCount; ++i)
 		{
 			CachedGPUParticles[i] = ConvertToGPU(CPUParticles[i]);
-
-			// Track bounds from PredictedPosition (which is initialized to Position)
-			const FVector3f& Pos = CachedGPUParticles[i].PredictedPosition;
-			BoundsMin.X = FMath::Min(BoundsMin.X, Pos.X);
-			BoundsMin.Y = FMath::Min(BoundsMin.Y, Pos.Y);
-			BoundsMin.Z = FMath::Min(BoundsMin.Z, Pos.Z);
-			BoundsMax.X = FMath::Max(BoundsMax.X, Pos.X);
-			BoundsMax.Y = FMath::Max(BoundsMax.Y, Pos.Y);
-			BoundsMax.Z = FMath::Max(BoundsMax.Z, Pos.Z);
 		}
 
-		// Add LARGE padding to bounds to prevent Black Hole Cell problem
-		// When particles move outside bounds, their cell coords become negative → clamped to 0
-		// This causes ALL out-of-bounds particles to cluster in Cell 0 → O(N²) neighbor search
-		//
-		// Padding strategy:
-		// 1. Use at least 2000 units padding (4x the previous 500 units)
-		// 2. Also ensure bounds cover at least 50% of Morton code capacity
-		//    (Morton code = 1024 cells per axis, so max extent = 1024 * CellSize)
-		//
-		// With typical CellSize=2.0, Morton capacity = 2048 units per axis
-		// We use 1000 units padding = covers ±1000 units of particle drift
-		const float BoundsPadding = 2000.0f;
-		BoundsMin -= FVector3f(BoundsPadding, BoundsPadding, BoundsPadding);
-		BoundsMax += FVector3f(BoundsPadding, BoundsPadding, BoundsPadding);
-
-		// Additionally, center the bounds and ensure minimum extent
-		// This prevents issues when particles are spawned in a small area
-		FVector3f Center = (BoundsMin + BoundsMax) * 0.5f;
-		FVector3f HalfExtent = (BoundsMax - BoundsMin) * 0.5f;
-		const float MinHalfExtent = 500.0f;  // At least 1000 units total per axis
-		HalfExtent.X = FMath::Max(HalfExtent.X, MinHalfExtent);
-		HalfExtent.Y = FMath::Max(HalfExtent.Y, MinHalfExtent);
-		HalfExtent.Z = FMath::Max(HalfExtent.Z, MinHalfExtent);
-		BoundsMin = Center - HalfExtent;
-		BoundsMax = Center + HalfExtent;
-
-		// Update simulation bounds for Morton code computation
-		SetSimulationBounds(BoundsMin, BoundsMax);
-
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Auto-computed bounds: Min(%.1f, %.1f, %.1f) Max(%.1f, %.1f, %.1f)"),
-			BoundsMin.X, BoundsMin.Y, BoundsMin.Z, BoundsMax.X, BoundsMax.Y, BoundsMax.Z);
+		// Simulation bounds for Morton code (Z-Order sorting) are set via SetSimulationBounds()
+		// from SimulateGPU before this call (preset bounds + component location offset)
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Using bounds: Min(%.1f, %.1f, %.1f) Max(%.1f, %.1f, %.1f)"),
+			SimulationBoundsMin.X, SimulationBoundsMin.Y, SimulationBoundsMin.Z,
+			SimulationBoundsMax.X, SimulationBoundsMax.Y, SimulationBoundsMax.Z);
 
 		NewParticleCount = 0;
 		NewParticlesToAppend.Empty();
@@ -4352,7 +4314,7 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
 	// Check if we need to allocate/resize buffers
 	const bool bNeedResize = ZOrderBufferParticleCapacity < CurrentParticleCount;
 	const int32 NumBlocks = FMath::DivideAndRoundUp(CurrentParticleCount, 256);
-	const int32 CellCount = GPU_SPATIAL_HASH_SIZE;  // Use same size as hash table for consistency
+	const int32 CellCount = GPU_MAX_CELLS;  // 21-bit Morton code = Cell ID (128^3 = 2,097,152 cells)
 
 	//=========================================================================
 	// Step 1: Create/reuse Morton code and index buffers
@@ -4403,7 +4365,7 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
 	}
 
 	//=========================================================================
-	// Step 3: Radix Sort (8 passes for 32-bit keys)
+	// Step 3: Radix Sort (6 passes for 21-bit Morton codes)
 	//=========================================================================
 	AddRadixSortPasses(GraphBuilder, MortonCodesRDG, SortIndicesRDG, CurrentParticleCount);
 
@@ -4546,11 +4508,13 @@ void FGPUFluidSimulator::AddRadixSortPasses(
 	FRDGBufferRef Values[2] = { InOutParticleIndices, ValuesTemp };
 	int32 BufferIndex = 0;
 
-	// 4 passes for 16-bit keys (4 bits per pass)
-	// MortonCodes are truncated to 16-bit (cellID = mortonCode & 0xFFFF)
-	// Using 8 passes with 16-bit keys causes instability because upper bits are all 0,
-	// and InterlockedAdd in Scatter is non-deterministic for same-bucket elements
-	for (int32 Pass = 0; Pass < 4; ++Pass)
+	// Auto-calculated passes for Morton code coverage
+	// Morton code = GPU_MORTON_CODE_BITS (GridAxisBits × 3)
+	// Passes = ceil(MortonCodeBits / RadixBits) = GPU_RADIX_SORT_PASSES
+	// Ping-pong buffer: even passes → result in original buffer, odd → result in temp buffer
+	// Current: GPU_RADIX_SORT_PASSES is even, so result is in InOutMortonCodes
+	static_assert(GPU_RADIX_SORT_PASSES % 2 == 0, "GPU_RADIX_SORT_PASSES must be even for ping-pong buffer to return result in original buffer");
+	for (int32 Pass = 0; Pass < GPU_RADIX_SORT_PASSES; ++Pass)
 	{
 		const int32 BitOffset = Pass * GPU_RADIX_BITS;
 		const int32 SrcIndex = BufferIndex;
@@ -4636,9 +4600,9 @@ void FGPUFluidSimulator::AddRadixSortPasses(
 		BufferIndex ^= 1;
 	}
 
-	// After 4 passes, the final sorted data is in Keys[BufferIndex]/Values[BufferIndex]
-	// BufferIndex alternates: 0->1->0->1 after 4 passes, ends at 0
-	// So final data is in Keys[0] = InOutMortonCodes, Values[0] = InOutParticleIndices
+	// After GPU_RADIX_SORT_PASSES passes, the final sorted data is in Keys[BufferIndex]/Values[BufferIndex]
+	// BufferIndex alternates each pass. With even passes, ends at 0 (original buffer).
+	// static_assert above ensures GPU_RADIX_SORT_PASSES is even.
 	InOutMortonCodes = Keys[BufferIndex];
 	InOutParticleIndices = Values[BufferIndex];
 }

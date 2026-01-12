@@ -1,25 +1,76 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 // Morton Code (Z-Order Curve) Utility Functions
 // Shared between FluidSolveDensityPressure.usf, FluidAnisotropyCompute.usf, etc.
+//
+// Z-Order Sorting Configuration (must match GPUFluidSimulatorShaders.h):
+//   - GridAxisBits = 7 (7 bits per axis)
+//   - GridResolution = 128 (2^7)
+//   - MaxCells = 128^3 = 2,097,152
+//   - Morton code (21-bit) = Cell ID (no truncation needed)
 
 #pragma once
 
 //=============================================================================
-// Morton Code Constants
+// Z-Order Sorting Configuration
 //=============================================================================
 
+#ifndef MORTON_GRID_AXIS_BITS
+#define MORTON_GRID_AXIS_BITS 7  // 7 bits per axis (from GPUFluidSimulatorShaders.h)
+#endif
+
+#define MORTON_GRID_SIZE (1 << MORTON_GRID_AXIS_BITS)  // 128 (2^7)
+#define MORTON_MAX_VALUE (MORTON_GRID_SIZE - 1)        // 127 (7-bit max)
+
 #ifndef MAX_CELLS
-#define MAX_CELLS 65536  // 2^16 cells, must match FluidCellStartEnd.usf
+#define MAX_CELLS (MORTON_GRID_SIZE * MORTON_GRID_SIZE * MORTON_GRID_SIZE)  // 2,097,152
 #endif
 
 #define INVALID_INDEX 0xFFFFFFFF
 
 //=============================================================================
-// Morton Code Functions
+// Morton Code Functions (7-bit per axis version)
 //=============================================================================
 
-// Expand 10-bit integer to 30-bit with 2-bit gaps
-uint MortonExpandBits(uint v)
+// Expand 7-bit integer to 21-bit with 2-bit gaps between each bit
+uint MortonExpandBits7(uint v)
+{
+	v = v & 0x7Fu;  // 127 max (7 bits)
+	v = (v | (v << 8)) & 0x0000F00Fu;
+	v = (v | (v << 4)) & 0x000C30C3u;
+	v = (v | (v << 2)) & 0x00249249u;
+	return v;
+}
+
+// Compute 21-bit Morton Code for 3D point (each coord 7 bits: 0-127)
+uint Morton3D_7bit(uint x, uint y, uint z)
+{
+	x = min(x, MORTON_MAX_VALUE);
+	y = min(y, MORTON_MAX_VALUE);
+	z = min(z, MORTON_MAX_VALUE);
+	uint xx = MortonExpandBits7(x);
+	uint yy = MortonExpandBits7(y);
+	uint zz = MortonExpandBits7(z);
+	return (zz << 2) | (yy << 1) | xx;
+}
+
+// Compute Morton-based cell ID from cell coordinates
+// With 7-bit per axis: Morton code = Cell ID directly (no masking needed)
+// Requires: boundsMin (float3), cellSize (float) as parameters
+uint GetMortonCellIDFromCellCoord(int3 cellCoord, float3 boundsMin, float cellSize)
+{
+	int3 gridMin = int3(floor(boundsMin / cellSize));
+	int3 offset = cellCoord - gridMin;
+	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
+	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+	// 21-bit Morton code IS the Cell ID
+	return Morton3D_7bit(uoffset.x, uoffset.y, uoffset.z);
+}
+
+//=============================================================================
+// Legacy Functions (10-bit per axis - for reference only, not used)
+//=============================================================================
+
+uint MortonExpandBits10_Legacy(uint v)
 {
 	v = (v * 0x00010001u) & 0xFF0000FFu;
 	v = (v * 0x00000101u) & 0x0F00F00Fu;
@@ -28,26 +79,13 @@ uint MortonExpandBits(uint v)
 	return v;
 }
 
-// Compute 30-bit Morton Code for 3D point (each coord 10 bits: 0-1023)
-uint Morton3D(uint x, uint y, uint z)
+uint Morton3D_10bit_Legacy(uint x, uint y, uint z)
 {
 	x = min(x, 1023u);
 	y = min(y, 1023u);
 	z = min(z, 1023u);
-	uint xx = MortonExpandBits(x);
-	uint yy = MortonExpandBits(y);
-	uint zz = MortonExpandBits(z);
+	uint xx = MortonExpandBits10_Legacy(x);
+	uint yy = MortonExpandBits10_Legacy(y);
+	uint zz = MortonExpandBits10_Legacy(z);
 	return (zz << 2) | (yy << 1) | xx;
-}
-
-// Compute Morton-based cell ID from cell coordinates
-// Requires: MortonBoundsMin (float3), CellSize (float) defined in including shader
-uint GetMortonCellIDFromCellCoord(int3 cellCoord, float3 boundsMin, float cellSize)
-{
-	int3 gridMin = int3(floor(boundsMin / cellSize));
-	int3 offset = cellCoord - gridMin;
-	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
-	uoffset = min(uoffset, uint3(1023, 1023, 1023));
-	uint mortonCode = Morton3D(uoffset.x, uoffset.y, uoffset.z);
-	return mortonCode & (MAX_CELLS - 1);
 }

@@ -231,6 +231,36 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		);
 	}
 
+	// Simulation Bounds Wireframe 시각화 (Z-Order Sorting region)
+	// Always visible in EDITOR ONLY when GPU simulation is active
+	// Uses preset bounds directly (not cached GPU bounds) for immediate preset change feedback
+#if WITH_EDITOR
+	if (Preset && bUseGPUSimulation && !bIsGameWorld)
+	{
+		// Preset bounds are relative to component, so add component location
+		const FVector ComponentLocation = GetComponentLocation();
+		const FVector WorldBoundsMin = Preset->SimulationBoundsMin + ComponentLocation;
+		const FVector WorldBoundsMax = Preset->SimulationBoundsMax + ComponentLocation;
+
+		// Compute AABB center and half-extent for DrawDebugBox
+		const FVector Center = (WorldBoundsMin + WorldBoundsMax) * 0.5f;
+		const FVector HalfExtent = (WorldBoundsMax - WorldBoundsMin) * 0.5f;
+
+		// Red color for Z-Order sorting bounds visualization
+		DrawDebugBox(
+			World,
+			Center,
+			HalfExtent,
+			FQuat::Identity,  // Simulation bounds are axis-aligned
+			FColor::Red,
+			false,  // bPersistentLines
+			-1.0f,  // LifeTime (redraw each frame)
+			0,      // DepthPriority
+			2.0f    // Thickness
+		);
+	}
+#endif
+
 	// Emitter mode: continuous spawn (Stream, Spray)
 	if (bIsGameWorld && SpawnSettings.IsEmitterMode())
 	{

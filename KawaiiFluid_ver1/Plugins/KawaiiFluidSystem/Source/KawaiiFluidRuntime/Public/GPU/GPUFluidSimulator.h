@@ -199,6 +199,7 @@ public:
 		OutMax = SimulationBoundsMax;
 	}
 
+
 	/** Get anisotropy parameters */
 	const FFluidAnisotropyParams& GetAnisotropyParams() const { return CachedAnisotropyParams; }
 
@@ -858,10 +859,12 @@ private:
 	// Use Z-Order sorting for cache-coherent neighbor access (recommended for performance)
 	bool bUseZOrderSorting = true;
 
-	// Simulation bounds for Morton code computation
-	// Max extent per axis = GPU_MORTON_GRID_SIZE * CellSize (e.g., 1024 * 2.0 = 2048 units)
-	FVector3f SimulationBoundsMin = FVector3f(-1000.0f, -1000.0f, -1000.0f);
-	FVector3f SimulationBoundsMax = FVector3f(1000.0f, 1000.0f, 1000.0f);
+	// Simulation bounds for Morton code computation (Z-Order sorting)
+	// Auto-calculated from Preset: GridResolution × SmoothingRadius / 2
+	// With GridAxisBits=7, SmoothingRadius=20: ±(128 × 20 / 2) = ±1280cm
+	// Bounds are set via SetSimulationBounds() from preset + component location
+	FVector3f SimulationBoundsMin = FVector3f(-1280.0f, -1280.0f, -1280.0f);
+	FVector3f SimulationBoundsMax = FVector3f(1280.0f, 1280.0f, 1280.0f);
 
 	// Flag: need to upload all particles from CPU (initial or after resize)
 	bool bNeedsFullUpload = true;

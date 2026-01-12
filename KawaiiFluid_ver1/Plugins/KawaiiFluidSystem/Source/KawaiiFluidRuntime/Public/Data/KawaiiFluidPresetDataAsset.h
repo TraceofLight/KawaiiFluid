@@ -284,6 +284,90 @@ public:
 	float DFCollisionFriction = 0.1f;
 
 	//========================================
+	// Z-Order Sorting (GPU Neighbor Search Optimization)
+	//========================================
+	//
+	// Z-Order sorting uses Morton Code for spatial locality in GPU neighbor search.
+	//
+	// GridAxisBits is a GLOBAL CONSTANT (GPU_MORTON_GRID_AXIS_BITS in GPUFluidSimulatorShaders.h)
+	// because it defines GPU shader constants that are compile-time fixed.
+	// All presets in the same project MUST use the same GridAxisBits value.
+	//
+	// Only SmoothingRadius (from Physics section) affects simulation bounds size:
+	//   - CellSize = SmoothingRadius (optimal for SPH neighbor search)
+	//   - SimulationBounds = GridResolution × CellSize
+	//
+	// Auto-calculated values (based on global GridAxisBits):
+	//   - GridResolution = 2^GridAxisBits
+	//   - MaxCells = GridResolution³
+	//   - MortonCodeBits = GridAxisBits × 3
+
+	/**
+	 * Grid resolution bits per axis (Z-Order sorting)
+	 *
+	 * GLOBAL CONSTANT: This value is fixed at compile-time in GPU shaders.
+	 * All presets must use the same value (GPU_MORTON_GRID_AXIS_BITS in GPUFluidSimulatorShaders.h).
+	 *
+	 * Current setting: 7 bits = 128 grid, 2,097,152 cells
+	 * To change: Modify GPU_MORTON_GRID_AXIS_BITS in GPUFluidSimulatorShaders.h and rebuild shaders.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting",
+		meta = (DisplayName = "Grid Axis Bits (Global)"))
+	int32 GridAxisBits = 7;
+
+	//--- Auto-Calculated Z-Order Parameters (Read-Only) ---
+
+	/**
+	 * Grid resolution per axis (auto-calculated: 2^GridAxisBits)
+	 * Example: GridAxisBits=7 → Resolution=128
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting")
+	int32 ZOrderGridResolution = 128;
+
+	/**
+	 * Morton code total bits (auto-calculated: GridAxisBits × 3)
+	 * Example: GridAxisBits=7 → MortonBits=21
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting")
+	int32 ZOrderMortonBits = 21;
+
+	/**
+	 * Maximum cell count (auto-calculated: GridResolution³)
+	 * Example: Resolution=128 → MaxCells=2,097,152
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting")
+	int32 ZOrderMaxCells = 2097152;
+
+	/**
+	 * Cell size (auto-calculated: = SmoothingRadius)
+	 * SPH optimal: CellSize = h (smoothing radius)
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting")
+	float ZOrderCellSize = 20.0f;
+
+	/**
+	 * Simulation bounds extent (auto-calculated: GridResolution × CellSize)
+	 * This is the total size of the simulation domain per axis
+	 * Example: 128 × 20cm = 2560cm (25.6m)
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting")
+	float ZOrderBoundsExtent = 2560.0f;
+
+	/**
+	 * Simulation bounds minimum corner (cm, relative to component)
+	 * Auto-calculated: -BoundsExtent/2
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting")
+	FVector SimulationBoundsMin = FVector(-1280.0f, -1280.0f, -1280.0f);
+
+	/**
+	 * Simulation bounds maximum corner (cm, relative to component)
+	 * Auto-calculated: +BoundsExtent/2
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Z-Order Sorting")
+	FVector SimulationBoundsMax = FVector(1280.0f, 1280.0f, 1280.0f);
+
+	//========================================
 	// Limits
 	//========================================
 

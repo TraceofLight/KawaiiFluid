@@ -71,41 +71,53 @@ int BoundaryParticleCount;
 int bUseBoundaryDensity;
 
 //=============================================================================
-// Constants for Z-Order Mode
+// Z-Order Sorting Configuration (must match FluidMortonCode.usf and FluidCellStartEnd.usf)
+//
+// Configuration: 7 bits per axis → 21-bit Morton code = Cell ID
+//   - GridResolution = 128 (2^7)
+//   - MaxCells = 128^3 = 2,097,152
+//   - Morton code = Cell ID (no truncation needed)
+//   - CellSize = SmoothingRadius (optimal for SPH)
 //=============================================================================
 #define INVALID_INDEX 0xFFFFFFFF
-#define MAX_CELLS 65536  // 2^16 cells, must match FluidCellStartEnd.usf
+
+// Grid configuration
+#define MORTON_GRID_AXIS_BITS 7
+#define MORTON_GRID_SIZE (1 << MORTON_GRID_AXIS_BITS)  // 128
+#define MORTON_MAX_VALUE (MORTON_GRID_SIZE - 1)        // 127
+#define MAX_CELLS (MORTON_GRID_SIZE * MORTON_GRID_SIZE * MORTON_GRID_SIZE)  // 2,097,152
 
 //=============================================================================
 // Morton Code Encoding Functions (for Z-Order cell lookup)
-// Must match FluidMortonCode.usf exactly
+// Must match FluidMortonCode.usf exactly (7-bit per axis version)
 //=============================================================================
 
-// Expand 10-bit integer to 30-bit with 2-bit gaps between each bit
-uint MortonExpandBits(uint v)
+// Expand 7-bit integer to 21-bit with 2-bit gaps between each bit
+uint MortonExpandBits7(uint v)
 {
-	v = (v * 0x00010001u) & 0xFF0000FFu;
-	v = (v * 0x00000101u) & 0x0F00F00Fu;
-	v = (v * 0x00000011u) & 0xC30C30C3u;
-	v = (v * 0x00000005u) & 0x49249249u;
+	v = v & 0x7Fu;  // 127 max (7 bits)
+	v = (v | (v << 8)) & 0x0000F00Fu;
+	v = (v | (v << 4)) & 0x000C30C3u;
+	v = (v | (v << 2)) & 0x00249249u;
 	return v;
 }
 
-// Compute 30-bit Morton Code for 3D point (each coord 10 bits: 0-1023)
-uint Morton3D(uint x, uint y, uint z)
+// Compute 21-bit Morton Code for 3D point (each coord 7 bits: 0-127)
+uint Morton3D_7bit(uint x, uint y, uint z)
 {
-	x = min(x, 1023u);
-	y = min(y, 1023u);
-	z = min(z, 1023u);
-	uint xx = MortonExpandBits(x);
-	uint yy = MortonExpandBits(y);
-	uint zz = MortonExpandBits(z);
+	x = min(x, MORTON_MAX_VALUE);
+	y = min(y, MORTON_MAX_VALUE);
+	z = min(z, MORTON_MAX_VALUE);
+	uint xx = MortonExpandBits7(x);
+	uint yy = MortonExpandBits7(y);
+	uint zz = MortonExpandBits7(z);
 	return (zz << 2) | (yy << 1) | xx;
 }
 
 // Compute Morton-based cell ID from cell coordinates (integer)
 // IMPORTANT: This must match FluidMortonCode.usf's ComputeMortonCodesCellBasedCS
 // Both use cell coordinates relative to GridMin, NOT normalized positions!
+// With 7-bit per axis: Morton code = Cell ID directly (no masking needed)
 uint GetMortonCellIDFromCellCoord(int3 cellCoord)
 {
 	// Compute grid minimum cell (same as in FluidMortonCode.usf)
@@ -114,13 +126,12 @@ uint GetMortonCellIDFromCellCoord(int3 cellCoord)
 	// Offset cell coordinates to make them positive (relative to grid min)
 	int3 offset = cellCoord - gridMin;
 
-	// Clamp to valid range (0-1023 for 10-bit Morton encoding)
+	// Clamp to valid range (0-127 for 7-bit Morton encoding)
 	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
-	uoffset = min(uoffset, uint3(1023, 1023, 1023));
+	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
-	// Compute Morton code and mask to cell ID
-	uint mortonCode = Morton3D(uoffset.x, uoffset.y, uoffset.z);
-	return mortonCode & (MAX_CELLS - 1);
+	// Compute 21-bit Morton code (IS the Cell ID, no masking needed)
+	return Morton3D_7bit(uoffset.x, uoffset.y, uoffset.z);
 }
 
 //=============================================================================

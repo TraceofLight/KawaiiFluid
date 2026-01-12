@@ -9,6 +9,12 @@
 //
 // Neighbor lookup becomes: for (i = CellStart[cellID]; i <= CellEnd[cellID]; i++)
 // This is much faster than hash table linked-list traversal.
+//
+// Configuration (must match GPUFluidSimulatorShaders.h and FluidMortonCode.usf):
+//   - GridAxisBits = 7 (7 bits per axis)
+//   - GridResolution = 128 (2^7)
+//   - MaxCells = 128^3 = 2,097,152
+//   - Morton code (21-bit) = Cell ID (no truncation needed)
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
@@ -17,9 +23,17 @@
 // Configuration
 //=============================================================================
 
-// Maximum number of cells (must match SPATIAL_HASH_SIZE or Morton code resolution)
+// Grid configuration (must match GPUFluidSimulatorShaders.h and FluidMortonCode.usf)
+#ifndef MORTON_GRID_AXIS_BITS
+#define MORTON_GRID_AXIS_BITS 7  // 7 bits per axis
+#endif
+
+#define MORTON_GRID_SIZE (1 << MORTON_GRID_AXIS_BITS)  // 128 (2^7)
+
+// Maximum number of cells = GridResolution³
+// With 7-bit per axis: 128³ = 2,097,152 cells
 #ifndef MAX_CELLS
-#define MAX_CELLS 65536  // 2^16 cells (64K)
+#define MAX_CELLS (MORTON_GRID_SIZE * MORTON_GRID_SIZE * MORTON_GRID_SIZE)  // 2,097,152
 #endif
 
 // Invalid index marker (no particles in cell)
@@ -107,20 +121,22 @@ void ComputeCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 }
 
 //=============================================================================
-// Alternative: Direct Morton Code Cell Lookup
-// Uses full Morton code as cell ID (no hashing/modulo)
-// Requires larger cell arrays but avoids collisions
+// [DEPRECATED] Alternative: Upper-bit Morton Code Cell Lookup
+// This was used for 10-bit per axis (30-bit Morton code) with 16-bit cell ID
+//
+// With 7-bit per axis (21-bit Morton code), Morton code = Cell ID directly,
+// so this function is no longer needed. Use ComputeCellStartEndCS instead.
 //=============================================================================
 
-// For this version, MAX_CELLS should be large enough to hold all Morton codes
-// 10-bit per axis = 2^30 possible codes, too large for direct indexing
-// So we use upper bits as cell ID
-
-#define MORTON_CELL_BITS 16  // Use upper 16 bits of Morton code as cell ID
+// Legacy: 16-bit cell ID from 30-bit Morton code (NOT USED with 7-bit grid)
+#define MORTON_CELL_BITS 16
 
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeCellStartEndMortonCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
+    // DEPRECATED: With 7-bit per axis, use ComputeCellStartEndCS instead
+    // This function remains for backward compatibility only
+
     uint idx = DispatchThreadId.x;
     if (idx >= (uint)ParticleCount)
     {
@@ -128,7 +144,8 @@ void ComputeCellStartEndMortonCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     }
 
     uint currentCode = SortedMortonCodes[idx];
-    uint cellID = currentCode >> (30 - MORTON_CELL_BITS);  // Upper bits
+    // With 21-bit Morton code, use directly as cellID (no shift needed)
+    uint cellID = currentCode;  // Direct mapping for 7-bit grid
 
     if (idx == 0)
     {
@@ -137,7 +154,7 @@ void ComputeCellStartEndMortonCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     else
     {
         uint prevCode = SortedMortonCodes[idx - 1];
-        uint prevCellID = prevCode >> (30 - MORTON_CELL_BITS);
+        uint prevCellID = prevCode;
 
         if (cellID != prevCellID)
         {
