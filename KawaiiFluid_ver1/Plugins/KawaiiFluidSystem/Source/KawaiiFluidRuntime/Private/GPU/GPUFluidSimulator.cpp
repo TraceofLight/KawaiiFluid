@@ -1582,10 +1582,14 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 
 		// Create dummy CellStart/CellEnd buffers for shader parameter validation
 		// These are not used when bUseZOrderSorting = 0, but RDG requires valid SRVs
+		// Must use QueueBufferUpload to mark buffer as "produced" for RDG validation
 		{
 			FRDGBufferDesc DummyCellDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
 			FRDGBufferRef DummyCellStartBuffer = GraphBuilder.CreateBuffer(DummyCellDesc, TEXT("DummyCellStart"));
 			FRDGBufferRef DummyCellEndBuffer = GraphBuilder.CreateBuffer(DummyCellDesc, TEXT("DummyCellEnd"));
+			uint32 InvalidIndex = 0xFFFFFFFF;
+			GraphBuilder.QueueBufferUpload(DummyCellStartBuffer, &InvalidIndex, sizeof(uint32));
+			GraphBuilder.QueueBufferUpload(DummyCellEndBuffer, &InvalidIndex, sizeof(uint32));
 			CellStartSRVLocal = GraphBuilder.CreateSRV(DummyCellStartBuffer);
 			CellEndSRVLocal = GraphBuilder.CreateSRV(DummyCellEndBuffer);
 		}
@@ -2140,10 +2144,13 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	else
 	{
 		// Create dummy buffer for RDG validation
+		// Must use QueueBufferUpload to mark buffer as "produced" for RDG validation
 		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(
 			FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), 1),
 			TEXT("GPUFluidBoundaryParticles_Density_Dummy")
 		);
+		FGPUBoundaryParticle ZeroBoundary = {};
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroBoundary, sizeof(FGPUBoundaryParticle));
 		PassParameters->BoundaryParticles = GraphBuilder.CreateSRV(DummyBuffer);
 		PassParameters->BoundaryParticleCount = 0;
 		PassParameters->bUseBoundaryDensity = 0;
@@ -2218,10 +2225,13 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	else
 	{
 		// Create dummy buffer for RDG validation
+		// Must use QueueBufferUpload to mark buffer as "produced" for RDG validation
 		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(
 			FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), 1),
 			TEXT("GPUFluidBoundaryParticles_Viscosity_Dummy")
 		);
+		FGPUBoundaryParticle ZeroBoundary = {};
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroBoundary, sizeof(FGPUBoundaryParticle));
 		PassParameters->BoundaryParticles = GraphBuilder.CreateSRV(DummyBuffer);
 		PassParameters->BoundaryParticleCount = 0;
 		PassParameters->bUseBoundaryViscosity = 0;

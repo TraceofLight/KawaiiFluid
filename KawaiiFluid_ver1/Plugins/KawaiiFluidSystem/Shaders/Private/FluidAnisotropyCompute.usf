@@ -364,6 +364,7 @@ void SymmetricEigen3x3(
 
 //-----------------------------------------------------------------------------
 // Velocity-Based Anisotropy (with explicit velocity parameter)
+// Volume-preserving using log-space processing
 //-----------------------------------------------------------------------------
 void CalculateVelocityBasedWithVelocity(
 	float3 Velocity,
@@ -383,23 +384,36 @@ void CalculateVelocityBasedWithVelocity(
 		Axis1 = Velocity / Speed;
 		BuildOrthonormalBasis(Axis1, Axis2, Axis3);
 
-		// Stretch along velocity
+		// Calculate stretch in log space for volume preservation
+		// Stretch along velocity: LogScale1 = log(1 + Speed * Stretch)
+		// Perpendicular compression: LogScale2 = LogScale3 = -LogScale1 / 2 (volume = 1.0)
 		float Stretch = VelocityStretchFactor * AnisotropyScale;
-		Scale1 = clamp(1.0f + Speed * Stretch, AnisotropyMin, AnisotropyMax);
+		float RawScale1 = 1.0f + Speed * Stretch;
 
-		// Volume-preserving perpendicular compression
-		float PerpScale = clamp(1.0f / sqrt(Scale1), AnisotropyMin, AnisotropyMax);
-		Scale2 = Scale3 = PerpScale;
+		// Convert to log space
+		float LogScale1 = log(max(RawScale1, 0.001f));
+		// Volume preservation: LogScale1 + 2*LogScale2 = 0 => LogScale2 = -LogScale1/2
+		float LogScale2 = -LogScale1 * 0.5f;
+		float LogScale3 = LogScale2;
 
-		// Ensure volume = 1.0
-		float Volume = Scale1 * Scale2 * Scale3;
-		if (Volume > 0.001f && abs(Volume - 1.0f) > 0.001f)
-		{
-			float VolumeNorm = pow(Volume, 1.0f / 3.0f);
-			Scale1 /= VolumeNorm;
-			Scale2 /= VolumeNorm;
-			Scale3 /= VolumeNorm;
-		}
+		// Clamp in log space
+		float LogMin = log(max(AnisotropyMin, 0.001f));
+		float LogMax = log(max(AnisotropyMax, 0.001f));
+		LogScale1 = clamp(LogScale1, LogMin, LogMax);
+		LogScale2 = clamp(LogScale2, LogMin, LogMax);
+		LogScale3 = clamp(LogScale3, LogMin, LogMax);
+
+		// Re-center logs to maintain volume = 1.0
+		float LogSum = LogScale1 + LogScale2 + LogScale3;
+		float LogAvg = LogSum / 3.0f;
+		LogScale1 -= LogAvg;
+		LogScale2 -= LogAvg;
+		LogScale3 -= LogAvg;
+
+		// Convert back to linear space
+		Scale1 = exp(LogScale1);
+		Scale2 = exp(LogScale2);
+		Scale3 = exp(LogScale3);
 	}
 }
 
@@ -648,56 +662,55 @@ void CalculateDensityBased(
 	float EllipsoidScale2 = Sigma1 / GeoMean;
 	float EllipsoidScale3 = Sigma2 / GeoMean;
 
-	// Apply user-controlled anisotropy intensity
-	// Use log-space scaling to preserve geometric mean (volume) while amplifying ratios
-	// - AnisotropyScale = 0: sphere (1,1,1)
-	// - AnisotropyScale = 1: original ellipsoid ratios
-	// - AnisotropyScale > 1: amplified ratios (more extreme anisotropy)
-	// Log-space scaling preserves geometric mean: if prod(scales)=1, then prod(exp(log*k))=1
+	// =========================================================================
+	// Volume-Preserving Log-Space Processing
+	// All operations in log space preserve geometric mean (volume = 1.0)
+	// Key insight: log(a) + log(b) + log(c) = 0  <=>  a * b * c = 1.0
+	// =========================================================================
+
+	// Step 1: Convert to log space
 	float LogScale1 = log(max(EllipsoidScale1, 0.001f));
 	float LogScale2 = log(max(EllipsoidScale2, 0.001f));
 	float LogScale3 = log(max(EllipsoidScale3, 0.001f));
 
-	EllipsoidScale1 = exp(LogScale1 * AnisotropyScale);
-	EllipsoidScale2 = exp(LogScale2 * AnisotropyScale);
-	EllipsoidScale3 = exp(LogScale3 * AnisotropyScale);
+	// Step 2: Apply AnisotropyScale (amplify/dampen ratios)
+	// - AnisotropyScale = 0: sphere (all logs become 0)
+	// - AnisotropyScale = 1: original ratios
+	// - AnisotropyScale > 1: more extreme anisotropy
+	LogScale1 *= AnisotropyScale;
+	LogScale2 *= AnisotropyScale;
+	LogScale3 *= AnisotropyScale;
 
-	// Clamp to prevent extreme shapes
-	EllipsoidScale1 = clamp(EllipsoidScale1, AnisotropyMin, AnisotropyMax);
-	EllipsoidScale2 = clamp(EllipsoidScale2, AnisotropyMin, AnisotropyMax);
-	EllipsoidScale3 = clamp(EllipsoidScale3, AnisotropyMin, AnisotropyMax);
+	// Step 3: Clamp in log space to prevent extreme shapes
+	float LogMin = log(max(AnisotropyMin, 0.001f));
+	float LogMax = log(max(AnisotropyMax, 0.001f));
+	LogScale1 = clamp(LogScale1, LogMin, LogMax);
+	LogScale2 = clamp(LogScale2, LogMin, LogMax);
+	LogScale3 = clamp(LogScale3, LogMin, LogMax);
 
-	// Re-normalize after clamp to maintain volume = 1.0
-	float ClampedVolume = EllipsoidScale1 * EllipsoidScale2 * EllipsoidScale3;
-	if (ClampedVolume > 0.001f && abs(ClampedVolume - 1.0f) > 0.001f)
-	{
-		float ClampedVolumeNorm = pow(ClampedVolume, 1.0f / 3.0f);
-		EllipsoidScale1 /= ClampedVolumeNorm;
-		EllipsoidScale2 /= ClampedVolumeNorm;
-		EllipsoidScale3 /= ClampedVolumeNorm;
-	}
+	// Step 4: Re-center logs to maintain volume = 1.0 (sum of logs = 0)
+	float LogSum = LogScale1 + LogScale2 + LogScale3;
+	float LogAvg = LogSum / 3.0f;
+	LogScale1 -= LogAvg;
+	LogScale2 -= LogAvg;
+	LogScale3 -= LogAvg;
 
 	// =========================================================================
 	// Smooth sphere-to-ellipsoid blending based on neighbor count
-	// Prevents visual popping when particles transition in/out of dense regions
+	// Blend in log space: lerp(0, logScale, factor) preserves volume
 	// =========================================================================
 	float BlendFactor = saturate((float)(NeighborCount - BLEND_NEIGHBORS_MIN) /
 	                             (float)(BLEND_NEIGHBORS_MAX - BLEND_NEIGHBORS_MIN));
 
-	// Lerp between sphere (1.0, 1.0, 1.0) and computed ellipsoid scales
-	Scale1 = lerp(1.0f, EllipsoidScale1, BlendFactor);
-	Scale2 = lerp(1.0f, EllipsoidScale2, BlendFactor);
-	Scale3 = lerp(1.0f, EllipsoidScale3, BlendFactor);
+	// Lerp in log space: sphere has log scales of (0, 0, 0)
+	LogScale1 *= BlendFactor;
+	LogScale2 *= BlendFactor;
+	LogScale3 *= BlendFactor;
 
-	// Volume preservation after blending (always maintain Volume = 1.0)
-	float BlendedVolume = Scale1 * Scale2 * Scale3;
-	if (BlendedVolume > 0.001f && abs(BlendedVolume - 1.0f) > 0.001f)
-	{
-		float BlendedVolumeNorm = pow(BlendedVolume, 1.0f / 3.0f);
-		Scale1 /= BlendedVolumeNorm;
-		Scale2 /= BlendedVolumeNorm;
-		Scale3 /= BlendedVolumeNorm;
-	}
+	// Step 5: Convert back to linear space
+	Scale1 = exp(LogScale1);
+	Scale2 = exp(LogScale2);
+	Scale3 = exp(LogScale3);
 
 	// Eigenvectors as axes
 	Axis1 = normalize(EV0);
@@ -856,23 +869,50 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	else // MODE_HYBRID
 	{
 		// Hybrid: density axes + velocity stretching (use effective velocity)
+		// Both operations in log space for volume preservation
 		CalculateDensityBased(Idx, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3, NeighborCount);
-		// Apply velocity stretching with effective velocity
+
+		// Apply velocity stretching in log space
 		float Speed = length(EffectiveVelocity);
 		if (Speed > 0.001f)
 		{
 			float3 VelDir = EffectiveVelocity / Speed;
-			float VelStretch = 1.0f + Speed * VelocityStretchFactor * AnisotropyScale;
-			VelStretch = clamp(VelStretch, 1.0f, AnisotropyMax);
+
+			// Convert current scales to log space
+			float LogScale1 = log(max(Scale1, 0.001f));
+			float LogScale2 = log(max(Scale2, 0.001f));
+			float LogScale3 = log(max(Scale3, 0.001f));
+
+			// Calculate velocity stretch in log space
+			float VelStretchFactor = Speed * VelocityStretchFactor * AnisotropyScale;
+			float LogVelStretch = log(max(1.0f + VelStretchFactor, 0.001f));
+
+			// Project velocity onto each axis and add stretch in log space
 			float Proj1 = abs(dot(VelDir, Axis1));
 			float Proj2 = abs(dot(VelDir, Axis2));
 			float Proj3 = abs(dot(VelDir, Axis3));
-			Scale1 *= lerp(1.0f, VelStretch, Proj1);
-			Scale2 *= lerp(1.0f, VelStretch, Proj2);
-			Scale3 *= lerp(1.0f, VelStretch, Proj3);
-			Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
-			Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
-			Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+			LogScale1 += LogVelStretch * Proj1;
+			LogScale2 += LogVelStretch * Proj2;
+			LogScale3 += LogVelStretch * Proj3;
+
+			// Clamp in log space
+			float LogMin = log(max(AnisotropyMin, 0.001f));
+			float LogMax = log(max(AnisotropyMax, 0.001f));
+			LogScale1 = clamp(LogScale1, LogMin, LogMax);
+			LogScale2 = clamp(LogScale2, LogMin, LogMax);
+			LogScale3 = clamp(LogScale3, LogMin, LogMax);
+
+			// Re-center logs to maintain volume = 1.0
+			float LogSum = LogScale1 + LogScale2 + LogScale3;
+			float LogAvg = LogSum / 3.0f;
+			LogScale1 -= LogAvg;
+			LogScale2 -= LogAvg;
+			LogScale3 -= LogAvg;
+
+			// Convert back to linear space
+			Scale1 = exp(LogScale1);
+			Scale2 = exp(LogScale2);
+			Scale3 = exp(LogScale3);
 		}
 	}
 
