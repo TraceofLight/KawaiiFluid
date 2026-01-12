@@ -425,11 +425,12 @@ void CalculateDensityBased(
 	out float Scale1, out float Scale2, out float Scale3,
 	out int OutNeighborCount)
 {
-	// Default: identity
+	// Default: identity (sphere with scale 1.0, NOT AnisotropyScale)
+	// AnisotropyScale is intensity parameter, not base size
 	Axis1 = float3(1, 0, 0);
 	Axis2 = float3(0, 1, 0);
 	Axis3 = float3(0, 0, 1);
-	Scale1 = Scale2 = Scale3 = AnisotropyScale;
+	Scale1 = Scale2 = Scale3 = 1.0f;
 	OutNeighborCount = 0;
 
 	FGPUFluidParticle P = InPhysicsParticles[ParticleIndex];
@@ -648,10 +649,18 @@ void CalculateDensityBased(
 	float EllipsoidScale3 = Sigma2 / GeoMean;
 
 	// Apply user-controlled anisotropy intensity
-	// Blend between sphere (1,1,1) and computed ellipsoid based on AnisotropyScale
-	EllipsoidScale1 = lerp(1.0f, EllipsoidScale1, AnisotropyScale);
-	EllipsoidScale2 = lerp(1.0f, EllipsoidScale2, AnisotropyScale);
-	EllipsoidScale3 = lerp(1.0f, EllipsoidScale3, AnisotropyScale);
+	// Use log-space scaling to preserve geometric mean (volume) while amplifying ratios
+	// - AnisotropyScale = 0: sphere (1,1,1)
+	// - AnisotropyScale = 1: original ellipsoid ratios
+	// - AnisotropyScale > 1: amplified ratios (more extreme anisotropy)
+	// Log-space scaling preserves geometric mean: if prod(scales)=1, then prod(exp(log*k))=1
+	float LogScale1 = log(max(EllipsoidScale1, 0.001f));
+	float LogScale2 = log(max(EllipsoidScale2, 0.001f));
+	float LogScale3 = log(max(EllipsoidScale3, 0.001f));
+
+	EllipsoidScale1 = exp(LogScale1 * AnisotropyScale);
+	EllipsoidScale2 = exp(LogScale2 * AnisotropyScale);
+	EllipsoidScale3 = exp(LogScale3 * AnisotropyScale);
 
 	// Clamp to prevent extreme shapes
 	EllipsoidScale1 = clamp(EllipsoidScale1, AnisotropyMin, AnisotropyMax);

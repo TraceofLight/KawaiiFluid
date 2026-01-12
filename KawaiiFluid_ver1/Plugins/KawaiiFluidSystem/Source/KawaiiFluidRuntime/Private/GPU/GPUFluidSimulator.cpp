@@ -1852,7 +1852,9 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 			{
 				AnisotropyParams.CellStartSRV = CellStartSRVLocal;
 				AnisotropyParams.CellEndSRV = CellEndSRVLocal;
-				AnisotropyParams.MortonBoundsMin = FVector3f(Params.BoundsMin);
+				// IMPORTANT: Must use SimulationBoundsMin (same as simulation passes)
+				// Using Params.BoundsMin causes cell ID mismatch and neighbor lookup failure
+				AnisotropyParams.MortonBoundsMin = SimulationBoundsMin;
 			}
 
 			// Debug log for density-based anisotropy parameters
