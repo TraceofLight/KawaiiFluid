@@ -3,6 +3,8 @@
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "GPU/FluidAnisotropyComputeShader.h"
+#include "GPU/Managers/GPUSpatialHashManager.h"
+#include "GPU/Managers/GPUBoundarySkinningManager.h"
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Rendering/Shaders/FluidSpatialHashShaders.h"
@@ -90,6 +92,18 @@ void FGPUFluidSimulator::Initialize(int32 InMaxParticleCount)
 	StreamCompactionManager = MakeUnique<FGPUStreamCompactionManager>();
 	StreamCompactionManager->Initialize(InMaxParticleCount);
 
+	// Initialize CollisionManager
+	CollisionManager = MakeUnique<FGPUCollisionManager>();
+	CollisionManager->Initialize();
+
+	// Initialize SpatialHashManager
+	SpatialHashManager = MakeUnique<FGPUSpatialHashManager>();
+	SpatialHashManager->Initialize();
+
+	// Initialize BoundarySkinningManager
+	BoundarySkinningManager = MakeUnique<FGPUBoundarySkinningManager>();
+	BoundarySkinningManager->Initialize();
+
 	// Initialize render resource on render thread
 	BeginInitResource(this);
 
@@ -121,6 +135,27 @@ void FGPUFluidSimulator::Release()
 	{
 		StreamCompactionManager->Release();
 		StreamCompactionManager.Reset();
+	}
+
+	// Release CollisionManager
+	if (CollisionManager.IsValid())
+	{
+		CollisionManager->Release();
+		CollisionManager.Reset();
+	}
+
+	// Release SpatialHashManager
+	if (SpatialHashManager.IsValid())
+	{
+		SpatialHashManager->Release();
+		SpatialHashManager.Reset();
+	}
+
+	// Release BoundarySkinningManager
+	if (BoundarySkinningManager.IsValid())
+	{
+		BoundarySkinningManager->Release();
+		BoundarySkinningManager.Reset();
 	}
 
 	bIsInitialized = false;
@@ -177,16 +212,7 @@ void FGPUFluidSimulator::ReleaseRHI()
 	PersistentCellCountsBuffer.SafeRelease();
 	PersistentParticleIndicesBuffer.SafeRelease();
 
-	// Clear collision primitives
-	CachedSpheres.Empty();
-	CachedCapsules.Empty();
-	CachedBoxes.Empty();
-	CachedConvexHeaders.Empty();
-	CachedConvexPlanes.Empty();
-	bCollisionPrimitivesValid = false;
-
-	// Release collision feedback buffers
-	ReleaseCollisionFeedbackBuffers();
+	// Collision cleanup is handled by CollisionManager::Release()
 }
 
 void FGPUFluidSimulator::ResizeBuffers(FRHICommandListBase& RHICmdList, int32 NewCapacity)
@@ -306,16 +332,12 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 		[Self](FRHICommandListImmediate& RHICmdList)
 		{
 			// Process collision feedback readback (reads from readback enqueued 2 frames ago)
-			if (Self->bCollisionFeedbackEnabled && Self->FeedbackReadbacks[0] != nullptr)
-			{
-				Self->ProcessCollisionFeedbackReadback(RHICmdList);
-			}
+			// Delegated to CollisionFeedbackManager
+			Self->ProcessCollisionFeedbackReadback(RHICmdList);
 
 			// Process collider contact count readback (reads from readback enqueued 2 frames ago)
-			if (Self->ContactCountReadbacks[0] != nullptr)
-			{
-				Self->ProcessColliderContactCountReadback(RHICmdList);
-			}
+			// Delegated to CollisionFeedbackManager
+			Self->ProcessColliderContactCountReadback(RHICmdList);
 		}
 	);
 
@@ -399,116 +421,11 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 
 			// =====================================================
 			// Phase 3: Collision Feedback Readback (Particle -> Player Interaction)
-			// Using FRHIGPUBufferReadback for truly async readback (no flush!)
+			// Delegated to FGPUCollisionFeedbackManager
 			// =====================================================
-
-			if (Self->bCollisionFeedbackEnabled && Self->CollisionFeedbackBuffer.IsValid() && Self->CollisionCounterBuffer.IsValid())
+			if (Self->CollisionManager.IsValid() && Self->CollisionManager->GetFeedbackManager())
 			{
-				// Ensure readback objects are allocated
-				if (Self->FeedbackReadbacks[0] == nullptr)
-				{
-					Self->AllocateCollisionFeedbackBuffers(RHICmdList);
-				}
-
-				const int32 WriteIdx = Self->FeedbackFrameNumber % Self->NUM_FEEDBACK_BUFFERS;
-
-				// Transition buffers for copy
-				RHICmdList.Transition(FRHITransitionInfo(
-					Self->CollisionFeedbackBuffer->GetRHI(),
-					ERHIAccess::UAVCompute,
-					ERHIAccess::CopySrc));
-
-				RHICmdList.Transition(FRHITransitionInfo(
-					Self->CollisionCounterBuffer->GetRHI(),
-					ERHIAccess::UAVCompute,
-					ERHIAccess::CopySrc));
-
-				// EnqueueCopy - async copy to readback buffer (non-blocking!)
-				Self->FeedbackReadbacks[WriteIdx]->EnqueueCopy(
-					RHICmdList,
-					Self->CollisionFeedbackBuffer->GetRHI(),
-					Self->MAX_COLLISION_FEEDBACK * sizeof(FGPUCollisionFeedback)
-				);
-
-				Self->CounterReadbacks[WriteIdx]->EnqueueCopy(
-					RHICmdList,
-					Self->CollisionCounterBuffer->GetRHI(),
-					sizeof(uint32)
-				);
-
-				// Transition back for next frame
-				RHICmdList.Transition(FRHITransitionInfo(
-					Self->CollisionFeedbackBuffer->GetRHI(),
-					ERHIAccess::CopySrc,
-					ERHIAccess::UAVCompute));
-
-				RHICmdList.Transition(FRHITransitionInfo(
-					Self->CollisionCounterBuffer->GetRHI(),
-					ERHIAccess::CopySrc,
-					ERHIAccess::UAVCompute));
-
-				// Increment frame counter AFTER EnqueueCopy
-				Self->FeedbackFrameNumber++;
-
-				if (bLogThisFrame)
-				{
-					UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> COLLISION FEEDBACK: EnqueueCopy to readback %d"), WriteIdx);
-				}
-			}
-
-			// =====================================================
-			// Copy Collider Contact Counts (FRHIGPUBufferReadback)
-			// EnqueueCopy → WriteIdx, IsReady+Lock → ReadIdx (2프레임 전)
-			// =====================================================
-			if (Self->ColliderContactCountBuffer.IsValid())
-			{
-				// Ensure readback objects are allocated
-				if (Self->ContactCountReadbacks[0] == nullptr)
-				{
-					Self->AllocateCollisionFeedbackBuffers(RHICmdList);
-				}
-
-				// Triple buffer index for this frame
-				const int32 WriteIdx = Self->ContactCountFrameNumber % Self->NUM_FEEDBACK_BUFFERS;
-
-				// 디버그 로그 (60프레임마다)
-				static int32 EnqueueDebugFrame = 0;
-				if (EnqueueDebugFrame++ % 60 == 0)
-				{
-					UE_LOG(LogGPUFluidSimulator, Log, TEXT("[ContactCount EnqueueCopy] WriteIdx=%d, FrameNum=%d, BufferValid=YES"),
-						WriteIdx, Self->ContactCountFrameNumber);
-				}
-
-				// Transition for copy
-				RHICmdList.Transition(FRHITransitionInfo(
-					Self->ColliderContactCountBuffer->GetRHI(),
-					ERHIAccess::UAVCompute,
-					ERHIAccess::CopySrc));
-
-				// EnqueueCopy - async copy to readback buffer (non-blocking!)
-				Self->ContactCountReadbacks[WriteIdx]->EnqueueCopy(
-					RHICmdList,
-					Self->ColliderContactCountBuffer->GetRHI(),
-					Self->MAX_COLLIDER_COUNT * sizeof(uint32)
-				);
-
-				// Transition back for next frame
-				RHICmdList.Transition(FRHITransitionInfo(
-					Self->ColliderContactCountBuffer->GetRHI(),
-					ERHIAccess::CopySrc,
-					ERHIAccess::UAVCompute));
-
-				// Increment frame counter AFTER EnqueueCopy
-				Self->ContactCountFrameNumber++;
-			}
-			else
-			{
-				// 버퍼가 유효하지 않음!
-				static int32 InvalidBufferLogFrame = 0;
-				if (InvalidBufferLogFrame++ % 60 == 0)
-				{
-					UE_LOG(LogGPUFluidSimulator, Warning, TEXT("[ContactCount EnqueueCopy] ColliderContactCountBuffer가 유효하지 않음!"));
-				}
+				Self->CollisionManager->GetFeedbackManager()->EnqueueReadbackCopy(RHICmdList);
 			}
 
 			// Mark that we have valid GPU results (buffer is ready for rendering)
@@ -676,7 +593,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 
 		// Run spawn particles pass using SpawnManager's active requests
 		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, SpawnManager->GetActiveRequests());
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
 
 		// Update particle count
 		CurrentParticleCount = FMath::Min(SpawnCount, MaxParticleCount);
@@ -860,7 +777,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 
 		// Run spawn particles pass using SpawnManager's active requests
 		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, SpawnManager->GetActiveRequests());
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
 
 		// Update particle count (after spawning, assuming all spawn requests succeed within capacity)
 		CurrentParticleCount = FMath::Min(ExpectedParticleCount, MaxParticleCount);
@@ -935,7 +852,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	// Option B: Hash Table (linked-list based)
 	//=========================================================================
 
-	// CellStart/End for Z-Order sorting (used when bUseZOrderSorting is true)
+	// CellStart/End for Z-Order sorting (used when SpatialHashManager.IsValid() is true)
 	FRDGBufferUAVRef CellStartUAVLocal = nullptr;
 	FRDGBufferSRVRef CellStartSRVLocal = nullptr;
 	FRDGBufferUAVRef CellEndUAVLocal = nullptr;
@@ -947,7 +864,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	FRDGBufferSRVRef CellCountsSRVLocal = nullptr;
 	FRDGBufferSRVRef ParticleIndicesSRVLocal = nullptr;
 
-	if (bUseZOrderSorting)
+	if (SpatialHashManager.IsValid())
 	{
 		//=====================================================================
 		// Z-Order Sorting Pipeline
@@ -1122,7 +1039,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: GPU clear+build completed"));
 
 		// Create dummy CellStart/CellEnd buffers for shader parameter validation
-		// These are not used when bUseZOrderSorting = 0, but RDG requires valid SRVs
+		// These are not used when SpatialHashManager.IsValid() = 0, but RDG requires valid SRVs
 		// Must use QueueBufferUpload to mark buffer as "produced" for RDG validation
 		{
 			FRDGBufferDesc DummyCellDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
@@ -1188,7 +1105,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	{
 		// Combined pass: Compute Density + Lambda + Apply Position Corrections
 		// First iteration (i=0) builds neighbor cache, subsequent iterations reuse it
-		// When bUseZOrderSorting is true, CellStartSRVLocal/CellEndSRVLocal are valid and shader uses sequential access
+		// When SpatialHashManager.IsValid() is true, CellStartSRVLocal/CellEndSRVLocal are valid and shader uses sequential access
 		AddSolveDensityPressurePass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal,
 			CellStartSRVLocal, CellEndSRVLocal, NeighborListUAVLocal, NeighborCountsUAVLocal, i, Params);
 	}
@@ -1401,8 +1318,8 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 
 			// Morton-sorted spatial lookup (cache-friendly sequential access)
 			// When bUseZOrderSorting=true, ParticleBuffer is already sorted by Morton code
-			AnisotropyParams.bUseZOrderSorting = bUseZOrderSorting;
-			if (bUseZOrderSorting && CellStartSRVLocal && CellEndSRVLocal)
+			AnisotropyParams.bUseZOrderSorting = SpatialHashManager.IsValid();
+			if (SpatialHashManager.IsValid() && CellStartSRVLocal && CellEndSRVLocal)
 			{
 				AnisotropyParams.CellStartSRV = CellStartSRVLocal;
 				AnisotropyParams.CellEndSRV = CellEndSRVLocal;
@@ -1477,4 +1394,555 @@ AnisotropyPassEnd:
 	);
 
 	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> EXTRACTION: Buffer extraction queued successfully"));
+}
+
+//=============================================================================
+// GPU Particle Spawning API (Delegated to FGPUSpawnManager)
+//=============================================================================
+
+void FGPUFluidSimulator::AddSpawnRequest(const FVector3f& Position, const FVector3f& Velocity, float Mass)
+{
+	if (SpawnManager.IsValid()) { SpawnManager->AddSpawnRequest(Position, Velocity, Mass); }
+}
+
+void FGPUFluidSimulator::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests)
+{
+	if (SpawnManager.IsValid()) { SpawnManager->AddSpawnRequests(Requests); }
+}
+
+void FGPUFluidSimulator::ClearSpawnRequests()
+{
+	if (SpawnManager.IsValid()) { SpawnManager->ClearSpawnRequests(); }
+}
+
+int32 FGPUFluidSimulator::GetPendingSpawnCount() const
+{
+	return SpawnManager.IsValid() ? SpawnManager->GetPendingSpawnCount() : 0;
+}
+
+//=============================================================================
+// FGPUFluidSimulationTask Implementation
+//=============================================================================
+
+void FGPUFluidSimulationTask::Execute(
+	FGPUFluidSimulator* Simulator,
+	const FGPUFluidSimulationParams& Params,
+	int32 NumSubsteps)
+{
+	if (!Simulator || !Simulator->IsReady()) { return; }
+
+	FGPUFluidSimulationParams SubstepParams = Params;
+	SubstepParams.DeltaTime = Params.DeltaTime / FMath::Max(1, NumSubsteps);
+	SubstepParams.DeltaTimeSq = SubstepParams.DeltaTime * SubstepParams.DeltaTime;
+	SubstepParams.TotalSubsteps = NumSubsteps;
+
+	for (int32 i = 0; i < NumSubsteps; ++i)
+	{
+		SubstepParams.SubstepIndex = i;
+		Simulator->SimulateSubstep(SubstepParams);
+	}
+}
+
+//=============================================================================
+// Boundary Particles & Skinning (Delegated to FGPUBoundarySkinningManager)
+//=============================================================================
+
+static FGPUBoundaryAdhesionParams GDefaultBoundaryAdhesionParams;
+
+const FGPUBoundaryAdhesionParams& FGPUFluidSimulator::GetBoundaryAdhesionParams() const
+{
+	return BoundarySkinningManager.IsValid() ? BoundarySkinningManager->GetBoundaryAdhesionParams() : GDefaultBoundaryAdhesionParams;
+}
+
+void FGPUFluidSimulator::UploadBoundaryParticles(const FGPUBoundaryParticles& BoundaryParticles)
+{
+	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UploadBoundaryParticles(BoundaryParticles); }
+}
+
+void FGPUFluidSimulator::UploadLocalBoundaryParticles(int32 OwnerID, const TArray<FGPUBoundaryParticleLocal>& LocalParticles)
+{
+	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UploadLocalBoundaryParticles(OwnerID, LocalParticles); }
+}
+
+void FGPUFluidSimulator::UploadBoneTransformsForBoundary(int32 OwnerID, const TArray<FMatrix44f>& BoneTransforms, const FMatrix44f& ComponentTransform)
+{
+	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UploadBoneTransformsForBoundary(OwnerID, BoneTransforms, ComponentTransform); }
+}
+
+void FGPUFluidSimulator::RemoveBoundarySkinningData(int32 OwnerID)
+{
+	if (BoundarySkinningManager.IsValid()) { BoundarySkinningManager->RemoveBoundarySkinningData(OwnerID); }
+}
+
+void FGPUFluidSimulator::ClearAllBoundarySkinningData()
+{
+	if (BoundarySkinningManager.IsValid()) { BoundarySkinningManager->ClearAllBoundarySkinningData(); }
+}
+
+void FGPUFluidSimulator::AddBoundaryAdhesionPass(FRDGBuilder& GraphBuilder, FRDGBufferUAVRef ParticlesUAV, const FGPUFluidSimulationParams& Params)
+{
+	if (BoundarySkinningManager.IsValid()) { BoundarySkinningManager->AddBoundaryAdhesionPass(GraphBuilder, ParticlesUAV, CurrentParticleCount, Params); }
+}
+
+void FGPUFluidSimulator::AddBoundarySkinningPass(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params)
+{
+	if (BoundarySkinningManager.IsValid()) { BoundarySkinningManager->AddBoundarySkinningPass(GraphBuilder); }
+}
+
+//=============================================================================
+// Z-Order Sorting (Delegated to FGPUSpatialHashManager)
+//=============================================================================
+
+FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
+	FRDGBuilder& GraphBuilder, FRDGBufferRef InParticleBuffer,
+	FRDGBufferUAVRef& OutCellStartUAV, FRDGBufferSRVRef& OutCellStartSRV,
+	FRDGBufferUAVRef& OutCellEndUAV, FRDGBufferSRVRef& OutCellEndSRV,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (!SpatialHashManager.IsValid()) { return InParticleBuffer; }
+	return SpatialHashManager->ExecuteZOrderSortingPipeline(GraphBuilder, InParticleBuffer,
+		OutCellStartUAV, OutCellStartSRV, OutCellEndUAV, OutCellEndSRV, CurrentParticleCount, Params);
+}
+
+//=============================================================================
+// Data Transfer (CPU <-> GPU)
+//=============================================================================
+
+FGPUFluidParticle FGPUFluidSimulator::ConvertToGPU(const FFluidParticle& CPUParticle)
+{
+	FGPUFluidParticle GPUParticle;
+
+	GPUParticle.Position = FVector3f(CPUParticle.Position);
+	GPUParticle.Mass = CPUParticle.Mass;
+	GPUParticle.PredictedPosition = FVector3f(CPUParticle.PredictedPosition);
+	GPUParticle.Density = CPUParticle.Density;
+	GPUParticle.Velocity = FVector3f(CPUParticle.Velocity);
+	GPUParticle.Lambda = CPUParticle.Lambda;
+	GPUParticle.ParticleID = CPUParticle.ParticleID;
+	GPUParticle.SourceID = CPUParticle.SourceID;
+
+	// Pack flags
+	uint32 Flags = 0;
+	if (CPUParticle.bIsAttached) Flags |= EGPUParticleFlags::IsAttached;
+	if (CPUParticle.bIsSurfaceParticle) Flags |= EGPUParticleFlags::IsSurface;
+	if (CPUParticle.bIsCoreParticle) Flags |= EGPUParticleFlags::IsCore;
+	if (CPUParticle.bJustDetached) Flags |= EGPUParticleFlags::JustDetached;
+	if (CPUParticle.bNearGround) Flags |= EGPUParticleFlags::NearGround;
+	GPUParticle.Flags = Flags;
+
+	// NeighborCount is calculated on GPU during density solve
+	GPUParticle.NeighborCount = 0;
+
+	return GPUParticle;
+}
+
+void FGPUFluidSimulator::ConvertFromGPU(FFluidParticle& OutCPUParticle, const FGPUFluidParticle& GPUParticle)
+{
+	// Safety check: validate GPU data before converting
+	// If data is NaN or invalid, keep the original CPU values
+	FVector NewPosition = FVector(GPUParticle.Position);
+	FVector NewVelocity = FVector(GPUParticle.Velocity);
+
+	// Check for NaN or extremely large values (indicates invalid data)
+	const float MaxValidValue = 1000000.0f;
+	bool bValidPosition = !NewPosition.ContainsNaN() && NewPosition.GetAbsMax() < MaxValidValue;
+	bool bValidVelocity = !NewVelocity.ContainsNaN() && NewVelocity.GetAbsMax() < MaxValidValue;
+
+	if (!bValidPosition || !bValidVelocity)
+	{
+		// Invalid GPU data - don't update the particle
+		// This can happen if readback hasn't completed yet
+		static bool bLoggedOnce = false;
+		if (!bLoggedOnce)
+		{
+			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("ConvertFromGPU: Invalid data detected (NaN or extreme values) - skipping update"));
+			bLoggedOnce = true;
+		}
+		return;
+	}
+
+	OutCPUParticle.Position = NewPosition;
+	OutCPUParticle.PredictedPosition = FVector(GPUParticle.PredictedPosition);
+	OutCPUParticle.Velocity = NewVelocity;
+	OutCPUParticle.Mass = FMath::IsFinite(GPUParticle.Mass) ? GPUParticle.Mass : OutCPUParticle.Mass;
+	OutCPUParticle.Density = FMath::IsFinite(GPUParticle.Density) ? GPUParticle.Density : OutCPUParticle.Density;
+	OutCPUParticle.Lambda = FMath::IsFinite(GPUParticle.Lambda) ? GPUParticle.Lambda : OutCPUParticle.Lambda;
+
+	// Unpack flags
+	OutCPUParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
+	OutCPUParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
+
+	// Note: bIsAttached is not updated from GPU - CPU handles attachment state
+}
+
+void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUParticles)
+{
+	if (!bIsInitialized)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("UploadParticles: Simulator not initialized"));
+		return;
+	}
+
+	const int32 NewCount = CPUParticles.Num();
+	if (NewCount == 0)
+	{
+		CurrentParticleCount = 0;
+		CachedGPUParticles.Empty();
+		return;
+	}
+
+	if (NewCount > MaxParticleCount)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("UploadParticles: Particle count (%d) exceeds capacity (%d)"),
+			NewCount, MaxParticleCount);
+		return;
+	}
+
+	FScopeLock Lock(&BufferLock);
+
+	// Store old count for comparison BEFORE updating
+	const int32 OldCount = CurrentParticleCount;
+
+	// Determine upload strategy based on persistent buffer state and particle count changes
+	const bool bHasPersistentBuffer = PersistentParticleBuffer.IsValid() && OldCount > 0;
+	const bool bSameCount = bHasPersistentBuffer && (NewCount == OldCount);
+	const bool bCanAppend = bHasPersistentBuffer && (NewCount > OldCount);
+
+	if (bSameCount)
+	{
+		// Same particle count - NO UPLOAD needed, reuse GPU buffer entirely
+		// GPU simulation results are preserved in PersistentParticleBuffer
+		NewParticleCount = 0;
+		NewParticlesToAppend.Empty();
+		// Note: Don't set bNeedsFullUpload = false here, it should already be false
+
+		static int32 ReuseLogCounter = 0;
+		if (++ReuseLogCounter % 60 == 0)  // Log every 60 frames
+		{
+			UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Reusing GPU buffer (no upload, %d particles)"), OldCount);
+		}
+		return;  // Skip upload entirely!
+	}
+	else if (bCanAppend)
+	{
+		// Only cache the NEW particles (indices OldCount to NewCount-1)
+		const int32 NumNewParticles = NewCount - OldCount;
+		NewParticlesToAppend.SetNumUninitialized(NumNewParticles);
+
+		for (int32 i = 0; i < NumNewParticles; ++i)
+		{
+			NewParticlesToAppend[i] = ConvertToGPU(CPUParticles[OldCount + i]);
+		}
+
+		NewParticleCount = NumNewParticles;
+		CurrentParticleCount = NewCount;
+
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Appending %d new particles (total: %d)"),
+			NumNewParticles, NewCount);
+	}
+	else
+	{
+		// Full upload needed: first frame, buffer invalid, or particles reduced
+		CachedGPUParticles.SetNumUninitialized(NewCount);
+
+		// Convert particles to GPU format
+		for (int32 i = 0; i < NewCount; ++i)
+		{
+			CachedGPUParticles[i] = ConvertToGPU(CPUParticles[i]);
+		}
+
+		// Simulation bounds for Morton code (Z-Order sorting) are set via SetSimulationBounds()
+		// from SimulateGPU before this call (preset bounds + component location offset)
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Using bounds: Min(%.1f, %.1f, %.1f) Max(%.1f, %.1f, %.1f)"),
+			SimulationBoundsMin.X, SimulationBoundsMin.Y, SimulationBoundsMin.Z,
+			SimulationBoundsMax.X, SimulationBoundsMax.Y, SimulationBoundsMax.Z);
+
+		NewParticleCount = 0;
+		NewParticlesToAppend.Empty();
+		CurrentParticleCount = NewCount;
+		bNeedsFullUpload = true;
+	}
+}
+
+void FGPUFluidSimulator::DownloadParticles(TArray<FFluidParticle>& OutCPUParticles)
+{
+	if (!bIsInitialized || CurrentParticleCount == 0)
+	{
+		return;
+	}
+
+	// Only download if we have valid GPU results from a previous simulation
+	if (!bHasValidGPUResults.load())
+	{
+		static bool bLoggedOnce = false;
+		if (!bLoggedOnce)
+		{
+			UE_LOG(LogGPUFluidSimulator, Log, TEXT("DownloadParticles: No valid GPU results yet, skipping"));
+			bLoggedOnce = true;
+		}
+		return;
+	}
+
+	FScopeLock Lock(&BufferLock);
+
+	// Read from separate readback buffer (not CachedGPUParticles)
+	const int32 Count = ReadbackGPUParticles.Num();
+	if (Count == 0)
+	{
+		return;
+	}
+
+	// Build ParticleID -> CPU index map for matching
+	TMap<int32, int32> ParticleIDToIndex;
+	ParticleIDToIndex.Reserve(OutCPUParticles.Num());
+	for (int32 i = 0; i < OutCPUParticles.Num(); ++i)
+	{
+		ParticleIDToIndex.Add(OutCPUParticles[i].ParticleID, i);
+	}
+
+	// Debug: Log first particle before conversion
+	static int32 DebugFrameCounter = 0;
+	if (DebugFrameCounter++ % 60 == 0)
+	{
+		const FGPUFluidParticle& P = ReadbackGPUParticles[0];
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("DownloadParticles: GPUCount=%d, CPUCount=%d, Readback[0] Pos=(%.2f, %.2f, %.2f)"),
+			Count, OutCPUParticles.Num(), P.Position.X, P.Position.Y, P.Position.Z);
+	}
+
+	// Update existing particles by matching ParticleID (don't overwrite newly spawned ones)
+	// Also track bounds to detect Black Hole Cell potential
+	int32 UpdatedCount = 0;
+	int32 OutOfBoundsCount = 0;
+	const float BoundsMargin = 100.0f;  // Warn if particles within 100 units of bounds edge
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FGPUFluidParticle& GPUParticle = ReadbackGPUParticles[i];
+		if (int32* CPUIndex = ParticleIDToIndex.Find(GPUParticle.ParticleID))
+		{
+			ConvertFromGPU(OutCPUParticles[*CPUIndex], GPUParticle);
+			++UpdatedCount;
+
+			// Check if particle is near or outside bounds
+			const FVector3f& Pos = GPUParticle.PredictedPosition;
+			if (Pos.X < SimulationBoundsMin.X + BoundsMargin ||
+				Pos.Y < SimulationBoundsMin.Y + BoundsMargin ||
+				Pos.Z < SimulationBoundsMin.Z + BoundsMargin ||
+				Pos.X > SimulationBoundsMax.X - BoundsMargin ||
+				Pos.Y > SimulationBoundsMax.Y - BoundsMargin ||
+				Pos.Z > SimulationBoundsMax.Z - BoundsMargin)
+			{
+				OutOfBoundsCount++;
+			}
+		}
+	}
+
+	// Warn if many particles are near bounds edge (potential Black Hole Cell issue)
+	static int32 LastBoundsWarningFrame = -1000;
+	if (OutOfBoundsCount > Count / 10 && (GFrameCounter - LastBoundsWarningFrame) > 300)  // >10% near edge, warn every 5 sec
+	{
+		LastBoundsWarningFrame = GFrameCounter;
+		UE_LOG(LogGPUFluidSimulator, Warning,
+			TEXT("Z-Order WARNING: %d/%d particles (%.1f%%) are near simulation bounds edge! "
+			     "This may cause Black Hole Cell problem with Z-Order sorting. "
+			     "Bounds: Min(%.1f, %.1f, %.1f) Max(%.1f, %.1f, %.1f)"),
+			OutOfBoundsCount, Count, 100.0f * OutOfBoundsCount / Count,
+			SimulationBoundsMin.X, SimulationBoundsMin.Y, SimulationBoundsMin.Z,
+			SimulationBoundsMax.X, SimulationBoundsMax.Y, SimulationBoundsMax.Z);
+	}
+
+	UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("DownloadParticles: Updated %d/%d particles"), UpdatedCount, Count);
+}
+
+bool FGPUFluidSimulator::GetAllGPUParticles(TArray<FFluidParticle>& OutParticles)
+{
+	if (!bIsInitialized || CurrentParticleCount == 0)
+	{
+		return false;
+	}
+
+	// Only download if we have valid GPU results from a previous simulation
+	if (!bHasValidGPUResults.load())
+	{
+		return false;
+	}
+
+	FScopeLock Lock(&BufferLock);
+
+	// Read from readback buffer
+	const int32 Count = ReadbackGPUParticles.Num();
+	if (Count == 0)
+	{
+		return false;
+	}
+
+	// Create new particles from GPU data (no ParticleID matching required)
+	OutParticles.SetNum(Count);
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		const FGPUFluidParticle& GPUParticle = ReadbackGPUParticles[i];
+		FFluidParticle& OutParticle = OutParticles[i];
+
+		// Initialize with default values
+		OutParticle = FFluidParticle();
+
+		// Convert GPU data to CPU particle
+		FVector NewPosition = FVector(GPUParticle.Position);
+		FVector NewVelocity = FVector(GPUParticle.Velocity);
+
+		// Validate data
+		const float MaxValidValue = 1000000.0f;
+		bool bValidPosition = !NewPosition.ContainsNaN() && NewPosition.GetAbsMax() < MaxValidValue;
+		bool bValidVelocity = !NewVelocity.ContainsNaN() && NewVelocity.GetAbsMax() < MaxValidValue;
+
+		if (bValidPosition)
+		{
+			OutParticle.Position = NewPosition;
+			OutParticle.PredictedPosition = FVector(GPUParticle.PredictedPosition);
+		}
+
+		if (bValidVelocity)
+		{
+			OutParticle.Velocity = NewVelocity;
+		}
+
+		OutParticle.Mass = FMath::IsFinite(GPUParticle.Mass) ? GPUParticle.Mass : 1.0f;
+		OutParticle.Density = FMath::IsFinite(GPUParticle.Density) ? GPUParticle.Density : 0.0f;
+		OutParticle.Lambda = FMath::IsFinite(GPUParticle.Lambda) ? GPUParticle.Lambda : 0.0f;
+		OutParticle.ParticleID = GPUParticle.ParticleID;
+		OutParticle.SourceID = GPUParticle.SourceID;
+
+		// Unpack flags
+		OutParticle.bIsAttached = (GPUParticle.Flags & EGPUParticleFlags::IsAttached) != 0;
+		OutParticle.bIsSurfaceParticle = (GPUParticle.Flags & EGPUParticleFlags::IsSurface) != 0;
+		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
+		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
+		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
+
+		// Set neighbor count (resize array so NeighborIndices.Num() returns the count)
+		// GPU stores count only, not actual indices (computed on-the-fly during spatial hash queries)
+		if (GPUParticle.NeighborCount > 0)
+		{
+			OutParticle.NeighborIndices.SetNum(GPUParticle.NeighborCount);
+		}
+	}
+
+	static int32 DebugFrameCounter = 0;
+	if (++DebugFrameCounter % 60 == 0)
+	{
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("GetAllGPUParticles: Retrieved %d particles"), Count);
+	}
+
+	return true;
+}
+
+//=============================================================================
+// Stream Compaction API (Delegated to FGPUStreamCompactionManager)
+//=============================================================================
+
+void FGPUFluidSimulator::ExecuteAABBFiltering(const TArray<FGPUFilterAABB>& FilterAABBs)
+{
+	if (!StreamCompactionManager.IsValid() || !bIsInitialized || CurrentParticleCount == 0)
+	{
+		return;
+	}
+
+	// Pass PersistentParticleBuffer and fallback SRV to manager
+	// Manager will create proper SRV on render thread from PersistentParticleBuffer if valid
+	StreamCompactionManager->ExecuteAABBFiltering(FilterAABBs, CurrentParticleCount, PersistentParticleBuffer, ParticleSRV);
+}
+
+bool FGPUFluidSimulator::GetFilteredCandidates(TArray<FGPUCandidateParticle>& OutCandidates)
+{
+	if (!StreamCompactionManager.IsValid())
+	{
+		OutCandidates.Empty();
+		return false;
+	}
+	return StreamCompactionManager->GetFilteredCandidates(OutCandidates);
+}
+
+void FGPUFluidSimulator::ApplyCorrections(const TArray<FParticleCorrection>& Corrections)
+{
+	if (!StreamCompactionManager.IsValid() || !bIsInitialized)
+	{
+		return;
+	}
+	StreamCompactionManager->ApplyCorrections(Corrections, PersistentParticleBuffer);
+}
+
+void FGPUFluidSimulator::ApplyAttachmentUpdates(const TArray<FAttachedParticleUpdate>& Updates)
+{
+	if (!StreamCompactionManager.IsValid() || !bIsInitialized)
+	{
+		return;
+	}
+	StreamCompactionManager->ApplyAttachmentUpdates(Updates, PersistentParticleBuffer);
+}
+
+//=============================================================================
+// Collision System (Delegated to FGPUCollisionManager)
+//=============================================================================
+
+void FGPUFluidSimulator::AddBoundsCollisionPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (CollisionManager.IsValid())
+	{
+		CollisionManager->AddBoundsCollisionPass(GraphBuilder, ParticlesUAV, CurrentParticleCount, Params);
+	}
+}
+
+void FGPUFluidSimulator::AddDistanceFieldCollisionPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (CollisionManager.IsValid())
+	{
+		CollisionManager->AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAV, CurrentParticleCount, Params);
+	}
+}
+
+void FGPUFluidSimulator::AddPrimitiveCollisionPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (CollisionManager.IsValid())
+	{
+		CollisionManager->AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAV, CurrentParticleCount, Params);
+	}
+}
+
+void FGPUFluidSimulator::AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList)
+{
+	if (CollisionManager.IsValid())
+	{
+		CollisionManager->AllocateCollisionFeedbackBuffers(RHICmdList);
+	}
+}
+
+void FGPUFluidSimulator::ReleaseCollisionFeedbackBuffers()
+{
+	// Handled by CollisionManager::Release()
+}
+
+void FGPUFluidSimulator::ProcessCollisionFeedbackReadback(FRHICommandListImmediate& RHICmdList)
+{
+	if (CollisionManager.IsValid())
+	{
+		CollisionManager->ProcessCollisionFeedbackReadback(RHICmdList);
+	}
+}
+
+void FGPUFluidSimulator::ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList)
+{
+	if (CollisionManager.IsValid())
+	{
+		CollisionManager->ProcessColliderContactCountReadback(RHICmdList);
+	}
 }

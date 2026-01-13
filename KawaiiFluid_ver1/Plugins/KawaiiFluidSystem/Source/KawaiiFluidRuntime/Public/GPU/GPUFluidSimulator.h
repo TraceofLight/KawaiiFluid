@@ -9,6 +9,9 @@
 #include "GPU/GPUFluidParticle.h"
 #include "GPU/Managers/GPUSpawnManager.h"
 #include "GPU/Managers/GPUStreamCompactionManager.h"
+#include "GPU/Managers/GPUCollisionManager.h"
+#include "GPU/Managers/GPUSpatialHashManager.h"
+#include "GPU/Managers/GPUBoundarySkinningManager.h"
 #include "Core/FluidAnisotropy.h"
 #include <atomic>
 
@@ -195,6 +198,11 @@ public:
 	{
 		SimulationBoundsMin = BoundsMin;
 		SimulationBoundsMax = BoundsMax;
+		// Also update SpatialHashManager
+		if (SpatialHashManager.IsValid())
+		{
+			SpatialHashManager->SetSimulationBounds(BoundsMin, BoundsMax);
+		}
 	}
 
 	/** Get current simulation bounds */
@@ -222,65 +230,46 @@ public:
 	TRefCountPtr<FRDGPooledBuffer>& AccessPersistentAnisotropyAxis3Buffer() { return PersistentAnisotropyAxis3Buffer; }
 
 	//=============================================================================
-	// Distance Field Collision
+	// Distance Field Collision (Delegated to FGPUCollisionManager)
 	//=============================================================================
 
-	/**
-	 * Enable or disable Distance Field collision
-	 * @param bEnabled - Whether to use DF collision
-	 */
-	void SetDistanceFieldCollisionEnabled(bool bEnabled) { DFCollisionParams.bEnabled = bEnabled ? 1 : 0; }
+	/** Enable or disable Distance Field collision */
+	void SetDistanceFieldCollisionEnabled(bool bEnabled) { if (CollisionManager.IsValid()) CollisionManager->SetDistanceFieldCollisionEnabled(bEnabled); }
 
-	/**
-	 * Set Distance Field collision parameters
-	 * @param Params - DF collision configuration
-	 */
-	void SetDistanceFieldCollisionParams(const FGPUDistanceFieldCollisionParams& Params) { DFCollisionParams = Params; }
+	/** Set Distance Field collision parameters */
+	void SetDistanceFieldCollisionParams(const FGPUDistanceFieldCollisionParams& Params) { if (CollisionManager.IsValid()) CollisionManager->SetDistanceFieldCollisionParams(Params); }
 
-	/**
-	 * Get Distance Field collision parameters
-	 */
-	const FGPUDistanceFieldCollisionParams& GetDistanceFieldCollisionParams() const { return DFCollisionParams; }
+	/** Get Distance Field collision parameters */
+	const FGPUDistanceFieldCollisionParams& GetDistanceFieldCollisionParams() const { static FGPUDistanceFieldCollisionParams Default; return CollisionManager.IsValid() ? CollisionManager->GetDistanceFieldCollisionParams() : Default; }
 
-	/**
-	 * Set the Global Distance Field texture SRV
-	 * This should be set from the scene renderer before simulation
-	 * @param SRV - The GDF texture SRV
-	 */
-	void SetGlobalDistanceFieldSRV(FRDGTextureSRVRef SRV) { CachedGDFTextureSRV = SRV; }
+	/** Set the Global Distance Field texture */
+	void SetGlobalDistanceFieldTexture(FRHITexture* Texture) { if (CollisionManager.IsValid()) CollisionManager->SetGDFTexture(Texture); }
 
 	/** Check if Distance Field collision is enabled */
-	bool IsDistanceFieldCollisionEnabled() const { return DFCollisionParams.bEnabled != 0; }
+	bool IsDistanceFieldCollisionEnabled() const { return CollisionManager.IsValid() && CollisionManager->IsDistanceFieldCollisionEnabled(); }
 
+	// Collision Primitives (Delegated to FGPUCollisionManager)
 	//=============================================================================
-	// Collision Primitives (from FluidCollider system)
 	//=============================================================================
 
-	/**
-	 * Upload collision primitives to GPU
-	 * Call this before simulation each frame with collision data from FluidCollider
-	 * @param Primitives - Collection of collision primitives
-	 */
-	void UploadCollisionPrimitives(const FGPUCollisionPrimitives& Primitives);
+	/** Upload collision primitives to GPU */
+	void UploadCollisionPrimitives(const FGPUCollisionPrimitives& Primitives) { if (CollisionManager.IsValid()) CollisionManager->UploadCollisionPrimitives(Primitives); }
 
-	/**
-	 * Set primitive collision threshold
-	 * @param Threshold - Distance threshold for collision detection
-	 */
-	void SetPrimitiveCollisionThreshold(float Threshold) { PrimitiveCollisionThreshold = Threshold; }
+	/** Set primitive collision threshold */
+	void SetPrimitiveCollisionThreshold(float Threshold) { if (CollisionManager.IsValid()) CollisionManager->SetPrimitiveCollisionThreshold(Threshold); }
 
-	/**
-	 * Check if collision primitives are available
-	 */
-	bool HasCollisionPrimitives() const { return bCollisionPrimitivesValid; }
+	/** Check if collision primitives are available */
+	bool HasCollisionPrimitives() const { return CollisionManager.IsValid() && CollisionManager->HasCollisionPrimitives(); }
 
-	/**
-	 * Get total number of collision primitives
-	 */
-	int32 GetCollisionPrimitiveCount() const
-	{
-		return CachedSpheres.Num() + CachedCapsules.Num() + CachedBoxes.Num() + CachedConvexHeaders.Num();
-	}
+	/** Get total number of collision primitives */
+	int32 GetCollisionPrimitiveCount() const { return CollisionManager.IsValid() ? CollisionManager->GetCollisionPrimitiveCount() : 0; }
+
+	/** Access cached collision data (for SimPasses) */
+	const TArray<FGPUCollisionSphere>& GetCachedSpheres() const { static TArray<FGPUCollisionSphere> Empty; return CollisionManager.IsValid() ? CollisionManager->GetCachedSpheres() : Empty; }
+	const TArray<FGPUCollisionCapsule>& GetCachedCapsules() const { static TArray<FGPUCollisionCapsule> Empty; return CollisionManager.IsValid() ? CollisionManager->GetCachedCapsules() : Empty; }
+	const TArray<FGPUCollisionBox>& GetCachedBoxes() const { static TArray<FGPUCollisionBox> Empty; return CollisionManager.IsValid() ? CollisionManager->GetCachedBoxes() : Empty; }
+	const TArray<FGPUCollisionConvex>& GetCachedConvexHeaders() const { static TArray<FGPUCollisionConvex> Empty; return CollisionManager.IsValid() ? CollisionManager->GetCachedConvexHeaders() : Empty; }
+	const TArray<FGPUConvexPlane>& GetCachedConvexPlanes() const { static TArray<FGPUConvexPlane> Empty; return CollisionManager.IsValid() ? CollisionManager->GetCachedConvexPlanes() : Empty; }
 
 	//=============================================================================
 	// GPU Adhesion System (Bone-based attachment tracking)
@@ -318,53 +307,25 @@ public:
 	 */
 	void UploadBoundaryParticles(const FGPUBoundaryParticles& BoundaryParticles);
 
-	/**
-	 * Set boundary adhesion parameters
-	 * @param Params - Boundary adhesion configuration
-	 */
-	void SetBoundaryAdhesionParams(const FGPUBoundaryAdhesionParams& Params) { CachedBoundaryAdhesionParams = Params; }
+	/** Set boundary adhesion parameters */
+	void SetBoundaryAdhesionParams(const FGPUBoundaryAdhesionParams& Params)
+	{
+		if (BoundarySkinningManager.IsValid()) { BoundarySkinningManager->SetBoundaryAdhesionParams(Params); }
+	}
 
-	/**
-	 * Get boundary adhesion parameters
-	 */
-	const FGPUBoundaryAdhesionParams& GetBoundaryAdhesionParams() const { return CachedBoundaryAdhesionParams; }
+	/** Get boundary adhesion parameters */
+	const FGPUBoundaryAdhesionParams& GetBoundaryAdhesionParams() const;
 
-	/**
-	 * Check if boundary adhesion is enabled
-	 */
-	bool IsBoundaryAdhesionEnabled() const { return CachedBoundaryAdhesionParams.bEnabled != 0 && CachedBoundaryParticles.Num() > 0; }
+	/** Check if boundary adhesion is enabled */
+	bool IsBoundaryAdhesionEnabled() const { return BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsBoundaryAdhesionEnabled(); }
 
-	/**
-	 * Get boundary particle count
-	 */
-	int32 GetBoundaryParticleCount() const { return CachedBoundaryParticles.Num(); }
+	/** Get boundary particle count */
+	int32 GetBoundaryParticleCount() const { return BoundarySkinningManager.IsValid() ? BoundarySkinningManager->GetBoundaryParticleCount() : 0; }
 
 	//=============================================================================
-	// GPU Boundary Skinning (Persistent Local Boundary + GPU Transform)
+	// GPU Boundary Skinning (Delegated to FGPUBoundarySkinningManager)
 	// Stores bone-local boundary particles once, transforms to world space on GPU each frame
 	//=============================================================================
-
-	/**
-	 * GPU Boundary Skinning Data - Input from FluidInteractionComponent
-	 * Contains bone-local particles and per-frame bone transforms
-	 */
-	struct FGPUBoundarySkinningData
-	{
-		/** Owner component ID for identification */
-		int32 OwnerID = 0;
-
-		/** Bone-local boundary particles (upload once, persistent) */
-		TArray<FGPUBoundaryParticleLocal> LocalParticles;
-
-		/** Bone transforms (upload each frame) - 4x4 matrices */
-		TArray<FMatrix44f> BoneTransforms;
-
-		/** Component transform for static meshes (BoneIndex == -1) */
-		FMatrix44f ComponentTransform = FMatrix44f::Identity;
-
-		/** Flag: local particles have been uploaded */
-		bool bLocalParticlesUploaded = false;
-	};
 
 	/**
 	 * Upload local boundary particles (persistent, upload once)
@@ -397,12 +358,12 @@ public:
 	/**
 	 * Check if GPU boundary skinning is enabled (has any local boundary particles)
 	 */
-	bool IsGPUBoundarySkinningEnabled() const { return TotalLocalBoundaryParticleCount > 0; }
+	bool IsGPUBoundarySkinningEnabled() const { return BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled(); }
 
 	/**
 	 * Get total local boundary particle count across all owners
 	 */
-	int32 GetTotalLocalBoundaryParticleCount() const { return TotalLocalBoundaryParticleCount; }
+	int32 GetTotalLocalBoundaryParticleCount() const { return BoundarySkinningManager.IsValid() ? BoundarySkinningManager->GetTotalLocalBoundaryParticleCount() : 0; }
 
 	//=============================================================================
 	// Stream Compaction (Phase 2 - Per-Polygon Collision)
@@ -450,74 +411,47 @@ public:
 	void ApplyAttachmentUpdates(const TArray<FAttachedParticleUpdate>& Updates);
 
 	//=============================================================================
-	// Collision Feedback (Particle -> Player Interaction)
-	// GPU collision data readback for force calculation and event triggering
+	// Collision Feedback (Delegated to FGPUCollisionManager)
 	//=============================================================================
 
-	/**
-	 * Enable or disable collision feedback recording
-	 * When enabled, collision data is written to a GPU buffer and read back to CPU
-	 * @param bEnabled - Whether to enable collision feedback
-	 */
-	void SetCollisionFeedbackEnabled(bool bEnabled) { bCollisionFeedbackEnabled = bEnabled; }
+	/** Enable or disable collision feedback recording */
+	void SetCollisionFeedbackEnabled(bool bEnabled) { if (CollisionManager.IsValid()) CollisionManager->SetCollisionFeedbackEnabled(bEnabled); }
 
-	/**
-	 * Check if collision feedback is enabled
-	 */
-	bool IsCollisionFeedbackEnabled() const { return bCollisionFeedbackEnabled; }
+	/** Check if collision feedback is enabled */
+	bool IsCollisionFeedbackEnabled() const { return CollisionManager.IsValid() && CollisionManager->IsCollisionFeedbackEnabled(); }
 
-	/**
-	 * Get collision feedback for a specific collider
-	 * Returns all feedback entries where ColliderIndex matches
-	 * @param ColliderIndex - Index of the collider to get feedback for
-	 * @param OutFeedback - Output array of feedback entries
-	 * @param OutCount - Number of feedback entries returned
-	 * @return true if feedback is available
-	 */
-	bool GetCollisionFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
+	/** Get collision feedback for a specific collider */
+	bool GetCollisionFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+	{
+		if (!CollisionManager.IsValid()) { OutFeedback.Reset(); OutCount = 0; return false; }
+		return CollisionManager->GetCollisionFeedbackForCollider(ColliderIndex, OutFeedback, OutCount);
+	}
 
-	/**
-	 * Get all collision feedback (unfiltered)
-	 * @param OutFeedback - Output array of all feedback entries
-	 * @param OutCount - Number of feedback entries
-	 * @return true if feedback is available
-	 */
-	bool GetAllCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
+	/** Get all collision feedback (unfiltered) */
+	bool GetAllCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+	{
+		if (!CollisionManager.IsValid()) { OutFeedback.Reset(); OutCount = 0; return false; }
+		return CollisionManager->GetAllCollisionFeedback(OutFeedback, OutCount);
+	}
 
-	/**
-	 * Get current collision feedback count
-	 */
-	int32 GetCollisionFeedbackCount() const { return ReadyFeedbackCount; }
+	/** Get current collision feedback count */
+	int32 GetCollisionFeedbackCount() const { return CollisionManager.IsValid() ? CollisionManager->GetCollisionFeedbackCount() : 0; }
 
 	//=============================================================================
-	// Collider Contact Count API (간단한 충돌 감지용)
+	// Collider Contact Count API (Delegated to FGPUCollisionManager)
 	//=============================================================================
 
-	/**
-	 * Get contact count for a specific collider index
-	 * @param ColliderIndex - Index of the collider (Sphere: 0~N, Capsule: SphereCount+0~M, etc.)
-	 * @return Number of particles colliding with this collider
-	 */
-	int32 GetColliderContactCount(int32 ColliderIndex) const;
+	/** Get contact count for a specific collider index */
+	int32 GetColliderContactCount(int32 ColliderIndex) const { return CollisionManager.IsValid() ? CollisionManager->GetColliderContactCount(ColliderIndex) : 0; }
 
-	/**
-	 * Get all collider contact counts
-	 * @param OutCounts - Output array of contact counts per collider
-	 */
-	void GetAllColliderContactCounts(TArray<int32>& OutCounts) const;
+	/** Get all collider contact counts */
+	void GetAllColliderContactCounts(TArray<int32>& OutCounts) const { if (CollisionManager.IsValid()) CollisionManager->GetAllColliderContactCounts(OutCounts); else OutCounts.Empty(); }
 
-	/**
-	 * Get total collider count (Spheres + Capsules + Boxes + Convexes)
-	 */
-	int32 GetTotalColliderCount() const;
+	/** Get total collider count */
+	int32 GetTotalColliderCount() const { return CollisionManager.IsValid() ? CollisionManager->GetTotalColliderCount() : 0; }
 
-	/**
-	 * Get total contact count for all colliders with a specific OwnerID
-	 * Sums contact counts across all collider types (sphere, capsule, box, convex)
-	 * @param OwnerID - Owner actor's unique ID (from AActor::GetUniqueID())
-	 * @return Total number of particles colliding with this owner's colliders
-	 */
-	int32 GetContactCountForOwner(int32 OwnerID) const;
+	/** Get total contact count for all colliders with a specific OwnerID */
+	int32 GetContactCountForOwner(int32 OwnerID) const { return CollisionManager.IsValid() ? CollisionManager->GetContactCountForOwner(OwnerID) : 0; }
 
 	//=============================================================================
 	// GPU Particle Spawning (Thread-Safe)
@@ -600,23 +534,7 @@ private:
 		FRDGBufferUAVRef InParticleIndicesUAV,
 		const FGPUFluidSimulationParams& Params);
 
-	/** [DEPRECATED] Add compute density pass - Use AddSolveDensityPressurePass instead */
-	void AddComputeDensityPass(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferUAVRef ParticlesUAV,
-		FRDGBufferSRVRef CellCountsSRV,
-		FRDGBufferSRVRef ParticleIndicesSRV,
-		const FGPUFluidSimulationParams& Params);
-
-	/** [DEPRECATED] Add solve pressure pass - Use AddSolveDensityPressurePass instead */
-	void AddSolvePressurePass(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferUAVRef ParticlesUAV,
-		FRDGBufferSRVRef CellCountsSRV,
-		FRDGBufferSRVRef ParticleIndicesSRV,
-		const FGPUFluidSimulationParams& Params);
-
-	/** Add combined density + pressure pass (OPTIMIZED: single neighbor traversal + neighbor caching) */
+	/** Add combined density + pressure pass (single neighbor traversal + neighbor caching) */
 	void AddSolveDensityPressurePass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
@@ -676,6 +594,22 @@ private:
 		FRDGBufferUAVRef ParticlesUAV,
 		const FGPUFluidSimulationParams& Params);
 
+	//-------------------------------------------------------------------------
+	// Collision Feedback Buffer Management (delegated to CollisionFeedbackManager)
+	//-------------------------------------------------------------------------
+
+	/** Allocate collision feedback readback buffers */
+	void AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList);
+
+	/** Release collision feedback buffers */
+	void ReleaseCollisionFeedbackBuffers();
+
+	/** Process collision feedback readback (non-blocking) */
+	void ProcessCollisionFeedbackReadback(FRHICommandListImmediate& RHICmdList);
+
+	/** Process collider contact count readback (non-blocking) */
+	void ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList);
+
 	/** Add finalize positions pass */
 	void AddFinalizePositionsPass(
 		FRDGBuilder& GraphBuilder,
@@ -689,13 +623,6 @@ private:
 		FRDGBufferUAVRef PositionsUAV,
 		int32 ParticleCount,
 		bool bUsePredictedPosition);
-
-	/** Add spawn particles pass (GPU-based particle creation from spawn requests) */
-	void AddSpawnParticlesPass(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferUAVRef ParticlesUAV,
-		FRDGBufferUAVRef ParticleCounterUAV,
-		const TArray<FGPUSpawnRequest>& SpawnRequests);
 
 	/** Add adhesion pass (bone-based attachment tracking) */
 	void AddAdhesionPass(
@@ -736,15 +663,10 @@ private:
 		const FGPUFluidSimulationParams& Params);
 
 	//=============================================================================
-	// Z-Order (Morton Code) Sorting Pipeline
-	// Replaces hash table with cache-coherent sorted particle access
+	// Z-Order (Morton Code) Sorting Pipeline (Delegated to FGPUSpatialHashManager)
 	//=============================================================================
 
-	/**
-	 * Execute full Z-Order sorting pipeline
-	 * Steps: Morton Code → Radix Sort → Data Reorder → CellStart/End
-	 * @return SortedParticleBuffer - new buffer with spatially sorted particles
-	 */
+	/** Execute Z-Order sorting pipeline (delegates to SpatialHashManager) */
 	FRDGBufferRef ExecuteZOrderSortingPipeline(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferRef InParticleBuffer,
@@ -753,35 +675,6 @@ private:
 		FRDGBufferUAVRef& OutCellEndUAV,
 		FRDGBufferSRVRef& OutCellEndSRV,
 		const FGPUFluidSimulationParams& Params);
-
-	/** Step 1: Compute Morton codes from particle positions */
-	void AddComputeMortonCodesPass(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferSRVRef ParticlesSRV,
-		FRDGBufferUAVRef MortonCodesUAV,
-		FRDGBufferUAVRef InParticleIndicesUAV,
-		const FGPUFluidSimulationParams& Params);
-
-	/** Step 2: GPU Radix Sort (sorts Morton codes + particle indices) */
-	void AddRadixSortPasses(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferRef& InOutMortonCodes,
-		FRDGBufferRef& InOutParticleIndices,
-		int32 ParticleCount);
-
-	/** Step 3: Reorder particle data based on sorted indices */
-	void AddReorderParticlesPass(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferSRVRef OldParticlesSRV,
-		FRDGBufferSRVRef SortedIndicesSRV,
-		FRDGBufferUAVRef SortedParticlesUAV);
-
-	/** Step 4: Compute Cell Start/End indices from sorted Morton codes */
-	void AddComputeCellStartEndPass(
-		FRDGBuilder& GraphBuilder,
-		FRDGBufferSRVRef SortedMortonCodesSRV,
-		FRDGBufferUAVRef CellStartUAV,
-		FRDGBufferUAVRef CellEndUAV);
 
 private:
 	//=============================================================================
@@ -844,30 +737,9 @@ private:
 	// NeighborCounts: [ParticleCount] - number of neighbors per particle
 	TRefCountPtr<FRDGPooledBuffer> NeighborListBuffer;
 	TRefCountPtr<FRDGPooledBuffer> NeighborCountsBuffer;
-	int32 NeighborBufferParticleCapacity = 0;  // Track capacity for resize detection
+	int32 NeighborBufferParticleCapacity = 0;
 
-	//=============================================================================
-	// Z-Order (Morton Code) Sorting Buffers
-	// Used for cache-coherent neighbor access via spatial sorting
-	// Temp buffers (KeysTemp, ValuesTemp, Histogram, BucketOffsets) are created
-	// as transient RDG buffers in AddRadixSortPasses for proper dependency tracking
-	//=============================================================================
-
-	TRefCountPtr<FRDGPooledBuffer> MortonCodesBuffer;      // 16-bit Morton code per particle
-	TRefCountPtr<FRDGPooledBuffer> SortIndicesBuffer;      // Particle index for sorting
-	TRefCountPtr<FRDGPooledBuffer> CellStartBuffer;        // First particle index per cell
-	TRefCountPtr<FRDGPooledBuffer> CellEndBuffer;          // Last particle index per cell
-
-	// Capacity tracking for Z-Order buffers
-	int32 ZOrderBufferParticleCapacity = 0;
-
-	// Use Z-Order sorting for cache-coherent neighbor access (recommended for performance)
-	bool bUseZOrderSorting = true;
-
-	// Simulation bounds for Morton code computation (Z-Order sorting)
-	// Auto-calculated from Preset: GridResolution × SmoothingRadius / 2
-	// With GridAxisBits=7, SmoothingRadius=20: ±(128 × 20 / 2) = ±1280cm
-	// Bounds are set via SetSimulationBounds() from preset + component location
+	// Simulation bounds (local copy for GetSimulationBounds API)
 	FVector3f SimulationBoundsMin = FVector3f(-1280.0f, -1280.0f, -1280.0f);
 	FVector3f SimulationBoundsMax = FVector3f(1280.0f, 1280.0f, 1280.0f);
 
@@ -899,27 +771,6 @@ private:
 	TRefCountPtr<FRDGPooledBuffer> PersistentAnisotropyAxis3Buffer;
 	int32 AnisotropyFrameCounter = 0;  // Frame counter for UpdateInterval optimization
 
-	// Distance Field Collision
-	FGPUDistanceFieldCollisionParams DFCollisionParams;
-	FRDGTextureSRVRef CachedGDFTextureSRV;
-
-	//=============================================================================
-	// Collision Primitives (from FluidCollider system)
-	//=============================================================================
-
-	// Cached collision primitive data (CPU side, for RDG buffer creation each frame)
-	TArray<FGPUCollisionSphere> CachedSpheres;
-	TArray<FGPUCollisionCapsule> CachedCapsules;
-	TArray<FGPUCollisionBox> CachedBoxes;
-	TArray<FGPUCollisionConvex> CachedConvexHeaders;
-	TArray<FGPUConvexPlane> CachedConvexPlanes;
-
-	// Collision threshold for primitives
-	float PrimitiveCollisionThreshold = 1.0f;
-
-	// Flag: primitives need upload
-	bool bCollisionPrimitivesValid = false;
-
 	// Critical section for thread-safe buffer access
 	FCriticalSection BufferLock;
 
@@ -950,48 +801,6 @@ private:
 	bool bBoneTransformsValid = false;
 
 	//=============================================================================
-	// Boundary Particles (Flex-style Adhesion)
-	//=============================================================================
-
-	// Cached boundary particles (CPU side, for RDG buffer creation each frame)
-	TArray<FGPUBoundaryParticle> CachedBoundaryParticles;
-
-	// Boundary adhesion parameters
-	FGPUBoundaryAdhesionParams CachedBoundaryAdhesionParams;
-
-	// Flag: boundary particles need upload
-	bool bBoundaryParticlesValid = false;
-
-	//=============================================================================
-	// GPU Boundary Skinning Buffers
-	// Persistent bone-local particles + per-frame GPU transform
-	//=============================================================================
-
-	// Map from OwnerID to skinning data
-	TMap<int32, FGPUBoundarySkinningData> BoundarySkinningDataMap;
-
-	// Total local boundary particle count across all owners
-	int32 TotalLocalBoundaryParticleCount = 0;
-
-	// Persistent buffers for GPU skinning (one per owner)
-	// Key: OwnerID, Value: Persistent local boundary particles buffer
-	TMap<int32, TRefCountPtr<FRDGPooledBuffer>> PersistentLocalBoundaryBuffers;
-
-	// World-space boundary particles buffer (output of skinning, input to density/viscosity)
-	TRefCountPtr<FRDGPooledBuffer> PersistentWorldBoundaryBuffer;
-	int32 WorldBoundaryBufferCapacity = 0;
-
-	// Boundary spatial hash buffers (for efficient neighbor lookup)
-	TRefCountPtr<FRDGPooledBuffer> BoundaryCellCountsBuffer;
-	TRefCountPtr<FRDGPooledBuffer> BoundaryParticleIndicesBuffer;
-
-	// Flag: boundary skinning data has changed (need re-upload local particles)
-	bool bBoundarySkinningDataDirty = false;
-
-	// Lock for boundary skinning data access (thread safety)
-	FCriticalSection BoundarySkinningLock;
-
-	//=============================================================================
 	// GPU Particle Spawn System (Delegated to FGPUSpawnManager)
 	//=============================================================================
 
@@ -1011,63 +820,26 @@ private:
 	TUniquePtr<FGPUStreamCompactionManager> StreamCompactionManager;
 
 	//=============================================================================
-	// Collision Feedback Buffers (Particle -> Player Interaction)
-	// Using FRHIGPUBufferReadback for truly async GPU -> CPU readback
+	// Collision System (Delegated to FGPUCollisionManager)
+	// Bounds, DistanceField, Primitive collision + Feedback
 	//=============================================================================
 
-	static constexpr int32 MAX_COLLISION_FEEDBACK = 1024;
-	static constexpr int32 NUM_FEEDBACK_BUFFERS = 3;
-	static constexpr int32 MAX_COLLIDER_COUNT = 256;  // 최대 콜라이더 수
-
-	// GPU feedback buffer (written by collision shader)
-	TRefCountPtr<FRDGPooledBuffer> CollisionFeedbackBuffer;
+	// CollisionManager handles all collision passes and feedback
+	TUniquePtr<FGPUCollisionManager> CollisionManager;
 
 	//=============================================================================
-	// Collider Contact Count Buffer (간단한 충돌 카운트용)
-	// FRHIGPUBufferReadback으로 비동기 readback (Flush 없음)
+	// Spatial Hash (Delegated to FGPUSpatialHashManager)
+	// Z-Order Morton code sorting for cache-coherent neighbor search
 	//=============================================================================
 
-	// GPU buffer: 콜라이더별 충돌 입자 수 (atomic increment)
-	TRefCountPtr<FRDGPooledBuffer> ColliderContactCountBuffer;
+	TUniquePtr<FGPUSpatialHashManager> SpatialHashManager;
 
-	// Async readback objects (replaces staging buffers)
-	FRHIGPUBufferReadback* ContactCountReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
+	//=============================================================================
+	// Boundary Skinning (Delegated to FGPUBoundarySkinningManager)
+	// GPU-based boundary skinning and adhesion
+	//=============================================================================
 
-	// Frame counter for triple buffering (separate from FeedbackFrameNumber)
-	int32 ContactCountFrameNumber = 0;
-
-	// Ready contact counts (콜라이더 인덱스 → 충돌 입자 수)
-	TArray<int32> ReadyColliderContactCounts;
-
-	// Atomic counter for feedback entries
-	TRefCountPtr<FRDGPooledBuffer> CollisionCounterBuffer;
-
-	// Async readback objects for collision feedback (replaces staging buffers)
-	FRHIGPUBufferReadback* FeedbackReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
-	FRHIGPUBufferReadback* CounterReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
-
-	// Ready feedback data (available to game thread)
-	TArray<FGPUCollisionFeedback> ReadyFeedback;
-	int32 ReadyFeedbackCount = 0;
-
-	// Triple buffer indices
-	int32 CurrentFeedbackWriteIndex = 0;
-	std::atomic<int32> CompletedFeedbackFrame{-1};
-
-	// Enable flag
-	bool bCollisionFeedbackEnabled = false;
-
-	// Lock for feedback data access
-	FCriticalSection FeedbackLock;
-
-	// Frame counter for triple buffering
-	int32 FeedbackFrameNumber = 0;
-
-	// Helper methods for collision feedback
-	void AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList);
-	void ReleaseCollisionFeedbackBuffers();
-	void ProcessCollisionFeedbackReadback(FRHICommandListImmediate& RHICmdList);
-	void ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList);
+	TUniquePtr<FGPUBoundarySkinningManager> BoundarySkinningManager;
 };
 
 /**

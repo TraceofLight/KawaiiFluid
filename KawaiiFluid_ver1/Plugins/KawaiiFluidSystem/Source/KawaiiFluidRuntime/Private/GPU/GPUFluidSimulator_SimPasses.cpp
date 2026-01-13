@@ -3,6 +3,8 @@
 
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "GPU/Managers/GPUBoundarySkinningManager.h"
+#include "GPU/Managers/GPUSpatialHashManager.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
@@ -75,79 +77,6 @@ void FGPUFluidSimulator::AddExtractPositionsPass(
 }
 
 //=============================================================================
-// Compute Density Pass
-//=============================================================================
-
-void FGPUFluidSimulator::AddComputeDensityPass(
-	FRDGBuilder& GraphBuilder,
-	FRDGBufferUAVRef InParticlesUAV,
-	FRDGBufferSRVRef InCellCountsSRV,
-	FRDGBufferSRVRef InParticleIndicesSRV,
-	const FGPUFluidSimulationParams& Params)
-{
-	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-	TShaderMapRef<FComputeDensityCS> ComputeShader(ShaderMap);
-
-	FComputeDensityCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FComputeDensityCS::FParameters>();
-	PassParameters->Particles = InParticlesUAV;
-	PassParameters->CellCounts = InCellCountsSRV;
-	PassParameters->ParticleIndices = InParticleIndicesSRV;
-	PassParameters->ParticleCount = CurrentParticleCount;
-	PassParameters->SmoothingRadius = Params.SmoothingRadius;
-	PassParameters->RestDensity = Params.RestDensity;
-	PassParameters->Poly6Coeff = Params.Poly6Coeff;
-	PassParameters->SpikyCoeff = Params.SpikyCoeff;
-	PassParameters->CellSize = Params.CellSize;
-	PassParameters->Compliance = Params.Compliance;
-	PassParameters->DeltaTimeSq = Params.DeltaTimeSq;
-
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FComputeDensityCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ComputeDensity"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
-}
-
-//=============================================================================
-// Solve Pressure Pass
-//=============================================================================
-
-void FGPUFluidSimulator::AddSolvePressurePass(
-	FRDGBuilder& GraphBuilder,
-	FRDGBufferUAVRef InParticlesUAV,
-	FRDGBufferSRVRef InCellCountsSRV,
-	FRDGBufferSRVRef InParticleIndicesSRV,
-	const FGPUFluidSimulationParams& Params)
-{
-	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-	TShaderMapRef<FSolvePressureCS> ComputeShader(ShaderMap);
-
-	FSolvePressureCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FSolvePressureCS::FParameters>();
-	PassParameters->Particles = InParticlesUAV;
-	PassParameters->CellCounts = InCellCountsSRV;
-	PassParameters->ParticleIndices = InParticleIndicesSRV;
-	PassParameters->ParticleCount = CurrentParticleCount;
-	PassParameters->SmoothingRadius = Params.SmoothingRadius;
-	PassParameters->RestDensity = Params.RestDensity;
-	PassParameters->SpikyCoeff = Params.SpikyCoeff;
-	PassParameters->CellSize = Params.CellSize;
-
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FSolvePressureCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::SolvePressure"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
-}
-
-//=============================================================================
 // Solve Density Pressure Pass (PBF with Neighbor Cache)
 //=============================================================================
 
@@ -174,8 +103,8 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	// Z-Order sorted mode (new)
 	PassParameters->CellStart = InCellStartSRV;
 	PassParameters->CellEnd = InCellEndSRV;
-	// Use member variable directly - don't check nullptr because dummy buffers are created for RDG validation
-	PassParameters->bUseZOrderSorting = bUseZOrderSorting ? 1 : 0;
+	// Z-Order sorting is always enabled when SpatialHashManager is valid
+	PassParameters->bUseZOrderSorting = SpatialHashManager.IsValid() ? 1 : 0;
 	// Morton bounds for Z-Order cell ID calculation (must match FluidMortonCode.usf)
 	PassParameters->MortonBoundsMin = SimulationBoundsMin;
 	PassParameters->MortonBoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
@@ -198,29 +127,29 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	// Iteration control for neighbor caching
 	PassParameters->IterationIndex = IterationIndex;
 
-	// Boundary Particles for density contribution (Akinci 2012)
-	// Priority: GPU skinned buffer > CPU uploaded buffer
-	const bool bUseGPUSkinning = IsGPUBoundarySkinningEnabled() && PersistentWorldBoundaryBuffer.IsValid();
-	const bool bUseCPUBoundary = !bUseGPUSkinning && IsBoundaryAdhesionEnabled() && CachedBoundaryParticles.Num() > 0;
+	// Boundary Particles for density contribution (Akinci 2012) - delegated to BoundarySkinningManager
+	const bool bUseGPUSkinning = BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled() && BoundarySkinningManager->HasWorldBoundaryBuffer();
+	const bool bUseCPUBoundary = !bUseGPUSkinning && BoundarySkinningManager.IsValid() && BoundarySkinningManager->HasBoundaryParticles();
 
 	if (bUseGPUSkinning)
 	{
 		// Use GPU-skinned world boundary buffer (populated by AddBoundarySkinningPass)
-		FRDGBufferRef BoundaryBuffer = GraphBuilder.RegisterExternalBuffer(PersistentWorldBoundaryBuffer, TEXT("GPUFluidBoundaryParticles_Density"));
+		FRDGBufferRef BoundaryBuffer = GraphBuilder.RegisterExternalBuffer(BoundarySkinningManager->GetWorldBoundaryBuffer(), TEXT("GPUFluidBoundaryParticles_Density"));
 		PassParameters->BoundaryParticles = GraphBuilder.CreateSRV(BoundaryBuffer);
-		PassParameters->BoundaryParticleCount = TotalLocalBoundaryParticleCount;
+		PassParameters->BoundaryParticleCount = BoundarySkinningManager->GetTotalLocalBoundaryParticleCount();
 		PassParameters->bUseBoundaryDensity = 1;
 	}
 	else if (bUseCPUBoundary)
 	{
 		// Use CPU-uploaded boundary particles (legacy path)
-		const int32 BoundaryCount = CachedBoundaryParticles.Num();
+		const TArray<FGPUBoundaryParticle>& CachedParticles = BoundarySkinningManager->GetCachedBoundaryParticles();
+		const int32 BoundaryCount = CachedParticles.Num();
 		FRDGBufferRef BoundaryBuffer = CreateStructuredBuffer(
 			GraphBuilder,
 			TEXT("GPUFluidBoundaryParticles_Density"),
 			sizeof(FGPUBoundaryParticle),
 			BoundaryCount,
-			CachedBoundaryParticles.GetData(),
+			CachedParticles.GetData(),
 			BoundaryCount * sizeof(FGPUBoundaryParticle),
 			ERDGInitialDataFlags::NoCopy
 		);
@@ -283,29 +212,29 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	PassParameters->CellSize = Params.CellSize;
 	PassParameters->bUseNeighborCache = (InNeighborListSRV != nullptr && InNeighborCountsSRV != nullptr) ? 1 : 0;
 
-	// Boundary Particles for viscosity contribution
-	// Priority: GPU skinned buffer > CPU uploaded buffer
-	const bool bUseGPUSkinning = IsGPUBoundarySkinningEnabled() && PersistentWorldBoundaryBuffer.IsValid();
-	const bool bUseCPUBoundary = !bUseGPUSkinning && IsBoundaryAdhesionEnabled() && CachedBoundaryParticles.Num() > 0;
+	// Boundary Particles for viscosity contribution (delegated to BoundarySkinningManager)
+	const bool bUseGPUSkinning = BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled() && BoundarySkinningManager->HasWorldBoundaryBuffer();
+	const bool bUseCPUBoundary = !bUseGPUSkinning && BoundarySkinningManager.IsValid() && BoundarySkinningManager->HasBoundaryParticles();
 
 	if (bUseGPUSkinning)
 	{
 		// Use GPU-skinned world boundary buffer (populated by AddBoundarySkinningPass)
-		FRDGBufferRef BoundaryBuffer = GraphBuilder.RegisterExternalBuffer(PersistentWorldBoundaryBuffer, TEXT("GPUFluidBoundaryParticles_Viscosity"));
+		FRDGBufferRef BoundaryBuffer = GraphBuilder.RegisterExternalBuffer(BoundarySkinningManager->GetWorldBoundaryBuffer(), TEXT("GPUFluidBoundaryParticles_Viscosity"));
 		PassParameters->BoundaryParticles = GraphBuilder.CreateSRV(BoundaryBuffer);
-		PassParameters->BoundaryParticleCount = TotalLocalBoundaryParticleCount;
+		PassParameters->BoundaryParticleCount = BoundarySkinningManager->GetTotalLocalBoundaryParticleCount();
 		PassParameters->bUseBoundaryViscosity = 1;
 	}
 	else if (bUseCPUBoundary)
 	{
 		// Use CPU-uploaded boundary particles (legacy path)
-		const int32 BoundaryCount = CachedBoundaryParticles.Num();
+		const TArray<FGPUBoundaryParticle>& CachedParticles = BoundarySkinningManager->GetCachedBoundaryParticles();
+		const int32 BoundaryCount = CachedParticles.Num();
 		FRDGBufferRef BoundaryBuffer = CreateStructuredBuffer(
 			GraphBuilder,
 			TEXT("GPUFluidBoundaryParticles_Viscosity"),
 			sizeof(FGPUBoundaryParticle),
 			BoundaryCount,
-			CachedBoundaryParticles.GetData(),
+			CachedParticles.GetData(),
 			BoundaryCount * sizeof(FGPUBoundaryParticle),
 			ERDGInitialDataFlags::NoCopy
 		);
@@ -423,34 +352,34 @@ void FGPUFluidSimulator::AddStackPressurePass(
 	// Create collision primitive buffers (same as Adhesion pass)
 	FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(4, 1);
 
-	FRDGBufferRef SpheresBuffer = CachedSpheres.Num() > 0
+	FRDGBufferRef SpheresBuffer = GetCachedSpheres().Num() > 0
 		? CreateStructuredBuffer(GraphBuilder, TEXT("StackPressure_Spheres"),
-			sizeof(FGPUCollisionSphere), CachedSpheres.Num(),
-			CachedSpheres.GetData(), sizeof(FGPUCollisionSphere) * CachedSpheres.Num())
+			sizeof(FGPUCollisionSphere), GetCachedSpheres().Num(),
+			GetCachedSpheres().GetData(), sizeof(FGPUCollisionSphere) * GetCachedSpheres().Num())
 		: GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummySpheres"));
 
-	FRDGBufferRef CapsulesBuffer = CachedCapsules.Num() > 0
+	FRDGBufferRef CapsulesBuffer = GetCachedCapsules().Num() > 0
 		? CreateStructuredBuffer(GraphBuilder, TEXT("StackPressure_Capsules"),
-			sizeof(FGPUCollisionCapsule), CachedCapsules.Num(),
-			CachedCapsules.GetData(), sizeof(FGPUCollisionCapsule) * CachedCapsules.Num())
+			sizeof(FGPUCollisionCapsule), GetCachedCapsules().Num(),
+			GetCachedCapsules().GetData(), sizeof(FGPUCollisionCapsule) * GetCachedCapsules().Num())
 		: GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyCapsules"));
 
-	FRDGBufferRef BoxesBuffer = CachedBoxes.Num() > 0
+	FRDGBufferRef BoxesBuffer = GetCachedBoxes().Num() > 0
 		? CreateStructuredBuffer(GraphBuilder, TEXT("StackPressure_Boxes"),
-			sizeof(FGPUCollisionBox), CachedBoxes.Num(),
-			CachedBoxes.GetData(), sizeof(FGPUCollisionBox) * CachedBoxes.Num())
+			sizeof(FGPUCollisionBox), GetCachedBoxes().Num(),
+			GetCachedBoxes().GetData(), sizeof(FGPUCollisionBox) * GetCachedBoxes().Num())
 		: GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyBoxes"));
 
-	FRDGBufferRef ConvexesBuffer = CachedConvexHeaders.Num() > 0
+	FRDGBufferRef ConvexesBuffer = GetCachedConvexHeaders().Num() > 0
 		? CreateStructuredBuffer(GraphBuilder, TEXT("StackPressure_Convexes"),
-			sizeof(FGPUCollisionConvex), CachedConvexHeaders.Num(),
-			CachedConvexHeaders.GetData(), sizeof(FGPUCollisionConvex) * CachedConvexHeaders.Num())
+			sizeof(FGPUCollisionConvex), GetCachedConvexHeaders().Num(),
+			GetCachedConvexHeaders().GetData(), sizeof(FGPUCollisionConvex) * GetCachedConvexHeaders().Num())
 		: GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyConvexes"));
 
-	FRDGBufferRef ConvexPlanesBuffer = CachedConvexPlanes.Num() > 0
+	FRDGBufferRef ConvexPlanesBuffer = GetCachedConvexPlanes().Num() > 0
 		? CreateStructuredBuffer(GraphBuilder, TEXT("StackPressure_ConvexPlanes"),
-			sizeof(FGPUConvexPlane), CachedConvexPlanes.Num(),
-			CachedConvexPlanes.GetData(), sizeof(FGPUConvexPlane) * CachedConvexPlanes.Num())
+			sizeof(FGPUConvexPlane), GetCachedConvexPlanes().Num(),
+			GetCachedConvexPlanes().GetData(), sizeof(FGPUConvexPlane) * GetCachedConvexPlanes().Num())
 		: GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyPlanes"));
 
 	FStackPressureCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FStackPressureCS::FParameters>();
@@ -461,13 +390,13 @@ void FGPUFluidSimulator::AddStackPressurePass(
 
 	// Collision primitives for surface normal calculation
 	PassParameters->CollisionSpheres = GraphBuilder.CreateSRV(SpheresBuffer);
-	PassParameters->SphereCount = CachedSpheres.Num();
+	PassParameters->SphereCount = GetCachedSpheres().Num();
 	PassParameters->CollisionCapsules = GraphBuilder.CreateSRV(CapsulesBuffer);
-	PassParameters->CapsuleCount = CachedCapsules.Num();
+	PassParameters->CapsuleCount = GetCachedCapsules().Num();
 	PassParameters->CollisionBoxes = GraphBuilder.CreateSRV(BoxesBuffer);
-	PassParameters->BoxCount = CachedBoxes.Num();
+	PassParameters->BoxCount = GetCachedBoxes().Num();
 	PassParameters->CollisionConvexes = GraphBuilder.CreateSRV(ConvexesBuffer);
-	PassParameters->ConvexCount = CachedConvexHeaders.Num();
+	PassParameters->ConvexCount = GetCachedConvexHeaders().Num();
 	PassParameters->ConvexPlanes = GraphBuilder.CreateSRV(ConvexPlanesBuffer);
 
 	// Parameters
@@ -556,48 +485,48 @@ void FGPUFluidSimulator::AddAdhesionPass(
 	FRDGBufferRef ConvexesBuffer = nullptr;
 	FRDGBufferRef ConvexPlanesBuffer = nullptr;
 
-	if (CachedSpheres.Num() > 0)
+	if (GetCachedSpheres().Num() > 0)
 	{
 		SpheresBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionSpheres"),
-			sizeof(FGPUCollisionSphere), CachedSpheres.Num(),
-			CachedSpheres.GetData(), CachedSpheres.Num() * sizeof(FGPUCollisionSphere),
+			sizeof(FGPUCollisionSphere), GetCachedSpheres().Num(),
+			GetCachedSpheres().GetData(), GetCachedSpheres().Num() * sizeof(FGPUCollisionSphere),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedCapsules.Num() > 0)
+	if (GetCachedCapsules().Num() > 0)
 	{
 		CapsulesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionCapsules"),
-			sizeof(FGPUCollisionCapsule), CachedCapsules.Num(),
-			CachedCapsules.GetData(), CachedCapsules.Num() * sizeof(FGPUCollisionCapsule),
+			sizeof(FGPUCollisionCapsule), GetCachedCapsules().Num(),
+			GetCachedCapsules().GetData(), GetCachedCapsules().Num() * sizeof(FGPUCollisionCapsule),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedBoxes.Num() > 0)
+	if (GetCachedBoxes().Num() > 0)
 	{
 		BoxesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionBoxes"),
-			sizeof(FGPUCollisionBox), CachedBoxes.Num(),
-			CachedBoxes.GetData(), CachedBoxes.Num() * sizeof(FGPUCollisionBox),
+			sizeof(FGPUCollisionBox), GetCachedBoxes().Num(),
+			GetCachedBoxes().GetData(), GetCachedBoxes().Num() * sizeof(FGPUCollisionBox),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedConvexHeaders.Num() > 0)
+	if (GetCachedConvexHeaders().Num() > 0)
 	{
 		ConvexesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionConvexes"),
-			sizeof(FGPUCollisionConvex), CachedConvexHeaders.Num(),
-			CachedConvexHeaders.GetData(), CachedConvexHeaders.Num() * sizeof(FGPUCollisionConvex),
+			sizeof(FGPUCollisionConvex), GetCachedConvexHeaders().Num(),
+			GetCachedConvexHeaders().GetData(), GetCachedConvexHeaders().Num() * sizeof(FGPUCollisionConvex),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedConvexPlanes.Num() > 0)
+	if (GetCachedConvexPlanes().Num() > 0)
 	{
 		ConvexPlanesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidConvexPlanes"),
-			sizeof(FGPUConvexPlane), CachedConvexPlanes.Num(),
-			CachedConvexPlanes.GetData(), CachedConvexPlanes.Num() * sizeof(FGPUConvexPlane),
+			sizeof(FGPUConvexPlane), GetCachedConvexPlanes().Num(),
+			GetCachedConvexPlanes().GetData(), GetCachedConvexPlanes().Num() * sizeof(FGPUConvexPlane),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
@@ -618,13 +547,13 @@ void FGPUFluidSimulator::AddAdhesionPass(
 	PassParameters->BoneTransforms = BoneTransformsSRVLocal;
 	PassParameters->BoneCount = CachedBoneTransforms.Num();
 	PassParameters->CollisionSpheres = GraphBuilder.CreateSRV(SpheresBuffer);
-	PassParameters->SphereCount = CachedSpheres.Num();
+	PassParameters->SphereCount = GetCachedSpheres().Num();
 	PassParameters->CollisionCapsules = GraphBuilder.CreateSRV(CapsulesBuffer);
-	PassParameters->CapsuleCount = CachedCapsules.Num();
+	PassParameters->CapsuleCount = GetCachedCapsules().Num();
 	PassParameters->CollisionBoxes = GraphBuilder.CreateSRV(BoxesBuffer);
-	PassParameters->BoxCount = CachedBoxes.Num();
+	PassParameters->BoxCount = GetCachedBoxes().Num();
 	PassParameters->CollisionConvexes = GraphBuilder.CreateSRV(ConvexesBuffer);
-	PassParameters->ConvexCount = CachedConvexHeaders.Num();
+	PassParameters->ConvexCount = GetCachedConvexHeaders().Num();
 	PassParameters->ConvexPlanes = GraphBuilder.CreateSRV(ConvexPlanesBuffer);
 	PassParameters->AdhesionStrength = CachedAdhesionParams.AdhesionStrength;
 	PassParameters->AdhesionRadius = CachedAdhesionParams.AdhesionRadius;
@@ -691,48 +620,48 @@ void FGPUFluidSimulator::AddUpdateAttachedPositionsPassInternal(
 	FRDGBufferRef ConvexesBuffer = nullptr;
 	FRDGBufferRef ConvexPlanesBuffer = nullptr;
 
-	if (CachedSpheres.Num() > 0)
+	if (GetCachedSpheres().Num() > 0)
 	{
 		SpheresBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionSpheresUpdate"),
-			sizeof(FGPUCollisionSphere), CachedSpheres.Num(),
-			CachedSpheres.GetData(), CachedSpheres.Num() * sizeof(FGPUCollisionSphere),
+			sizeof(FGPUCollisionSphere), GetCachedSpheres().Num(),
+			GetCachedSpheres().GetData(), GetCachedSpheres().Num() * sizeof(FGPUCollisionSphere),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedCapsules.Num() > 0)
+	if (GetCachedCapsules().Num() > 0)
 	{
 		CapsulesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionCapsulesUpdate"),
-			sizeof(FGPUCollisionCapsule), CachedCapsules.Num(),
-			CachedCapsules.GetData(), CachedCapsules.Num() * sizeof(FGPUCollisionCapsule),
+			sizeof(FGPUCollisionCapsule), GetCachedCapsules().Num(),
+			GetCachedCapsules().GetData(), GetCachedCapsules().Num() * sizeof(FGPUCollisionCapsule),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedBoxes.Num() > 0)
+	if (GetCachedBoxes().Num() > 0)
 	{
 		BoxesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionBoxesUpdate"),
-			sizeof(FGPUCollisionBox), CachedBoxes.Num(),
-			CachedBoxes.GetData(), CachedBoxes.Num() * sizeof(FGPUCollisionBox),
+			sizeof(FGPUCollisionBox), GetCachedBoxes().Num(),
+			GetCachedBoxes().GetData(), GetCachedBoxes().Num() * sizeof(FGPUCollisionBox),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedConvexHeaders.Num() > 0)
+	if (GetCachedConvexHeaders().Num() > 0)
 	{
 		ConvexesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidCollisionConvexesUpdate"),
-			sizeof(FGPUCollisionConvex), CachedConvexHeaders.Num(),
-			CachedConvexHeaders.GetData(), CachedConvexHeaders.Num() * sizeof(FGPUCollisionConvex),
+			sizeof(FGPUCollisionConvex), GetCachedConvexHeaders().Num(),
+			GetCachedConvexHeaders().GetData(), GetCachedConvexHeaders().Num() * sizeof(FGPUCollisionConvex),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
-	if (CachedConvexPlanes.Num() > 0)
+	if (GetCachedConvexPlanes().Num() > 0)
 	{
 		ConvexPlanesBuffer = CreateStructuredBuffer(
 			GraphBuilder, TEXT("GPUFluidConvexPlanesUpdate"),
-			sizeof(FGPUConvexPlane), CachedConvexPlanes.Num(),
-			CachedConvexPlanes.GetData(), CachedConvexPlanes.Num() * sizeof(FGPUConvexPlane),
+			sizeof(FGPUConvexPlane), GetCachedConvexPlanes().Num(),
+			GetCachedConvexPlanes().GetData(), GetCachedConvexPlanes().Num() * sizeof(FGPUConvexPlane),
 			ERDGInitialDataFlags::NoCopy
 		);
 	}
@@ -752,13 +681,13 @@ void FGPUFluidSimulator::AddUpdateAttachedPositionsPassInternal(
 	PassParameters->BoneTransforms = BoneTransformsSRVLocal;
 	PassParameters->BoneCount = CachedBoneTransforms.Num();
 	PassParameters->CollisionSpheres = GraphBuilder.CreateSRV(SpheresBuffer);
-	PassParameters->SphereCount = CachedSpheres.Num();
+	PassParameters->SphereCount = GetCachedSpheres().Num();
 	PassParameters->CollisionCapsules = GraphBuilder.CreateSRV(CapsulesBuffer);
-	PassParameters->CapsuleCount = CachedCapsules.Num();
+	PassParameters->CapsuleCount = GetCachedCapsules().Num();
 	PassParameters->CollisionBoxes = GraphBuilder.CreateSRV(BoxesBuffer);
-	PassParameters->BoxCount = CachedBoxes.Num();
+	PassParameters->BoxCount = GetCachedBoxes().Num();
 	PassParameters->CollisionConvexes = GraphBuilder.CreateSRV(ConvexesBuffer);
-	PassParameters->ConvexCount = CachedConvexHeaders.Num();
+	PassParameters->ConvexCount = GetCachedConvexHeaders().Num();
 	PassParameters->ConvexPlanes = GraphBuilder.CreateSRV(ConvexPlanesBuffer);
 	PassParameters->DetachAccelThreshold = CachedAdhesionParams.DetachAccelThreshold;
 	PassParameters->DetachDistanceThreshold = CachedAdhesionParams.DetachDistanceThreshold;
