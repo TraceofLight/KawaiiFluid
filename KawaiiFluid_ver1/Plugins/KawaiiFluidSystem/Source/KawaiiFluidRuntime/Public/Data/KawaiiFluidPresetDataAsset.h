@@ -8,6 +8,10 @@
 #include "KawaiiFluidPresetDataAsset.generated.h"
 
 class UKawaiiFluidSimulationContext;
+class UKawaiiFluidPresetDataAsset;
+
+/** Delegate broadcast when preset properties change (SmoothingRadius, etc.) */
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnPresetPropertyChanged, UKawaiiFluidPresetDataAsset*);
 
 /**
  * Fluid Preset Data Asset
@@ -336,5 +340,8 @@ public:
 
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+
+	/** Delegate broadcast when preset properties change in editor */
+	FOnPresetPropertyChanged OnPropertyChanged;
 #endif
 };

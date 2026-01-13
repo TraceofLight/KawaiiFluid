@@ -49,6 +49,10 @@ class KAWAIIFLUIDRUNTIME_API UKawaiiFluidSimulationModule : public UObject, publ
 public:
 	UKawaiiFluidSimulationModule();
 
+	// UObject interface
+	virtual void PostLoad() override;
+	virtual void BeginDestroy() override;
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 #endif
@@ -137,12 +141,16 @@ public:
 	TObjectPtr<AKawaiiFluidSimulationVolume> TargetSimulationVolume = nullptr;
 
 	/**
-	 * Cell size for Z-Order grid (when using internal volume)
-	 * Should match SmoothingRadius of your fluid preset.
-	 * Only editable when TargetSimulationVolume is not set.
+	 * Cell size for Z-Order spatial hashing grid (read-only, auto-derived).
+	 *
+	 * This value is automatically determined and cannot be set directly:
+	 * - Internal Volume Mode: Derived from Preset's SmoothingRadius (CellSize = SmoothingRadius)
+	 * - External Volume Mode: Inherited from TargetSimulationVolume's CellSize
+	 *
+	 * For optimal SPH neighbor search, CellSize should equal SmoothingRadius.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Simulation Volume",
-		meta = (EditCondition = "TargetSimulationVolume == nullptr", ClampMin = "1.0", ClampMax = "1000.0"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid|Simulation Volume",
+		meta = (DisplayName = "Cell Size (Auto)"))
 	float CellSize = 20.0f;
 
 	/**
@@ -204,6 +212,12 @@ public:
 	 * Otherwise uses internal CellSize to calculate
 	 */
 	void UpdateVolumeInfoDisplay();
+
+	/**
+	 * Called when Preset reference is changed externally (e.g., from owning Component)
+	 * Handles delegate rebinding and CellSize synchronization
+	 */
+	void OnPresetChangedExternal(UKawaiiFluidPresetDataAsset* NewPreset);
 
 	//========================================
 	// 파티클 데이터 접근 (IKawaiiFluidDataProvider 구현)
@@ -819,13 +833,6 @@ private:
 	TObjectPtr<UKawaiiFluidSimulationVolumeComponent> OwnedVolumeComponent = nullptr;
 
 	/**
-	 * Backup of internal CellSize value
-	 * When TargetSimulationVolume is set, CellSize displays external volume's value
-	 * When TargetSimulationVolume is cleared, CellSize is restored from this backup
-	 */
-	float InternalCellSize = 20.0f;
-
-	/**
 	 * Previously registered volume component (for editor unregistration tracking)
 	 * Used to properly unregister when TargetSimulationVolume changes in editor
 	 */
@@ -841,6 +848,28 @@ private:
 
 	/** Whether we're currently bound to the volume's OnDestroyed event */
 	bool bBoundToVolumeDestroyed = false;
+
+#if WITH_EDITOR
+	/** Callback when Preset's properties change (SmoothingRadius, etc.) */
+	void OnPresetPropertyChanged(UKawaiiFluidPresetDataAsset* ChangedPreset);
+
+	/** Bind/Unbind to Preset's OnPropertyChanged delegate */
+	void BindToPresetPropertyChanged();
+	void UnbindFromPresetPropertyChanged();
+
+	/** Delegate handle for preset property changes */
+	FDelegateHandle PresetPropertyChangedHandle;
+
+	/** Callback when objects are replaced (e.g., asset reload) */
+	void OnObjectsReplaced(const TMap<UObject*, UObject*>& ReplacementMap);
+
+	/** Bind/Unbind to FCoreUObjectDelegates::OnObjectsReplaced */
+	void BindToObjectsReplaced();
+	void UnbindFromObjectsReplaced();
+
+	/** Delegate handle for objects replaced event */
+	FDelegateHandle ObjectsReplacedHandle;
+#endif
 
 	/** Cached source ID for spawned particles (Component's unique ID, -1 = invalid) */
 	int32 CachedSourceID = -1;

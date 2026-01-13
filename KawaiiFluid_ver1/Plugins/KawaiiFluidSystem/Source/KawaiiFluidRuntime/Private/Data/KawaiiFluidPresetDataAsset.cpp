@@ -68,6 +68,9 @@ void UKawaiiFluidPresetDataAsset::PostEditChangeProperty(FPropertyChangedEvent& 
 		PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidPresetDataAsset, SpacingRatio))
 	{
 		RecalculateDerivedParameters();
+
+		// Notify subscribers (e.g., SimulationModules) about property changes
+		OnPropertyChanged.Broadcast(this);
 	}
 }
 #endif

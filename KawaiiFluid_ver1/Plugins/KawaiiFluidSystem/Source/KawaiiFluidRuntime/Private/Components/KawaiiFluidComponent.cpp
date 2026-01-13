@@ -30,6 +30,25 @@ UKawaiiFluidComponent::UKawaiiFluidComponent()
 	RenderingModule = CreateDefaultSubobject<UKawaiiFluidRenderingModule>(TEXT("RenderingModule"));
 }
 
+#if WITH_EDITOR
+void UKawaiiFluidComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	const FName PropertyName = PropertyChangedEvent.GetPropertyName();
+
+	// Component's Preset changed - sync to SimulationModule via public API
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidComponent, Preset))
+	{
+		if (SimulationModule)
+		{
+			// Use public API to handle preset change (handles delegate rebinding internally)
+			SimulationModule->OnPresetChangedExternal(Preset);
+		}
+	}
+}
+#endif
+
 void UKawaiiFluidComponent::OnRegister()
 {
 	Super::OnRegister();

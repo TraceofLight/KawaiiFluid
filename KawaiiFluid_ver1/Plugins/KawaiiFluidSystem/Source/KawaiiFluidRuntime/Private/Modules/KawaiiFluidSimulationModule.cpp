@@ -11,6 +11,7 @@
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
 #include "GPU/GPUFluidParticle.h"  // For FGPUSpawnRequest
+#include "UObject/UObjectGlobals.h"  // For FCoreUObjectDelegates
 
 UKawaiiFluidSimulationModule::UKawaiiFluidSimulationModule()
 {
@@ -19,11 +20,40 @@ UKawaiiFluidSimulationModule::UKawaiiFluidSimulationModule()
 	GridResolution = GPU_MORTON_GRID_SIZE;
 	MaxCells = GPU_MAX_CELLS;
 
-	// Initialize internal CellSize backup
-	InternalCellSize = CellSize;
-
 	// Calculate initial bounds
 	RecalculateVolumeBounds();
+}
+
+void UKawaiiFluidSimulationModule::PostLoad()
+{
+	Super::PostLoad();
+
+#if WITH_EDITOR
+	// Bind to preset property changes when loading in editor
+	if (Preset)
+	{
+		BindToPresetPropertyChanged();
+	}
+
+	// Bind to objects replaced event (for asset reload detection)
+	BindToObjectsReplaced();
+#endif
+}
+
+void UKawaiiFluidSimulationModule::BeginDestroy()
+{
+#if WITH_EDITOR
+	// Unbind from preset property changes
+	UnbindFromPresetPropertyChanged();
+
+	// Unbind from objects replaced event
+	UnbindFromObjectsReplaced();
+#endif
+
+	// Unbind from volume destroyed event
+	UnbindFromVolumeDestroyedEvent();
+
+	Super::BeginDestroy();
 }
 
 #if WITH_EDITOR
@@ -36,25 +66,22 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 	// Preset 변경 시
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, Preset))
 	{
-		bRuntimePresetDirty = true;
-		// SpatialHash 재구성
-		if (Preset && SpatialHash.IsValid())
-		{
-			SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
-		}
-	}
-	// CellSize 변경 시 bounds 재계산
-	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, CellSize))
-	{
-		// Only sync InternalCellSize when not using external volume
-		// (When external volume is set, CellSize is read-only display of external value)
-		if (!TargetSimulationVolume)
-		{
-			InternalCellSize = CellSize;
-		}
+		// Unbind from old preset's delegate, bind to new preset
+		UnbindFromPresetPropertyChanged();
 
-		// RecalculateVolumeBounds() syncs all bounds to OwnedVolumeComponent
-		RecalculateVolumeBounds();
+		bRuntimePresetDirty = true;
+		if (Preset)
+		{
+			// SpatialHash 재구성
+			if (SpatialHash.IsValid())
+			{
+				SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
+			}
+			// Subscribe to preset property changes
+			BindToPresetPropertyChanged();
+		}
+		// Update CellSize and bounds (handles both internal and external volume cases)
+		UpdateVolumeInfoDisplay();
 	}
 	// TargetSimulationVolume 변경 시 정보 업데이트
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, TargetSimulationVolume))
@@ -66,18 +93,6 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 		if (UKawaiiFluidSimulationVolumeComponent* PrevVolume = PreviousRegisteredVolume.Get())
 		{
 			PrevVolume->UnregisterModule(this);
-		}
-
-		// Backup CellSize before setting external volume
-		if (TargetSimulationVolume && !PreviousRegisteredVolume.IsValid())
-		{
-			// Switching from internal to external: backup current CellSize
-			InternalCellSize = CellSize;
-		}
-		// Restore CellSize from backup when clearing external volume
-		else if (!TargetSimulationVolume)
-		{
-			CellSize = InternalCellSize;
 		}
 
 		// Register with new volume and update tracking
@@ -135,8 +150,8 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 	if (Preset)
 	{
 		SpatialHashCellSize = Preset->SmoothingRadius;
-		// Use Preset's SmoothingRadius as default CellSize if not set
-		if (CellSize == 20.0f && Preset->SmoothingRadius > 0.0f)
+		// Always sync CellSize to Preset's SmoothingRadius for optimal SPH neighbor search
+		if (Preset->SmoothingRadius > 0.0f)
 		{
 			CellSize = Preset->SmoothingRadius;
 		}
@@ -1528,14 +1543,6 @@ void UKawaiiFluidSimulationModule::SetTargetSimulationVolume(AKawaiiFluidSimulat
 		return;
 	}
 
-	// Backup CellSize before setting external volume
-	// (CellSize will be overwritten by external volume's CellSize in UpdateVolumeInfoDisplay)
-	if (!TargetSimulationVolume && NewSimulationVolume)
-	{
-		// Switching from internal to external: backup current CellSize
-		InternalCellSize = CellSize;
-	}
-
 	// Unbind from old volume's OnDestroyed event
 	UnbindFromVolumeDestroyedEvent();
 
@@ -1563,12 +1570,10 @@ void UKawaiiFluidSimulationModule::SetTargetSimulationVolume(AKawaiiFluidSimulat
 	}
 	else
 	{
-		// Switching from external to internal: restore CellSize from backup
-		CellSize = InternalCellSize;
 		PreviousRegisteredVolume = nullptr;
 	}
 
-	// Update volume info display
+	// Update volume info display (handles CellSize derivation)
 	UpdateVolumeInfoDisplay();
 }
 
@@ -1617,13 +1622,17 @@ void UKawaiiFluidSimulationModule::UpdateVolumeInfoDisplay()
 			BoundsExtent = ExternalVolume->BoundsExtent;
 			WorldBoundsMin = ExternalVolume->GetWorldBoundsMin();
 			WorldBoundsMax = ExternalVolume->GetWorldBoundsMax();
-			// Also sync CellSize display (though it's read-only when external is set)
 			CellSize = ExternalVolume->CellSize;
 		}
 	}
 	else
 	{
-		// Calculate from internal settings
+		// Derive CellSize from Preset's SmoothingRadius
+		if (Preset && Preset->SmoothingRadius > 0.0f)
+		{
+			CellSize = Preset->SmoothingRadius;
+		}
+		// Calculate bounds from internal settings
 		RecalculateVolumeBounds();
 	}
 }
@@ -1631,7 +1640,6 @@ void UKawaiiFluidSimulationModule::UpdateVolumeInfoDisplay()
 void UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed(AActor* DestroyedActor)
 {
 	// The TargetSimulationVolume actor was deleted
-	// Restore CellSize to internal value and clear references
 	if (DestroyedActor == TargetSimulationVolume)
 	{
 		// Unregister from the volume component before it's destroyed
@@ -1640,15 +1648,12 @@ void UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed(AActor* DestroyedActo
 			VolumeComp->UnregisterModule(this);
 		}
 
-		// Restore internal CellSize
-		CellSize = InternalCellSize;
-
 		// Clear references (don't unbind - the actor is being destroyed)
 		TargetSimulationVolume = nullptr;
 		PreviousRegisteredVolume = nullptr;
 		bBoundToVolumeDestroyed = false;
 
-		// Update display to show internal values
+		// Update display - derives CellSize from Preset
 		UpdateVolumeInfoDisplay();
 	}
 }
@@ -1678,3 +1683,136 @@ void UKawaiiFluidSimulationModule::UnbindFromVolumeDestroyedEvent()
 		bBoundToVolumeDestroyed = false;
 	}
 }
+
+void UKawaiiFluidSimulationModule::OnPresetChangedExternal(UKawaiiFluidPresetDataAsset* NewPreset)
+{
+#if WITH_EDITOR
+	// Unbind from old preset's delegate
+	UnbindFromPresetPropertyChanged();
+#endif
+
+	// Update preset reference
+	Preset = NewPreset;
+	bRuntimePresetDirty = true;
+
+	// Update SpatialHash if it exists
+	if (SpatialHash.IsValid() && Preset)
+	{
+		SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
+	}
+
+#if WITH_EDITOR
+	// Bind to new preset's property changed delegate
+	if (Preset)
+	{
+		BindToPresetPropertyChanged();
+	}
+#endif
+
+	// Update CellSize and bounds display
+	UpdateVolumeInfoDisplay();
+}
+
+#if WITH_EDITOR
+void UKawaiiFluidSimulationModule::OnPresetPropertyChanged(UKawaiiFluidPresetDataAsset* ChangedPreset)
+{
+	// Ensure this is our preset
+	if (ChangedPreset != Preset)
+	{
+		return;
+	}
+
+	// Mark preset as dirty for runtime rebuild
+	bRuntimePresetDirty = true;
+
+	// Update SpatialHash if it exists
+	if (SpatialHash.IsValid() && Preset)
+	{
+		SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
+	}
+
+	// Update CellSize and bounds display
+	UpdateVolumeInfoDisplay();
+}
+
+void UKawaiiFluidSimulationModule::BindToPresetPropertyChanged()
+{
+	// First unbind any existing binding
+	UnbindFromPresetPropertyChanged();
+
+	// Bind to the preset's OnPropertyChanged delegate
+	if (Preset)
+	{
+		PresetPropertyChangedHandle = Preset->OnPropertyChanged.AddUObject(
+			this, &UKawaiiFluidSimulationModule::OnPresetPropertyChanged);
+	}
+}
+
+void UKawaiiFluidSimulationModule::UnbindFromPresetPropertyChanged()
+{
+	if (PresetPropertyChangedHandle.IsValid())
+	{
+		if (Preset)
+		{
+			Preset->OnPropertyChanged.Remove(PresetPropertyChangedHandle);
+		}
+		PresetPropertyChangedHandle.Reset();
+	}
+}
+
+void UKawaiiFluidSimulationModule::OnObjectsReplaced(const TMap<UObject*, UObject*>& ReplacementMap)
+{
+	// Check if our Preset was replaced (e.g., via asset reload)
+	if (Preset)
+	{
+		if (UObject* const* NewPresetPtr = ReplacementMap.Find(Preset))
+		{
+			UKawaiiFluidPresetDataAsset* NewPreset = Cast<UKawaiiFluidPresetDataAsset>(*NewPresetPtr);
+
+			UE_LOG(LogTemp, Log, TEXT("SimulationModule: Preset replaced via reload (Old=%p, New=%p)"),
+				Preset.Get(), NewPreset);
+
+			// Unbind from old preset
+			UnbindFromPresetPropertyChanged();
+
+			// Update preset reference
+			Preset = NewPreset;
+			bRuntimePresetDirty = true;
+
+			// Update SpatialHash if it exists
+			if (SpatialHash.IsValid() && Preset)
+			{
+				SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
+			}
+
+			// Bind to new preset's property changed delegate
+			if (Preset)
+			{
+				BindToPresetPropertyChanged();
+			}
+
+			// Update CellSize and bounds display
+			UpdateVolumeInfoDisplay();
+		}
+	}
+}
+
+void UKawaiiFluidSimulationModule::BindToObjectsReplaced()
+{
+	// First unbind any existing binding
+	UnbindFromObjectsReplaced();
+
+	// Bind to the objects replaced delegate
+	ObjectsReplacedHandle = FCoreUObjectDelegates::OnObjectsReplaced.AddUObject(
+		this, &UKawaiiFluidSimulationModule::OnObjectsReplaced);
+}
+
+void UKawaiiFluidSimulationModule::UnbindFromObjectsReplaced()
+{
+	if (ObjectsReplacedHandle.IsValid())
+	{
+		FCoreUObjectDelegates::OnObjectsReplaced.Remove(ObjectsReplacedHandle);
+		ObjectsReplacedHandle.Reset();
+	}
+}
+#endif
