@@ -495,6 +495,72 @@ private:
 	// Internal Methods
 	//=============================================================================
 
+	/** Struct to hold shared spatial data for simulation passes */
+	struct FSimulationSpatialData
+	{
+		// Hash Table buffers (Legacy / Compatibility)
+		FRDGBufferRef CellCountsBuffer = nullptr;
+		FRDGBufferRef ParticleIndicesBuffer = nullptr;
+		FRDGBufferSRVRef CellCountsSRV = nullptr;
+		FRDGBufferSRVRef ParticleIndicesSRV = nullptr;
+
+		// Z-Order buffers (Sorted)
+		FRDGBufferRef CellStartBuffer = nullptr;
+		FRDGBufferRef CellEndBuffer = nullptr;
+		FRDGBufferSRVRef CellStartSRV = nullptr;
+		FRDGBufferSRVRef CellEndSRV = nullptr;
+
+		// Neighbor Cache buffers
+		FRDGBufferRef NeighborListBuffer = nullptr;
+		FRDGBufferRef NeighborCountsBuffer = nullptr;
+		FRDGBufferSRVRef NeighborListSRV = nullptr;
+		FRDGBufferSRVRef NeighborCountsSRV = nullptr;
+	};
+
+	/** Phase 1: Prepare particle buffer (Spawn, Upload, Reuse, Append) */
+	FRDGBufferRef PrepareParticleBuffer(
+		FRDGBuilder& GraphBuilder,
+		const FGPUFluidSimulationParams& Params,
+		int32 SpawnCount);
+
+	/** Phase 2: Build spatial structures (Z-Order Sort or Hash Table) */
+	FSimulationSpatialData BuildSpatialStructures(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferRef& InOutParticleBuffer,
+		FRDGBufferSRVRef& OutParticlesSRV,
+		FRDGBufferUAVRef& OutParticlesUAV,
+		FRDGBufferSRVRef& OutPositionsSRV,
+		FRDGBufferUAVRef& OutPositionsUAV,
+		const FGPUFluidSimulationParams& Params);
+
+	/** Phase 3: Execute physics solver (Predict, Density/Pressure Loop) */
+	void ExecutePhysicsSolver(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		FSimulationSpatialData& SpatialData,
+		const FGPUFluidSimulationParams& Params);
+
+	/** Phase 4: Execute collision and adhesion passes */
+	void ExecuteCollisionAndAdhesion(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		const FSimulationSpatialData& SpatialData,
+		const FGPUFluidSimulationParams& Params);
+
+	/** Phase 5: Execute post-simulation passes (Viscosity, Finalize, Anisotropy) */
+	void ExecutePostSimulation(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferRef ParticleBuffer,
+		FRDGBufferUAVRef ParticlesUAV,
+		const FSimulationSpatialData& SpatialData,
+		const FGPUFluidSimulationParams& Params);
+
+	/** Phase 6: Extract persistent buffers for next frame */
+	void ExtractPersistentBuffers(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferRef ParticleBuffer,
+		const FSimulationSpatialData& SpatialData);
+
 	/** Resize GPU buffers to new capacity */
 	void ResizeBuffers(FRHICommandListBase& RHICmdList, int32 NewCapacity);
 

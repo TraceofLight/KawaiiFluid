@@ -457,9 +457,6 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 {
 	// =====================================================
 	// Phase 1: Swap spawn requests (double buffer for thread safety)
-	// Game thread writes to PendingSpawnRequests
-	// Render thread consumes from ActiveSpawnRequests
-	// Delegated to FGPUSpawnManager
 	// =====================================================
 	if (SpawnManager.IsValid())
 	{
@@ -481,344 +478,15 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		return;
 	}
 
-	// Calculate expected particle count after spawning
-	const int32 ExpectedParticleCount = CurrentParticleCount + SpawnCount;
-
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluidSimulation (Particles: %d, Spawning: %d)", CurrentParticleCount, SpawnCount);
 
 	// =====================================================
-	// Phase 2: Persistent GPU Buffer with Append Support
-	// - First frame: full upload from CPU
-	// - New particles added: copy existing + append new
-	// - Same count: reuse GPU buffer (no CPU upload)
+	// Phase 1: Prepare Particle Buffer (Spawn, Upload, Reuse)
 	// =====================================================
-
-	FRDGBufferRef ParticleBuffer;
-
-	// Determine operation mode
-	const bool bHasNewParticles = (NewParticleCount > 0 && NewParticlesToAppend.Num() > 0);
-	const bool bNeedFullUpload = bNeedsFullUpload || !PersistentParticleBuffer.IsValid();
-	// First spawn: have spawn requests, no current particles, and no persistent buffer
-	// Note: Check !PersistentParticleBuffer.IsValid() instead of !bNeedFullUpload because
-	// bNeedsFullUpload may be true even when using GPU spawn system (it's not cleared by AddSpawnRequests)
-	const bool bFirstSpawnOnly = bHasSpawnRequests && CurrentParticleCount == 0 && !PersistentParticleBuffer.IsValid();
-
-	// DEBUG: Log which path is being taken (only first 10 frames to avoid spam)
-	static int32 DebugFrameCounter = 0;
-	const bool bShouldLog = (DebugFrameCounter++ < 10);
-
-	// =====================================================
-	// DEBUG: Trigger RenderDoc capture on configurable GPU simulation frame
-	// This helps diagnose Z-Order sorting issues by capturing the first frame
-	// where RadixSort runs on fresh data (not corrupted by previous frames)
-	//
-	// CVars:
-	//   r.Fluid.CaptureFirstFrame 1  - Capture first simulation frame (default)
-	//   r.Fluid.CaptureFrameNumber N - Capture specific frame N
-	// =====================================================
+	FRDGBufferRef ParticleBuffer = PrepareParticleBuffer(GraphBuilder, Params, SpawnCount);
+	if (!ParticleBuffer)
 	{
-		bool bShouldCapture = false;
-		int32 TargetFrame = 0;
-
-		if (GFluidCaptureFrameNumber > 0)
-		{
-			// Capture specific frame number
-			TargetFrame = GFluidCaptureFrameNumber;
-			bShouldCapture = (DebugFrameCounter == TargetFrame && GFluidCapturedFrame != TargetFrame);
-		}
-		else if (GFluidCaptureFirstFrame != 0)
-		{
-			// Capture first frame
-			TargetFrame = 1;
-			bShouldCapture = (DebugFrameCounter == 1 && GFluidCapturedFrame == 0);
-		}
-
-		if (bShouldCapture)
-		{
-			GFluidCapturedFrame = TargetFrame;
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT(">>> TRIGGERING RENDERDOC CAPTURE ON GPU SIMULATION FRAME %d <<<"), DebugFrameCounter);
-
-			// Trigger RenderDoc capture using console command
-			// Execute on game thread since we're in render thread context
-			// This works when editor is launched with -RenderDoc flag
-			AsyncTask(ENamedThreads::GameThread, []()
-			{
-				IConsoleObject* CaptureCmd = IConsoleManager::Get().FindConsoleObject(TEXT("renderdoc.CaptureFrame"));
-				if (CaptureCmd)
-				{
-					IConsoleCommand* Cmd = CaptureCmd->AsCommand();
-					if (Cmd)
-					{
-						Cmd->Execute(TArray<FString>(), nullptr, *GLog);
-						UE_LOG(LogGPUFluidSimulator, Warning, TEXT(">>> RenderDoc capture command executed successfully"));
-					}
-				}
-				else
-				{
-					UE_LOG(LogGPUFluidSimulator, Warning, TEXT(">>> RenderDoc not available. Launch editor with -RenderDoc flag."));
-				}
-			});
-		}
-	}
-
-	if (bShouldLog)
-	{
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("=== BUFFER PATH DEBUG (Frame %d) ==="), DebugFrameCounter);
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bFirstSpawnOnly: %s"), bFirstSpawnOnly ? TEXT("TRUE") : TEXT("FALSE"));
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bNeedFullUpload: %s"), bNeedFullUpload ? TEXT("TRUE") : TEXT("FALSE"));
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bHasNewParticles: %s"), bHasNewParticles ? TEXT("TRUE") : TEXT("FALSE"));
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bHasSpawnRequests: %s"), bHasSpawnRequests ? TEXT("TRUE") : TEXT("FALSE"));
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  PersistentBuffer Valid: %s"), PersistentParticleBuffer.IsValid() ? TEXT("TRUE") : TEXT("FALSE"));
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  CurrentParticleCount: %d, SpawnCount: %d"), CurrentParticleCount, SpawnCount);
-	}
-
-	if (bFirstSpawnOnly)
-	{
-		// =====================================================
-		// FIRST SPAWN: No existing particles, just spawn requests
-		// Create buffer and use spawn pass to initialize
-		// =====================================================
-		const int32 BufferCapacity = FMath::Min(SpawnCount, MaxParticleCount);
-
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> FIRST SPAWN PATH: BufferCapacity=%d, MaxParticleCount=%d"), BufferCapacity, MaxParticleCount);
-
-		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
-		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
-
-		// Create counter buffer initialized to 0
-		// IMPORTANT: Do NOT use NoCopy - InitialCounterData is a local variable that goes
-		// out of scope before RDG executes. RDG must copy the data.
-		TArray<uint32> InitialCounterData;
-		InitialCounterData.Add(0);
-
-		FRDGBufferRef CounterBuffer = CreateStructuredBuffer(
-			GraphBuilder,
-			TEXT("GPUFluidParticleCounter"),
-			sizeof(uint32),
-			1,
-			InitialCounterData.GetData(),
-			sizeof(uint32),
-			ERDGInitialDataFlags::None
-		);
-		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
-
-		// Run spawn particles pass using SpawnManager's active requests
-		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
-
-		// Update particle count
-		CurrentParticleCount = FMath::Min(SpawnCount, MaxParticleCount);
-		PreviousParticleCount = CurrentParticleCount;
-
-		// IMPORTANT: Clear the full upload flag - we've successfully created the buffer via spawn
-		// Without this, Frame 2+ would incorrectly take the full upload path
-		bNeedsFullUpload = false;
-
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("GPU Buffer: First spawn - created %d particles"), CurrentParticleCount);
-
-		// Clear active requests after processing
-		SpawnManager->ClearActiveRequests();
-	}
-	else if (bNeedFullUpload && CachedGPUParticles.Num() > 0)
-	{
-		// Full upload from CPU - create new buffer with all particles
-		ParticleBuffer = CreateStructuredBuffer(
-			GraphBuilder,
-			TEXT("GPUFluidParticles"),
-			sizeof(FGPUFluidParticle),
-			CurrentParticleCount,
-			CachedGPUParticles.GetData(),
-			CurrentParticleCount * sizeof(FGPUFluidParticle),
-			ERDGInitialDataFlags::NoCopy
-		);
-
-		bNeedsFullUpload = false;
-		PreviousParticleCount = CurrentParticleCount;
-		NewParticleCount = 0;
-		NewParticlesToAppend.Empty();
-
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("GPU Buffer: Full upload (%d particles)"), CurrentParticleCount);
-	}
-	else if (bHasNewParticles)
-	{
-		// Append new particles while preserving existing GPU simulation results
-		// 1. Create new buffer with expanded capacity
-		// 2. Copy existing particles from persistent buffer using compute shader
-		// 3. Upload only new particles to the end using compute shader
-
-		const int32 ExistingCount = PreviousParticleCount;
-		const int32 TotalCount = CurrentParticleCount;
-
-		// Create new buffer for total count
-		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), TotalCount);
-		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
-
-		// Register existing persistent buffer as source
-		FRDGBufferRef ExistingBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
-
-		// Use compute shader to copy existing particles (more reliable than AddCopyBufferPass)
-		{
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
-
-			FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
-			CopyParams->SourceParticles = GraphBuilder.CreateSRV(ExistingBuffer);
-			CopyParams->DestParticles = GraphBuilder.CreateUAV(ParticleBuffer);
-			CopyParams->SourceOffset = 0;
-			CopyParams->DestOffset = 0;
-			CopyParams->CopyCount = ExistingCount;
-
-			const uint32 NumGroups = FMath::DivideAndRoundUp(ExistingCount, FCopyParticlesCS::ThreadGroupSize);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("GPUFluid::CopyExistingParticles(%d)", ExistingCount),
-				CopyShader,
-				CopyParams,
-				FIntVector(NumGroups, 1, 1)
-			);
-		}
-
-		// Upload and copy new particles to the end of the buffer
-		if (NewParticleCount > 0)
-		{
-			// Create upload buffer for new particles only
-			FRDGBufferRef NewParticlesUploadBuffer = CreateStructuredBuffer(
-				GraphBuilder,
-				TEXT("GPUFluidNewParticles"),
-				sizeof(FGPUFluidParticle),
-				NewParticleCount,
-				NewParticlesToAppend.GetData(),
-				NewParticleCount * sizeof(FGPUFluidParticle),
-				ERDGInitialDataFlags::NoCopy
-			);
-
-			// Use compute shader to copy new particles to the end
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
-
-			FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
-			CopyParams->SourceParticles = GraphBuilder.CreateSRV(NewParticlesUploadBuffer);
-			CopyParams->DestParticles = GraphBuilder.CreateUAV(ParticleBuffer);
-			CopyParams->SourceOffset = 0;
-			CopyParams->DestOffset = ExistingCount;
-			CopyParams->CopyCount = NewParticleCount;
-
-			const uint32 NumGroups = FMath::DivideAndRoundUp(NewParticleCount, FCopyParticlesCS::ThreadGroupSize);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("GPUFluid::CopyNewParticles(%d)", NewParticleCount),
-				CopyShader,
-				CopyParams,
-				FIntVector(NumGroups, 1, 1)
-			);
-		}
-
-		PreviousParticleCount = CurrentParticleCount;
-		NewParticleCount = 0;
-		NewParticlesToAppend.Empty();
-
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("GPU Buffer: Appended %d new particles (existing: %d, total: %d)"),
-			TotalCount - ExistingCount, ExistingCount, TotalCount);
-	}
-	else if (bHasSpawnRequests && PersistentParticleBuffer.IsValid())
-	{
-		// =====================================================
-		// NEW: GPU-based spawning path (eliminates race condition)
-		// Expand buffer and use spawn pass to add particles atomically
-		// =====================================================
-		const int32 ExistingCount = CurrentParticleCount;
-		const int32 TotalCount = ExpectedParticleCount;
-
-		// Capacity check
-		if (TotalCount > MaxParticleCount)
-		{
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("GPU Spawn: Total count (%d) exceeds capacity (%d), clamping spawn requests"),
-				TotalCount, MaxParticleCount);
-			// Will be handled by atomic counter in shader
-		}
-
-		// Create new buffer with expanded capacity
-		const int32 BufferCapacity = FMath::Min(TotalCount, MaxParticleCount);
-		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
-		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
-
-		// Copy existing particles from persistent buffer
-		FRDGBufferRef ExistingBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
-		{
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
-
-			FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
-			CopyParams->SourceParticles = GraphBuilder.CreateSRV(ExistingBuffer);
-			CopyParams->DestParticles = GraphBuilder.CreateUAV(ParticleBuffer);
-			CopyParams->SourceOffset = 0;
-			CopyParams->DestOffset = 0;
-			CopyParams->CopyCount = ExistingCount;
-
-			const uint32 NumGroups = FMath::DivideAndRoundUp(ExistingCount, FCopyParticlesCS::ThreadGroupSize);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("GPUFluid::CopyExistingForSpawn(%d)", ExistingCount),
-				CopyShader,
-				CopyParams,
-				FIntVector(NumGroups, 1, 1)
-			);
-		}
-
-		// Create counter buffer with current particle count
-		// The shader will atomically increment this counter
-		// IMPORTANT: Do NOT use NoCopy - InitialCounterData is a local variable that goes
-		// out of scope before RDG executes. RDG must copy the data.
-		TArray<uint32> InitialCounterData;
-		InitialCounterData.Add(static_cast<uint32>(ExistingCount));
-
-		FRDGBufferRef CounterBuffer = CreateStructuredBuffer(
-			GraphBuilder,
-			TEXT("GPUFluidParticleCounter"),
-			sizeof(uint32),
-			1,
-			InitialCounterData.GetData(),
-			sizeof(uint32),
-			ERDGInitialDataFlags::None
-		);
-		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
-
-		// Run spawn particles pass using SpawnManager's active requests
-		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
-
-		// Update particle count (after spawning, assuming all spawn requests succeed within capacity)
-		CurrentParticleCount = FMath::Min(ExpectedParticleCount, MaxParticleCount);
-		PreviousParticleCount = CurrentParticleCount;
-
-		//UE_LOG(LogGPUFluidSimulator, Log, TEXT("GPU Buffer: GPU Spawn path - spawned %d particles (existing: %d, total: %d)"),SpawnCount, ExistingCount, CurrentParticleCount);
-
-		// Clear active requests after processing
-		SpawnManager->ClearActiveRequests();
-	}
-	else
-	{
-		// Reuse persistent buffer from previous frame (no CPU upload!)
-		// This is the key path for proper GPU simulation - gravity should work here!
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> REUSE PATH: Attempting RegisterExternalBuffer"));
-
-		if (!PersistentParticleBuffer.IsValid())
-		{
-			UE_LOG(LogGPUFluidSimulator, Error, TEXT(">>> REUSE PATH FAILED: PersistentParticleBuffer is NULL/Invalid!"));
-			return;
-		}
-
-		ParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticles"));
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> REUSE PATH: RegisterExternalBuffer succeeded, ParticleCount=%d"), CurrentParticleCount);
-	}
-
-	// Clear active spawn requests if any remaining (shouldn't happen, but safety)
-	if (SpawnManager.IsValid())
-	{
-		SpawnManager->ClearActiveRequests();
+		return;
 	}
 
 	// Create transient position buffer for spatial hash
@@ -830,396 +498,479 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	FRDGBufferUAVRef PositionsUAVLocal = GraphBuilder.CreateUAV(PositionBuffer);
 	FRDGBufferSRVRef PositionsSRVLocal = GraphBuilder.CreateSRV(PositionBuffer);
 
-	// Debug: Log simulation parameters
-	static int32 SimDebugCounter = 0;
-	if (++SimDebugCounter % 60 == 0)
+	// =====================================================
+	// Phase 2: Build Spatial Structures (Predict -> Extract -> Sort -> Hash)
+	// =====================================================
+	FSimulationSpatialData SpatialData = BuildSpatialStructures(
+		GraphBuilder, 
+		ParticleBuffer, 
+		ParticlesSRVLocal, 
+		ParticlesUAVLocal, 
+		PositionsSRVLocal, 
+		PositionsUAVLocal, 
+		Params);
+
+	// =====================================================
+	// Phase 3: Physics Solver (Density, Pressure)
+	// =====================================================
+	ExecutePhysicsSolver(GraphBuilder, ParticlesUAVLocal, SpatialData, Params);
+
+	// =====================================================
+	// Phase 4: Collision & Adhesion
+	// =====================================================
+	ExecuteCollisionAndAdhesion(GraphBuilder, ParticlesUAVLocal, SpatialData, Params);
+
+	// =====================================================
+	// Phase 5: Post-Simulation (Viscosity, Finalize, Anisotropy)
+	// =====================================================
+	ExecutePostSimulation(GraphBuilder, ParticleBuffer, ParticlesUAVLocal, SpatialData, Params);
+
+	// =====================================================
+	// Phase 6: Extract Persistent Buffers
+	// =====================================================
+	ExtractPersistentBuffers(GraphBuilder, ParticleBuffer, SpatialData);
+}
+
+FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
+	FRDGBuilder& GraphBuilder,
+	const FGPUFluidSimulationParams& Params,
+	int32 SpawnCount)
+{
+	// Calculate expected particle count after spawning
+	const int32 ExpectedParticleCount = CurrentParticleCount + SpawnCount;
+	FRDGBufferRef ParticleBuffer = nullptr;
+
+	// Determine operation mode
+	const bool bHasNewParticles = (NewParticleCount > 0 && NewParticlesToAppend.Num() > 0);
+	const bool bNeedFullUpload = bNeedsFullUpload || !PersistentParticleBuffer.IsValid();
+	const bool bHasSpawnRequests = SpawnCount > 0;
+	// First spawn: have spawn requests, no current particles, and no persistent buffer
+	const bool bFirstSpawnOnly = bHasSpawnRequests && CurrentParticleCount == 0 && !PersistentParticleBuffer.IsValid();
+
+	// DEBUG: Log which path is being taken (only first 10 frames to avoid spam)
+	static int32 DebugFrameCounter = 0;
+	const bool bShouldLog = (DebugFrameCounter++ < 10);
+
+	// =====================================================
+	// DEBUG: Trigger RenderDoc capture
+	// =====================================================
 	{
-		//UE_LOG(LogGPUFluidSimulator, Log, TEXT("=== SIMULATION DEBUG ==="));
-		//UE_LOG(LogGPUFluidSimulator, Log, TEXT("  ParticleCount: %d"), CurrentParticleCount);
-		//UE_LOG(LogGPUFluidSimulator, Log, TEXT("  Gravity: (%.2f, %.2f, %.2f)"), Params.Gravity.X, Params.Gravity.Y, Params.Gravity.Z);
-		//UE_LOG(LogGPUFluidSimulator, Log, TEXT("  DeltaTime: %.4f"), Params.DeltaTime);
-		//UE_LOG(LogGPUFluidSimulator, Log, TEXT("  PersistentBuffer Valid: %s"), PersistentParticleBuffer.IsValid() ? TEXT("YES") : TEXT("NO"));
+		bool bShouldCapture = false;
+		int32 TargetFrame = 0;
+
+		if (GFluidCaptureFrameNumber > 0)
+		{
+			TargetFrame = GFluidCaptureFrameNumber;
+			bShouldCapture = (DebugFrameCounter == TargetFrame && GFluidCapturedFrame != TargetFrame);
+		}
+		else if (GFluidCaptureFirstFrame != 0)
+		{
+			TargetFrame = 1;
+			bShouldCapture = (DebugFrameCounter == 1 && GFluidCapturedFrame == 0);
+		}
+
+		if (bShouldCapture)
+		{
+			GFluidCapturedFrame = TargetFrame;
+			UE_LOG(LogGPUFluidSimulator, Warning, TEXT(">>> TRIGGERING RENDERDOC CAPTURE ON GPU SIMULATION FRAME %d <<<"), DebugFrameCounter);
+
+			AsyncTask(ENamedThreads::GameThread, []()
+			{
+				IConsoleObject* CaptureCmd = IConsoleManager::Get().FindConsoleObject(TEXT("renderdoc.CaptureFrame"));
+				if (CaptureCmd)
+				{
+					IConsoleCommand* Cmd = CaptureCmd->AsCommand();
+					if (Cmd) Cmd->Execute(TArray<FString>(), nullptr, *GLog);
+				}
+			});
+		}
 	}
 
-	// Pass 0.5: Update attached particles (move with bones) - before physics simulation
-	// Only run if attachment buffer exists AND matches current particle count
-	FRDGBufferRef AttachmentBufferForUpdate = nullptr;
+	if (bShouldLog)
+	{
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("=== BUFFER PATH DEBUG (Frame %d) ==="), DebugFrameCounter);
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bFirstSpawnOnly: %s"), bFirstSpawnOnly ? TEXT("TRUE") : TEXT("FALSE"));
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bNeedFullUpload: %s"), bNeedFullUpload ? TEXT("TRUE") : TEXT("FALSE"));
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bHasNewParticles: %s"), bHasNewParticles ? TEXT("TRUE") : TEXT("FALSE"));
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  CurrentParticleCount: %d, SpawnCount: %d"), CurrentParticleCount, SpawnCount);
+	}
+
+	if (bFirstSpawnOnly)
+	{
+		// FIRST SPAWN: No existing particles, just spawn requests
+		const int32 BufferCapacity = FMath::Min(SpawnCount, MaxParticleCount);
+		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
+		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
+
+		TArray<uint32> InitialCounterData;
+		InitialCounterData.Add(0);
+		FRDGBufferRef CounterBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticleCounter"), sizeof(uint32), 1, InitialCounterData.GetData(), sizeof(uint32), ERDGInitialDataFlags::None);
+		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
+
+		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
+
+		CurrentParticleCount = FMath::Min(SpawnCount, MaxParticleCount);
+		PreviousParticleCount = CurrentParticleCount;
+		bNeedsFullUpload = false;
+		SpawnManager->ClearActiveRequests();
+	}
+	else if (bNeedFullUpload && CachedGPUParticles.Num() > 0)
+	{
+		// Full upload from CPU
+		ParticleBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticles"), sizeof(FGPUFluidParticle), CurrentParticleCount, CachedGPUParticles.GetData(), CurrentParticleCount * sizeof(FGPUFluidParticle), ERDGInitialDataFlags::NoCopy);
+		bNeedsFullUpload = false;
+		PreviousParticleCount = CurrentParticleCount;
+		NewParticleCount = 0;
+		NewParticlesToAppend.Empty();
+	}
+	else if (bHasNewParticles)
+	{
+		// Append new particles
+		const int32 ExistingCount = PreviousParticleCount;
+		const int32 TotalCount = CurrentParticleCount;
+		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), TotalCount);
+		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
+
+		FRDGBufferRef ExistingBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
+
+		// Copy existing
+		{
+			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
+			FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
+			CopyParams->SourceParticles = GraphBuilder.CreateSRV(ExistingBuffer);
+			CopyParams->DestParticles = GraphBuilder.CreateUAV(ParticleBuffer);
+			CopyParams->SourceOffset = 0;
+			CopyParams->DestOffset = 0;
+			CopyParams->CopyCount = ExistingCount;
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("GPUFluid::CopyExistingParticles(%d)", ExistingCount), CopyShader, CopyParams, FIntVector(FMath::DivideAndRoundUp(ExistingCount, FCopyParticlesCS::ThreadGroupSize), 1, 1));
+		}
+
+		// Upload and copy new
+		if (NewParticleCount > 0)
+		{
+			FRDGBufferRef NewParticlesUploadBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidNewParticles"), sizeof(FGPUFluidParticle), NewParticleCount, NewParticlesToAppend.GetData(), NewParticleCount * sizeof(FGPUFluidParticle), ERDGInitialDataFlags::NoCopy);
+			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
+			FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
+			CopyParams->SourceParticles = GraphBuilder.CreateSRV(NewParticlesUploadBuffer);
+			CopyParams->DestParticles = GraphBuilder.CreateUAV(ParticleBuffer);
+			CopyParams->SourceOffset = 0;
+			CopyParams->DestOffset = ExistingCount;
+			CopyParams->CopyCount = NewParticleCount;
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("GPUFluid::CopyNewParticles(%d)", NewParticleCount), CopyShader, CopyParams, FIntVector(FMath::DivideAndRoundUp(NewParticleCount, FCopyParticlesCS::ThreadGroupSize), 1, 1));
+		}
+
+		PreviousParticleCount = CurrentParticleCount;
+		NewParticleCount = 0;
+		NewParticlesToAppend.Empty();
+	}
+	else if (bHasSpawnRequests && PersistentParticleBuffer.IsValid())
+	{
+		// GPU-based spawning path
+		const int32 ExistingCount = CurrentParticleCount;
+		const int32 TotalCount = ExpectedParticleCount;
+		const int32 BufferCapacity = FMath::Min(TotalCount, MaxParticleCount);
+		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
+		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
+
+		FRDGBufferRef ExistingBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
+		{
+			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
+			FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
+			CopyParams->SourceParticles = GraphBuilder.CreateSRV(ExistingBuffer);
+			CopyParams->DestParticles = GraphBuilder.CreateUAV(ParticleBuffer);
+			CopyParams->SourceOffset = 0;
+			CopyParams->DestOffset = 0;
+			CopyParams->CopyCount = ExistingCount;
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("GPUFluid::CopyExistingForSpawn(%d)", ExistingCount), CopyShader, CopyParams, FIntVector(FMath::DivideAndRoundUp(ExistingCount, FCopyParticlesCS::ThreadGroupSize), 1, 1));
+		}
+
+		TArray<uint32> InitialCounterData;
+		InitialCounterData.Add(static_cast<uint32>(ExistingCount));
+		FRDGBufferRef CounterBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticleCounter"), sizeof(uint32), 1, InitialCounterData.GetData(), sizeof(uint32), ERDGInitialDataFlags::None);
+		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
+
+		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
+
+		CurrentParticleCount = FMath::Min(ExpectedParticleCount, MaxParticleCount);
+		PreviousParticleCount = CurrentParticleCount;
+		SpawnManager->ClearActiveRequests();
+	}
+	else
+	{
+		// Reuse persistent buffer
+		if (!PersistentParticleBuffer.IsValid()) return nullptr;
+		ParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticles"));
+	}
+
+	if (SpawnManager.IsValid()) SpawnManager->ClearActiveRequests();
+	return ParticleBuffer;
+}
+
+FGPUFluidSimulator::FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStructures(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef& InOutParticleBuffer,
+	FRDGBufferSRVRef& OutParticlesSRV,
+	FRDGBufferUAVRef& OutParticlesUAV,
+	FRDGBufferSRVRef& OutPositionsSRV,
+	FRDGBufferUAVRef& OutPositionsUAV,
+	const FGPUFluidSimulationParams& Params)
+{
+	FSimulationSpatialData SpatialData;
+
+	// Pass 0.5: Update attached particles (move with bones)
 	if (AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled() && CollisionManager.IsValid() && CollisionManager->AreBoneTransformsValid())
 	{
 		TRefCountPtr<FRDGPooledBuffer> PersistentAttachmentBuffer = AdhesionManager->GetPersistentAttachmentBuffer();
 		int32 AttachmentBufferSize = AdhesionManager->GetAttachmentBufferSize();
 		if (PersistentAttachmentBuffer.IsValid() && AttachmentBufferSize >= CurrentParticleCount)
 		{
-			AttachmentBufferForUpdate = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachmentsUpdate"));
+			FRDGBufferRef AttachmentBufferForUpdate = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachmentsUpdate"));
 			FRDGBufferUAVRef AttachmentUAVForUpdate = GraphBuilder.CreateUAV(AttachmentBufferForUpdate);
-			AdhesionManager->AddUpdateAttachedPositionsPass(GraphBuilder, ParticlesUAVLocal, AttachmentUAVForUpdate, CollisionManager.Get(), CurrentParticleCount, Params);
+			AdhesionManager->AddUpdateAttachedPositionsPass(GraphBuilder, OutParticlesUAV, AttachmentUAVForUpdate, CollisionManager.Get(), CurrentParticleCount, Params);
 		}
 	}
 
 	// Pass 1: Predict Positions
-	AddPredictPositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
+	AddPredictPositionsPass(GraphBuilder, OutParticlesUAV, Params);
 
-	// Pass 2: Extract positions for spatial hash (use predicted positions)
-	AddExtractPositionsPass(GraphBuilder, ParticlesSRVLocal, PositionsUAVLocal, CurrentParticleCount, true);
+	// Pass 2: Extract positions (Initial)
+	AddExtractPositionsPass(GraphBuilder, OutParticlesSRV, OutPositionsUAV, CurrentParticleCount, true);
 
-	//=========================================================================
 	// Pass 3: Spatial Data Structure
-	// Option A: Z-Order Sorting (cache-coherent memory access)
-	// Option B: Hash Table (linked-list based)
-	//=========================================================================
-
-	// CellStart/End for Z-Order sorting (used when SpatialHashManager.IsValid() is true)
-	FRDGBufferUAVRef CellStartUAVLocal = nullptr;
-	FRDGBufferSRVRef CellStartSRVLocal = nullptr;
-	FRDGBufferUAVRef CellEndUAVLocal = nullptr;
-	FRDGBufferSRVRef CellEndSRVLocal = nullptr;
-
-	// CellCounts/ParticleIndices for hash table (used by physics shaders)
-	FRDGBufferRef CellCountsBuffer = nullptr;
-	FRDGBufferRef ParticleIndicesBuffer = nullptr;
-	FRDGBufferSRVRef CellCountsSRVLocal = nullptr;
-	FRDGBufferSRVRef ParticleIndicesSRVLocal = nullptr;
-
 	if (SpatialHashManager.IsValid())
 	{
-		//=====================================================================
-		// Z-Order Sorting Pipeline
-		// Morton Code → Radix Sort → Reorder → CellStart/End
-		//=====================================================================
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> Z-ORDER SORTING: Building with ParticleCount=%d"), CurrentParticleCount);
+		// Z-Order Sorting
+		FRDGBufferUAVRef CellStartUAVLocal = nullptr;
+		FRDGBufferUAVRef CellEndUAVLocal = nullptr;
 
-		// Execute Z-Order sorting and get sorted particle buffer
 		FRDGBufferRef SortedParticleBuffer = ExecuteZOrderSortingPipeline(
-			GraphBuilder,
-			ParticleBuffer,
-			CellStartUAVLocal,
-			CellStartSRVLocal,
-			CellEndUAVLocal,
-			CellEndSRVLocal,
+			GraphBuilder, InOutParticleBuffer,
+			CellStartUAVLocal, SpatialData.CellStartSRV,
+			CellEndUAVLocal, SpatialData.CellEndSRV,
 			Params);
 
-		// Replace particle buffer with sorted version for subsequent passes
-		ParticleBuffer = SortedParticleBuffer;
-		ParticlesUAVLocal = GraphBuilder.CreateUAV(ParticleBuffer);
-		ParticlesSRVLocal = GraphBuilder.CreateSRV(ParticleBuffer);
+		// Replace particle buffer with sorted version
+		InOutParticleBuffer = SortedParticleBuffer;
+		OutParticlesUAV = GraphBuilder.CreateUAV(InOutParticleBuffer);
+		OutParticlesSRV = GraphBuilder.CreateSRV(InOutParticleBuffer);
 
-		// Extract positions from sorted particles for hash table build
-		AddExtractPositionsPass(GraphBuilder, ParticlesSRVLocal, PositionsUAVLocal, CurrentParticleCount, true);
+		// Re-extract positions from sorted particles
+		AddExtractPositionsPass(GraphBuilder, OutParticlesSRV, OutPositionsUAV, CurrentParticleCount, true);
 
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> Z-ORDER SORTING: Completed, particles reordered"));
-
-		//=====================================================================
-		// Also build hash table for compatibility with existing shaders
-		// Sorted particles → better cache locality during neighbor iteration
-		//=====================================================================
+		// Also build hash table (Legacy/Compatibility)
 		if (!PersistentCellCountsBuffer.IsValid())
 		{
-			FRDGBufferDesc CellCountsDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPU_SPATIAL_HASH_SIZE);
-			CellCountsBuffer = GraphBuilder.CreateBuffer(CellCountsDesc, TEXT("SpatialHash.CellCounts"));
-
-			const uint32 TotalSlots = GPU_SPATIAL_HASH_SIZE * GPU_MAX_PARTICLES_PER_CELL;
-			FRDGBufferDesc ParticleIndicesDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), TotalSlots);
-			ParticleIndicesBuffer = GraphBuilder.CreateBuffer(ParticleIndicesDesc, TEXT("SpatialHash.ParticleIndices"));
+			SpatialData.CellCountsBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPU_SPATIAL_HASH_SIZE), TEXT("SpatialHash.CellCounts"));
+			SpatialData.ParticleIndicesBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPU_SPATIAL_HASH_SIZE * GPU_MAX_PARTICLES_PER_CELL), TEXT("SpatialHash.ParticleIndices"));
 		}
 		else
 		{
-			CellCountsBuffer = GraphBuilder.RegisterExternalBuffer(PersistentCellCountsBuffer, TEXT("SpatialHash.CellCounts"));
-			ParticleIndicesBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleIndicesBuffer, TEXT("SpatialHash.ParticleIndices"));
+			SpatialData.CellCountsBuffer = GraphBuilder.RegisterExternalBuffer(PersistentCellCountsBuffer, TEXT("SpatialHash.CellCounts"));
+			SpatialData.ParticleIndicesBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleIndicesBuffer, TEXT("SpatialHash.ParticleIndices"));
 		}
 
-		CellCountsSRVLocal = GraphBuilder.CreateSRV(CellCountsBuffer);
-		FRDGBufferUAVRef CellCountsUAVLocal = GraphBuilder.CreateUAV(CellCountsBuffer);
-		ParticleIndicesSRVLocal = GraphBuilder.CreateSRV(ParticleIndicesBuffer);
-		FRDGBufferUAVRef ParticleIndicesUAVLocal = GraphBuilder.CreateUAV(ParticleIndicesBuffer);
+		SpatialData.CellCountsSRV = GraphBuilder.CreateSRV(SpatialData.CellCountsBuffer);
+		SpatialData.ParticleIndicesSRV = GraphBuilder.CreateSRV(SpatialData.ParticleIndicesBuffer);
+		FRDGBufferUAVRef CellCountsUAVLocal = GraphBuilder.CreateUAV(SpatialData.CellCountsBuffer);
+		FRDGBufferUAVRef ParticleIndicesUAVLocal = GraphBuilder.CreateUAV(SpatialData.ParticleIndicesBuffer);
 
-		// GPU Clear pass
+		// GPU Clear
 		{
 			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 			TShaderMapRef<FClearCellDataCS> ClearShader(ShaderMap);
-
 			FClearCellDataCS::FParameters* ClearParams = GraphBuilder.AllocParameters<FClearCellDataCS::FParameters>();
 			ClearParams->CellCounts = CellCountsUAVLocal;
-
-			const uint32 NumGroups = FMath::DivideAndRoundUp<uint32>(GPU_SPATIAL_HASH_SIZE, SPATIAL_HASH_THREAD_GROUP_SIZE);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("SpatialHash::GPUClear(ZOrder)"),
-				ClearShader,
-				ClearParams,
-				FIntVector(NumGroups, 1, 1)
-			);
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("SpatialHash::GPUClear(ZOrder)"), ClearShader, ClearParams, FIntVector(FMath::DivideAndRoundUp<uint32>(GPU_SPATIAL_HASH_SIZE, SPATIAL_HASH_THREAD_GROUP_SIZE), 1, 1));
 		}
 
-		// GPU Build pass with sorted positions
+		// GPU Build
 		{
 			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 			TShaderMapRef<FBuildSpatialHashSimpleCS> BuildShader(ShaderMap);
-
 			FBuildSpatialHashSimpleCS::FParameters* BuildParams = GraphBuilder.AllocParameters<FBuildSpatialHashSimpleCS::FParameters>();
-			BuildParams->ParticlePositions = PositionsSRVLocal;
+			BuildParams->ParticlePositions = OutPositionsSRV;
 			BuildParams->ParticleCount = CurrentParticleCount;
 			BuildParams->ParticleRadius = Params.ParticleRadius;
 			BuildParams->CellSize = Params.CellSize;
 			BuildParams->CellCounts = CellCountsUAVLocal;
 			BuildParams->ParticleIndices = ParticleIndicesUAVLocal;
-
-			const uint32 NumGroups = FMath::DivideAndRoundUp<uint32>(CurrentParticleCount, SPATIAL_HASH_THREAD_GROUP_SIZE);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("SpatialHash::GPUBuild(ZOrder)"),
-				BuildShader,
-				BuildParams,
-				FIntVector(NumGroups, 1, 1)
-			);
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("SpatialHash::GPUBuild(ZOrder)"), BuildShader, BuildParams, FIntVector(FMath::DivideAndRoundUp<uint32>(CurrentParticleCount, SPATIAL_HASH_THREAD_GROUP_SIZE), 1, 1));
 		}
 	}
 	else
 	{
-		//=====================================================================
-		// Traditional Hash Table (fallback)
-		//=====================================================================
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: Building with ParticleCount=%d, Radius=%.2f, CellSize=%.2f"),
-			CurrentParticleCount, Params.ParticleRadius, Params.CellSize);
-
+		// Traditional Hash Table (Fallback)
 		if (!PersistentCellCountsBuffer.IsValid())
 		{
-			// First frame: create buffers
-			FRDGBufferDesc CellCountsDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPU_SPATIAL_HASH_SIZE);
-			CellCountsBuffer = GraphBuilder.CreateBuffer(CellCountsDesc, TEXT("SpatialHash.CellCounts"));
-
-			const uint32 TotalSlots = GPU_SPATIAL_HASH_SIZE * GPU_MAX_PARTICLES_PER_CELL;
-			FRDGBufferDesc ParticleIndicesDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), TotalSlots);
-			ParticleIndicesBuffer = GraphBuilder.CreateBuffer(ParticleIndicesDesc, TEXT("SpatialHash.ParticleIndices"));
-
-			if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: Created new persistent buffers"));
+			SpatialData.CellCountsBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPU_SPATIAL_HASH_SIZE), TEXT("SpatialHash.CellCounts"));
+			SpatialData.ParticleIndicesBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPU_SPATIAL_HASH_SIZE * GPU_MAX_PARTICLES_PER_CELL), TEXT("SpatialHash.ParticleIndices"));
 		}
 		else
 		{
-			// Subsequent frames: reuse persistent buffers
-			CellCountsBuffer = GraphBuilder.RegisterExternalBuffer(PersistentCellCountsBuffer, TEXT("SpatialHash.CellCounts"));
-			ParticleIndicesBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleIndicesBuffer, TEXT("SpatialHash.ParticleIndices"));
-
-			if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: Reusing persistent buffers"));
+			SpatialData.CellCountsBuffer = GraphBuilder.RegisterExternalBuffer(PersistentCellCountsBuffer, TEXT("SpatialHash.CellCounts"));
+			SpatialData.ParticleIndicesBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleIndicesBuffer, TEXT("SpatialHash.ParticleIndices"));
 		}
 
-		CellCountsSRVLocal = GraphBuilder.CreateSRV(CellCountsBuffer);
-		FRDGBufferUAVRef CellCountsUAVLocal = GraphBuilder.CreateUAV(CellCountsBuffer);
-		ParticleIndicesSRVLocal = GraphBuilder.CreateSRV(ParticleIndicesBuffer);
-		FRDGBufferUAVRef ParticleIndicesUAVLocal = GraphBuilder.CreateUAV(ParticleIndicesBuffer);
+		SpatialData.CellCountsSRV = GraphBuilder.CreateSRV(SpatialData.CellCountsBuffer);
+		SpatialData.ParticleIndicesSRV = GraphBuilder.CreateSRV(SpatialData.ParticleIndicesBuffer);
+		FRDGBufferUAVRef CellCountsUAVLocal = GraphBuilder.CreateUAV(SpatialData.CellCountsBuffer);
+		FRDGBufferUAVRef ParticleIndicesUAVLocal = GraphBuilder.CreateUAV(SpatialData.ParticleIndicesBuffer);
 
-		// GPU Clear pass - clears CellCounts to 0 entirely on GPU
+		// GPU Clear
 		{
 			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 			TShaderMapRef<FClearCellDataCS> ClearShader(ShaderMap);
-
 			FClearCellDataCS::FParameters* ClearParams = GraphBuilder.AllocParameters<FClearCellDataCS::FParameters>();
 			ClearParams->CellCounts = CellCountsUAVLocal;
-
-			const uint32 NumGroups = FMath::DivideAndRoundUp<uint32>(GPU_SPATIAL_HASH_SIZE, SPATIAL_HASH_THREAD_GROUP_SIZE);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("SpatialHash::GPUClear"),
-				ClearShader,
-				ClearParams,
-				FIntVector(NumGroups, 1, 1)
-			);
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("SpatialHash::GPUClear"), ClearShader, ClearParams, FIntVector(FMath::DivideAndRoundUp<uint32>(GPU_SPATIAL_HASH_SIZE, SPATIAL_HASH_THREAD_GROUP_SIZE), 1, 1));
 		}
 
-		// GPU Build pass - writes particle indices into hash grid
+		// GPU Build
 		{
 			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 			TShaderMapRef<FBuildSpatialHashSimpleCS> BuildShader(ShaderMap);
-
 			FBuildSpatialHashSimpleCS::FParameters* BuildParams = GraphBuilder.AllocParameters<FBuildSpatialHashSimpleCS::FParameters>();
-			BuildParams->ParticlePositions = PositionsSRVLocal;
+			BuildParams->ParticlePositions = OutPositionsSRV;
 			BuildParams->ParticleCount = CurrentParticleCount;
 			BuildParams->ParticleRadius = Params.ParticleRadius;
 			BuildParams->CellSize = Params.CellSize;
 			BuildParams->CellCounts = CellCountsUAVLocal;
 			BuildParams->ParticleIndices = ParticleIndicesUAVLocal;
-
-			const uint32 NumGroups = FMath::DivideAndRoundUp<uint32>(CurrentParticleCount, SPATIAL_HASH_THREAD_GROUP_SIZE);
-
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
-				RDG_EVENT_NAME("SpatialHash::GPUBuild"),
-				BuildShader,
-				BuildParams,
-				FIntVector(NumGroups, 1, 1)
-			);
+			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("SpatialHash::GPUBuild"), BuildShader, BuildParams, FIntVector(FMath::DivideAndRoundUp<uint32>(CurrentParticleCount, SPATIAL_HASH_THREAD_GROUP_SIZE), 1, 1));
 		}
 
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SPATIAL HASH: GPU clear+build completed"));
-
-		// Create dummy CellStart/CellEnd buffers for shader parameter validation
-		// These are not used when SpatialHashManager.IsValid() = 0, but RDG requires valid SRVs
-		// Must use QueueBufferUpload to mark buffer as "produced" for RDG validation
-		{
-			FRDGBufferDesc DummyCellDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
-			FRDGBufferRef DummyCellStartBuffer = GraphBuilder.CreateBuffer(DummyCellDesc, TEXT("DummyCellStart"));
-			FRDGBufferRef DummyCellEndBuffer = GraphBuilder.CreateBuffer(DummyCellDesc, TEXT("DummyCellEnd"));
-			uint32 InvalidIndex = 0xFFFFFFFF;
-			GraphBuilder.QueueBufferUpload(DummyCellStartBuffer, &InvalidIndex, sizeof(uint32));
-			GraphBuilder.QueueBufferUpload(DummyCellEndBuffer, &InvalidIndex, sizeof(uint32));
-			CellStartSRVLocal = GraphBuilder.CreateSRV(DummyCellStartBuffer);
-			CellEndSRVLocal = GraphBuilder.CreateSRV(DummyCellEndBuffer);
-		}
+		// Dummy CellStart/End for validation
+		FRDGBufferRef DummyCellStartBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1), TEXT("DummyCellStart"));
+		FRDGBufferRef DummyCellEndBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1), TEXT("DummyCellEnd"));
+		uint32 InvalidIndex = 0xFFFFFFFF;
+		GraphBuilder.QueueBufferUpload(DummyCellStartBuffer, &InvalidIndex, sizeof(uint32));
+		GraphBuilder.QueueBufferUpload(DummyCellEndBuffer, &InvalidIndex, sizeof(uint32));
+		SpatialData.CellStartSRV = GraphBuilder.CreateSRV(DummyCellStartBuffer);
+		SpatialData.CellEndSRV = GraphBuilder.CreateSRV(DummyCellEndBuffer);
 	}
 
-	// Pass 3.5: GPU Boundary Skinning (if using GPU skinning system)
-	// Transforms bone-local boundary particles to world space on GPU
-	// Must run before density/pressure solver so boundary particles are in correct positions
+	// Pass 3.5: GPU Boundary Skinning
 	if (IsGPUBoundarySkinningEnabled())
 	{
 		AddBoundarySkinningPass(GraphBuilder, Params);
-		if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> BOUNDARY SKINNING: GPU skinning pass completed"));
 	}
 
-	// Pass 4-5: XPBD Density Constraint Solver (OPTIMIZED: Combined Density + Pressure + Neighbor Caching)
-	// Neighbor Caching: First iteration builds neighbor list, subsequent iterations reuse
-	// Each iteration:
-	//   - Single neighbor traversal computes both Density/Lambda AND Position corrections
-	//   - Uses previous iteration's Lambda for Jacobi-style update (parallel-safe)
-	// Performance: Hash lookup only in first iteration, cached for subsequent iterations
+	return SpatialData;
+}
 
-	// Create/resize neighbor caching buffers if needed
-	FRDGBufferRef NeighborListRDGBuffer = nullptr;
-	FRDGBufferRef NeighborCountsRDGBuffer = nullptr;
-	FRDGBufferUAVRef NeighborListUAVLocal = nullptr;
-	FRDGBufferUAVRef NeighborCountsUAVLocal = nullptr;
-	FRDGBufferSRVRef NeighborListSRVLocal = nullptr;
-	FRDGBufferSRVRef NeighborCountsSRVLocal = nullptr;
-
+void FGPUFluidSimulator::ExecutePhysicsSolver(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	FSimulationSpatialData& SpatialData,
+	const FGPUFluidSimulationParams& Params)
+{
+	// Create/resize neighbor caching buffers
 	const int32 NeighborListSize = CurrentParticleCount * GPU_MAX_NEIGHBORS_PER_PARTICLE;
 
 	if (NeighborBufferParticleCapacity < CurrentParticleCount || !NeighborListBuffer.IsValid())
 	{
-		// Create new buffers
-		NeighborListRDGBuffer = GraphBuilder.CreateBuffer(
-			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), NeighborListSize),
-			TEXT("GPUFluidNeighborList"));
-		NeighborCountsRDGBuffer = GraphBuilder.CreateBuffer(
-			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), CurrentParticleCount),
-			TEXT("GPUFluidNeighborCounts"));
-
+		SpatialData.NeighborListBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), NeighborListSize), TEXT("GPUFluidNeighborList"));
+		SpatialData.NeighborCountsBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), CurrentParticleCount), TEXT("GPUFluidNeighborCounts"));
 		NeighborBufferParticleCapacity = CurrentParticleCount;
 	}
 	else
 	{
-		// Reuse existing buffers
-		NeighborListRDGBuffer = GraphBuilder.RegisterExternalBuffer(NeighborListBuffer, TEXT("GPUFluidNeighborList"));
-		NeighborCountsRDGBuffer = GraphBuilder.RegisterExternalBuffer(NeighborCountsBuffer, TEXT("GPUFluidNeighborCounts"));
+		SpatialData.NeighborListBuffer = GraphBuilder.RegisterExternalBuffer(NeighborListBuffer, TEXT("GPUFluidNeighborList"));
+		SpatialData.NeighborCountsBuffer = GraphBuilder.RegisterExternalBuffer(NeighborCountsBuffer, TEXT("GPUFluidNeighborCounts"));
 	}
 
-	NeighborListUAVLocal = GraphBuilder.CreateUAV(NeighborListRDGBuffer);
-	NeighborCountsUAVLocal = GraphBuilder.CreateUAV(NeighborCountsRDGBuffer);
+	FRDGBufferUAVRef NeighborListUAVLocal = GraphBuilder.CreateUAV(SpatialData.NeighborListBuffer);
+	FRDGBufferUAVRef NeighborCountsUAVLocal = GraphBuilder.CreateUAV(SpatialData.NeighborCountsBuffer);
 
 	for (int32 i = 0; i < Params.SolverIterations; ++i)
 	{
-		// Combined pass: Compute Density + Lambda + Apply Position Corrections
-		// First iteration (i=0) builds neighbor cache, subsequent iterations reuse it
-		// When SpatialHashManager.IsValid() is true, CellStartSRVLocal/CellEndSRVLocal are valid and shader uses sequential access
-		AddSolveDensityPressurePass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal,
-			CellStartSRVLocal, CellEndSRVLocal, NeighborListUAVLocal, NeighborCountsUAVLocal, i, Params);
+		AddSolveDensityPressurePass(
+			GraphBuilder, ParticlesUAV, 
+			SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV,
+			SpatialData.CellStartSRV, SpatialData.CellEndSRV, 
+			NeighborListUAVLocal, NeighborCountsUAVLocal, i, Params);
 	}
 
-	// Create SRVs from neighbor cache buffers for use in Viscosity and Cohesion passes
-	NeighborListSRVLocal = GraphBuilder.CreateSRV(NeighborListRDGBuffer);
-	NeighborCountsSRVLocal = GraphBuilder.CreateSRV(NeighborCountsRDGBuffer);
+	// Create SRVs for use in subsequent passes
+	SpatialData.NeighborListSRV = GraphBuilder.CreateSRV(SpatialData.NeighborListBuffer);
+	SpatialData.NeighborCountsSRV = GraphBuilder.CreateSRV(SpatialData.NeighborCountsBuffer);
 
-	// Extract neighbor buffers for next frame (persist across substeps)
-	GraphBuilder.QueueBufferExtraction(NeighborListRDGBuffer, &NeighborListBuffer, ERHIAccess::UAVCompute);
-	GraphBuilder.QueueBufferExtraction(NeighborCountsRDGBuffer, &NeighborCountsBuffer, ERHIAccess::UAVCompute);
+	// Queue extraction
+	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborListBuffer, &NeighborListBuffer, ERHIAccess::UAVCompute);
+	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborCountsBuffer, &NeighborCountsBuffer, ERHIAccess::UAVCompute);
+}
 
-	// Pass 6: Bounds Collision
-	AddBoundsCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
+void FGPUFluidSimulator::ExecuteCollisionAndAdhesion(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	const FSimulationSpatialData& SpatialData,
+	const FGPUFluidSimulationParams& Params)
+{
+	AddBoundsCollisionPass(GraphBuilder, ParticlesUAV, Params);
+	AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAV, Params);
+	AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAV, Params);
 
-	// Pass 6.5: Distance Field Collision (if enabled)
-	AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
-
-	// Pass 6.6: Primitive Collision (spheres, capsules, boxes, convexes from FluidCollider)
-	AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAVLocal, Params);
-
-	// Pass 6.7: Adhesion - Create attachments to bone colliders (GPU-based)
 	if (AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled() && CollisionManager.IsValid() && CollisionManager->AreBoneTransformsValid())
 	{
 		TRefCountPtr<FRDGPooledBuffer>& PersistentAttachmentBuffer = AdhesionManager->AccessPersistentAttachmentBuffer();
 		int32 AttachmentBufferSize = AdhesionManager->GetAttachmentBufferSize();
-
-		// Check if we need to create or resize attachment buffer
 		const bool bNeedNewBuffer = !PersistentAttachmentBuffer.IsValid() || AttachmentBufferSize < CurrentParticleCount;
 
 		FRDGBufferRef AttachmentBuffer;
 		if (bNeedNewBuffer)
 		{
-			// Create new buffer with initialized data (PrimitiveType = -1 means no attachment)
 			TArray<FGPUParticleAttachment> InitialAttachments;
 			InitialAttachments.SetNum(CurrentParticleCount);
 			for (int32 i = 0; i < CurrentParticleCount; ++i)
 			{
-				InitialAttachments[i].PrimitiveType = -1;
-				InitialAttachments[i].PrimitiveIndex = -1;
-				InitialAttachments[i].BoneIndex = -1;
-				InitialAttachments[i].AdhesionStrength = 0.0f;
-				InitialAttachments[i].LocalOffset = FVector3f::ZeroVector;
-				InitialAttachments[i].AttachmentTime = 0.0f;
+				FGPUParticleAttachment& Attachment = InitialAttachments[i];
+				Attachment.PrimitiveType = -1;
+				Attachment.PrimitiveIndex = -1;
+				Attachment.BoneIndex = -1;
+				Attachment.AdhesionStrength = 0.0f;
+				Attachment.LocalOffset = FVector3f::ZeroVector;
+				Attachment.AttachmentTime = 0.0f;
+				Attachment.RelativeVelocity = FVector3f::ZeroVector;
+				Attachment.Padding = 0.0f;
 			}
 
-			AttachmentBuffer = CreateStructuredBuffer(
-				GraphBuilder,
-				TEXT("GPUFluidAttachments"),
-				sizeof(FGPUParticleAttachment),
-				CurrentParticleCount,
-				InitialAttachments.GetData(),
-				CurrentParticleCount * sizeof(FGPUParticleAttachment),
-				ERDGInitialDataFlags::None  // Copy the data, don't use NoCopy
-			);
+			AttachmentBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidAttachments"), sizeof(FGPUParticleAttachment), CurrentParticleCount, InitialAttachments.GetData(), CurrentParticleCount * sizeof(FGPUParticleAttachment), ERDGInitialDataFlags::None);
 
-			// If we had existing data, copy it to the new buffer
 			if (PersistentAttachmentBuffer.IsValid() && AttachmentBufferSize > 0)
 			{
 				FRDGBufferRef OldBuffer = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachmentsOld"));
-
-				// Copy existing attachment data (preserve attached particles)
 				AddCopyBufferPass(GraphBuilder, AttachmentBuffer, 0, OldBuffer, 0, AttachmentBufferSize * sizeof(FGPUParticleAttachment));
 			}
-
-			// Update tracked size
 			AdhesionManager->SetAttachmentBufferSize(CurrentParticleCount);
 		}
 		else
 		{
 			AttachmentBuffer = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachments"));
 		}
+
 		FRDGBufferUAVRef AttachmentUAV = GraphBuilder.CreateUAV(AttachmentBuffer);
-
-		AdhesionManager->AddAdhesionPass(GraphBuilder, ParticlesUAVLocal, AttachmentUAV, CollisionManager.Get(), CurrentParticleCount, Params);
-
-		// Extract attachment buffer for next frame
-		GraphBuilder.QueueBufferExtraction(
-			AttachmentBuffer,
-			&PersistentAttachmentBuffer,
-			ERHIAccess::UAVCompute
-		);
+		AdhesionManager->AddAdhesionPass(GraphBuilder, ParticlesUAV, AttachmentUAV, CollisionManager.Get(), CurrentParticleCount, Params);
+		GraphBuilder.QueueBufferExtraction(AttachmentBuffer, &PersistentAttachmentBuffer, ERHIAccess::UAVCompute);
 	}
+}
 
-	// Pass 7: Finalize Positions (update Position from PredictedPosition, recalculate Velocity: v = (x* - x) / dt)
-	AddFinalizePositionsPass(GraphBuilder, ParticlesUAVLocal, Params);
+void FGPUFluidSimulator::ExecutePostSimulation(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef ParticleBuffer,
+	FRDGBufferUAVRef ParticlesUAV,
+	const FSimulationSpatialData& SpatialData,
+	const FGPUFluidSimulationParams& Params)
+{
+	AddFinalizePositionsPass(GraphBuilder, ParticlesUAV, Params);
 
-	// Pass 8: Apply Viscosity (XSPH velocity smoothing) - Applied AFTER velocity is finalized per PBF paper
-	// Uses cached neighbor list from DensityPressure pass for faster lookup
-	AddApplyViscosityPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal,
-		NeighborListSRVLocal, NeighborCountsSRVLocal, Params);
+	AddApplyViscosityPass(GraphBuilder, ParticlesUAV, SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV, SpatialData.NeighborListSRV, SpatialData.NeighborCountsSRV, Params);
+	AddApplyCohesionPass(GraphBuilder, ParticlesUAV, SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV, SpatialData.NeighborListSRV, SpatialData.NeighborCountsSRV, Params);
 
-	// Pass 8.5: Apply Cohesion (surface tension between particles)
-	// Uses cached neighbor list from DensityPressure pass for faster lookup
-	AddApplyCohesionPass(GraphBuilder, ParticlesUAVLocal, CellCountsSRVLocal, ParticleIndicesSRVLocal,
-		NeighborListSRVLocal, NeighborCountsSRVLocal, Params);
-
-	// Pass 8.6: Apply Stack Pressure (weight transfer from stacked attached particles)
 	if (Params.StackPressureScale > 0.0f && AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled())
 	{
 		TRefCountPtr<FRDGPooledBuffer> PersistentAttachmentBuffer = AdhesionManager->GetPersistentAttachmentBuffer();
@@ -1227,200 +978,99 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		{
 			FRDGBufferRef AttachmentBufferForStackPressure = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachmentsStackPressure"));
 			FRDGBufferSRVRef AttachmentSRVForStackPressure = GraphBuilder.CreateSRV(AttachmentBufferForStackPressure);
-			AdhesionManager->AddStackPressurePass(GraphBuilder, ParticlesUAVLocal, AttachmentSRVForStackPressure, CellCountsSRVLocal, ParticleIndicesSRVLocal, CollisionManager.Get(), CurrentParticleCount, Params);
+			AdhesionManager->AddStackPressurePass(GraphBuilder, ParticlesUAV, AttachmentSRVForStackPressure, SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV, CollisionManager.Get(), CurrentParticleCount, Params);
 		}
 	}
 
-	// Pass 9: Clear just-detached flag at end of frame
 	if (AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled())
 	{
-		AdhesionManager->AddClearDetachedFlagPass(GraphBuilder, ParticlesUAVLocal, CurrentParticleCount);
+		AdhesionManager->AddClearDetachedFlagPass(GraphBuilder, ParticlesUAV, CurrentParticleCount);
 	}
 
-	// Pass 9.5: Boundary Adhesion (Flex-style adhesion from mesh surface particles)
 	if (IsBoundaryAdhesionEnabled())
 	{
-		AddBoundaryAdhesionPass(GraphBuilder, ParticlesUAVLocal, Params);
+		AddBoundaryAdhesionPass(GraphBuilder, ParticlesUAV, Params);
 	}
 
-	// Pass 10: Anisotropy calculation (for ellipsoid rendering)
-	// Runs after simulation is complete, uses spatial hash for neighbor lookup
+	// Anisotropy
 	if (CachedAnisotropyParams.bEnabled && CurrentParticleCount > 0)
 	{
-		// Update interval optimization: skip calculation on some frames
 		const int32 UpdateInterval = FMath::Max(1, CachedAnisotropyParams.UpdateInterval);
 		++AnisotropyFrameCounter;
-		const bool bShouldUpdateAnisotropy = (AnisotropyFrameCounter >= UpdateInterval)
-			|| !PersistentAnisotropyAxis1Buffer.IsValid();  // Always update if no buffer exists
-
-		if (bShouldUpdateAnisotropy)
+		if (AnisotropyFrameCounter >= UpdateInterval || !PersistentAnisotropyAxis1Buffer.IsValid())
 		{
-			AnisotropyFrameCounter = 0;  // Reset counter
-		}
-		else
-		{
-			// Skip this frame - reuse existing anisotropy buffers
-			// No extraction needed, buffers persist from previous frame
-			goto AnisotropyPassEnd;
-		}
+			AnisotropyFrameCounter = 0;
+			FRDGBufferRef Axis1Buffer, Axis2Buffer, Axis3Buffer;
+			FFluidAnisotropyPassBuilder::CreateAnisotropyBuffers(GraphBuilder, CurrentParticleCount, Axis1Buffer, Axis2Buffer, Axis3Buffer);
 
-		// Create anisotropy output buffers
-		FRDGBufferRef Axis1Buffer = nullptr;
-		FRDGBufferRef Axis2Buffer = nullptr;
-		FRDGBufferRef Axis3Buffer = nullptr;
-		FFluidAnisotropyPassBuilder::CreateAnisotropyBuffers(
-			GraphBuilder, CurrentParticleCount, Axis1Buffer, Axis2Buffer, Axis3Buffer);
-
-		if (Axis1Buffer && Axis2Buffer && Axis3Buffer && CellCountsBuffer && ParticleIndicesBuffer)
-		{
-			// Prepare anisotropy compute parameters
-			FAnisotropyComputeParams AnisotropyParams;
-			AnisotropyParams.PhysicsParticlesSRV = GraphBuilder.CreateSRV(ParticleBuffer);
-
-			// Pass Attachment buffer for attached particle anisotropy
-			// Always create a valid SRV (dummy if adhesion disabled) to satisfy shader requirements
-			TRefCountPtr<FRDGPooledBuffer> AttachmentBufferForAniso = AdhesionManager.IsValid() ? AdhesionManager->GetPersistentAttachmentBuffer() : nullptr;
-			if (AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled() && AttachmentBufferForAniso.IsValid())
+			if (Axis1Buffer && Axis2Buffer && Axis3Buffer && SpatialData.CellCountsBuffer && SpatialData.ParticleIndicesBuffer)
 			{
-				FRDGBufferRef AttachmentBufferForAnisotropy = GraphBuilder.RegisterExternalBuffer(
-					AttachmentBufferForAniso, TEXT("GPUFluidAttachmentsAnisotropy"));
-				AnisotropyParams.AttachmentsSRV = GraphBuilder.CreateSRV(AttachmentBufferForAnisotropy);
-			}
-			else
-			{
-				// Create dummy attachment buffer (shader requires valid SRV)
-				// Must upload data so RDG marks buffer as "produced" (bQueuedForUpload = true)
-				FRDGBufferRef DummyAttachmentBuffer = GraphBuilder.CreateBuffer(
-					FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUParticleAttachment), 1),
-					TEXT("DummyAttachmentBuffer"));
-				FGPUParticleAttachment ZeroData = {};
-				GraphBuilder.QueueBufferUpload(DummyAttachmentBuffer, &ZeroData, sizeof(FGPUParticleAttachment));
-				AnisotropyParams.AttachmentsSRV = GraphBuilder.CreateSRV(DummyAttachmentBuffer);
-			}
+				FAnisotropyComputeParams AnisotropyParams;
+				AnisotropyParams.PhysicsParticlesSRV = GraphBuilder.CreateSRV(ParticleBuffer);
 
-			// Create fresh SRVs for Anisotropy pass to avoid RDG resource state conflicts
-			// Previous SRVs may have been used in passes that also had UAV writes to same buffers
-			AnisotropyParams.CellCountsSRV = GraphBuilder.CreateSRV(CellCountsBuffer);
-			AnisotropyParams.ParticleIndicesSRV = GraphBuilder.CreateSRV(ParticleIndicesBuffer);
-			AnisotropyParams.OutAxis1UAV = GraphBuilder.CreateUAV(Axis1Buffer);
-			AnisotropyParams.OutAxis2UAV = GraphBuilder.CreateUAV(Axis2Buffer);
-			AnisotropyParams.OutAxis3UAV = GraphBuilder.CreateUAV(Axis3Buffer);
-			AnisotropyParams.ParticleCount = CurrentParticleCount;
+				TRefCountPtr<FRDGPooledBuffer> AttachmentBufferForAniso = AdhesionManager.IsValid() ? AdhesionManager->GetPersistentAttachmentBuffer() : nullptr;
+				if (AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled() && AttachmentBufferForAniso.IsValid())
+				{
+					FRDGBufferRef AttachmentBuffer = GraphBuilder.RegisterExternalBuffer(AttachmentBufferForAniso, TEXT("GPUFluidAttachmentsAnisotropy"));
+					AnisotropyParams.AttachmentsSRV = GraphBuilder.CreateSRV(AttachmentBuffer);
+				}
+				else
+				{
+					FRDGBufferRef Dummy = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUParticleAttachment), 1), TEXT("DummyAttachmentBuffer"));
+					FGPUParticleAttachment Zero = {};
+					GraphBuilder.QueueBufferUpload(Dummy, &Zero, sizeof(FGPUParticleAttachment));
+					AnisotropyParams.AttachmentsSRV = GraphBuilder.CreateSRV(Dummy);
+				}
 
-			// Map anisotropy mode
-			switch (CachedAnisotropyParams.Mode)
-			{
-			case EFluidAnisotropyMode::VelocityBased:
-				AnisotropyParams.Mode = EGPUAnisotropyMode::VelocityBased;
-				break;
-			case EFluidAnisotropyMode::DensityBased:
-				AnisotropyParams.Mode = EGPUAnisotropyMode::DensityBased;
-				break;
-			case EFluidAnisotropyMode::Hybrid:
-				AnisotropyParams.Mode = EGPUAnisotropyMode::Hybrid;
-				break;
-			default:
-				AnisotropyParams.Mode = EGPUAnisotropyMode::DensityBased;
-				break;
-			}
+				AnisotropyParams.CellCountsSRV = GraphBuilder.CreateSRV(SpatialData.CellCountsBuffer);
+				AnisotropyParams.ParticleIndicesSRV = GraphBuilder.CreateSRV(SpatialData.ParticleIndicesBuffer);
+				AnisotropyParams.OutAxis1UAV = GraphBuilder.CreateUAV(Axis1Buffer);
+				AnisotropyParams.OutAxis2UAV = GraphBuilder.CreateUAV(Axis2Buffer);
+				AnisotropyParams.OutAxis3UAV = GraphBuilder.CreateUAV(Axis3Buffer);
+				AnisotropyParams.ParticleCount = CurrentParticleCount;
+				
+				// Params Mapping
+				AnisotropyParams.Mode = (EGPUAnisotropyMode)CachedAnisotropyParams.Mode;
+				AnisotropyParams.VelocityStretchFactor = CachedAnisotropyParams.VelocityStretchFactor;
+				AnisotropyParams.AnisotropyScale = CachedAnisotropyParams.AnisotropyScale;
+				AnisotropyParams.AnisotropyMin = CachedAnisotropyParams.AnisotropyMin;
+				AnisotropyParams.AnisotropyMax = CachedAnisotropyParams.AnisotropyMax;
+				AnisotropyParams.DensityWeight = CachedAnisotropyParams.DensityWeight;
+				AnisotropyParams.MinNeighborsForAnisotropy = CachedAnisotropyParams.MinNeighborsForAnisotropy;
+				AnisotropyParams.bFadeIsolatedParticles = CachedAnisotropyParams.bFadeIsolatedParticles;
+				AnisotropyParams.MinIsolatedScale = CachedAnisotropyParams.MinIsolatedScale;
+				AnisotropyParams.bStretchIsolatedByVelocity = CachedAnisotropyParams.bStretchIsolatedByVelocity;
+				AnisotropyParams.bFadeSlowIsolated = CachedAnisotropyParams.bFadeSlowIsolated;
+				AnisotropyParams.IsolationFadeSpeed = CachedAnisotropyParams.IsolationFadeSpeed;
+				
+				AnisotropyParams.SmoothingRadius = Params.SmoothingRadius * 2.5f;
+				AnisotropyParams.CellSize = Params.CellSize;
+				AnisotropyParams.bUseZOrderSorting = SpatialHashManager.IsValid();
+				if (SpatialHashManager.IsValid())
+				{
+					AnisotropyParams.CellStartSRV = SpatialData.CellStartSRV;
+					AnisotropyParams.CellEndSRV = SpatialData.CellEndSRV;
+					AnisotropyParams.MortonBoundsMin = SimulationBoundsMin;
+				}
 
-			AnisotropyParams.VelocityStretchFactor = CachedAnisotropyParams.VelocityStretchFactor;
-			AnisotropyParams.AnisotropyScale = CachedAnisotropyParams.AnisotropyScale;
-			AnisotropyParams.AnisotropyMin = CachedAnisotropyParams.AnisotropyMin;
-			AnisotropyParams.AnisotropyMax = CachedAnisotropyParams.AnisotropyMax;
-			AnisotropyParams.DensityWeight = CachedAnisotropyParams.DensityWeight;
+				FFluidAnisotropyPassBuilder::AddAnisotropyPass(GraphBuilder, AnisotropyParams);
 
-			// Isolated particle handling params
-			AnisotropyParams.MinNeighborsForAnisotropy = CachedAnisotropyParams.MinNeighborsForAnisotropy;
-			AnisotropyParams.bFadeIsolatedParticles = CachedAnisotropyParams.bFadeIsolatedParticles;
-			AnisotropyParams.MinIsolatedScale = CachedAnisotropyParams.MinIsolatedScale;
-			AnisotropyParams.bStretchIsolatedByVelocity = CachedAnisotropyParams.bStretchIsolatedByVelocity;
-			AnisotropyParams.bFadeSlowIsolated = CachedAnisotropyParams.bFadeSlowIsolated;
-			AnisotropyParams.IsolationFadeSpeed = CachedAnisotropyParams.IsolationFadeSpeed;
-
-			// Density-based anisotropy needs wider neighbor search than simulation
-			// Use 2.5x smoothing radius to find enough neighbors for reliable covariance
-			AnisotropyParams.SmoothingRadius = Params.SmoothingRadius * 2.5f;
-			AnisotropyParams.CellSize = Params.CellSize;
-
-			// Morton-sorted spatial lookup (cache-friendly sequential access)
-			// When bUseZOrderSorting=true, ParticleBuffer is already sorted by Morton code
-			AnisotropyParams.bUseZOrderSorting = SpatialHashManager.IsValid();
-			if (SpatialHashManager.IsValid() && CellStartSRVLocal && CellEndSRVLocal)
-			{
-				AnisotropyParams.CellStartSRV = CellStartSRVLocal;
-				AnisotropyParams.CellEndSRV = CellEndSRVLocal;
-				// IMPORTANT: Must use SimulationBoundsMin (same as simulation passes)
-				// Using Params.BoundsMin causes cell ID mismatch and neighbor lookup failure
-				AnisotropyParams.MortonBoundsMin = SimulationBoundsMin;
-			}
-
-			// Debug log for density-based anisotropy parameters
-			static int32 AnisotropyDebugCounter = 0;
-			if (++AnisotropyDebugCounter % 60 == 0)
-			{
-				UE_LOG(LogGPUFluidSimulator, Warning,
-					TEXT("Anisotropy Pass: CachedMode=%d -> GPUMode=%d, SmoothingRadius=%.2f, CellSize=%.2f, CellRadius=%d"),
-					static_cast<int32>(CachedAnisotropyParams.Mode),
-					static_cast<int32>(AnisotropyParams.Mode),
-					AnisotropyParams.SmoothingRadius,
-					AnisotropyParams.CellSize,
-					AnisotropyParams.CellSize > 0.01f ? (int32)FMath::CeilToInt(AnisotropyParams.SmoothingRadius / AnisotropyParams.CellSize) : 0);
-			}
-
-			// Add anisotropy compute pass
-			FFluidAnisotropyPassBuilder::AddAnisotropyPass(GraphBuilder, AnisotropyParams);
-
-			// Extract anisotropy buffers for rendering
-			GraphBuilder.QueueBufferExtraction(
-				Axis1Buffer,
-				&PersistentAnisotropyAxis1Buffer,
-				ERHIAccess::SRVCompute);
-			GraphBuilder.QueueBufferExtraction(
-				Axis2Buffer,
-				&PersistentAnisotropyAxis2Buffer,
-				ERHIAccess::SRVCompute);
-			GraphBuilder.QueueBufferExtraction(
-				Axis3Buffer,
-				&PersistentAnisotropyAxis3Buffer,
-				ERHIAccess::SRVCompute);
-
-			if (bShouldLog)
-			{
-				UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> ANISOTROPY: Pass added (mode=%d, particles=%d)"),
-					static_cast<int32>(AnisotropyParams.Mode), CurrentParticleCount);
+				GraphBuilder.QueueBufferExtraction(Axis1Buffer, &PersistentAnisotropyAxis1Buffer, ERHIAccess::SRVCompute);
+				GraphBuilder.QueueBufferExtraction(Axis2Buffer, &PersistentAnisotropyAxis2Buffer, ERHIAccess::SRVCompute);
+				GraphBuilder.QueueBufferExtraction(Axis3Buffer, &PersistentAnisotropyAxis3Buffer, ERHIAccess::SRVCompute);
 			}
 		}
 	}
-AnisotropyPassEnd:
+}
 
-	// Debug: log that we reached the end of simulation
-	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> SIMULATION COMPLETE: All passes added for %d particles"), CurrentParticleCount);
-
-	// Phase 2: Extract buffers to persistent storage for next frame reuse
-	// This keeps simulation results on GPU without CPU readback
-	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> EXTRACTION: Queuing buffer extraction..."));
-
-	// Extract particle buffer
-	GraphBuilder.QueueBufferExtraction(
-		ParticleBuffer,
-		&PersistentParticleBuffer,
-		ERHIAccess::UAVCompute  // Ready for next frame's compute passes
-	);
-
-	// Extract spatial hash buffers for reuse next frame
-	GraphBuilder.QueueBufferExtraction(
-		CellCountsBuffer,
-		&PersistentCellCountsBuffer,
-		ERHIAccess::UAVCompute
-	);
-	GraphBuilder.QueueBufferExtraction(
-		ParticleIndicesBuffer,
-		&PersistentParticleIndicesBuffer,
-		ERHIAccess::UAVCompute
-	);
-
-	if (bShouldLog) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> EXTRACTION: Buffer extraction queued successfully"));
+void FGPUFluidSimulator::ExtractPersistentBuffers(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef ParticleBuffer,
+	const FSimulationSpatialData& SpatialData)
+{
+	GraphBuilder.QueueBufferExtraction(ParticleBuffer, &PersistentParticleBuffer, ERHIAccess::UAVCompute);
+	if (SpatialData.CellCountsBuffer) GraphBuilder.QueueBufferExtraction(SpatialData.CellCountsBuffer, &PersistentCellCountsBuffer, ERHIAccess::UAVCompute);
+	if (SpatialData.ParticleIndicesBuffer) GraphBuilder.QueueBufferExtraction(SpatialData.ParticleIndicesBuffer, &PersistentParticleIndicesBuffer, ERHIAccess::UAVCompute);
 }
 
 //=============================================================================
