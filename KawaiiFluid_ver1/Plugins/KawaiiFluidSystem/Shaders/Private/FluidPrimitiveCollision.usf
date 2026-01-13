@@ -31,6 +31,9 @@ int ConvexCount;
 
 StructuredBuffer<FGPUConvexPlane> ConvexPlanes;
 
+StructuredBuffer<FGPUBoneTransform> BoneTransforms;
+int BoneCount;
+
 // Collision threshold
 float CollisionThreshold;
 
@@ -78,10 +81,11 @@ int MaxColliderCount;
  * @param colliderOwnerID - Unique ID of collider owner (for filtering by actor)
  * @param particleSourceID - Particle's SourceID (PresetIndex | ComponentIndex << 16)
  * @param boneIndex - Bone index for per-bone force calculation (-1 = no bone)
+ * @param impactWorld - Impact position in world space
  */
 void RecordCollisionFeedback(int particleIdx, int colliderIdx, int colliderType,
                              float density, float3 normal, float penetration, float3 velocity,
-                             int colliderOwnerID, int particleSourceID,  int boneIndex)
+                             int colliderOwnerID, int particleSourceID,  int boneIndex, float3 impactWorld)
 {
 	// 콜라이더별 충돌 카운트 증가 (항상 실행)
 	if (colliderIdx >= 0 && colliderIdx < MaxColliderCount)
@@ -115,6 +119,15 @@ void RecordCollisionFeedback(int particleIdx, int colliderIdx, int colliderType,
 		feedback.ParticleActorID = 0;  // Reserved for future use
 		feedback.BoneIndex = boneIndex;
 		feedback.Padding1 = 0;
+		if (boneIndex >= 0 && boneIndex < BoneCount)
+		{
+			feedback.ImpactOffset = WorldToBoneLocal(impactWorld, BoneTransforms[boneIndex]);
+		}
+		else
+		{
+			feedback.ImpactOffset = float3(0, 0, 0);
+		}
+		feedback.Padding2 = 0;
 		CollisionFeedback[feedbackIdx] = feedback;
 	}
 }
@@ -156,12 +169,13 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			float3 normal = CalcNumericalGradient_Sphere(pos, sphere.Center, sphere.Radius);
 			float penetration = max(0.0f, -effectiveDist);
+			float3 impactWorld = pos - normal * sdf;
 			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, sphere.Friction, sphere.Restitution);
 			originalPos = pos;  // Update for subsequent collisions
 			bCollided = true;
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, si, COLLIDER_TYPE_SPHERE, particle.Density, normal, penetration, particle.Velocity, sphere.OwnerID, particle.SourceID,sphere.BoneIndex);
+			RecordCollisionFeedback(idx, si, COLLIDER_TYPE_SPHERE, particle.Density, normal, penetration, particle.Velocity, sphere.OwnerID, particle.SourceID, sphere.BoneIndex, impactWorld);
 		}
 	}
 
@@ -176,12 +190,13 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			float3 normal = CalcNumericalGradient_Capsule(pos, capsule.Start, capsule.End, capsule.Radius);
 			float penetration = max(0.0f, -effectiveDist);
+			float3 impactWorld = pos - normal * sdf;
 			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, capsule.Friction, capsule.Restitution);
 			originalPos = pos;
 			bCollided = true;
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, SphereCount + ci, COLLIDER_TYPE_CAPSULE, particle.Density, normal, penetration, particle.Velocity, capsule.OwnerID, particle.SourceID,  capsule.BoneIndex);
+			RecordCollisionFeedback(idx, SphereCount + ci, COLLIDER_TYPE_CAPSULE, particle.Density, normal, penetration, particle.Velocity, capsule.OwnerID, particle.SourceID, capsule.BoneIndex, impactWorld);
 		}
 	}
 
@@ -196,6 +211,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			float3 normal = CalcNumericalGradient_Box(pos, box.Center, box.Extent, box.Rotation);
 			float penetration = max(0.0f, -effectiveDist);
+			float3 impactWorld = pos - normal * sdf;
 			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, box.Friction, box.Restitution);
 			originalPos = pos;
 			bCollided = true;
@@ -207,7 +223,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			}
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + bi, COLLIDER_TYPE_BOX, particle.Density, normal, penetration, particle.Velocity, box.OwnerID, particle.SourceID, box.BoneIndex);
+			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + bi, COLLIDER_TYPE_BOX, particle.Density, normal, penetration, particle.Velocity, box.OwnerID, particle.SourceID, box.BoneIndex, impactWorld);
 		}
 	}
 
@@ -244,6 +260,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			}
 
 			float penetration = max(0.0f, -effectiveDist);
+			float3 impactWorld = pos - normal * sdf;
 			ApplyCollisionResponseWithFriction(pos, originalPos, vel, normal, penetration, convex.Friction, convex.Restitution);
 			originalPos = pos;
 			bCollided = true;
@@ -254,7 +271,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			}
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + BoxCount + cxi, COLLIDER_TYPE_CONVEX, particle.Density, normal, penetration, particle.Velocity, convex.OwnerID, particle.SourceID, convex.BoneIndex);
+			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + BoxCount + cxi, COLLIDER_TYPE_CONVEX, particle.Density, normal, penetration, particle.Velocity, convex.OwnerID, particle.SourceID, convex.BoneIndex, impactWorld);
 		}
 	}
 

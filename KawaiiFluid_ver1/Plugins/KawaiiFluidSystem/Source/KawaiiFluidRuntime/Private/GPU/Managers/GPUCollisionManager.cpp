@@ -225,6 +225,7 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 	FRDGBufferSRVRef BoxesSRV = nullptr;
 	FRDGBufferSRVRef ConvexesSRV = nullptr;
 	FRDGBufferSRVRef ConvexPlanesSRV = nullptr;
+	FRDGBufferSRVRef BoneTransformsSRV = nullptr;
 
 	// Dummy data for empty buffers (shader requires all SRVs to be valid)
 	static FGPUCollisionSphere DummySphere;
@@ -232,6 +233,7 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 	static FGPUCollisionBox DummyBox;
 	static FGPUCollisionConvex DummyConvex;
 	static FGPUConvexPlane DummyPlane;
+	static FGPUBoneTransform DummyBone;
 
 	// Create RDG buffers from cached data (or dummy for empty arrays)
 	{
@@ -302,6 +304,20 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 			ERDGInitialDataFlags::NoCopy
 		);
 		ConvexPlanesSRV = GraphBuilder.CreateSRV(ConvexPlanesBuffer);
+	}
+
+	{
+		const bool bHasData = CachedBoneTransforms.Num() > 0;
+		FRDGBufferRef BoneTransformsBuffer = CreateStructuredBuffer(
+			GraphBuilder,
+			TEXT("GPUCollisionBoneTransforms"),
+			sizeof(FGPUBoneTransform),
+			bHasData ? CachedBoneTransforms.Num() : 1,
+			bHasData ? CachedBoneTransforms.GetData() : &DummyBone,
+			bHasData ? CachedBoneTransforms.Num() * sizeof(FGPUBoneTransform) : sizeof(FGPUBoneTransform),
+			ERDGInitialDataFlags::NoCopy
+		);
+		BoneTransformsSRV = GraphBuilder.CreateSRV(BoneTransformsBuffer);
 	}
 
 	// Create collision feedback buffers (for particle -> player interaction)
@@ -398,6 +414,8 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 	PassParameters->ConvexCount = CachedConvexHeaders.Num();
 
 	PassParameters->ConvexPlanes = ConvexPlanesSRV;
+	PassParameters->BoneTransforms = BoneTransformsSRV;
+	PassParameters->BoneCount = CachedBoneTransforms.Num();
 
 	// Collision feedback parameters
 	PassParameters->CollisionFeedback = GraphBuilder.CreateUAV(FeedbackBuffer);

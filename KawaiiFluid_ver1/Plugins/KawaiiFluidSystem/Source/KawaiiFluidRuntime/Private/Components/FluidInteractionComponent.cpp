@@ -1075,6 +1075,8 @@ void UFluidInteractionComponent::ProcessBoneCollisionEvents(float DeltaTime, con
 	TMap<int32, int32> NewBoneContactCounts;
 	TMap<int32, FVector> BoneVelocitySums;
 	TMap<int32, int32> BoneVelocityCounts;
+	TMap<int32, FVector> BoneImpactOffsetSums;
+	TMap<int32, int32> BoneImpactOffsetCounts;
 	TMap<int32, TMap<int32, int32>> BoneSourceCounts;  // BoneIndex → (SourceID → Count)
 
 	for (int32 i = 0; i < FeedbackCount; ++i)
@@ -1104,6 +1106,14 @@ void UFluidInteractionComponent::ProcessBoneCollisionEvents(float DeltaTime, con
 
 		int32& VelCount = BoneVelocityCounts.FindOrAdd(Feedback.BoneIndex, 0);
 		VelCount++;
+
+		// ImpactOffset 합산
+		FVector ImpactOffset(Feedback.ImpactOffset.X, Feedback.ImpactOffset.Y, Feedback.ImpactOffset.Z);
+		FVector& OffsetSum = BoneImpactOffsetSums.FindOrAdd(Feedback.BoneIndex, FVector::ZeroVector);
+		OffsetSum += ImpactOffset;
+
+		int32& OffsetCount = BoneImpactOffsetCounts.FindOrAdd(Feedback.BoneIndex, 0);
+		OffsetCount++;
 
 		// SourceID별 카운트 (FluidTag 결정용)
 		TMap<int32, int32>& SourceCounts = BoneSourceCounts.FindOrAdd(Feedback.BoneIndex);
@@ -1153,6 +1163,15 @@ void UFluidInteractionComponent::ProcessBoneCollisionEvents(float DeltaTime, con
 			const FVector* AvgVelPtr = CurrentBoneAverageVelocities.Find(BoneIdx);
 			FVector AverageVelocity = AvgVelPtr ? *AvgVelPtr : FVector::ZeroVector;
 
+			// 평균 ImpactOffset 계산
+			FVector ImpactOffsetAverage = FVector::ZeroVector;
+			const FVector* OffsetSumPtr = BoneImpactOffsetSums.Find(BoneIdx);
+			const int32* OffsetCountPtr = BoneImpactOffsetCounts.Find(BoneIdx);
+			if (OffsetSumPtr && OffsetCountPtr && *OffsetCountPtr > 0)
+			{
+				ImpactOffsetAverage = *OffsetSumPtr / *OffsetCountPtr;
+			}
+
 			// 본 이름 가져오기
 			FName BoneName = GetBoneNameFromIndex(BoneIdx);
 
@@ -1185,7 +1204,7 @@ void UFluidInteractionComponent::ProcessBoneCollisionEvents(float DeltaTime, con
 			}
 
 			// 이벤트 브로드캐스트 (FluidName 포함)
-			OnBoneParticleCollision.Broadcast(BoneIdx, BoneName, ContactCount, AverageVelocity, FluidName);
+			OnBoneParticleCollision.Broadcast(BoneIdx, BoneName, ContactCount, AverageVelocity, FluidName, ImpactOffsetAverage);
 
 			// 쿨다운 설정
 			BoneEventCooldownTimers.Add(BoneIdx, BoneEventCooldown);

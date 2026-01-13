@@ -526,6 +526,10 @@ public:
 
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUConvexPlane>, ConvexPlanes)
 
+		// Bone transforms (for impact offset computation)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoneTransform>, BoneTransforms)
+		SHADER_PARAMETER(int32, BoneCount)
+
 		// Collision Feedback (for particle -> player interaction)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUCollisionFeedback>, CollisionFeedback)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, CollisionCounter)

@@ -79,7 +79,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnFluidForceUpdate, FVector, For
  * @param AverageVelocity 충돌 파티클들의 평균 속도 (Niagara 방향/강도용)
  * @param FluidName 충돌한 유체의 이름 (Preset의 FluidName, Switch on Name으로 분기)
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_FiveParams(FOnBoneParticleCollision, int32, BoneIndex, FName, BoneName, int32, ContactCount, FVector, AverageVelocity, FName, FluidName);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_SixParams(FOnBoneParticleCollision, int32, BoneIndex, FName, BoneName, int32, ContactCount, FVector, AverageVelocity, FName, FluidName, FVector, ImpactOffset);
 
 /**
  * 유체 상호작용 컴포넌트

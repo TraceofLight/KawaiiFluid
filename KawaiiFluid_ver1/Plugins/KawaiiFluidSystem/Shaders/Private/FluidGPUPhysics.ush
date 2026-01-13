@@ -359,7 +359,7 @@ uint ClearFlag(uint flags, uint flag)
 //=============================================================================
 // GPU Collision Feedback Structure (must match FGPUCollisionFeedback in C++)
 // Used for particle -> player interaction readback
-// 64 bytes total for drag-based force calculation
+// 80 bytes total for drag-based force calculation + impact offset
 //=============================================================================
 
 struct FGPUCollisionFeedback
@@ -383,6 +383,10 @@ struct FGPUCollisionFeedback
 	int ParticleActorID;     // 4 bytes - Unique ID of particle's owner actor (reserved)
 	int BoneIndex;           // 4 bytes - Bone index for per-bone force calculation (-1 = no bone)
 	int Padding1;            // 4 bytes - Alignment padding
+
+	// Row 5: 16 bytes
+	float3 ImpactOffset;     // 12 bytes - Impact position in bone-local space
+	int Padding2;            // 4 bytes - Alignment padding
 
 };
 

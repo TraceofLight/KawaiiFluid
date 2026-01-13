@@ -584,6 +584,10 @@ struct FGPUCollisionFeedback
 	int32 BoneIndex;              // 4 bytes - Bone index for per-bone force calculation (-1 = no bone)
 	int32 Padding1;               // 4 bytes - Alignment padding
 
+	// Row 5 (16 bytes) - Bone-local impact offset (for precise effect placement)
+	FVector3f ImpactOffset;       // 12 bytes - Impact position in bone-local space
+	int32 Padding2;               // 4 bytes - Alignment padding
+
 	FGPUCollisionFeedback()
 		: ParticleIndex(0)
 		, ColliderIndex(0)
@@ -597,6 +601,8 @@ struct FGPUCollisionFeedback
 		, ParticleActorID(0)
 		, BoneIndex(-1)
 		, Padding1(0)
+		, ImpactOffset(FVector3f::ZeroVector)
+		, Padding2(0)
 	{
 	}
 
@@ -606,7 +612,7 @@ struct FGPUCollisionFeedback
 	/** Get source Component ID */
 	int32 GetSourceComponentID() const { return ParticleSourceID; }
 };
-static_assert(sizeof(FGPUCollisionFeedback) == 64, "FGPUCollisionFeedback must be 64 bytes for GPU alignment");
+static_assert(sizeof(FGPUCollisionFeedback) == 80, "FGPUCollisionFeedback must be 80 bytes for GPU alignment");
 
 /**
  * GPU Collision Primitives Collection
