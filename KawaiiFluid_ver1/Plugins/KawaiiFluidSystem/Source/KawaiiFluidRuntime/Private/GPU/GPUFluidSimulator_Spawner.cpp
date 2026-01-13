@@ -7,8 +7,6 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
-
 //=============================================================================
 // GPU Particle Spawning (Thread-Safe)
 // Public API delegates to FGPUSpawnManager

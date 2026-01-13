@@ -18,7 +18,6 @@
 #include "HAL/IConsoleManager.h"  // For console command execution
 #include "Async/Async.h"  // For AsyncTask
 
-DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
 DEFINE_LOG_CATEGORY(LogGPUFluidSimulator);
 
 // =====================================================

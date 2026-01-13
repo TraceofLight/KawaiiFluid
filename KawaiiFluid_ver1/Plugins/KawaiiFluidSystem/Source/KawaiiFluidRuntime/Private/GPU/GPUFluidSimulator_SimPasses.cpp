@@ -6,8 +6,6 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
-
 //=============================================================================
 // Predict Positions Pass
 //=============================================================================

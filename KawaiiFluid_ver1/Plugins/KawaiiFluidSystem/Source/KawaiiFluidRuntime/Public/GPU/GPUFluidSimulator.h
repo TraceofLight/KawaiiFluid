@@ -12,6 +12,9 @@
 #include "Core/FluidAnisotropy.h"
 #include <atomic>
 
+// Log category
+DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
+
 // Forward declarations
 struct FFluidParticle;
 class FRDGBuilder;

@@ -6,8 +6,6 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
-
 // Boundary spatial hash constants for Flex-style adhesion
 static constexpr int32 BOUNDARY_HASH_SIZE = 65536;  // 2^16 cells
 static constexpr int32 BOUNDARY_MAX_PARTICLES_PER_CELL = 16;

@@ -6,8 +6,6 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
-
 //=============================================================================
 // Z-Order (Morton Code) Sorting Pipeline
 // Replaces hash table with cache-coherent sorted particle access

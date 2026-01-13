@@ -7,8 +7,6 @@
 #include "RenderGraphUtils.h"
 #include "RHIGPUReadback.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
-
 //=============================================================================
 // Collision Primitives Upload
 //=============================================================================

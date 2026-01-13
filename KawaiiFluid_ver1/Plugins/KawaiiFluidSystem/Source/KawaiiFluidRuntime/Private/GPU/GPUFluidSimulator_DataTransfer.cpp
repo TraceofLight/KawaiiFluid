@@ -5,8 +5,6 @@
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "Core/FluidParticle.h"
 
-DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
-
 //=============================================================================
 // Data Transfer (CPU <-> GPU)
 //=============================================================================
