@@ -1042,7 +1042,8 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 	}
 
 	// Anisotropy
-	if (CachedAnisotropyParams.bEnabled && CurrentParticleCount > 0)
+    bool bIsLastSubstep = (Params.SubstepIndex == Params.TotalSubsteps - 1);
+	if (bIsLastSubstep && CachedAnisotropyParams.bEnabled && CurrentParticleCount > 0)
 	{
 		const int32 UpdateInterval = FMath::Max(1, CachedAnisotropyParams.UpdateInterval);
 		++AnisotropyFrameCounter;
