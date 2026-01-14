@@ -478,6 +478,13 @@ public:
 	void AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests);
 
 	/**
+	 * Add multiple despawn requests at once (thread-safe, more efficient than individual calls)
+	 * @param WorldPos - Position to Remove Particle
+	 * @param Radius - Radius to remove Particles
+	 */
+	void AddDespawnRequest(const FVector& WorldPos, float Radius);
+
+	/**
 	 * Clear all pending spawn requests
 	 */
 	void ClearSpawnRequests();

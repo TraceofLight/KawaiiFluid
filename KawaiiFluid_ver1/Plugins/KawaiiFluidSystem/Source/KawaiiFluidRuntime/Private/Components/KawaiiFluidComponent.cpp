@@ -1038,21 +1038,28 @@ int32 UKawaiiFluidComponent::RemoveParticlesInRadius(const FVector& WorldCenter,
 	SimulationModule->Modify();
 #endif
 
-	float RadiusSq = Radius * Radius;
-
-	TArray<FFluidParticle>& Particles = SimulationModule->GetParticlesMutable();
-	int32 RemovedCount = 0;
-
-	for (int32 i = Particles.Num() - 1; i >= 0; --i)
+	if (bUseGPUSimulation)
 	{
-		if (FVector::DistSquared(Particles[i].Position, WorldCenter) <= RadiusSq)
-		{
-			Particles.RemoveAtSwap(i);
-			++RemovedCount;
-		}
+		SimulationModule->DespawnParticle(WorldCenter, Radius);
+		return -1;
 	}
+	else
+	{
+		float RadiusSq = Radius * Radius;
 
-	return RemovedCount;
+		TArray<FFluidParticle>& Particles = SimulationModule->GetParticlesMutable();
+		int32 RemovedCount = 0;
+
+		for (int32 i = Particles.Num() - 1; i >= 0; --i)
+		{
+			if (FVector::DistSquared(Particles[i].Position, WorldCenter) <= RadiusSq)
+			{
+				Particles.RemoveAtSwap(i);
+				++RemovedCount;
+			}
+		}
+		return RemovedCount;
+	}
 }
 
 void UKawaiiFluidComponent::ClearAllParticles()

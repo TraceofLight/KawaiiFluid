@@ -5,6 +5,7 @@
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
+#include "RHIGPUReadback.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGPUSpawnManager, Log, All);
 DEFINE_LOG_CATEGORY(LogGPUSpawnManager);
@@ -106,6 +107,30 @@ int32 FGPUSpawnManager::GetPendingSpawnCount() const
 	return PendingSpawnRequests.Num();
 }
 
+void FGPUSpawnManager::AddDespawnRequest(const FVector& Position, float Radius)
+{
+	FScopeLock Lock(&SpawnLock);
+
+	PendingDespawnRequests.Add(FGPUDespawnRequest(static_cast<FVector3f>(Position), Radius));
+}
+
+void FGPUSpawnManager::SwapDespawnBuffers()
+{
+	FScopeLock Lock(&DespawnLock);
+	
+	if (PendingDespawnRequests.Num() > 0)
+	{
+		ActiveDespawnRequests.Append(PendingDespawnRequests);
+		PendingDespawnRequests.Empty();
+	}
+}
+
+int32 FGPUSpawnManager::GetPendingDespawnCount() const
+{
+	FScopeLock Lock(&DespawnLock);
+	return PendingDespawnRequests.Num();
+}
+
 //=============================================================================
 // Render Thread API
 //=============================================================================
@@ -169,6 +194,199 @@ void FGPUSpawnManager::AddSpawnParticlesPass(
 
 	UE_LOG(LogGPUSpawnManager, Verbose, TEXT("SpawnParticlesPass: Spawning %d particles (NextID: %d)"),
 		ActiveSpawnRequests.Num(), NextParticleID.load());
+}
+
+void FGPUSpawnManager::AddDespawnPass(FRDGBuilder& GraphBuilder, FRDGBufferRef& InOutParticleBuffer,
+	int32& InOutParticleCount)
+{
+	if (ActiveDespawnRequests.Num() == 0)
+	{
+		return;
+	}
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FMarkDespawnCS> MarkDespawnCS(ShaderMap);
+
+	FRDGBufferRef DespawnRequestsBuffer = CreateStructuredBuffer
+	(
+		GraphBuilder,
+		TEXT("GPUFluidDespawnRequests"),
+		sizeof(FGPUDespawnRequest),
+		ActiveDespawnRequests.Num(),
+		ActiveDespawnRequests.GetData(),
+		ActiveDespawnRequests.Num() * sizeof(FGPUDespawnRequest),
+		ERDGInitialDataFlags::None
+		);
+
+	FRDGBufferRef AliveMaskBuffer = CreateStructuredBuffer(
+		GraphBuilder,
+		TEXT("GPUFluidOutAliveMask"),
+		sizeof(uint32),
+		InOutParticleCount,
+		nullptr,
+		0,
+		ERDGInitialDataFlags::None
+	);
+
+	// 제거할 파티클 마크
+	FMarkDespawnCS::FParameters* MarkPassParameters = GraphBuilder.AllocParameters<FMarkDespawnCS::FParameters>();
+	MarkPassParameters->DespawnRequests = GraphBuilder.CreateSRV(DespawnRequestsBuffer);
+	MarkPassParameters->Particles = GraphBuilder.CreateSRV(InOutParticleBuffer);
+	MarkPassParameters->OutAliveMask = GraphBuilder.CreateUAV(AliveMaskBuffer);
+	MarkPassParameters->DespawnRequestCount = ActiveDespawnRequests.Num();
+	MarkPassParameters->ParticleCount = InOutParticleCount;
+
+	const uint32 MarkPassNumGroups = FMath::DivideAndRoundUp(InOutParticleCount, FMarkDespawnCS::ThreadGroupSize);
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::Despawn_MarkDown(%d)", ActiveDespawnRequests.Num()),
+		MarkDespawnCS,
+		MarkPassParameters,
+		FIntVector(MarkPassNumGroups, 1, 1)
+	);
+
+	FRDGBufferRef PrefixSumsBuffer = CreateStructuredBuffer(
+	GraphBuilder,
+	TEXT("PrefixSums"),
+	sizeof(uint32),
+	InOutParticleCount,
+	nullptr,
+	0,
+	ERDGInitialDataFlags::None
+	);
+
+	FRDGBufferRef BlockSumsBuffer = CreateStructuredBuffer(
+		GraphBuilder,
+		TEXT("BlockSums"),
+		sizeof(uint32),
+		FMath::DivideAndRoundUp(InOutParticleCount, FPrefixSumBlockCS_RDG::ThreadGroupSize),
+		nullptr,
+		0,
+		ERDGInitialDataFlags::None
+	);
+
+	// 블록 별 프리픽스 계산
+	TShaderMapRef<FPrefixSumBlockCS_RDG> PrefixSumBlock(ShaderMap);
+	FPrefixSumBlockCS_RDG::FParameters* PrefixSumBlockParameters = GraphBuilder.AllocParameters<FPrefixSumBlockCS_RDG::FParameters>();
+	PrefixSumBlockParameters->MarkedFlags = GraphBuilder.CreateSRV(AliveMaskBuffer);
+	PrefixSumBlockParameters->PrefixSums = GraphBuilder.CreateUAV(PrefixSumsBuffer);
+	PrefixSumBlockParameters->BlockSums = GraphBuilder.CreateUAV(BlockSumsBuffer);
+	PrefixSumBlockParameters->ElementCount = InOutParticleCount;
+
+	const int32 PrefixSumBlockNumGroups = FMath::DivideAndRoundUp(InOutParticleCount, FPrefixSumBlockCS_RDG::ThreadGroupSize);
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::PrefixSumBlock"),
+		PrefixSumBlock,
+		PrefixSumBlockParameters,
+		FIntVector(PrefixSumBlockNumGroups, 1, 1)
+	);
+
+	// 블록 당 프리픽스 합 계산
+	TShaderMapRef<FScanBlockSumsCS_RDG> ScanBlockSums(ShaderMap);
+	FScanBlockSumsCS_RDG::FParameters* ScanBlockSumsParameters = GraphBuilder.AllocParameters<FScanBlockSumsCS_RDG::FParameters>();
+	ScanBlockSumsParameters->BlockSums = GraphBuilder.CreateUAV(BlockSumsBuffer);
+	ScanBlockSumsParameters->BlockCount = PrefixSumBlockNumGroups;
+
+	const int32 ScanBlockSumsNumGroups = FMath::DivideAndRoundUp(PrefixSumBlockNumGroups, FScanBlockSumsCS_RDG::ThreadGroupSize);
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::ScanBlockSums"),
+		ScanBlockSums,
+		ScanBlockSumsParameters,
+		FIntVector(ScanBlockSumsNumGroups, 1, 1)
+	);
+
+	// 모든 프리픽스에 블록 합 가산
+	TShaderMapRef<FAddBlockOffsetsCS_RDG> AddBlockOffsets(ShaderMap);
+	FAddBlockOffsetsCS_RDG::FParameters* AddBlockOffsetsParameters = GraphBuilder.AllocParameters<FAddBlockOffsetsCS_RDG::FParameters>();
+	AddBlockOffsetsParameters->PrefixSums = GraphBuilder.CreateUAV(PrefixSumsBuffer);
+	AddBlockOffsetsParameters->BlockSums = GraphBuilder.CreateUAV(BlockSumsBuffer);
+	AddBlockOffsetsParameters->ElementCount = InOutParticleCount;
+
+	const int32 AddBlockOffsetsNumGroups = FMath::DivideAndRoundUp(InOutParticleCount, FPrefixSumBlockCS_RDG::ThreadGroupSize);
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::AddBlockOffsets"),
+		AddBlockOffsets,
+		AddBlockOffsetsParameters,
+		FIntVector(AddBlockOffsetsNumGroups, 1, 1)
+	);
+
+
+	FRDGBufferRef CompactedParticlesBuffer = CreateStructuredBuffer(
+	GraphBuilder,
+	TEXT("CompactedParticles"),
+	sizeof(FGPUFluidParticle),
+	InOutParticleCount,
+	nullptr,
+	0,
+	ERDGInitialDataFlags::None
+	);
+
+	// 프리픽스를 통해 파티클 버퍼 최신화
+	TShaderMapRef<FCompactParticlesCS_RDG> Compact(ShaderMap);
+	FCompactParticlesCS_RDG::FParameters* CompactParameters = GraphBuilder.AllocParameters<FCompactParticlesCS_RDG::FParameters>();
+	CompactParameters->Particles = GraphBuilder.CreateSRV(InOutParticleBuffer);
+	CompactParameters->MarkedFlags = GraphBuilder.CreateSRV(AliveMaskBuffer);
+	CompactParameters->PrefixSums = GraphBuilder.CreateSRV(PrefixSumsBuffer);
+	CompactParameters->CompactedParticles = GraphBuilder.CreateUAV(CompactedParticlesBuffer);
+	CompactParameters->ParticleCount = InOutParticleCount;
+
+	const int32 CompactCSNumGroups = FMath::DivideAndRoundUp(InOutParticleCount, FPrefixSumBlockCS_RDG::ThreadGroupSize);
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::Compact"),
+		Compact,
+		CompactParameters,
+		FIntVector(CompactCSNumGroups, 1, 1)
+	);
+
+	// 버퍼 업데이트
+	InOutParticleBuffer = CompactedParticlesBuffer;
+
+	FRDGBufferRef TotalCountBuffer = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1),
+		TEXT("Despawn.TotalCount")
+	);
+	
+	// 파티클 카운트 비동기 리드백
+	TShaderMapRef<FWriteTotalCountCS_RDG> WriteTotalCount(ShaderMap);
+	FWriteTotalCountCS_RDG::FParameters* WriteTotalCountParameters = GraphBuilder.AllocParameters<FWriteTotalCountCS_RDG::FParameters>();
+	WriteTotalCountParameters->PrefixSums = GraphBuilder.CreateSRV(PrefixSumsBuffer);
+	WriteTotalCountParameters->MarkedFlags = GraphBuilder.CreateSRV(AliveMaskBuffer);
+	WriteTotalCountParameters->OutTotalCount = GraphBuilder.CreateUAV(TotalCountBuffer);
+	WriteTotalCountParameters->ParticleCount = InOutParticleCount;
+
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::WriteTotalCount"),
+		WriteTotalCount,
+		WriteTotalCountParameters,
+		FIntVector(1, 1, 1)
+	);
+
+	if (!ParticleCountReadback)
+	{
+		ParticleCountReadback = new FRHIGPUBufferReadback(TEXT("FluidParticleCountReadback"));
+	}
+	AddEnqueueCopyPass(GraphBuilder, ParticleCountReadback, TotalCountBuffer, 0);
+	bDespawnPassExecuted = true;
+}
+
+int32 FGPUSpawnManager::ProcessAsyncReadback()
+{
+	if (ParticleCountReadback && ParticleCountReadback->IsReady())
+	{
+		uint32* BufferData = static_cast<uint32*>(ParticleCountReadback->Lock(sizeof(uint32)));
+		int32 DeadCount = static_cast<int32>(BufferData[0]);
+
+		ParticleCountReadback->Unlock();
+
+		return DeadCount;
+	}
+
+	return -1;
 }
 
 void FGPUSpawnManager::OnSpawnComplete(int32 SpawnedCount)

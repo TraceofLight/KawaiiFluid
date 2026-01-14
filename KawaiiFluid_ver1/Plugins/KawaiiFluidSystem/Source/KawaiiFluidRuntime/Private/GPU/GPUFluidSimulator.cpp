@@ -732,8 +732,27 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		ParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticles"));
 	}
 
+	// Despawn Logic
+	if (SpawnManager.IsValid() && SpawnManager->HasPendingDespawnRequests())
+	{
+		SpawnManager->SwapDespawnBuffers();
+		SpawnManager->AddDespawnPass(GraphBuilder, ParticleBuffer, CurrentParticleCount);
+		SpawnManager->ClearActiveRequests();
+	}
+
+	// Async Readback
+	if (SpawnManager.IsValid())
+	{
+		int32 DeadCount = SpawnManager->ProcessAsyncReadback();
+		if (DeadCount != 0)
+		{ //이 새끼가 문제임
+			CurrentParticleCount -= DeadCount;
+			PreviousParticleCount = CurrentParticleCount;
+		}
+	}
+	
 	if (SpawnManager.IsValid()) SpawnManager->ClearActiveRequests();
-	return ParticleBuffer;
+		return ParticleBuffer;
 }
 
 FGPUFluidSimulator::FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStructures(
@@ -1142,6 +1161,14 @@ void FGPUFluidSimulator::AddSpawnRequest(const FVector3f& Position, const FVecto
 void FGPUFluidSimulator::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests)
 {
 	if (SpawnManager.IsValid()) { SpawnManager->AddSpawnRequests(Requests); }
+}
+
+void FGPUFluidSimulator::AddDespawnRequest(const FVector& WorldPos, float Radius)
+{
+	if (SpawnManager.IsValid())
+	{
+		SpawnManager->AddDespawnRequest(WorldPos, Radius);
+	}
 }
 
 void FGPUFluidSimulator::ClearSpawnRequests()

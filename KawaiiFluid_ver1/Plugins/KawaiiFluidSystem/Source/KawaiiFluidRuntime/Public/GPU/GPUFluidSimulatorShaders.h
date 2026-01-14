@@ -800,6 +800,196 @@ public:
 	}
 };
 
+
+//=============================================================================
+// Despawn Particles Compute Shader
+// GPU-based particle creation from spawn requests (eliminates CPU→GPU race condition)
+//=============================================================================
+class FMarkDespawnCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FMarkDespawnCS);
+	SHADER_USE_PARAMETER_STRUCT(FMarkDespawnCS, FGlobalShader);
+	
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		// Input: Spawn requests from CPU
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUDespawnRequest>, DespawnRequests)
+
+		// Output: Particle buffer to write new particles into
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, Particles)
+
+		// Atomic counter for particle count (RWStructuredBuffer<uint>)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, OutAliveMask)
+	
+		// Spawn parameters
+		SHADER_PARAMETER(int32, DespawnRequestCount)
+		SHADER_PARAMETER(int32, ParticleCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 64;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+class FPrefixSumBlockCS_RDG : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FPrefixSumBlockCS_RDG);
+	SHADER_USE_PARAMETER_STRUCT(FPrefixSumBlockCS_RDG, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, MarkedFlags)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, PrefixSums)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BlockSums)
+		SHADER_PARAMETER(int32, ElementCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Pass 2b: Scan Block Sums
+ * Scans the block sums for multi-block prefix sum
+ */
+class FScanBlockSumsCS_RDG : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FScanBlockSumsCS_RDG);
+	SHADER_USE_PARAMETER_STRUCT(FScanBlockSumsCS_RDG, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BlockSums)
+		SHADER_PARAMETER(int32, BlockCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Pass 2c: Add Block Offsets
+ * Adds block offsets to get final prefix sums
+ */
+class FAddBlockOffsetsCS_RDG : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FAddBlockOffsetsCS_RDG);
+	SHADER_USE_PARAMETER_STRUCT(FAddBlockOffsetsCS_RDG, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, PrefixSums)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BlockSums)
+		SHADER_PARAMETER(int32, ElementCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Pass 3: Compact
+ * Compacts marked particles into contiguous array
+ */
+class FCompactParticlesCS_RDG : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FCompactParticlesCS_RDG);
+	SHADER_USE_PARAMETER_STRUCT(FCompactParticlesCS_RDG, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, MarkedFlags)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, PrefixSums)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, CompactedParticles)
+		SHADER_PARAMETER(int32, ParticleCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Pass 4: Write Total Count
+ * Writes the total number of compacted particles
+ */
+class FWriteTotalCountCS_RDG : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FWriteTotalCountCS_RDG);
+	SHADER_USE_PARAMETER_STRUCT(FWriteTotalCountCS_RDG, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, PrefixSums)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, MarkedFlags)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, OutTotalCount)
+		SHADER_PARAMETER(int32, ParticleCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
 //=============================================================================
 // Extract Positions Compute Shader
 // Utility: Extract positions from particle buffer for spatial hash

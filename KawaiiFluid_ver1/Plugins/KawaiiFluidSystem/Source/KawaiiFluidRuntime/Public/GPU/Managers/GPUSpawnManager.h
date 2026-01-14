@@ -8,6 +8,7 @@
 #include "GPU/GPUFluidParticle.h"
 #include <atomic>
 
+class FRHIGPUBufferReadback;
 class FRDGBuilder;
 
 /**
@@ -62,6 +63,21 @@ public:
 
 	/** Check if there are pending spawn requests (lock-free) */
 	bool HasPendingSpawnRequests() const { return bHasPendingSpawnRequests.load(); }
+
+	/**
+	 * Add a despawn request (thread-safe)
+	 * @param Position - World position to despawn at
+	 * @param Radius - despawn radius
+	 */
+	void AddDespawnRequest(const FVector& Position, float Radius);
+	
+	void SwapDespawnBuffers();
+	
+	/** Get number of pending despawn requests (thread-safe) */
+	int32 GetPendingDespawnCount() const;
+
+	/** Check if there are pending despawn requests (lock-free) */
+	bool HasPendingDespawnRequests() const { return !PendingDespawnRequests.IsEmpty(); }
 
 	//=========================================================================
 	// Configuration
@@ -119,6 +135,22 @@ public:
 		int32 MaxParticleCount);
 
 	/**
+	 * Add despawn particles RDG pass
+	 * @param GraphBuilder - RDG builder
+	 * @param InOutParticleBuffer - Particle Buffer After Remove
+	 * @param InOutParticleCount - Particle Count After Remove
+	 */
+	void AddDespawnPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef& InOutParticleBuffer,
+	int32& InOutParticleCount);
+	
+	/**
+	 * Async Readback particle count pass
+	 */
+	int32 ProcessAsyncReadback();
+	
+	/**
 	 * Update next particle ID after spawning
 	 * @param SpawnedCount - Number of particles successfully spawned
 	 */
@@ -135,19 +167,31 @@ private:
 	//=========================================================================
 	// Double-Buffered Spawn Requests
 	//=========================================================================
-
-	// Game thread writes to PendingSpawnRequests
 	TArray<FGPUSpawnRequest> PendingSpawnRequests;
-
-	// Render thread reads from ActiveSpawnRequests
 	TArray<FGPUSpawnRequest> ActiveSpawnRequests;
-
-	// Lock for PendingSpawnRequests access (mutable for const methods)
 	mutable FCriticalSection SpawnLock;
 
 	// Lock-free flag for quick pending check
 	std::atomic<bool> bHasPendingSpawnRequests{false};
 
+	//=========================================================================
+	// Double-Buffered Despawn Requests
+	//=========================================================================
+	TArray<FGPUDespawnRequest> PendingDespawnRequests;
+	TArray<FGPUDespawnRequest> ActiveDespawnRequests;
+	mutable FCriticalSection DespawnLock;
+	
+	// Lock-free flag for quick pending check
+	std::atomic<bool> bHasPendingDespawnRequests{false};
+
+	//=========================================================================
+	// Async Readback Instance
+	//=========================================================================
+	FRHIGPUBufferReadback* ParticleCountReadback = nullptr;
+
+	// particle remove pass bool
+	bool bDespawnPassExecuted = false;
+	
 	//=========================================================================
 	// Particle ID Tracking
 	//=========================================================================

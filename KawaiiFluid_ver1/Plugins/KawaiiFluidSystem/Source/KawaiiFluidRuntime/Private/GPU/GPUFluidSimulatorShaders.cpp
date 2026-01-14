@@ -76,6 +76,29 @@ IMPLEMENT_GLOBAL_SHADER(FSpawnParticlesCS,
 	"/Plugin/KawaiiFluidSystem/Private/FluidSpawnParticles.usf",
 	"SpawnParticlesCS", SF_Compute);
 
+IMPLEMENT_GLOBAL_SHADER(FMarkDespawnCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnParticles.usf",
+	"MarkDespawnCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FPrefixSumBlockCS_RDG,
+	"/Plugin/KawaiiFluidSystem/Private/FluidPrefixSum.usf",
+	"PrefixSumBlockCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FScanBlockSumsCS_RDG,
+	"/Plugin/KawaiiFluidSystem/Private/FluidPrefixSum.usf",
+	"ScanBlockSumsCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FAddBlockOffsetsCS_RDG,
+	"/Plugin/KawaiiFluidSystem/Private/FluidPrefixSum.usf",
+	"AddBlockOffsetsCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FCompactParticlesCS_RDG,
+	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnParticles.usf",
+	"CompactParticlesCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FWriteTotalCountCS_RDG,
+	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnParticles.usf",
+	"WriteTotalCountCS", SF_Compute);
 //=============================================================================
 // Stream Compaction Shaders (Phase 2 - Per-Polygon Collision)
 //=============================================================================
