@@ -1134,6 +1134,9 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					AnisotropyParams.CellStartSRV = SpatialData.CellStartSRV;
 					AnisotropyParams.CellEndSRV = SpatialData.CellEndSRV;
 					AnisotropyParams.MortonBoundsMin = SimulationBoundsMin;
+					// CRITICAL: Pass GridResolutionPreset for correct Morton code calculation
+					// Without this, shader uses default Medium (7-bit) even when Large (8-bit) is configured
+					AnisotropyParams.GridResolutionPreset = ZOrderSortManager->GetGridResolutionPreset();
 				}
 
 				FFluidAnisotropyPassBuilder::AddAnisotropyPass(GraphBuilder, AnisotropyParams);
