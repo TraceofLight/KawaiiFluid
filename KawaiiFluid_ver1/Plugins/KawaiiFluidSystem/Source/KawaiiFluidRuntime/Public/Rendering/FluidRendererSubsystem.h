@@ -44,7 +44,7 @@ public:
 	void UnregisterRenderingModule(UKawaiiFluidRenderingModule* Module);
 
 	/** 등록된 모든 RenderingModule 반환 */
-	const TArray<UKawaiiFluidRenderingModule*>& GetAllRenderingModules() const { return RegisteredRenderingModules; }
+	const TArray<TObjectPtr<UKawaiiFluidRenderingModule>>& GetAllRenderingModules() const { return RegisteredRenderingModules; }
 
 	//========================================
 	// 렌더링 파라미터
@@ -96,7 +96,7 @@ public:
 private:
 	/** 등록된 RenderingModule들 */
 	UPROPERTY(Transient)
-	TArray<UKawaiiFluidRenderingModule*> RegisteredRenderingModules;
+	TArray<TObjectPtr<UKawaiiFluidRenderingModule>> RegisteredRenderingModules;
 
 	/** Scene View Extension (렌더링 파이프라인 인젝션) */
 	TSharedPtr<FFluidSceneViewExtension, ESPMode::ThreadSafe> ViewExtension;
@@ -197,11 +197,11 @@ public:
 private:
 	/** Actor that owns the HISM shadow component. */
 	UPROPERTY(Transient)
-	AActor* ShadowProxyActor = nullptr;
+	TObjectPtr<AActor> ShadowProxyActor = nullptr;
 
 	/** HISM component for instanced sphere shadow casting. */
 	UPROPERTY(Transient)
-	UHierarchicalInstancedStaticMeshComponent* ShadowInstanceComponent = nullptr;
+	TObjectPtr<UHierarchicalInstancedStaticMeshComponent> ShadowInstanceComponent = nullptr;
 
 	/** Sphere mesh used for shadow instances. */
 	UPROPERTY(Transient)

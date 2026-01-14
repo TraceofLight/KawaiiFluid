@@ -445,7 +445,7 @@ public:
 	void ClearColliders() { Colliders.Empty(); }
 
 	/** 등록된 콜라이더 목록 */
-	const TArray<UFluidCollider*>& GetColliders() const { return Colliders; }
+	const TArray<TObjectPtr<UFluidCollider>>& GetColliders() const { return Colliders; }
 	
 	//========================================
 	// SpatialHash (Independent 모드용)
@@ -699,11 +699,11 @@ private:
 
 	/** 등록된 콜라이더 */
 	UPROPERTY()
-	TArray<UFluidCollider*> Colliders;
+	TArray<TObjectPtr<UFluidCollider>> Colliders;
 
 	/** Override 적용된 런타임 Preset (Transient) */
 	UPROPERTY(Transient)
-	UKawaiiFluidPresetDataAsset* RuntimePreset = nullptr;
+	TObjectPtr<UKawaiiFluidPresetDataAsset> RuntimePreset = nullptr;
 
 	/** RuntimePreset 갱신 필요 플래그 */
 	bool bRuntimePresetDirty = true;

@@ -123,7 +123,7 @@ void FFluidSceneViewExtension::PreRenderViewFamily_RenderThread(
 	// 중복 처리 방지를 위해 처리된 RenderResource 추적
 	TSet<FKawaiiFluidRenderResource*> ProcessedResources;
 
-	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
+	const TArray<TObjectPtr<UKawaiiFluidRenderingModule>>& Modules = SubsystemPtr->GetAllRenderingModules();
 	for (UKawaiiFluidRenderingModule* Module : Modules)
 	{
 		if (!Module) continue;
@@ -440,7 +440,7 @@ void FFluidSceneViewExtension::PostRenderBasePassDeferred_RenderThread(
 	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> GBufferBatches;
 	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
 
-	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
+	const TArray<TObjectPtr<UKawaiiFluidRenderingModule>>& Modules = SubsystemPtr->GetAllRenderingModules();
 	for (UKawaiiFluidRenderingModule* Module : Modules)
 	{
 		if (!Module) continue;
@@ -635,7 +635,7 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> TranslucentBatches;
 	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
 
-	const TArray<UKawaiiFluidRenderingModule*>& Modules = SubsystemPtr->GetAllRenderingModules();
+	const TArray<TObjectPtr<UKawaiiFluidRenderingModule>>& Modules = SubsystemPtr->GetAllRenderingModules();
 	for (UKawaiiFluidRenderingModule* Module : Modules)
 	{
 		if (!Module) continue;

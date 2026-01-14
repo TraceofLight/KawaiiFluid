@@ -192,11 +192,11 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 
 	/** Registered colliders */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
-	TArray<UFluidCollider*> Colliders;
+	TArray<TObjectPtr<UFluidCollider>> Colliders;
 
 	/** Registered interaction components */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
-	TArray<UFluidInteractionComponent*> InteractionComponents;
+	TArray<TObjectPtr<UFluidInteractionComponent>> InteractionComponents;
 
 	/** World reference for collision queries */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
@@ -334,7 +334,7 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 struct FKawaiiFluidModuleBatchInfo
 {
 	/** Module that owns these particles */
-	UKawaiiFluidSimulationModule* Module = nullptr;
+	TObjectPtr<UKawaiiFluidSimulationModule> Module = nullptr;
 
 	/** Start index in merged buffer */
 	int32 StartIndex = 0;

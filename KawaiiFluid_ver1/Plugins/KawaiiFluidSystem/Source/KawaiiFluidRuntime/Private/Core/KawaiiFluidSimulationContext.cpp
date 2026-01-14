@@ -746,7 +746,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 		const bool bDebugLog = (++PerPolygonDebugCounter % 60 == 0);
 
 		// Collect Per-Polygon enabled interaction components FIRST
-		TArray<UFluidInteractionComponent*> PerPolygonInteractions;
+		TArray<TObjectPtr<UFluidInteractionComponent>> PerPolygonInteractions;
 		for (UFluidInteractionComponent* Interaction : Params.InteractionComponents)
 		{
 			if (Interaction && Interaction->IsPerPolygonCollisionEnabled())
@@ -1181,7 +1181,7 @@ void UKawaiiFluidSimulationContext::SolveDensityConstraints(
 	}
 }
 
-void UKawaiiFluidSimulationContext::CacheColliderShapes(const TArray<UFluidCollider*>& Colliders)
+void UKawaiiFluidSimulationContext::CacheColliderShapes(const TArray<TObjectPtr<UFluidCollider>>& Colliders)
 {
 	for (UFluidCollider* Collider : Colliders)
 	{
@@ -1194,7 +1194,7 @@ void UKawaiiFluidSimulationContext::CacheColliderShapes(const TArray<UFluidColli
 
 void UKawaiiFluidSimulationContext::HandleCollisions(
 	TArray<FFluidParticle>& Particles,
-	const TArray<UFluidCollider*>& Colliders,
+	const TArray<TObjectPtr<UFluidCollider>>& Colliders,
 	float SubstepDT)
 {
 	for (UFluidCollider* Collider : Colliders)
@@ -1836,7 +1836,7 @@ void UKawaiiFluidSimulationContext::ApplyViscosity(
 void UKawaiiFluidSimulationContext::ApplyAdhesion(
 	TArray<FFluidParticle>& Particles,
 	const UKawaiiFluidPresetDataAsset* Preset,
-	const TArray<UFluidCollider*>& Colliders)
+	const TArray<TObjectPtr<UFluidCollider>>& Colliders)
 {
 	if (AdhesionSolver.IsValid() && Preset->AdhesionStrength > 0.0f)
 	{
@@ -1959,7 +1959,7 @@ void UKawaiiFluidSimulationContext::ApplyShapeMatchingConstraint(
 
 void UKawaiiFluidSimulationContext::UpdateAttachedParticlePositions(
 	TArray<FFluidParticle>& Particles,
-	const TArray<UFluidInteractionComponent*>& InteractionComponents)
+	const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents)
 {
 	if (InteractionComponents.Num() == 0 || Particles.Num() == 0)
 	{

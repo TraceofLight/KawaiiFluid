@@ -198,7 +198,7 @@ protected:
 	/** 4. Handle collisions with registered colliders */
 	virtual void HandleCollisions(
 		TArray<FFluidParticle>& Particles,
-		const TArray<UFluidCollider*>& Colliders,
+		const TArray<TObjectPtr<UFluidCollider>>& Colliders,
 		float SubstepDT
 	);
 
@@ -251,7 +251,7 @@ protected:
 	virtual void ApplyAdhesion(
 		TArray<FFluidParticle>& Particles,
 		const UKawaiiFluidPresetDataAsset* Preset,
-		const TArray<UFluidCollider*>& Colliders
+		const TArray<TObjectPtr<UFluidCollider>>& Colliders
 	);
 
 	/** 9. Apply cohesion (surface tension between particles) */
@@ -284,11 +284,11 @@ protected:
 	/** Update attached particle positions (bone tracking) */
 	virtual void UpdateAttachedParticlePositions(
 		TArray<FFluidParticle>& Particles,
-		const TArray<UFluidInteractionComponent*>& InteractionComponents
+		const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents
 	);
 
 	/** Cache collider shapes (once per frame) */
-	virtual void CacheColliderShapes(const TArray<UFluidCollider*>& Colliders);
+	virtual void CacheColliderShapes(const TArray<TObjectPtr<UFluidCollider>>& Colliders);
 
 protected:
 	//========================================

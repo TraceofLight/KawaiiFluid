@@ -70,7 +70,7 @@ TSharedPtr<FSkeletalMeshBVH> FPerPolygonCollisionProcessor::CreateOrGetBVH(USkel
 	return nullptr;
 }
 
-void FPerPolygonCollisionProcessor::UpdateBVHCache(const TArray<UFluidInteractionComponent*>& InteractionComponents)
+void FPerPolygonCollisionProcessor::UpdateBVHCache(const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(PerPolygonCollision_UpdateBVHCache);
 
@@ -155,7 +155,7 @@ void FPerPolygonCollisionProcessor::UpdateBVHCache(const TArray<UFluidInteractio
 
 void FPerPolygonCollisionProcessor::ProcessCollisions(
 	const TArray<FGPUCandidateParticle>& Candidates,
-	const TArray<UFluidInteractionComponent*>& InteractionComponents,
+	const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents,
 	float ParticleRadius,
 	float AdhesionStrength,
 	float ContactOffset,
@@ -734,7 +734,7 @@ void FPerPolygonCollisionProcessor::TryAttachParticle(
 }
 
 void FPerPolygonCollisionProcessor::UpdateAttachedParticles(
-	const TArray<UFluidInteractionComponent*>& InteractionComponents,
+	const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents,
 	float DeltaTime,
 	TArray<FAttachedParticleUpdate>& OutUpdates)
 {

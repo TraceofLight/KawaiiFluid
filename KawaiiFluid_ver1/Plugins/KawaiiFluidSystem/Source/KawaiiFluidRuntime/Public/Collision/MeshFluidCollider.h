@@ -69,7 +69,7 @@ public:
 	UMeshFluidCollider();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Collider|Mesh")
-	UPrimitiveComponent* TargetMeshComponent;
+	TObjectPtr<UPrimitiveComponent> TargetMeshComponent;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Collider|Mesh")
 	bool bAutoFindMesh;

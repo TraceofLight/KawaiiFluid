@@ -276,7 +276,7 @@ void UFluidInteractionComponent::UpdateAttachedParticleCount()
 	if (TargetSubsystem)
 	{
 		// Iterate all Modules from subsystem
-		for (auto* Module : TargetSubsystem->GetAllModules())
+		for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 		{
 			if (!Module) continue;
 			for (const FFluidParticle& Particle : Module->GetParticles())
@@ -387,7 +387,7 @@ void UFluidInteractionComponent::DetectCollidingParticles()
 	{
 		TArray<int32> CandidateIndices;
 
-		for (auto* Module : TargetSubsystem->GetAllModules())
+		for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 		{
 			if (!Module) continue;
 
@@ -493,7 +493,7 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 
 	// GPUSimulator에서 피드백 가져오기 (첫 번째 GPU 모드 모듈에서)
 	FGPUFluidSimulator* GPUSimulator = nullptr;
-	for (auto* Module : TargetSubsystem->GetAllModules())
+for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (Module && Module->GetGPUSimulator())
 		{
@@ -735,7 +735,7 @@ void UFluidInteractionComponent::EnableGPUCollisionFeedbackIfNeeded()
 	}
 
 	// 모든 GPU 모듈에서 피드백 활성화
-	for (auto* Module : TargetSubsystem->GetAllModules())
+for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (Module)
 		{

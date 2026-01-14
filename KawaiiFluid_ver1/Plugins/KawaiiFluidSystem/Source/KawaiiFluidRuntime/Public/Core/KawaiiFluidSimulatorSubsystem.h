@@ -103,7 +103,7 @@ public:
 	void UnregisterModule(UKawaiiFluidSimulationModule* Module);
 
 	/** Get all registered modules */
-	const TArray<UKawaiiFluidSimulationModule*>& GetAllModules() const { return AllModules; }
+	const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& GetAllModules() const { return AllModules; }
 
 	//========================================
 	// Volume Registration
@@ -116,7 +116,7 @@ public:
 	void UnregisterVolumeComponent(UKawaiiFluidSimulationVolumeComponent* VolumeComponent);
 
 	/** Get all registered volume components */
-	const TArray<UKawaiiFluidSimulationVolumeComponent*>& GetAllVolumeComponents() const { return AllVolumeComponents; }
+	const TArray<TObjectPtr<UKawaiiFluidSimulationVolumeComponent>>& GetAllVolumeComponents() const { return AllVolumeComponents; }
 
 	//========================================
 	// Component Registration (for backward compatibility)
@@ -129,7 +129,7 @@ public:
 	void UnregisterComponent(UKawaiiFluidComponent* Component);
 
 	/** Get all registered components (deprecated) */
-	const TArray<UKawaiiFluidComponent*>& GetAllFluidComponents() const { return AllFluidComponents; }
+	const TArray<TObjectPtr<UKawaiiFluidComponent>>& GetAllFluidComponents() const { return AllFluidComponents; }
 
 	//========================================
 	// Global Colliders
@@ -144,7 +144,7 @@ public:
 	void UnregisterGlobalCollider(UFluidCollider* Collider);
 
 	/** Get all global colliders */
-	const TArray<UFluidCollider*>& GetGlobalColliders() const { return GlobalColliders; }
+	const TArray<TObjectPtr<UFluidCollider>>& GetGlobalColliders() const { return GlobalColliders; }
 
 	//========================================
 	// Global Interaction Components
@@ -157,7 +157,7 @@ public:
 	void UnregisterGlobalInteractionComponent(UFluidInteractionComponent* Component);
 
 	/** Get all global interaction components */
-	const TArray<UFluidInteractionComponent*>& GetGlobalInteractionComponents() const { return GlobalInteractionComponents; }
+	const TArray<TObjectPtr<UFluidInteractionComponent>>& GetGlobalInteractionComponents() const { return GlobalInteractionComponents; }
 
 	//========================================
 	// Query API
@@ -213,7 +213,7 @@ private:
 
 	/** All registered simulation modules */
 	UPROPERTY()
-	TArray<UKawaiiFluidSimulationModule*> AllModules;
+	TArray<TObjectPtr<UKawaiiFluidSimulationModule>> AllModules;
 
 	//========================================
 	// Volume Component Management
@@ -221,7 +221,7 @@ private:
 
 	/** All registered simulation volume components */
 	UPROPERTY()
-	TArray<UKawaiiFluidSimulationVolumeComponent*> AllVolumeComponents;
+	TArray<TObjectPtr<UKawaiiFluidSimulationVolumeComponent>> AllVolumeComponents;
 
 	//========================================
 	// Component Management (Deprecated)
@@ -229,15 +229,15 @@ private:
 
 	/** All registered modular components (deprecated - kept for backward compatibility) */
 	UPROPERTY()
-	TArray<UKawaiiFluidComponent*> AllFluidComponents;
+	TArray<TObjectPtr<UKawaiiFluidComponent>> AllFluidComponents;
 
 	/** Global colliders */
 	UPROPERTY()
-	TArray<UFluidCollider*> GlobalColliders;
+	TArray<TObjectPtr<UFluidCollider>> GlobalColliders;
 
 	/** Global interaction components */
 	UPROPERTY()
-	TArray<UFluidInteractionComponent*> GlobalInteractionComponents;
+	TArray<TObjectPtr<UFluidInteractionComponent>> GlobalInteractionComponents;
 
 	/** Context cache (Preset + SimulationMode -> Instance)
 	 *  Same Preset can have different Contexts for GPU vs CPU simulation
@@ -287,14 +287,14 @@ private:
 	void SimulateBatchedFluidComponents(float DeltaTime);
 
 	/** Group modules by (Preset + SimulationMode) - allows GPU/CPU mixing with same Preset */
-	TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>> GroupModulesByContext() const;
+	TMap<FContextCacheKey, TArray<TObjectPtr<UKawaiiFluidSimulationModule>>> GroupModulesByContext() const;
 
 	/** Merge particles from modules */
-	void MergeModuleParticles(const TArray<UKawaiiFluidSimulationModule*>& Modules);
+	void MergeModuleParticles(const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules);
 
 	/** Split particles back to modules */
-	void SplitModuleParticles(const TArray<UKawaiiFluidSimulationModule*>& Modules);
+	void SplitModuleParticles(const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules);
 
 	/** Build merged params from modules */
-	FKawaiiFluidSimulationParams BuildMergedModuleSimulationParams(const TArray<UKawaiiFluidSimulationModule*>& Modules);
+	FKawaiiFluidSimulationParams BuildMergedModuleSimulationParams(const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules);
 };

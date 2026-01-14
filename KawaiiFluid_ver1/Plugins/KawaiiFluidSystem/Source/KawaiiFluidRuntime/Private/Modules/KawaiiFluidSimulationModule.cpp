@@ -235,7 +235,7 @@ UKawaiiFluidPresetDataAsset* UKawaiiFluidSimulationModule::GetEffectivePreset()
 		UpdateRuntimePreset();
 	}
 
-	return RuntimePreset ? RuntimePreset : Preset.Get();
+	return RuntimePreset.Get() ? RuntimePreset.Get() : Preset.Get();
 }
 
 void UKawaiiFluidSimulationModule::UpdateRuntimePreset()

@@ -225,7 +225,7 @@ void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePosit
 	if (++DebugCounter % 300 == 1)
 	{
 		UE_LOG(LogTemp, Log, TEXT("VSM UpdateShadowInstances: bEnable=%d, NumParticles=%d, Actor=%p, HISM=%p"),
-			bEnableVSMIntegration, NumParticles, ShadowProxyActor, ShadowInstanceComponent);
+			bEnableVSMIntegration, NumParticles, ShadowProxyActor.Get(), ShadowInstanceComponent.Get());
 	}
 
 	// VSM 비활성화 시 early return

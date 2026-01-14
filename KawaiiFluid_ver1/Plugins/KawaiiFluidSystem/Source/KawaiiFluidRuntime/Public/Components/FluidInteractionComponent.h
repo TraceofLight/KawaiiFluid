@@ -97,7 +97,7 @@ public:
 
 	/** Cached subsystem reference */
 	UPROPERTY(Transient)
-	UKawaiiFluidSimulatorSubsystem* TargetSubsystem;
+	TObjectPtr<UKawaiiFluidSimulatorSubsystem> TargetSubsystem;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction")
 	bool bCanAttachFluid;
@@ -495,7 +495,7 @@ protected:
 
 private:
 	UPROPERTY()
-	UMeshFluidCollider* AutoCollider;
+	TObjectPtr<UMeshFluidCollider> AutoCollider;
 
 	/** 이전 프레임 충돌 상태 */
 	bool bWasColliding = false;

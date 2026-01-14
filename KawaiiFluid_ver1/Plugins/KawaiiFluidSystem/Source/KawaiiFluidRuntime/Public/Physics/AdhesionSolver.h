@@ -30,7 +30,7 @@ public:
 	 */
 	void Apply(
 		TArray<FFluidParticle>& Particles,
-		const TArray<UFluidCollider*>& Colliders,
+		const TArray<TObjectPtr<UFluidCollider>>& Colliders,
 		float AdhesionStrength,
 		float AdhesionRadius,
 		float DetachThreshold,

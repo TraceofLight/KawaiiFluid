@@ -506,13 +506,13 @@ void UKawaiiFluidSimulatorSubsystem::SimulateIndependentFluidComponents(float De
 void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaTime)
 {
 	// Group modules by (Preset + SimulationMode) - allows GPU/CPU mixing
-	TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>> ContextGroups = GroupModulesByContext();
+	TMap<FContextCacheKey, TArray<TObjectPtr<UKawaiiFluidSimulationModule>>> ContextGroups = GroupModulesByContext();
 
 	// Process each context group
 	for (auto& Pair : ContextGroups)
 	{
 		const FContextCacheKey& CacheKey = Pair.Key;
-		TArray<UKawaiiFluidSimulationModule*>& Modules = Pair.Value;
+		TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules = Pair.Value;
 
 		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
 		if (!Preset || Modules.Num() == 0)
@@ -605,10 +605,10 @@ void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaT
 	}
 }
 
-TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>>
+TMap<FContextCacheKey, TArray<TObjectPtr<UKawaiiFluidSimulationModule>>>
 UKawaiiFluidSimulatorSubsystem::GroupModulesByContext() const
 {
-	TMap<FContextCacheKey, TArray<UKawaiiFluidSimulationModule*>> Result;
+	TMap<FContextCacheKey, TArray<TObjectPtr<UKawaiiFluidSimulationModule>>> Result;
 
 	for (UKawaiiFluidSimulationModule* Module : AllModules)
 	{
@@ -643,7 +643,7 @@ UKawaiiFluidSimulatorSubsystem::GroupModulesByContext() const
 	return Result;
 }
 
-void UKawaiiFluidSimulatorSubsystem::MergeModuleParticles(const TArray<UKawaiiFluidSimulationModule*>& Modules)
+void UKawaiiFluidSimulatorSubsystem::MergeModuleParticles(const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules)
 {
 	// Calculate total particle count
 	int32 TotalParticles = 0;
@@ -684,7 +684,7 @@ void UKawaiiFluidSimulatorSubsystem::MergeModuleParticles(const TArray<UKawaiiFl
 	}
 }
 
-void UKawaiiFluidSimulatorSubsystem::SplitModuleParticles(const TArray<UKawaiiFluidSimulationModule*>& Modules)
+void UKawaiiFluidSimulatorSubsystem::SplitModuleParticles(const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules)
 {
 	// Copy particles back from merged buffer
 	for (const FKawaiiFluidModuleBatchInfo& Info : ModuleBatchInfos)
@@ -712,7 +712,7 @@ void UKawaiiFluidSimulatorSubsystem::SplitModuleParticles(const TArray<UKawaiiFl
 }
 
 FKawaiiFluidSimulationParams UKawaiiFluidSimulatorSubsystem::BuildMergedModuleSimulationParams(
-	const TArray<UKawaiiFluidSimulationModule*>& Modules)
+	const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules)
 {
 	FKawaiiFluidSimulationParams Params;
 	Params.World = GetWorld();

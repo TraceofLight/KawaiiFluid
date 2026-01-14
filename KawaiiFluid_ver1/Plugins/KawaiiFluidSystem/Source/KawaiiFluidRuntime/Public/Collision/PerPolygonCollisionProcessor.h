@@ -40,7 +40,7 @@ public:
 	 */
 	void ProcessCollisions(
 		const TArray<FGPUCandidateParticle>& Candidates,
-		const TArray<UFluidInteractionComponent*>& InteractionComponents,
+		const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents,
 		float ParticleRadius,
 		float AdhesionStrength,
 		float ContactOffset,
@@ -55,7 +55,7 @@ public:
 	 * @param OutUpdates - Output position updates for GPU
 	 */
 	void UpdateAttachedParticles(
-		const TArray<UFluidInteractionComponent*>& InteractionComponents,
+		const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents,
 		float DeltaTime,
 		TArray<FAttachedParticleUpdate>& OutUpdates
 	);
@@ -65,7 +65,7 @@ public:
 	 * Creates new BVH for components without one, updates skinned positions for existing ones
 	 * @param InteractionComponents - Components to update
 	 */
-	void UpdateBVHCache(const TArray<UFluidInteractionComponent*>& InteractionComponents);
+	void UpdateBVHCache(const TArray<TObjectPtr<UFluidInteractionComponent>>& InteractionComponents);
 
 	/**
 	 * Clear all cached BVH data
