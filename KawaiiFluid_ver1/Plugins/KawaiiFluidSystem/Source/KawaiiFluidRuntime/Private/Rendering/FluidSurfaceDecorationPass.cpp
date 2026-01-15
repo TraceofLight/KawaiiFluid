@@ -28,6 +28,7 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		SHADER_PARAMETER_RDG_TEXTURE(Texture2D, AccumulatedFlowTexture)  // Accumulated flow offset in world units (RDG)
 		SHADER_PARAMETER_SAMPLER(SamplerState, PointClampSampler)
 		SHADER_PARAMETER_SAMPLER(SamplerState, BilinearWrapSampler)
+		SHADER_PARAMETER_SAMPLER(SamplerState, BilinearMirrorSampler)  // For mirror addressing mode
 		SHADER_PARAMETER_SAMPLER(SamplerState, BilinearClampSampler)  // For screen-space textures
 
 		// Decoration textures (non-RDG, use engine textures as fallback)
@@ -62,12 +63,14 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		SHADER_PARAMETER(float, FoamIntensity)
 		SHADER_PARAMETER(float, FoamTilingScale)
 		SHADER_PARAMETER(int32, bWaveCrestFoam)
+		SHADER_PARAMETER(int32, FoamAddressingMode)  // 0 = Wrap, 1 = Mirror
 
 		// Emissive
 		SHADER_PARAMETER(int32, bEmissiveEnabled)
 		SHADER_PARAMETER(FLinearColor, EmissiveColor)
 		SHADER_PARAMETER(float, EmissiveIntensity)
 		SHADER_PARAMETER(float, CrackTilingScale)
+		SHADER_PARAMETER(int32, EmissiveAddressingMode)  // 0 = Wrap, 1 = Mirror
 		SHADER_PARAMETER(int32, bTemperatureMode)
 		SHADER_PARAMETER(float, MaxTemperatureVelocity)
 		SHADER_PARAMETER(float, MinEmissive)
@@ -83,6 +86,7 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		// Primary Layer
 		SHADER_PARAMETER(int32, bPrimaryLayerEnabled)
 		SHADER_PARAMETER(float, PrimaryTilingScale)
+		SHADER_PARAMETER(int32, PrimaryAddressingMode)  // 0 = Wrap, 1 = Mirror
 		SHADER_PARAMETER(float, PrimaryOpacity)
 		SHADER_PARAMETER(float, PrimaryNormalZThreshold)
 		SHADER_PARAMETER(float, PrimaryFlowInfluence)
@@ -91,6 +95,7 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		// Secondary Layer
 		SHADER_PARAMETER(int32, bSecondaryLayerEnabled)
 		SHADER_PARAMETER(float, SecondaryTilingScale)
+		SHADER_PARAMETER(int32, SecondaryAddressingMode)  // 0 = Wrap, 1 = Mirror
 		SHADER_PARAMETER(float, SecondaryOpacity)
 		SHADER_PARAMETER(float, SecondaryNormalZThreshold)
 
@@ -193,6 +198,7 @@ void RenderFluidSurfaceDecorationPass(
 	PassParameters->SceneColorTexture = SceneColorTexture;
 	PassParameters->PointClampSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp>::GetRHI();
 	PassParameters->BilinearWrapSampler = TStaticSamplerState<SF_Bilinear, AM_Wrap, AM_Wrap>::GetRHI();
+	PassParameters->BilinearMirrorSampler = TStaticSamplerState<SF_Bilinear, AM_Mirror, AM_Mirror>::GetRHI();
 	PassParameters->BilinearClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp>::GetRHI();
 
 	// Decoration textures (non-RDG) - use engine global textures as fallback
@@ -282,12 +288,14 @@ void RenderFluidSurfaceDecorationPass(
 	PassParameters->FoamIntensity = Params.Foam.Intensity;
 	PassParameters->FoamTilingScale = Params.Foam.TilingScale;
 	PassParameters->bWaveCrestFoam = Params.Foam.bWaveCrestFoam ? 1 : 0;
+	PassParameters->FoamAddressingMode = static_cast<int32>(Params.Foam.AddressingMode);
 
 	// Emissive (auto-enable if texture is assigned)
 	PassParameters->bEmissiveEnabled = (Params.Emissive.bEnabled || bEmissiveHasTexture) ? 1 : 0;
 	PassParameters->EmissiveColor = Params.Emissive.EmissiveColor;
 	PassParameters->EmissiveIntensity = Params.Emissive.Intensity;
 	PassParameters->CrackTilingScale = Params.Emissive.CrackTilingScale;
+	PassParameters->EmissiveAddressingMode = static_cast<int32>(Params.Emissive.AddressingMode);
 	PassParameters->bTemperatureMode = Params.Emissive.bTemperatureMode ? 1 : 0;
 	PassParameters->MaxTemperatureVelocity = Params.Emissive.MaxTemperatureVelocity;
 	PassParameters->MinEmissive = Params.Emissive.MinEmissive;
@@ -304,6 +312,7 @@ void RenderFluidSurfaceDecorationPass(
 	// Primary Layer (auto-enable if texture is assigned)
 	PassParameters->bPrimaryLayerEnabled = (Params.PrimaryLayer.bEnabled || bPrimaryHasTexture) ? 1 : 0;
 	PassParameters->PrimaryTilingScale = Params.PrimaryLayer.TilingScale;
+	PassParameters->PrimaryAddressingMode = static_cast<int32>(Params.PrimaryLayer.AddressingMode);
 	PassParameters->PrimaryOpacity = Params.PrimaryLayer.Opacity;
 	PassParameters->PrimaryNormalZThreshold = Params.PrimaryLayer.NormalZThreshold;
 	PassParameters->PrimaryFlowInfluence = Params.PrimaryLayer.FlowInfluence;
@@ -312,6 +321,7 @@ void RenderFluidSurfaceDecorationPass(
 	// Secondary Layer (auto-enable if texture is assigned)
 	PassParameters->bSecondaryLayerEnabled = (Params.SecondaryLayer.bEnabled || bSecondaryHasTexture) ? 1 : 0;
 	PassParameters->SecondaryTilingScale = Params.SecondaryLayer.TilingScale;
+	PassParameters->SecondaryAddressingMode = static_cast<int32>(Params.SecondaryLayer.AddressingMode);
 	PassParameters->SecondaryOpacity = Params.SecondaryLayer.Opacity;
 	PassParameters->SecondaryNormalZThreshold = Params.SecondaryLayer.NormalZThreshold;
 

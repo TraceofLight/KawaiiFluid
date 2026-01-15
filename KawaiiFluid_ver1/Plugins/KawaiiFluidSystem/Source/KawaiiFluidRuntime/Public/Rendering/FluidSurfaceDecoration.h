@@ -7,6 +7,20 @@
 #include "FluidSurfaceDecoration.generated.h"
 
 /**
+ * Texture Addressing Mode for UV coordinates.
+ * Controls how textures are sampled when UV goes outside [0,1] range.
+ */
+UENUM(BlueprintType)
+enum class ETextureAddressingMode : uint8
+{
+	/** Repeat the texture (default tiling) */
+	Wrap UMETA(DisplayName = "Wrap (Repeat)"),
+
+	/** Mirror the texture at boundaries (like decals) */
+	Mirror UMETA(DisplayName = "Mirror")
+};
+
+/**
  * Surface Decoration Layer
  * Defines a single texture layer to overlay on the fluid surface.
  */
@@ -22,6 +36,10 @@ struct KAWAIIFLUIDRUNTIME_API FSurfaceDecorationLayer
 	/** Layer texture (albedo/pattern) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
 	TObjectPtr<UTexture2D> Texture = nullptr;
+
+	/** UV addressing mode when texture coordinates exceed [0,1] range */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer", meta = (EditCondition = "Texture != nullptr"))
+	ETextureAddressingMode AddressingMode = ETextureAddressingMode::Wrap;
 
 	/** Normal map for this layer (optional) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
@@ -68,6 +86,10 @@ struct KAWAIIFLUIDRUNTIME_API FFoamSettings
 	/** Foam texture (noise-based pattern) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foam", meta = (EditCondition = "bEnabled"))
 	TObjectPtr<UTexture2D> FoamTexture = nullptr;
+
+	/** UV addressing mode when texture coordinates exceed [0,1] range */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foam", meta = (EditCondition = "bEnabled && FoamTexture != nullptr"))
+	ETextureAddressingMode AddressingMode = ETextureAddressingMode::Wrap;
 
 	/** Foam color */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Foam", meta = (EditCondition = "bEnabled"))
@@ -122,6 +144,10 @@ struct KAWAIIFLUIDRUNTIME_API FEmissiveSettings
 	/** Crack/pattern texture that reveals emissive underneath */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emissive", meta = (EditCondition = "bEnabled"))
 	TObjectPtr<UTexture2D> CrackTexture = nullptr;
+
+	/** UV addressing mode when texture coordinates exceed [0,1] range */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emissive", meta = (EditCondition = "bEnabled && CrackTexture != nullptr"))
+	ETextureAddressingMode AddressingMode = ETextureAddressingMode::Wrap;
 
 	/** Crack texture tiling scale (0.01 = 1 tile per 100 units/1m, 0.1 = 1 tile per 10 units) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emissive", meta = (EditCondition = "bEnabled", ClampMin = "0.0001", ClampMax = "1.0"))

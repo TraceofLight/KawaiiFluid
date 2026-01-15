@@ -15,6 +15,7 @@ Texture2D<float> ThicknessTexture;
 Texture2D<float4> SceneColorTexture;
 SamplerState PointClampSampler;
 SamplerState BilinearWrapSampler;
+SamplerState BilinearMirrorSampler;
 
 //=============================================================================
 // Decoration Textures
@@ -57,12 +58,14 @@ float FoamVelocityThreshold;
 float FoamIntensity;
 float FoamTilingScale;
 int bWaveCrestFoam;
+int FoamAddressingMode;  // 0 = Wrap (repeat), 1 = Mirror
 
 // Emissive
 int bEmissiveEnabled;
 float4 EmissiveColor;
 float EmissiveIntensity;
 float CrackTilingScale;
+int EmissiveAddressingMode;  // 0 = Wrap (repeat), 1 = Mirror
 int bTemperatureMode;
 float MaxTemperatureVelocity;
 float MinEmissive;
@@ -78,6 +81,7 @@ float FlowDistortionStrength;
 // Primary Layer
 int bPrimaryLayerEnabled;
 float PrimaryTilingScale;
+int PrimaryAddressingMode;  // 0 = Wrap (repeat), 1 = Mirror
 float PrimaryOpacity;
 float PrimaryNormalZThreshold;
 float PrimaryFlowInfluence;
@@ -86,6 +90,7 @@ float2 PrimaryScrollSpeed;
 // Secondary Layer
 int bSecondaryLayerEnabled;
 float SecondaryTilingScale;
+int SecondaryAddressingMode;  // 0 = Wrap (repeat), 1 = Mirror
 float SecondaryOpacity;
 float SecondaryNormalZThreshold;
 
@@ -195,6 +200,66 @@ float2 FlowUV_Legacy(float2 BaseUV, float2 FlowDir, float Phase)
 {
 	float Progress = frac(Time * FlowSpeed + Phase);
 	return BaseUV + FlowDir * Progress * FlowDistortionStrength;
+}
+
+// Sample foam texture with addressing mode support
+float4 SampleFoamTexture(float2 UV)
+{
+	if (FoamAddressingMode == 1)
+	{
+		// Mirror addressing mode
+		return FoamTexture.SampleLevel(BilinearMirrorSampler, UV, 0);
+	}
+	else
+	{
+		// Wrap (repeat) addressing mode (default)
+		return FoamTexture.SampleLevel(BilinearWrapSampler, UV, 0);
+	}
+}
+
+// Sample emissive crack texture with addressing mode support
+float4 SampleEmissiveCrackTexture(float2 UV)
+{
+	if (EmissiveAddressingMode == 1)
+	{
+		// Mirror addressing mode
+		return EmissiveCrackTexture.SampleLevel(BilinearMirrorSampler, UV, 0);
+	}
+	else
+	{
+		// Wrap (repeat) addressing mode (default)
+		return EmissiveCrackTexture.SampleLevel(BilinearWrapSampler, UV, 0);
+	}
+}
+
+// Sample primary layer texture with addressing mode support
+float4 SamplePrimaryLayerTexture(float2 UV)
+{
+	if (PrimaryAddressingMode == 1)
+	{
+		// Mirror addressing mode
+		return PrimaryLayerTexture.SampleLevel(BilinearMirrorSampler, UV, 0);
+	}
+	else
+	{
+		// Wrap (repeat) addressing mode (default)
+		return PrimaryLayerTexture.SampleLevel(BilinearWrapSampler, UV, 0);
+	}
+}
+
+// Sample secondary layer texture with addressing mode support
+float4 SampleSecondaryLayerTexture(float2 UV)
+{
+	if (SecondaryAddressingMode == 1)
+	{
+		// Mirror addressing mode
+		return SecondaryLayerTexture.SampleLevel(BilinearMirrorSampler, UV, 0);
+	}
+	else
+	{
+		// Wrap (repeat) addressing mode (default)
+		return SecondaryLayerTexture.SampleLevel(BilinearWrapSampler, UV, 0);
+	}
 }
 
 // Compute foam intensity based on various factors
@@ -373,9 +438,9 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			float2 FoamUV1 = WorldUV * FoamTilingScale - FoamFlowOffset;
 			float2 FoamUV2 = WorldUV * FoamTilingScale - FoamFlowOffset * 0.5;
 
-			// Sample foam (single projection)
-			float4 FoamSample1 = FoamTexture.SampleLevel(BilinearWrapSampler, FoamUV1, 0);
-			float4 FoamSample2 = FoamTexture.SampleLevel(BilinearWrapSampler, FoamUV2, 0);
+			// Sample foam (single projection) with addressing mode support
+			float4 FoamSample1 = SampleFoamTexture(FoamUV1);
+			float4 FoamSample2 = SampleFoamTexture(FoamUV2);
 
 			// Dual-phase blend
 			float4 FoamSample = lerp(FoamSample1, FoamSample2, BlendPhase);
@@ -412,8 +477,8 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		// Subtract flow offset so texture moves with flow direction
 		float2 CrackUV = WorldUV * CrackTilingScale - CrackFlowOffset;
 
-		// Sample crack texture (single projection)
-		float4 CrackSample = EmissiveCrackTexture.SampleLevel(BilinearWrapSampler, CrackUV, 0);
+		// Sample crack texture (single projection) with addressing mode support
+		float4 CrackSample = SampleEmissiveCrackTexture(CrackUV);
 
 		// Crack texture: dark areas = cracks = emissive visible
 		float CrackMask = 1.0 - CrackSample.r;
@@ -460,8 +525,8 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		// Subtract FlowOffset so texture moves in the direction of flow
 		float2 PrimaryUV = WorldUV * PrimaryTilingScale - FlowOffset + ScrollOffset;
 
-		// Sample texture (single projection)
-		float4 LayerSample = PrimaryLayerTexture.SampleLevel(BilinearWrapSampler, PrimaryUV, 0);
+		// Sample texture (single projection) with addressing mode support
+		float4 LayerSample = SamplePrimaryLayerTexture(PrimaryUV);
 
 		// Use texture alpha if available (> 0), otherwise use full opacity
 		float TextureAlpha = LayerSample.a > 0.001 ? LayerSample.a : 1.0;
@@ -479,8 +544,8 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		// Z-axis projection UV (XY plane)
 		float2 SecondaryUV = WorldUV * SecondaryTilingScale;
 
-		// Sample texture (single projection)
-		float4 LayerSample = SecondaryLayerTexture.SampleLevel(BilinearWrapSampler, SecondaryUV, 0);
+		// Sample texture (single projection) with addressing mode support
+		float4 LayerSample = SampleSecondaryLayerTexture(SecondaryUV);
 
 		// Use texture alpha if available (> 0), otherwise use full opacity
 		float TextureAlpha = LayerSample.a > 0.001 ? LayerSample.a : 1.0;
