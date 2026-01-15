@@ -14,6 +14,7 @@
 #include "Collision/PerPolygonCollisionProcessor.h"
 #include "Components/FluidInteractionComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Async/Async.h"
 #include "RenderingThread.h"
 #include "GPU/GPUFluidSimulator.h"
@@ -21,6 +22,8 @@
 #include "Rendering/KawaiiFluidRenderResource.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/OverlapResult.h"
+#include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 
 // Profiling
 DECLARE_STATS_GROUP(TEXT("KawaiiFluidContext"), STATGROUP_KawaiiFluidContext, STATCAT_Advanced);
@@ -61,6 +64,221 @@ namespace SPHScaling
 		}
 		const float Ratio = ReferenceRadius / FMath::Max(SmoothingRadius, 1.0f);
 		return BaseCompliance * FMath::Pow(Ratio, Exponent);
+	}
+}
+
+namespace
+{
+	constexpr float GPUWorldCollisionMargin = 1.0f;
+	constexpr float GPUWorldBoundsTolerance = 0.1f;
+
+	bool AreBoundsEqual(const FBox& A, const FBox& B)
+	{
+		if (!A.IsValid || !B.IsValid)
+		{
+			return false;
+		}
+
+		return A.Min.Equals(B.Min, GPUWorldBoundsTolerance) && A.Max.Equals(B.Max, GPUWorldBoundsTolerance);
+	}
+
+	void AppendConvexToGPUPrimitives(
+		const FKConvexElem& ConvexElem,
+		const FTransform& ComponentTransform,
+		float Friction,
+		float Restitution,
+		int32 OwnerID,
+		FGPUCollisionPrimitives& OutPrimitives)
+	{
+		const TArray<FVector>& VertexData = ConvexElem.VertexData;
+		if (VertexData.Num() < 4)
+		{
+			return;
+		}
+
+		TArray<FVector> WorldVerts;
+		WorldVerts.Reserve(VertexData.Num());
+		FVector CenterSum = FVector::ZeroVector;
+
+		for (const FVector& Vertex : VertexData)
+		{
+			const FVector WorldVertex = ComponentTransform.TransformPosition(Vertex);
+			WorldVerts.Add(WorldVertex);
+			CenterSum += WorldVertex;
+		}
+
+		const FVector Center = CenterSum / static_cast<float>(WorldVerts.Num());
+
+		float MaxDistSq = 0.0f;
+		for (const FVector& Vertex : WorldVerts)
+		{
+			MaxDistSq = FMath::Max(MaxDistSq, FVector::DistSquared(Vertex, Center));
+		}
+
+		TArray<FGPUConvexPlane> Planes;
+		const TArray<int32>& IndexData = ConvexElem.IndexData;
+		if (IndexData.Num() >= 3)
+		{
+			TSet<uint32> PlaneHashes;
+
+			for (int32 i = 0; i + 2 < IndexData.Num(); i += 3)
+			{
+				const int32 I0 = IndexData[i];
+				const int32 I1 = IndexData[i + 1];
+				const int32 I2 = IndexData[i + 2];
+
+				if (!WorldVerts.IsValidIndex(I0) || !WorldVerts.IsValidIndex(I1) || !WorldVerts.IsValidIndex(I2))
+				{
+					continue;
+				}
+
+				const FVector V0 = WorldVerts[I0];
+				const FVector V1 = WorldVerts[I1];
+				const FVector V2 = WorldVerts[I2];
+
+				FVector Normal = FVector::CrossProduct(V1 - V0, V2 - V0);
+				const float NormalLen = Normal.Size();
+				if (NormalLen <= KINDA_SMALL_NUMBER)
+				{
+					continue;
+				}
+
+				Normal /= NormalLen;
+				if (FVector::DotProduct(Normal, Center - V0) > 0.0f)
+				{
+					Normal = -Normal;
+				}
+
+				const int32 Nx = FMath::RoundToInt(Normal.X * 1000.0f);
+				const int32 Ny = FMath::RoundToInt(Normal.Y * 1000.0f);
+				const int32 Nz = FMath::RoundToInt(Normal.Z * 1000.0f);
+				const uint32 Hash = HashCombine(HashCombine(GetTypeHash(Nx), GetTypeHash(Ny)), GetTypeHash(Nz));
+				if (PlaneHashes.Contains(Hash))
+				{
+					continue;
+				}
+				PlaneHashes.Add(Hash);
+
+				FGPUConvexPlane Plane;
+				Plane.Normal = FVector3f(Normal);
+				Plane.Distance = FVector::DotProduct(V0, Normal);
+				Planes.Add(Plane);
+			}
+		}
+
+		if (Planes.Num() < 4)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Convex] SKIP: Verts=%d, Indices=%d, Planes=%d (need >= 4)"),
+				VertexData.Num(), IndexData.Num(), Planes.Num());
+			return;
+		}
+
+		// Convex 디버그 로그
+		static int32 ConvexLogCounter = 0;
+		if (++ConvexLogCounter % 300 == 1)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[Convex] Created: Center=(%.1f, %.1f, %.1f), BoundingRadius=%.1f, Planes=%d"),
+				Center.X, Center.Y, Center.Z, FMath::Sqrt(MaxDistSq) + GPUWorldCollisionMargin, Planes.Num());
+			for (int32 i = 0; i < FMath::Min(Planes.Num(), 6); ++i)
+			{
+				const FGPUConvexPlane& P = Planes[i];
+				UE_LOG(LogTemp, Log, TEXT("  Plane[%d]: Normal=(%.3f, %.3f, %.3f), Dist=%.1f"),
+					i, P.Normal.X, P.Normal.Y, P.Normal.Z, P.Distance);
+			}
+		}
+
+		FGPUCollisionConvex Convex;
+		Convex.Center = FVector3f(Center);
+		Convex.BoundingRadius = FMath::Sqrt(MaxDistSq) + GPUWorldCollisionMargin;
+		Convex.PlaneStartIndex = OutPrimitives.ConvexPlanes.Num();
+		Convex.PlaneCount = Planes.Num();
+
+		// PlaneStartIndex 디버그 로그
+		if (ConvexLogCounter % 300 == 1)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[Convex] PlaneStartIndex=%d, PlaneCount=%d, TotalPlanesBeforeAppend=%d"),
+				Convex.PlaneStartIndex, Convex.PlaneCount, OutPrimitives.ConvexPlanes.Num());
+		}
+		Convex.Friction = Friction;
+		Convex.Restitution = Restitution;
+		Convex.BoneIndex = -1;
+		Convex.OwnerID = OwnerID;
+
+		OutPrimitives.Convexes.Add(Convex);
+		OutPrimitives.ConvexPlanes.Append(Planes);
+	}
+
+	void AppendAggGeomToGPUPrimitives(
+		const FKAggregateGeom& AggGeom,
+		const FTransform& ComponentTransform,
+		float Friction,
+		float Restitution,
+		int32 OwnerID,
+		FGPUCollisionPrimitives& OutPrimitives)
+	{
+		const FVector3d Scale = ComponentTransform.GetScale3D();
+
+		for (const FKSphereElem& SphereElem : AggGeom.SphereElems)
+		{
+			const FTransform SphereWorldTransform = SphereElem.GetTransform() * ComponentTransform;
+			FGPUCollisionSphere Sphere;
+			Sphere.Center = FVector3f(SphereWorldTransform.GetLocation());
+			Sphere.Radius = SphereElem.Radius * ComponentTransform.GetScale3D().GetMax() + GPUWorldCollisionMargin;
+			Sphere.Friction = Friction;
+			Sphere.Restitution = Restitution;
+			Sphere.BoneIndex = -1;
+			Sphere.OwnerID = OwnerID;
+			OutPrimitives.Spheres.Add(Sphere);
+		}
+
+		for (const FKSphylElem& SphylElem : AggGeom.SphylElems)
+		{
+			const FTransform CapsuleWorldTransform = SphylElem.GetTransform() * ComponentTransform;
+			const FVector CapsuleCenter = CapsuleWorldTransform.GetLocation();
+			const float ScaledRadius = SphylElem.Radius * FMath::Max(Scale.X, Scale.Y) + GPUWorldCollisionMargin;
+			const float ScaledLength = SphylElem.Length * Scale.Z;
+			const FVector CapsuleUp = CapsuleWorldTransform.GetRotation().GetUpVector();
+			const float HalfLength = ScaledLength * 0.5f;
+
+			FGPUCollisionCapsule Capsule;
+			Capsule.Start = FVector3f(CapsuleCenter - CapsuleUp * HalfLength);
+			Capsule.End = FVector3f(CapsuleCenter + CapsuleUp * HalfLength);
+			Capsule.Radius = ScaledRadius;
+			Capsule.Friction = Friction;
+			Capsule.Restitution = Restitution;
+			Capsule.BoneIndex = -1;
+			Capsule.OwnerID = OwnerID;
+			OutPrimitives.Capsules.Add(Capsule);
+		}
+
+		for (const FKBoxElem& BoxElem : AggGeom.BoxElems)
+		{
+			const FTransform BoxWorldTransform = BoxElem.GetTransform() * ComponentTransform;
+			FGPUCollisionBox Box;
+			Box.Center = FVector3f(BoxWorldTransform.GetLocation());
+			Box.Extent = FVector3f(
+				BoxElem.X * 0.5f * Scale.X + GPUWorldCollisionMargin,
+				BoxElem.Y * 0.5f * Scale.Y + GPUWorldCollisionMargin,
+				BoxElem.Z * 0.5f * Scale.Z + GPUWorldCollisionMargin
+			);
+			const FQuat BoxRotation = BoxWorldTransform.GetRotation();
+			Box.Rotation = FVector4f(
+				static_cast<float>(BoxRotation.X),
+				static_cast<float>(BoxRotation.Y),
+				static_cast<float>(BoxRotation.Z),
+				static_cast<float>(BoxRotation.W)
+			);
+			Box.Friction = Friction;
+			Box.Restitution = Restitution;
+			Box.BoneIndex = -1;
+			Box.OwnerID = OwnerID;
+			OutPrimitives.Boxes.Add(Box);
+		}
+
+		for (const FKConvexElem& ConvexElem : AggGeom.ConvexElems)
+		{
+			AppendConvexToGPUPrimitives(ConvexElem, ComponentTransform, Friction, Restitution, OwnerID, OutPrimitives);
+		}
 	}
 }
 
@@ -430,6 +648,10 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	GPUSimulator->SetSimulationBounds(WorldBoundsMin, WorldBoundsMax);
 	GPUSimulator->SetGridResolutionPreset(GridPreset);
 
+	// GPU World Collision Query Bounds (Simulation Volume + Particle Radius padding)
+	FBox GPUWorldQueryBounds{FVector(WorldBoundsMin), FVector(WorldBoundsMax)};
+	GPUWorldQueryBounds = GPUWorldQueryBounds.ExpandBy(Preset->ParticleRadius);
+
 	// =====================================================
 	// GPU-Only Mode: No CPU Particles array dependency
 	// - Spawning: Handled directly by SpawnParticle() → GPUSimulator->AddSpawnRequest()
@@ -568,9 +790,39 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 			}
 		}
 
+		// Simulation Volume 내 StaticMesh들의 Simple Collision 자동 수집
+		AppendGPUWorldCollisionPrimitives(
+			CollisionPrimitives,
+			Params,
+			GPUWorldQueryBounds,
+			DefaultFriction,
+			DefaultRestitution,
+			PerPolygonActors
+		);
+
 		// Upload to GPU only if we have primitives
 		if (!CollisionPrimitives.IsEmpty())
 		{
+			// GPU 업로드 로그 (60프레임마다)
+			static int32 GPUUploadLogCounter = 0;
+			if (++GPUUploadLogCounter % 60 == 1)
+			{
+				const int32 TotalPrimitives = CollisionPrimitives.Spheres.Num()
+					+ CollisionPrimitives.Capsules.Num()
+					+ CollisionPrimitives.Boxes.Num()
+					+ CollisionPrimitives.Convexes.Num();
+
+				UE_LOG(LogTemp, Log, TEXT("========== GPU Collision Upload =========="));
+				UE_LOG(LogTemp, Log, TEXT("  Total Primitives: %d"), TotalPrimitives);
+				UE_LOG(LogTemp, Log, TEXT("    - Spheres: %d"), CollisionPrimitives.Spheres.Num());
+				UE_LOG(LogTemp, Log, TEXT("    - Capsules: %d"), CollisionPrimitives.Capsules.Num());
+				UE_LOG(LogTemp, Log, TEXT("    - Boxes: %d"), CollisionPrimitives.Boxes.Num());
+				UE_LOG(LogTemp, Log, TEXT("    - Convexes: %d (Planes: %d)"),
+					CollisionPrimitives.Convexes.Num(), CollisionPrimitives.ConvexPlanes.Num());
+				UE_LOG(LogTemp, Log, TEXT("    - BoneTransforms: %d"), CollisionPrimitives.BoneTransforms.Num());
+				UE_LOG(LogTemp, Log, TEXT("==========================================="));
+			}
+
 			GPUSimulator->UploadCollisionPrimitives(CollisionPrimitives);
 
 			// Set adhesion parameters if enabled
@@ -1196,6 +1448,234 @@ void UKawaiiFluidSimulationContext::CacheColliderShapes(const TArray<TObjectPtr<
 		{
 			Collider->CacheCollisionShapes();
 		}
+	}
+}
+
+void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
+	FGPUCollisionPrimitives& OutPrimitives,
+	const FKawaiiFluidSimulationParams& Params,
+	const FBox& QueryBounds,
+	float DefaultFriction,
+	float DefaultRestitution,
+	const TSet<AActor*>& PerPolygonActors)
+{
+	// 진단 로그 (60프레임마다)
+	static int32 DiagLogCounter = 0;
+	const bool bShouldLog = (++DiagLogCounter % 60 == 1);
+
+	if (!Params.bUseWorldCollision)
+	{
+		if (bShouldLog)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: bUseWorldCollision=false"));
+		}
+		bGPUWorldCollisionCacheDirty = true;
+		return;
+	}
+
+	if (!Params.World || Params.CollisionChannel != ECC_WorldStatic)
+	{
+		if (bShouldLog)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: World=%s, CollisionChannel=%d (expected ECC_WorldStatic=%d)"),
+				Params.World ? TEXT("Valid") : TEXT("nullptr"), (int32)Params.CollisionChannel, (int32)ECC_WorldStatic);
+		}
+		bGPUWorldCollisionCacheDirty = true;
+		return;
+	}
+
+	if (!QueryBounds.IsValid)
+	{
+		if (bShouldLog)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: QueryBounds is invalid"));
+		}
+		return;
+	}
+
+	const bool bWorldChanged = CachedGPUWorldCollisionWorld.Get() != Params.World;
+	const bool bChannelChanged = CachedGPUWorldCollisionChannel != Params.CollisionChannel;
+	const bool bBoundsChanged = !AreBoundsEqual(CachedGPUWorldCollisionBounds, QueryBounds);
+
+	if (bGPUWorldCollisionCacheDirty || bWorldChanged || bChannelChanged || bBoundsChanged)
+	{
+		CachedGPUWorldCollisionPrimitives.Reset();
+		CachedGPUWorldCollisionBounds = QueryBounds;
+		CachedGPUWorldCollisionWorld = Params.World;
+		CachedGPUWorldCollisionChannel = Params.CollisionChannel;
+		bGPUWorldCollisionCacheDirty = false;
+
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(KawaiiFluidGPUWorldCollision), false);
+		QueryParams.bTraceComplex = false;
+		QueryParams.bReturnPhysicalMaterial = false;
+		if (Params.IgnoreActor.IsValid())
+		{
+			QueryParams.AddIgnoredActor(Params.IgnoreActor.Get());
+		}
+
+		TArray<FOverlapResult> Overlaps;
+		const FVector QueryCenter = QueryBounds.GetCenter();
+		const FVector QueryExtent = QueryBounds.GetExtent();
+		Params.World->OverlapMultiByChannel(
+			Overlaps,
+			QueryCenter,
+			FQuat::Identity,
+			Params.CollisionChannel,
+			FCollisionShape::MakeBox(QueryExtent),
+			QueryParams
+		);
+
+		TSet<const UPrimitiveComponent*> UniqueComponents;
+		int32 TotalOverlaps = Overlaps.Num();
+		int32 ValidStaticMeshCount = 0;
+
+		for (const FOverlapResult& Overlap : Overlaps)
+		{
+			const UPrimitiveComponent* PrimComp = Overlap.Component.Get();
+			if (!PrimComp || UniqueComponents.Contains(PrimComp))
+			{
+				continue;
+			}
+			UniqueComponents.Add(PrimComp);
+
+			if (PrimComp->GetCollisionEnabled() == ECollisionEnabled::NoCollision)
+			{
+				continue;
+			}
+
+			if (PrimComp->GetCollisionObjectType() != ECC_WorldStatic)
+			{
+				continue;
+			}
+
+			if (PrimComp->GetCollisionResponseToChannel(Params.CollisionChannel) != ECR_Block)
+			{
+				continue;
+			}
+
+			const AActor* Owner = PrimComp->GetOwner();
+			if (Owner && PerPolygonActors.Contains(const_cast<AActor*>(Owner)))
+			{
+				continue;
+			}
+
+			const UStaticMeshComponent* StaticMeshComp = Cast<UStaticMeshComponent>(PrimComp);
+			if (!StaticMeshComp)
+			{
+				continue;
+			}
+
+			const UStaticMesh* StaticMesh = StaticMeshComp->GetStaticMesh();
+			const UBodySetup* BodySetup = StaticMesh ? StaticMesh->GetBodySetup() : nullptr;
+			if (!BodySetup)
+			{
+				continue;
+			}
+
+			const FKAggregateGeom& AggGeom = BodySetup->AggGeom;
+			if (AggGeom.SphereElems.Num() == 0 && AggGeom.SphylElems.Num() == 0 &&
+				AggGeom.BoxElems.Num() == 0 && AggGeom.ConvexElems.Num() == 0)
+			{
+				continue;
+			}
+
+			ValidStaticMeshCount++;
+
+			// 개별 StaticMesh 디버그 로그
+			if (bShouldLog)
+			{
+				const FVector MeshLocation = StaticMeshComp->GetComponentLocation();
+				const FVector MeshScale = StaticMeshComp->GetComponentScale();
+				UE_LOG(LogTemp, Log, TEXT("  [WorldCollision] Mesh: %s, Owner: %s"),
+					*StaticMesh->GetName(),
+					Owner ? *Owner->GetName() : TEXT("None"));
+				UE_LOG(LogTemp, Log, TEXT("    Location: (%.1f, %.1f, %.1f), Scale: (%.2f, %.2f, %.2f)"),
+					MeshLocation.X, MeshLocation.Y, MeshLocation.Z,
+					MeshScale.X, MeshScale.Y, MeshScale.Z);
+				UE_LOG(LogTemp, Log, TEXT("    Collision: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d"),
+					AggGeom.SphereElems.Num(), AggGeom.SphylElems.Num(),
+					AggGeom.BoxElems.Num(), AggGeom.ConvexElems.Num());
+
+				// 각 프리미티브 상세 정보
+				for (int32 i = 0; i < AggGeom.SphereElems.Num(); ++i)
+				{
+					const FKSphereElem& Sphere = AggGeom.SphereElems[i];
+					UE_LOG(LogTemp, Log, TEXT("      Sphere[%d]: Center=(%.1f, %.1f, %.1f), Radius=%.1f"),
+						i, Sphere.Center.X, Sphere.Center.Y, Sphere.Center.Z, Sphere.Radius);
+				}
+				for (int32 i = 0; i < AggGeom.BoxElems.Num(); ++i)
+				{
+					const FKBoxElem& Box = AggGeom.BoxElems[i];
+					UE_LOG(LogTemp, Log, TEXT("      Box[%d]: Center=(%.1f, %.1f, %.1f), Size=(%.1f, %.1f, %.1f)"),
+						i, Box.Center.X, Box.Center.Y, Box.Center.Z, Box.X, Box.Y, Box.Z);
+				}
+				for (int32 i = 0; i < AggGeom.ConvexElems.Num(); ++i)
+				{
+					const FKConvexElem& Convex = AggGeom.ConvexElems[i];
+					UE_LOG(LogTemp, Log, TEXT("      Convex[%d]: Vertices=%d, Indices=%d"),
+						i, Convex.VertexData.Num(), Convex.IndexData.Num());
+					if (Convex.VertexData.Num() > 0)
+					{
+						// 바운딩 박스 계산
+						FBox ConvexBounds(ForceInit);
+						for (const FVector& V : Convex.VertexData)
+						{
+							ConvexBounds += V;
+						}
+						UE_LOG(LogTemp, Log, TEXT("        LocalBounds: Min=(%.1f, %.1f, %.1f), Max=(%.1f, %.1f, %.1f)"),
+							ConvexBounds.Min.X, ConvexBounds.Min.Y, ConvexBounds.Min.Z,
+							ConvexBounds.Max.X, ConvexBounds.Max.Y, ConvexBounds.Max.Z);
+					}
+				}
+			}
+
+			const int32 OwnerID = Owner ? Owner->GetUniqueID() : 0;
+			AppendAggGeomToGPUPrimitives(
+				AggGeom,
+				StaticMeshComp->GetComponentTransform(),
+				DefaultFriction,
+				DefaultRestitution,
+				OwnerID,
+				CachedGPUWorldCollisionPrimitives
+			);
+		}
+
+		// 로그 출력 (캐시 갱신 시에만, 60프레임마다)
+		static int32 WorldCollisionLogCounter = 0;
+		if (++WorldCollisionLogCounter % 60 == 1)
+		{
+			UE_LOG(LogTemp, Log, TEXT("========== GPU World Collision Cache Updated =========="));
+			UE_LOG(LogTemp, Log, TEXT("  Query Bounds: Center=(%.1f, %.1f, %.1f) Extent=(%.1f, %.1f, %.1f)"),
+				QueryCenter.X, QueryCenter.Y, QueryCenter.Z,
+				QueryExtent.X, QueryExtent.Y, QueryExtent.Z);
+			UE_LOG(LogTemp, Log, TEXT("  Overlaps Found: %d (Unique Components: %d)"),
+				TotalOverlaps, UniqueComponents.Num());
+			UE_LOG(LogTemp, Log, TEXT("  Valid StaticMeshes with Simple Collision: %d"), ValidStaticMeshCount);
+			UE_LOG(LogTemp, Log, TEXT("  Cached Primitives: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d"),
+				CachedGPUWorldCollisionPrimitives.Spheres.Num(),
+				CachedGPUWorldCollisionPrimitives.Capsules.Num(),
+				CachedGPUWorldCollisionPrimitives.Boxes.Num(),
+				CachedGPUWorldCollisionPrimitives.Convexes.Num());
+			UE_LOG(LogTemp, Log, TEXT("========================================================"));
+		}
+	}
+
+	if (CachedGPUWorldCollisionPrimitives.IsEmpty())
+	{
+		return;
+	}
+
+	const int32 PlaneOffset = OutPrimitives.ConvexPlanes.Num();
+	OutPrimitives.Spheres.Append(CachedGPUWorldCollisionPrimitives.Spheres);
+	OutPrimitives.Capsules.Append(CachedGPUWorldCollisionPrimitives.Capsules);
+	OutPrimitives.Boxes.Append(CachedGPUWorldCollisionPrimitives.Boxes);
+	OutPrimitives.ConvexPlanes.Append(CachedGPUWorldCollisionPrimitives.ConvexPlanes);
+
+	for (const FGPUCollisionConvex& CachedConvex : CachedGPUWorldCollisionPrimitives.Convexes)
+	{
+		FGPUCollisionConvex Convex = CachedConvex;
+		Convex.PlaneStartIndex += PlaneOffset;
+		OutPrimitives.Convexes.Add(Convex);
 	}
 }
 

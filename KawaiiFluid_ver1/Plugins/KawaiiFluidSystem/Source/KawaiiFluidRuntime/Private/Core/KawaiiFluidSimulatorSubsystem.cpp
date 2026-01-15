@@ -12,6 +12,8 @@
 #include "Rendering/KawaiiFluidRenderResource.h"
 #include "Components/FluidInteractionComponent.h"
 #include "Collision/FluidCollider.h"
+#include "Engine/Level.h"
+#include "Engine/World.h"
 
 // Profiling
 DECLARE_STATS_GROUP(TEXT("KawaiiFluidSubsystem"), STATGROUP_KawaiiFluidSubsystem, STATCAT_Advanced);
@@ -39,11 +41,41 @@ void UKawaiiFluidSimulatorSubsystem::Initialize(FSubsystemCollectionBase& Collec
 	// Create default context
 	DefaultContext = NewObject<UKawaiiFluidSimulationContext>(this);
 
+	if (UWorld* World = GetWorld())
+	{
+		OnActorSpawnedHandle = World->AddOnActorSpawnedHandler(
+			FOnActorSpawned::FDelegate::CreateUObject(this, &UKawaiiFluidSimulatorSubsystem::HandleActorSpawned));
+	}
+
+	//OnActorDestroyedHandle = FWorldDelegates::OnActorDestroyed.AddUObject(this, &UKawaiiFluidSimulatorSubsystem::HandleActorDestroyed);
+	OnLevelAddedHandle = FWorldDelegates::LevelAddedToWorld.AddUObject(
+		this, &UKawaiiFluidSimulatorSubsystem::HandleLevelAdded);
+	OnLevelRemovedHandle = FWorldDelegates::LevelRemovedFromWorld.AddUObject(
+		this, &UKawaiiFluidSimulatorSubsystem::HandleLevelRemoved);
+
 	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidSimulatorSubsystem initialized"));
 }
 
 void UKawaiiFluidSimulatorSubsystem::Deinitialize()
 {
+	if (UWorld* World = GetWorld())
+	{
+		if (OnActorSpawnedHandle.IsValid())
+		{
+			World->RemoveOnActorSpawnedHandler(OnActorSpawnedHandle);
+		}
+	}
+
+	if (OnLevelAddedHandle.IsValid())
+	{
+		FWorldDelegates::LevelAddedToWorld.Remove(OnLevelAddedHandle);
+	}
+
+	if (OnLevelRemovedHandle.IsValid())
+	{
+		FWorldDelegates::LevelRemovedFromWorld.Remove(OnLevelRemovedHandle);
+	}
+
 	AllModules.Empty();
 	AllVolumeComponents.Empty();
 	AllFluidComponents.Empty();
@@ -767,4 +799,60 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulatorSubsystem::BuildMergedModuleSi
 	}
 
 	return Params;
+}
+
+void UKawaiiFluidSimulatorSubsystem::HandleActorSpawned(AActor* Actor)
+{
+	if (!Actor || Actor->GetWorld() != GetWorld())
+	{
+		return;
+	}
+
+	MarkAllContextsWorldCollisionDirty();
+}
+
+void UKawaiiFluidSimulatorSubsystem::HandleActorDestroyed(AActor* Actor)
+{
+	if (!Actor || Actor->GetWorld() != GetWorld())
+	{
+		return;
+	}
+
+	MarkAllContextsWorldCollisionDirty();
+}
+
+void UKawaiiFluidSimulatorSubsystem::HandleLevelAdded(ULevel* InLevel, UWorld* InWorld)
+{
+	if (!InWorld || InWorld != GetWorld())
+	{
+		return;
+	}
+
+	MarkAllContextsWorldCollisionDirty();
+}
+
+void UKawaiiFluidSimulatorSubsystem::HandleLevelRemoved(ULevel* InLevel, UWorld* InWorld)
+{
+	if (!InWorld || InWorld != GetWorld())
+	{
+		return;
+	}
+
+	MarkAllContextsWorldCollisionDirty();
+}
+
+void UKawaiiFluidSimulatorSubsystem::MarkAllContextsWorldCollisionDirty()
+{
+	for (TPair<FContextCacheKey, TObjectPtr<UKawaiiFluidSimulationContext>>& Pair : ContextCache)
+	{
+		if (Pair.Value)
+		{
+			Pair.Value->MarkGPUWorldCollisionCacheDirty();
+		}
+	}
+
+	if (DefaultContext)
+	{
+		DefaultContext->MarkGPUWorldCollisionCacheDirty();
+	}
 }

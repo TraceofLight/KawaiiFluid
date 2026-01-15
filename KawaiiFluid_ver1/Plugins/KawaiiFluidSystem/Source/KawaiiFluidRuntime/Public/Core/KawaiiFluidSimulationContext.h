@@ -90,6 +90,9 @@ public:
 	 */
 	void SetCachedPreset(UKawaiiFluidPresetDataAsset* InPreset) { CachedPreset = InPreset; }
 
+	/** Mark GPU world-collision cache dirty (rebuild on next GPU sim) */
+	void MarkGPUWorldCollisionCacheDirty() { bGPUWorldCollisionCacheDirty = true; }
+
 	//========================================
 	// Target Volume Component (Z-Order Space Bounds)
 	//========================================
@@ -290,6 +293,16 @@ protected:
 	/** Cache collider shapes (once per frame) */
 	virtual void CacheColliderShapes(const TArray<TObjectPtr<UFluidCollider>>& Colliders);
 
+	/** Append cached world-collision primitives (GPU) using channel-filtered world query */
+	void AppendGPUWorldCollisionPrimitives(
+		FGPUCollisionPrimitives& OutPrimitives,
+		const FKawaiiFluidSimulationParams& Params,
+		const FBox& QueryBounds,
+		float DefaultFriction,
+		float DefaultRestitution,
+		const TSet<AActor*>& PerPolygonActors
+	);
+
 protected:
 	//========================================
 	// Cached Solvers (Lazy initialization)
@@ -384,4 +397,23 @@ protected:
 
 	/** Weak reference to the target volume component for Z-Order space bounds */
 	TWeakObjectPtr<UKawaiiFluidSimulationVolumeComponent> TargetVolumeComponent;
+
+	//========================================
+	// GPU World Collision Cache (channel-based)
+	//========================================
+
+	/** Cached primitives built from world collision channel */
+	FGPUCollisionPrimitives CachedGPUWorldCollisionPrimitives;
+
+	/** Cached query bounds for world collision */
+	FBox CachedGPUWorldCollisionBounds = FBox(EForceInit::ForceInit);
+
+	/** Cached world pointer for world collision */
+	TWeakObjectPtr<UWorld> CachedGPUWorldCollisionWorld;
+
+	/** Cached collision channel */
+	TEnumAsByte<ECollisionChannel> CachedGPUWorldCollisionChannel = ECC_MAX;
+
+	/** Cached world collision primitives dirty flag */
+	bool bGPUWorldCollisionCacheDirty = true;
 };

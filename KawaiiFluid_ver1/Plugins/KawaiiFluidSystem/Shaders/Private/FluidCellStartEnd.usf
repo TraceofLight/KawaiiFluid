@@ -57,7 +57,7 @@ int ParticleCount;
 // Initialize all cells to invalid (no particles)
 //=============================================================================
 
-#define THREAD_GROUP_SIZE 256
+#define THREAD_GROUP_SIZE 512
 
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ClearCellIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)

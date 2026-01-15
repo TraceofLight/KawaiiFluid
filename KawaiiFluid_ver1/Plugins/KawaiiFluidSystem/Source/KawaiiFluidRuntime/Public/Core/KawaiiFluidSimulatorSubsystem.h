@@ -15,6 +15,8 @@ class UKawaiiFluidPresetDataAsset;
 class UKawaiiFluidSimulationVolumeComponent;
 class UFluidCollider;
 class UFluidInteractionComponent;
+class AActor;
+class ULevel;
 enum class EFluidType : uint8;
 class FSpatialHash;
 struct FFluidParticle;
@@ -297,4 +299,18 @@ private:
 
 	/** Build merged params from modules */
 	FKawaiiFluidSimulationParams BuildMergedModuleSimulationParams(const TArray<TObjectPtr<UKawaiiFluidSimulationModule>>& Modules);
+
+	//========================================
+	// World Change Tracking (GPU world collision cache)
+	//========================================
+
+	void HandleActorSpawned(AActor* Actor);
+	void HandleActorDestroyed(AActor* Actor);
+	void HandleLevelAdded(ULevel* InLevel, UWorld* InWorld);
+	void HandleLevelRemoved(ULevel* InLevel, UWorld* InWorld);
+	void MarkAllContextsWorldCollisionDirty();
+
+	FDelegateHandle OnActorSpawnedHandle;
+	FDelegateHandle OnLevelAddedHandle;
+	FDelegateHandle OnLevelRemovedHandle;
 };

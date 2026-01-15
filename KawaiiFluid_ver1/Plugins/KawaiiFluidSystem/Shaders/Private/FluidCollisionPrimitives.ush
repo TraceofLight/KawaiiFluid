@@ -195,11 +195,14 @@ float sdConvex(
 	int planeCount,
 	StructuredBuffer<FGPUConvexPlane> planes)
 {
-	// Early out with bounding sphere
+	// Early out with bounding sphere - return large value to skip collision
+	// (Main shader already does bounding sphere check with particle radius)
 	float boundDist = length(p - center) - boundingRadius;
 	if (boundDist > 0.0f)
 	{
-		return boundDist;
+		// Return large positive value so collision won't trigger
+		// (effectiveDist = largeValue - ParticleRadius will still be large)
+		return 1000.0f;
 	}
 
 	// Find maximum signed distance to all planes

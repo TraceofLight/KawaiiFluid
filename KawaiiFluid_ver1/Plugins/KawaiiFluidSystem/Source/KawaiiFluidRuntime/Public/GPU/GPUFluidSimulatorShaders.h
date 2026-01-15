@@ -2146,7 +2146,9 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, CellEnd)
 	END_SHADER_PARAMETER_STRUCT()
 
-	static constexpr int32 ThreadGroupSize = 256;
+	// Increased to 512 to avoid exceeding GPU dispatch limit (65535) with Large preset
+	// Large preset: 256³ = 16,777,216 cells / 512 = 32,768 groups (under limit)
+	static constexpr int32 ThreadGroupSize = 512;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{
@@ -2191,7 +2193,8 @@ public:
 		SHADER_PARAMETER(int32, ParticleCount)
 	END_SHADER_PARAMETER_STRUCT()
 
-	static constexpr int32 ThreadGroupSize = 256;
+	// Increased to 512 to match FluidCellStartEnd.usf
+	static constexpr int32 ThreadGroupSize = 512;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
 	{

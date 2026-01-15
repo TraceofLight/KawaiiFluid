@@ -1243,6 +1243,21 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		return;
 	}
 
+	int32 CachedPlaneCount = 0;
+	for (const FCachedConvex& Cvx : CachedConvexes)
+	{
+		CachedPlaneCount += Cvx.Planes.Num();
+	}
+
+	// Debug: log exported primitive counts once per OwnerID to avoid spam
+	static TSet<int32> LoggedOwnerIDs;
+	if (!LoggedOwnerIDs.Contains(InOwnerID) && (CachedSpheres.Num() > 0 || CachedCapsules.Num() > 0 || CachedBoxes.Num() > 0 || CachedConvexes.Num() > 0))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider Export (OwnerID=%d): Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d, Planes=%d"),
+			InOwnerID, CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedConvexes.Num(), CachedPlaneCount);
+		LoggedOwnerIDs.Add(InOwnerID);
+	}
+
 	// Export spheres
 	for (const FCachedSphere& Sph : CachedSpheres)
 	{
@@ -1332,12 +1347,18 @@ void UMeshFluidCollider::ExportToGPUPrimitivesWithBones(
 		return;
 	}
 
-	// Debug: 어떤 primitive가 export되는지 로그 출력 (각 OwnerID당 한 번만)
+	int32 CachedPlaneCount = 0;
+	for (const FCachedConvex& Cvx : CachedConvexes)
+	{
+		CachedPlaneCount += Cvx.Planes.Num();
+	}
+
+	// Debug: log exported primitive counts once per OwnerID to avoid spam
 	static TSet<int32> LoggedOwnerIDs;
 	if (!LoggedOwnerIDs.Contains(InOwnerID) && (CachedSpheres.Num() > 0 || CachedCapsules.Num() > 0 || CachedBoxes.Num() > 0 || CachedConvexes.Num() > 0))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider Export (OwnerID=%d): Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d"),
-			InOwnerID, CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedConvexes.Num());
+		UE_LOG(LogTemp, Warning, TEXT("MeshFluidCollider Export (OwnerID=%d): Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d, Planes=%d"),
+			InOwnerID, CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedConvexes.Num(), CachedPlaneCount);
 		LoggedOwnerIDs.Add(InOwnerID);
 	}
 
