@@ -710,51 +710,51 @@ void FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 			// Histogram
 			{
 				TShaderMapRef<FRadixSortHistogramCS> HistogramShader(ShaderMap);
-				FRadixSortHistogramCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortHistogramCS::FParameters>();
-				Params->KeysIn = GraphBuilder.CreateSRV(Keys[SrcIndex]);
-				Params->ValuesIn = GraphBuilder.CreateSRV(Values[SrcIndex]);
-				Params->Histogram = GraphBuilder.CreateUAV(Histogram);
-				Params->ElementCount = BoundaryParticleCount;
-				Params->BitOffset = BitOffset;
-				Params->NumGroups = NumBlocks;
+				FRadixSortHistogramCS::FParameters* HistogramParams = GraphBuilder.AllocParameters<FRadixSortHistogramCS::FParameters>();
+				HistogramParams->KeysIn = GraphBuilder.CreateSRV(Keys[SrcIndex]);
+				HistogramParams->ValuesIn = GraphBuilder.CreateSRV(Values[SrcIndex]);
+				HistogramParams->Histogram = GraphBuilder.CreateUAV(Histogram);
+				HistogramParams->ElementCount = BoundaryParticleCount;
+				HistogramParams->BitOffset = BitOffset;
+				HistogramParams->NumGroups = NumBlocks;
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Histogram"), HistogramShader, Params, FIntVector(NumBlocks, 1, 1));
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Histogram"), HistogramShader, HistogramParams, FIntVector(NumBlocks, 1, 1));
 			}
 
 			// Global Prefix Sum
 			{
 				TShaderMapRef<FRadixSortGlobalPrefixSumCS> PrefixSumShader(ShaderMap);
-				FRadixSortGlobalPrefixSumCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortGlobalPrefixSumCS::FParameters>();
-				Params->Histogram = GraphBuilder.CreateUAV(Histogram);
-				Params->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
-				Params->NumGroups = NumBlocks;
+				FRadixSortGlobalPrefixSumCS::FParameters* GlobalPrefixParams = GraphBuilder.AllocParameters<FRadixSortGlobalPrefixSumCS::FParameters>();
+				GlobalPrefixParams->Histogram = GraphBuilder.CreateUAV(Histogram);
+				GlobalPrefixParams->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
+				GlobalPrefixParams->NumGroups = NumBlocks;
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::GlobalPrefixSum"), PrefixSumShader, Params, FIntVector(1, 1, 1));
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::GlobalPrefixSum"), PrefixSumShader, GlobalPrefixParams, FIntVector(1, 1, 1));
 			}
 
 			// Bucket Prefix Sum
 			{
 				TShaderMapRef<FRadixSortBucketPrefixSumCS> BucketSumShader(ShaderMap);
-				FRadixSortBucketPrefixSumCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortBucketPrefixSumCS::FParameters>();
-				Params->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
+				FRadixSortBucketPrefixSumCS::FParameters* BucketPrefixParams = GraphBuilder.AllocParameters<FRadixSortBucketPrefixSumCS::FParameters>();
+				BucketPrefixParams->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::BucketPrefixSum"), BucketSumShader, Params, FIntVector(1, 1, 1));
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::BucketPrefixSum"), BucketSumShader, BucketPrefixParams, FIntVector(1, 1, 1));
 			}
 
 			// Scatter
 			{
 				TShaderMapRef<FRadixSortScatterCS> ScatterShader(ShaderMap);
-				FRadixSortScatterCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortScatterCS::FParameters>();
-				Params->KeysIn = GraphBuilder.CreateSRV(Keys[SrcIndex]);
-				Params->ValuesIn = GraphBuilder.CreateSRV(Values[SrcIndex]);
-				Params->KeysOut = GraphBuilder.CreateUAV(Keys[DstIndex]);
-				Params->ValuesOut = GraphBuilder.CreateUAV(Values[DstIndex]);
-				Params->HistogramSRV = GraphBuilder.CreateSRV(Histogram);
-				Params->GlobalOffsetsSRV = GraphBuilder.CreateSRV(BucketOffsets);
-				Params->ElementCount = BoundaryParticleCount;
-				Params->BitOffset = BitOffset;
+				FRadixSortScatterCS::FParameters* ScatterParams = GraphBuilder.AllocParameters<FRadixSortScatterCS::FParameters>();
+				ScatterParams->KeysIn = GraphBuilder.CreateSRV(Keys[SrcIndex]);
+				ScatterParams->ValuesIn = GraphBuilder.CreateSRV(Values[SrcIndex]);
+				ScatterParams->KeysOut = GraphBuilder.CreateUAV(Keys[DstIndex]);
+				ScatterParams->ValuesOut = GraphBuilder.CreateUAV(Values[DstIndex]);
+				ScatterParams->HistogramSRV = GraphBuilder.CreateSRV(Histogram);
+				ScatterParams->GlobalOffsetsSRV = GraphBuilder.CreateSRV(BucketOffsets);
+				ScatterParams->ElementCount = BoundaryParticleCount;
+				ScatterParams->BitOffset = BitOffset;
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Scatter"), ScatterShader, Params, FIntVector(NumBlocks, 1, 1));
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Scatter"), ScatterShader, ScatterParams, FIntVector(NumBlocks, 1, 1));
 			}
 
 			BufferIndex ^= 1;
