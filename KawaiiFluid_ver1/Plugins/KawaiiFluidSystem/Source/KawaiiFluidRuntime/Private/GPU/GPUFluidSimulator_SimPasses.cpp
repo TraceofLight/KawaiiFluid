@@ -90,7 +90,8 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	FRDGBufferUAVRef InNeighborListUAV,
 	FRDGBufferUAVRef InNeighborCountsUAV,
 	int32 IterationIndex,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	const FSimulationSpatialData& SpatialData)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 
@@ -141,13 +142,24 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	// Iteration control for neighbor caching
 	PassParameters->IterationIndex = IterationIndex;
 
-	// Boundary Particles for density contribution (Akinci 2012) - delegated to BoundarySkinningManager
-	const bool bUseGPUSkinning = BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled() && BoundarySkinningManager->HasWorldBoundaryBuffer();
-	const bool bUseCPUBoundary = !bUseGPUSkinning && BoundarySkinningManager.IsValid() && BoundarySkinningManager->HasBoundaryParticles();
+	// Boundary Particles for density contribution (Akinci 2012)
+	// Priority: 1) Same-frame buffer from SpatialData, 2) Persistent buffer, 3) CPU fallback
+	const bool bUseSameFrameBuffer = SpatialData.bBoundarySkinningPerformed && SpatialData.WorldBoundarySRV != nullptr;
+	const bool bUsePersistentBuffer = !bUseSameFrameBuffer && BoundarySkinningManager.IsValid()
+		&& BoundarySkinningManager->IsGPUBoundarySkinningEnabled() && BoundarySkinningManager->HasWorldBoundaryBuffer();
+	const bool bUseCPUBoundary = !bUseSameFrameBuffer && !bUsePersistentBuffer
+		&& BoundarySkinningManager.IsValid() && BoundarySkinningManager->HasBoundaryParticles();
 
-	if (bUseGPUSkinning)
+	if (bUseSameFrameBuffer)
 	{
-		// Use GPU-skinned world boundary buffer (populated by AddBoundarySkinningPass)
+		// Use same-frame buffer created in AddBoundarySkinningPass (works on first frame!)
+		PassParameters->BoundaryParticles = SpatialData.WorldBoundarySRV;
+		PassParameters->BoundaryParticleCount = SpatialData.WorldBoundaryParticleCount;
+		PassParameters->bUseBoundaryDensity = 1;
+	}
+	else if (bUsePersistentBuffer)
+	{
+		// Use GPU-skinned world boundary buffer from previous frame
 		FRDGBufferRef BoundaryBuffer = GraphBuilder.RegisterExternalBuffer(BoundarySkinningManager->GetWorldBoundaryBuffer(), TEXT("GPUFluidBoundaryParticles_Density"));
 		PassParameters->BoundaryParticles = GraphBuilder.CreateSRV(BoundaryBuffer);
 		PassParameters->BoundaryParticleCount = BoundarySkinningManager->GetTotalLocalBoundaryParticleCount();
@@ -186,6 +198,55 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 		PassParameters->bUseBoundaryDensity = 0;
 	}
 
+	// Z-Order sorted boundary particles (Akinci 2012 + Z-Order optimization)
+	const bool bUseBoundaryZOrder = BoundarySkinningManager.IsValid()
+		&& BoundarySkinningManager->IsBoundaryZOrderEnabled()
+		&& BoundarySkinningManager->HasBoundaryZOrderData();
+
+	if (bUseBoundaryZOrder)
+	{
+		// Use Z-Order sorted boundary buffer for O(K) neighbor search
+		FRDGBufferRef SortedBoundaryBuffer = GraphBuilder.RegisterExternalBuffer(
+			BoundarySkinningManager->GetSortedBoundaryBuffer(),
+			TEXT("GPUFluidSortedBoundaryParticles_Density"));
+		FRDGBufferRef BoundaryCellStartBuffer = GraphBuilder.RegisterExternalBuffer(
+			BoundarySkinningManager->GetBoundaryCellStartBuffer(),
+			TEXT("GPUFluidBoundaryCellStart_Density"));
+		FRDGBufferRef BoundaryCellEndBuffer = GraphBuilder.RegisterExternalBuffer(
+			BoundarySkinningManager->GetBoundaryCellEndBuffer(),
+			TEXT("GPUFluidBoundaryCellEnd_Density"));
+
+		PassParameters->SortedBoundaryParticles = GraphBuilder.CreateSRV(SortedBoundaryBuffer);
+		PassParameters->BoundaryCellStart = GraphBuilder.CreateSRV(BoundaryCellStartBuffer);
+		PassParameters->BoundaryCellEnd = GraphBuilder.CreateSRV(BoundaryCellEndBuffer);
+		PassParameters->bUseBoundaryZOrder = 1;
+	}
+	else
+	{
+		// Create dummy buffers for RDG validation when Z-Order is disabled
+		FRDGBufferRef DummySortedBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), 1),
+			TEXT("GPUFluidSortedBoundaryParticles_Density_Dummy"));
+		FGPUBoundaryParticle ZeroBoundary = {};
+		GraphBuilder.QueueBufferUpload(DummySortedBuffer, &ZeroBoundary, sizeof(FGPUBoundaryParticle));
+
+		FRDGBufferRef DummyCellStartBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1),
+			TEXT("GPUFluidBoundaryCellStart_Density_Dummy"));
+		uint32 InvalidIndex = 0xFFFFFFFF;
+		GraphBuilder.QueueBufferUpload(DummyCellStartBuffer, &InvalidIndex, sizeof(uint32));
+
+		FRDGBufferRef DummyCellEndBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1),
+			TEXT("GPUFluidBoundaryCellEnd_Density_Dummy"));
+		GraphBuilder.QueueBufferUpload(DummyCellEndBuffer, &InvalidIndex, sizeof(uint32));
+
+		PassParameters->SortedBoundaryParticles = GraphBuilder.CreateSRV(DummySortedBuffer);
+		PassParameters->BoundaryCellStart = GraphBuilder.CreateSRV(DummyCellStartBuffer);
+		PassParameters->BoundaryCellEnd = GraphBuilder.CreateSRV(DummyCellEndBuffer);
+		PassParameters->bUseBoundaryZOrder = 0;
+	}
+
 	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FSolveDensityPressureCS::ThreadGroupSize);
 
 	FComputeShaderUtils::AddPass(
@@ -208,7 +269,8 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	FRDGBufferSRVRef InParticleIndicesSRV,
 	FRDGBufferSRVRef InNeighborListSRV,
 	FRDGBufferSRVRef InNeighborCountsSRV,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	const FSimulationSpatialData& SpatialData)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FApplyViscosityCS> ComputeShader(ShaderMap);
@@ -226,13 +288,24 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	PassParameters->CellSize = Params.CellSize;
 	PassParameters->bUseNeighborCache = (InNeighborListSRV != nullptr && InNeighborCountsSRV != nullptr) ? 1 : 0;
 
-	// Boundary Particles for viscosity contribution (delegated to BoundarySkinningManager)
-	const bool bUseGPUSkinning = BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled() && BoundarySkinningManager->HasWorldBoundaryBuffer();
-	const bool bUseCPUBoundary = !bUseGPUSkinning && BoundarySkinningManager.IsValid() && BoundarySkinningManager->HasBoundaryParticles();
+	// Boundary Particles for viscosity contribution
+	// Priority: 1) Same-frame buffer from SpatialData, 2) Persistent buffer, 3) CPU fallback
+	const bool bUseViscSameFrameBuffer = SpatialData.bBoundarySkinningPerformed && SpatialData.WorldBoundarySRV != nullptr;
+	const bool bUseViscPersistentBuffer = !bUseViscSameFrameBuffer && BoundarySkinningManager.IsValid()
+		&& BoundarySkinningManager->IsGPUBoundarySkinningEnabled() && BoundarySkinningManager->HasWorldBoundaryBuffer();
+	const bool bUseCPUBoundary = !bUseViscSameFrameBuffer && !bUseViscPersistentBuffer
+		&& BoundarySkinningManager.IsValid() && BoundarySkinningManager->HasBoundaryParticles();
 
-	if (bUseGPUSkinning)
+	if (bUseViscSameFrameBuffer)
 	{
-		// Use GPU-skinned world boundary buffer (populated by AddBoundarySkinningPass)
+		// Use same-frame buffer created in AddBoundarySkinningPass (works on first frame!)
+		PassParameters->BoundaryParticles = SpatialData.WorldBoundarySRV;
+		PassParameters->BoundaryParticleCount = SpatialData.WorldBoundaryParticleCount;
+		PassParameters->bUseBoundaryViscosity = 1;
+	}
+	else if (bUseViscPersistentBuffer)
+	{
+		// Use GPU-skinned world boundary buffer from previous frame
 		FRDGBufferRef BoundaryBuffer = GraphBuilder.RegisterExternalBuffer(BoundarySkinningManager->GetWorldBoundaryBuffer(), TEXT("GPUFluidBoundaryParticles_Viscosity"));
 		PassParameters->BoundaryParticles = GraphBuilder.CreateSRV(BoundaryBuffer);
 		PassParameters->BoundaryParticleCount = BoundarySkinningManager->GetTotalLocalBoundaryParticleCount();

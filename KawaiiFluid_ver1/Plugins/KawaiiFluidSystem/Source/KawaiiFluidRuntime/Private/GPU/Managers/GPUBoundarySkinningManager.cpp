@@ -177,9 +177,15 @@ bool FGPUBoundarySkinningManager::IsBoundaryAdhesionEnabled() const
 // Boundary Skinning Pass
 //=============================================================================
 
-void FGPUBoundarySkinningManager::AddBoundarySkinningPass(FRDGBuilder& GraphBuilder)
+void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferRef& OutWorldBoundaryBuffer,
+	int32& OutBoundaryParticleCount)
 {
 	FScopeLock Lock(&BoundarySkinningLock);
+
+	OutWorldBoundaryBuffer = nullptr;
+	OutBoundaryParticleCount = 0;
 
 	if (TotalLocalBoundaryParticleCount <= 0 || BoundarySkinningDataMap.Num() == 0)
 	{
@@ -302,6 +308,10 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(FRDGBuilder& GraphBuil
 		OutputOffset += LocalParticleCount;
 	}
 
+	// Output for same-frame access by density/adhesion passes
+	OutWorldBoundaryBuffer = WorldBoundaryBuffer;
+	OutBoundaryParticleCount = TotalLocalBoundaryParticleCount;
+
 	GraphBuilder.QueueBufferExtraction(WorldBoundaryBuffer, &PersistentWorldBoundaryBuffer);
 }
 
@@ -313,12 +323,16 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	int32 CurrentParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef InSameFrameBoundaryBuffer,
+	int32 InSameFrameBoundaryCount)
 {
-	const bool bUseGPUSkinning = IsGPUBoundarySkinningEnabled() && PersistentWorldBoundaryBuffer.IsValid();
-	const bool bUseCPUBoundary = !bUseGPUSkinning && CachedBoundaryParticles.Num() > 0;
+	// Priority: 1) Same-frame buffer, 2) Persistent buffer, 3) CPU fallback
+	const bool bUseSameFrameBuffer = InSameFrameBoundaryBuffer != nullptr && InSameFrameBoundaryCount > 0;
+	const bool bUseGPUSkinning = !bUseSameFrameBuffer && IsGPUBoundarySkinningEnabled() && PersistentWorldBoundaryBuffer.IsValid();
+	const bool bUseCPUBoundary = !bUseSameFrameBuffer && !bUseGPUSkinning && CachedBoundaryParticles.Num() > 0;
 
-	if (!IsBoundaryAdhesionEnabled() || (!bUseGPUSkinning && !bUseCPUBoundary) || CurrentParticleCount <= 0)
+	if (!IsBoundaryAdhesionEnabled() || (!bUseSameFrameBuffer && !bUseGPUSkinning && !bUseCPUBoundary) || CurrentParticleCount <= 0)
 	{
 		return;
 	}
@@ -328,7 +342,14 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 	FRDGBufferRef BoundaryParticleBuffer;
 	FRDGBufferSRVRef BoundaryParticlesSRV;
 
-	if (bUseGPUSkinning)
+	if (bUseSameFrameBuffer)
+	{
+		// Use same-frame buffer created in AddBoundarySkinningPass (works on first frame!)
+		BoundaryParticleCount = InSameFrameBoundaryCount;
+		BoundaryParticleBuffer = InSameFrameBoundaryBuffer;
+		BoundaryParticlesSRV = GraphBuilder.CreateSRV(BoundaryParticleBuffer);
+	}
+	else if (bUseGPUSkinning)
 	{
 		BoundaryParticleCount = TotalLocalBoundaryParticleCount;
 		BoundaryParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentWorldBoundaryBuffer, TEXT("GPUFluidBoundaryParticles_Adhesion"));
@@ -349,7 +370,10 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 		BoundaryParticlesSRV = GraphBuilder.CreateSRV(BoundaryParticleBuffer);
 	}
 
-	const float BoundaryCellSize = CachedBoundaryAdhesionParams.AdhesionRadius;
+	// BoundaryCellSize must be >= SmoothingRadius for proper neighbor search
+	// Legacy mode searches 3x3x3 cells = BoundaryCellSize * 3 range
+	// So BoundaryCellSize should be at least SmoothingRadius / 1.5 to cover the search range
+	const float BoundaryCellSize = Params.SmoothingRadius;
 
 	// Create spatial hash buffers
 	FRDGBufferRef AdhesionCellCountsBuffer = GraphBuilder.CreateBuffer(
@@ -401,15 +425,73 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 
 	// Pass 3: Boundary adhesion
 	{
-		TShaderMapRef<FBoundaryAdhesionCS> AdhesionShader(ShaderMap);
+		// Check if Z-Order mode is enabled and valid
+		const bool bCanUseZOrder = bUseBoundaryZOrder && bBoundaryZOrderValid
+			&& PersistentSortedBoundaryBuffer.IsValid()
+			&& PersistentBoundaryCellStart.IsValid()
+			&& PersistentBoundaryCellEnd.IsValid();
+
+		// Create permutation vector for grid resolution
+		FBoundaryAdhesionCS::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		TShaderMapRef<FBoundaryAdhesionCS> AdhesionShader(ShaderMap, PermutationVector);
+
 		FBoundaryAdhesionCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FBoundaryAdhesionCS::FParameters>();
 		PassParameters->Particles = ParticlesUAV;
 		PassParameters->ParticleCount = CurrentParticleCount;
 		PassParameters->BoundaryParticles = BoundaryParticlesSRV;
 		PassParameters->BoundaryParticleCount = BoundaryParticleCount;
+		// Legacy Spatial Hash mode
 		PassParameters->BoundaryCellCounts = GraphBuilder.CreateSRV(AdhesionCellCountsBuffer);
 		PassParameters->BoundaryParticleIndices = GraphBuilder.CreateSRV(AdhesionParticleIndicesBuffer);
 		PassParameters->BoundaryCellSize = BoundaryCellSize;
+
+		// Z-Order mode (if enabled and valid)
+		if (bCanUseZOrder)
+		{
+			FRDGBufferRef SortedBuffer = GraphBuilder.RegisterExternalBuffer(
+				PersistentSortedBoundaryBuffer, TEXT("GPUFluidSortedBoundaryParticles_Adhesion"));
+			FRDGBufferRef CellStartBuffer = GraphBuilder.RegisterExternalBuffer(
+				PersistentBoundaryCellStart, TEXT("GPUFluidBoundaryCellStart_Adhesion"));
+			FRDGBufferRef CellEndBuffer = GraphBuilder.RegisterExternalBuffer(
+				PersistentBoundaryCellEnd, TEXT("GPUFluidBoundaryCellEnd_Adhesion"));
+
+			PassParameters->SortedBoundaryParticles = GraphBuilder.CreateSRV(SortedBuffer);
+			PassParameters->BoundaryCellStart = GraphBuilder.CreateSRV(CellStartBuffer);
+			PassParameters->BoundaryCellEnd = GraphBuilder.CreateSRV(CellEndBuffer);
+			PassParameters->bUseBoundaryZOrder = 1;
+			PassParameters->MortonBoundsMin = ZOrderBoundsMin;
+			PassParameters->CellSize = Params.CellSize;
+		}
+		else
+		{
+			// Create dummy buffers for RDG validation when Z-Order is disabled
+			FRDGBufferRef DummySortedBuffer = GraphBuilder.CreateBuffer(
+				FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), 1),
+				TEXT("GPUFluidSortedBoundaryParticles_Adhesion_Dummy"));
+			FGPUBoundaryParticle ZeroBoundary = {};
+			GraphBuilder.QueueBufferUpload(DummySortedBuffer, &ZeroBoundary, sizeof(FGPUBoundaryParticle));
+
+			FRDGBufferRef DummyCellStartBuffer = GraphBuilder.CreateBuffer(
+				FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1),
+				TEXT("GPUFluidBoundaryCellStart_Adhesion_Dummy"));
+			uint32 InvalidIndex = 0xFFFFFFFF;
+			GraphBuilder.QueueBufferUpload(DummyCellStartBuffer, &InvalidIndex, sizeof(uint32));
+
+			FRDGBufferRef DummyCellEndBuffer = GraphBuilder.CreateBuffer(
+				FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1),
+				TEXT("GPUFluidBoundaryCellEnd_Adhesion_Dummy"));
+			GraphBuilder.QueueBufferUpload(DummyCellEndBuffer, &InvalidIndex, sizeof(uint32));
+
+			PassParameters->SortedBoundaryParticles = GraphBuilder.CreateSRV(DummySortedBuffer);
+			PassParameters->BoundaryCellStart = GraphBuilder.CreateSRV(DummyCellStartBuffer);
+			PassParameters->BoundaryCellEnd = GraphBuilder.CreateSRV(DummyCellEndBuffer);
+			PassParameters->bUseBoundaryZOrder = 0;
+			PassParameters->MortonBoundsMin = FVector3f::ZeroVector;
+			PassParameters->CellSize = Params.CellSize;
+		}
+
+		// Adhesion parameters
 		PassParameters->AdhesionStrength = CachedBoundaryAdhesionParams.AdhesionStrength;
 		PassParameters->AdhesionRadius = CachedBoundaryAdhesionParams.AdhesionRadius;
 		PassParameters->CohesionStrength = CachedBoundaryAdhesionParams.CohesionStrength;
@@ -422,10 +504,349 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 
 		FComputeShaderUtils::AddPass(
 			GraphBuilder,
-			RDG_EVENT_NAME("GPUFluid::BoundaryAdhesion"),
+			RDG_EVENT_NAME("GPUFluid::BoundaryAdhesion%s", bCanUseZOrder ? TEXT(" (Z-Order)") : TEXT("")),
 			AdhesionShader,
 			PassParameters,
 			FIntVector(NumGroups, 1, 1)
 		);
 	}
+}
+
+//=============================================================================
+// Boundary Z-Order Sorting Pipeline
+//=============================================================================
+
+void FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
+	FRDGBuilder& GraphBuilder,
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef InSameFrameBoundaryBuffer,
+	int32 InSameFrameBoundaryCount)
+{
+	FScopeLock Lock(&BoundarySkinningLock);
+
+	// Priority: 1) Same-frame buffer, 2) Persistent buffer, 3) CPU fallback
+	const bool bUseSameFrameBuffer = InSameFrameBoundaryBuffer != nullptr && InSameFrameBoundaryCount > 0;
+	const bool bUseGPUSkinning = !bUseSameFrameBuffer && IsGPUBoundarySkinningEnabled() && PersistentWorldBoundaryBuffer.IsValid();
+	const bool bUseCPUBoundary = !bUseSameFrameBuffer && !bUseGPUSkinning && CachedBoundaryParticles.Num() > 0;
+
+	if (!bUseBoundaryZOrder || (!bUseSameFrameBuffer && !bUseGPUSkinning && !bUseCPUBoundary))
+	{
+		bBoundaryZOrderValid = false;
+		return;
+	}
+
+	// Determine boundary particle count and source buffer
+	int32 BoundaryParticleCount;
+	FRDGBufferRef SourceBoundaryBuffer;
+
+	if (bUseSameFrameBuffer)
+	{
+		// Use same-frame buffer created in AddBoundarySkinningPass (works on first frame!)
+		BoundaryParticleCount = InSameFrameBoundaryCount;
+		SourceBoundaryBuffer = InSameFrameBoundaryBuffer;
+	}
+	else if (bUseGPUSkinning)
+	{
+		BoundaryParticleCount = TotalLocalBoundaryParticleCount;
+		SourceBoundaryBuffer = GraphBuilder.RegisterExternalBuffer(
+			PersistentWorldBoundaryBuffer, TEXT("GPUFluidBoundaryParticles_ZOrderSource"));
+	}
+	else
+	{
+		BoundaryParticleCount = CachedBoundaryParticles.Num();
+		SourceBoundaryBuffer = CreateStructuredBuffer(
+			GraphBuilder,
+			TEXT("GPUFluidBoundaryParticles_CPU"),
+			sizeof(FGPUBoundaryParticle),
+			BoundaryParticleCount,
+			CachedBoundaryParticles.GetData(),
+			BoundaryParticleCount * sizeof(FGPUBoundaryParticle),
+			ERDGInitialDataFlags::NoCopy
+		);
+	}
+
+	if (BoundaryParticleCount <= 0)
+	{
+		bBoundaryZOrderValid = false;
+		return;
+	}
+
+	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid::BoundaryZOrderSort");
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+
+	// Get grid parameters from preset
+	const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(GridResolutionPreset);
+
+	// Create transient buffers for sorting
+	FRDGBufferRef MortonCodesBuffer = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), BoundaryParticleCount),
+		TEXT("GPUFluid.BoundaryMortonCodes")
+	);
+	FRDGBufferRef MortonCodesTempBuffer = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), BoundaryParticleCount),
+		TEXT("GPUFluid.BoundaryMortonCodesTemp")
+	);
+	FRDGBufferRef IndicesBuffer = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), BoundaryParticleCount),
+		TEXT("GPUFluid.BoundarySortIndices")
+	);
+	FRDGBufferRef IndicesTempBuffer = GraphBuilder.CreateBuffer(
+		FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), BoundaryParticleCount),
+		TEXT("GPUFluid.BoundarySortIndicesTemp")
+	);
+
+	// Create or reuse persistent buffers
+	FRDGBufferRef SortedBoundaryBuffer;
+	FRDGBufferRef BoundaryCellStartBuffer;
+	FRDGBufferRef BoundaryCellEndBuffer;
+
+	if (BoundaryZOrderBufferCapacity < BoundaryParticleCount)
+	{
+		PersistentSortedBoundaryBuffer.SafeRelease();
+		PersistentBoundaryCellStart.SafeRelease();
+		PersistentBoundaryCellEnd.SafeRelease();
+		BoundaryZOrderBufferCapacity = BoundaryParticleCount;
+	}
+
+	if (PersistentSortedBoundaryBuffer.IsValid())
+	{
+		SortedBoundaryBuffer = GraphBuilder.RegisterExternalBuffer(
+			PersistentSortedBoundaryBuffer, TEXT("GPUFluid.SortedBoundaryParticles"));
+	}
+	else
+	{
+		SortedBoundaryBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), BoundaryParticleCount),
+			TEXT("GPUFluid.SortedBoundaryParticles")
+		);
+	}
+
+	if (PersistentBoundaryCellStart.IsValid())
+	{
+		BoundaryCellStartBuffer = GraphBuilder.RegisterExternalBuffer(
+			PersistentBoundaryCellStart, TEXT("GPUFluid.BoundaryCellStart"));
+	}
+	else
+	{
+		BoundaryCellStartBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), CellCount),
+			TEXT("GPUFluid.BoundaryCellStart")
+		);
+	}
+
+	if (PersistentBoundaryCellEnd.IsValid())
+	{
+		BoundaryCellEndBuffer = GraphBuilder.RegisterExternalBuffer(
+			PersistentBoundaryCellEnd, TEXT("GPUFluid.BoundaryCellEnd"));
+	}
+	else
+	{
+		BoundaryCellEndBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), CellCount),
+			TEXT("GPUFluid.BoundaryCellEnd")
+		);
+	}
+
+	//=========================================================================
+	// Pass 1: Compute Morton codes for boundary particles
+	//=========================================================================
+	{
+		FComputeBoundaryMortonCodesCS::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		TShaderMapRef<FComputeBoundaryMortonCodesCS> ComputeShader(ShaderMap, PermutationVector);
+
+		FComputeBoundaryMortonCodesCS::FParameters* PassParams =
+			GraphBuilder.AllocParameters<FComputeBoundaryMortonCodesCS::FParameters>();
+		PassParams->BoundaryParticlesIn = GraphBuilder.CreateSRV(SourceBoundaryBuffer);
+		PassParams->BoundaryMortonCodes = GraphBuilder.CreateUAV(MortonCodesBuffer);
+		PassParams->BoundaryParticleIndices = GraphBuilder.CreateUAV(IndicesBuffer);
+		PassParams->BoundaryParticleCount = BoundaryParticleCount;
+		PassParams->BoundsMin = ZOrderBoundsMin;
+		PassParams->CellSize = Params.CellSize;
+
+		const int32 NumGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FComputeBoundaryMortonCodesCS::ThreadGroupSize);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ComputeBoundaryMortonCodes(%d)", BoundaryParticleCount),
+			ComputeShader,
+			PassParams,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
+
+	//=========================================================================
+	// Pass 2: Radix Sort (reuse existing radix sort passes)
+	//=========================================================================
+	{
+		const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
+		const int32 MortonCodeBits = GridAxisBits * 3;
+		int32 RadixSortPasses = (MortonCodeBits + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS;
+		if (RadixSortPasses % 2 != 0) RadixSortPasses++;
+
+		const int32 NumBlocks = FMath::DivideAndRoundUp(BoundaryParticleCount, GPU_RADIX_ELEMENTS_PER_GROUP);
+		const int32 RequiredHistogramSize = GPU_RADIX_SIZE * NumBlocks;
+
+		FRDGBufferRef Histogram = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), RequiredHistogramSize),
+			TEXT("BoundaryRadixSort.Histogram")
+		);
+		FRDGBufferRef BucketOffsets = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPU_RADIX_SIZE),
+			TEXT("BoundaryRadixSort.BucketOffsets")
+		);
+
+		FRDGBufferRef Keys[2] = { MortonCodesBuffer, MortonCodesTempBuffer };
+		FRDGBufferRef Values[2] = { IndicesBuffer, IndicesTempBuffer };
+		int32 BufferIndex = 0;
+
+		for (int32 Pass = 0; Pass < RadixSortPasses; ++Pass)
+		{
+			const int32 BitOffset = Pass * GPU_RADIX_BITS;
+			const int32 SrcIndex = BufferIndex;
+			const int32 DstIndex = BufferIndex ^ 1;
+
+			// Histogram
+			{
+				TShaderMapRef<FRadixSortHistogramCS> HistogramShader(ShaderMap);
+				FRadixSortHistogramCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortHistogramCS::FParameters>();
+				Params->KeysIn = GraphBuilder.CreateSRV(Keys[SrcIndex]);
+				Params->ValuesIn = GraphBuilder.CreateSRV(Values[SrcIndex]);
+				Params->Histogram = GraphBuilder.CreateUAV(Histogram);
+				Params->ElementCount = BoundaryParticleCount;
+				Params->BitOffset = BitOffset;
+				Params->NumGroups = NumBlocks;
+
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Histogram"), HistogramShader, Params, FIntVector(NumBlocks, 1, 1));
+			}
+
+			// Global Prefix Sum
+			{
+				TShaderMapRef<FRadixSortGlobalPrefixSumCS> PrefixSumShader(ShaderMap);
+				FRadixSortGlobalPrefixSumCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortGlobalPrefixSumCS::FParameters>();
+				Params->Histogram = GraphBuilder.CreateUAV(Histogram);
+				Params->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
+				Params->NumGroups = NumBlocks;
+
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::GlobalPrefixSum"), PrefixSumShader, Params, FIntVector(1, 1, 1));
+			}
+
+			// Bucket Prefix Sum
+			{
+				TShaderMapRef<FRadixSortBucketPrefixSumCS> BucketSumShader(ShaderMap);
+				FRadixSortBucketPrefixSumCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortBucketPrefixSumCS::FParameters>();
+				Params->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
+
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::BucketPrefixSum"), BucketSumShader, Params, FIntVector(1, 1, 1));
+			}
+
+			// Scatter
+			{
+				TShaderMapRef<FRadixSortScatterCS> ScatterShader(ShaderMap);
+				FRadixSortScatterCS::FParameters* Params = GraphBuilder.AllocParameters<FRadixSortScatterCS::FParameters>();
+				Params->KeysIn = GraphBuilder.CreateSRV(Keys[SrcIndex]);
+				Params->ValuesIn = GraphBuilder.CreateSRV(Values[SrcIndex]);
+				Params->KeysOut = GraphBuilder.CreateUAV(Keys[DstIndex]);
+				Params->ValuesOut = GraphBuilder.CreateUAV(Values[DstIndex]);
+				Params->HistogramSRV = GraphBuilder.CreateSRV(Histogram);
+				Params->GlobalOffsetsSRV = GraphBuilder.CreateSRV(BucketOffsets);
+				Params->ElementCount = BoundaryParticleCount;
+				Params->BitOffset = BitOffset;
+
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Scatter"), ScatterShader, Params, FIntVector(NumBlocks, 1, 1));
+			}
+
+			BufferIndex ^= 1;
+		}
+
+		MortonCodesBuffer = Keys[BufferIndex];
+		IndicesBuffer = Values[BufferIndex];
+	}
+
+	//=========================================================================
+	// Pass 3: Clear Cell Start/End
+	//=========================================================================
+	{
+		FClearBoundaryCellIndicesCS::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		TShaderMapRef<FClearBoundaryCellIndicesCS> ClearShader(ShaderMap, PermutationVector);
+
+		FClearBoundaryCellIndicesCS::FParameters* ClearParams =
+			GraphBuilder.AllocParameters<FClearBoundaryCellIndicesCS::FParameters>();
+		ClearParams->BoundaryCellStart = GraphBuilder.CreateUAV(BoundaryCellStartBuffer);
+		ClearParams->BoundaryCellEnd = GraphBuilder.CreateUAV(BoundaryCellEndBuffer);
+
+		const int32 NumGroups = FMath::DivideAndRoundUp(CellCount, FClearBoundaryCellIndicesCS::ThreadGroupSize);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ClearBoundaryCellIndices"),
+			ClearShader,
+			ClearParams,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
+
+	//=========================================================================
+	// Pass 4: Reorder Boundary Particles
+	//=========================================================================
+	{
+		TShaderMapRef<FReorderBoundaryParticlesCS> ReorderShader(ShaderMap);
+
+		FReorderBoundaryParticlesCS::FParameters* ReorderParams =
+			GraphBuilder.AllocParameters<FReorderBoundaryParticlesCS::FParameters>();
+		ReorderParams->OldBoundaryParticles = GraphBuilder.CreateSRV(SourceBoundaryBuffer);
+		ReorderParams->SortedBoundaryIndices = GraphBuilder.CreateSRV(IndicesBuffer);
+		ReorderParams->SortedBoundaryParticles = GraphBuilder.CreateUAV(SortedBoundaryBuffer);
+		ReorderParams->BoundaryParticleCount = BoundaryParticleCount;
+
+		const int32 NumGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FReorderBoundaryParticlesCS::ThreadGroupSize);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ReorderBoundaryParticles(%d)", BoundaryParticleCount),
+			ReorderShader,
+			ReorderParams,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
+
+	//=========================================================================
+	// Pass 5: Compute Cell Start/End
+	//=========================================================================
+	{
+		FComputeBoundaryCellStartEndCS::FPermutationDomain PermutationVector;
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		TShaderMapRef<FComputeBoundaryCellStartEndCS> CellStartEndShader(ShaderMap, PermutationVector);
+
+		FComputeBoundaryCellStartEndCS::FParameters* CellParams =
+			GraphBuilder.AllocParameters<FComputeBoundaryCellStartEndCS::FParameters>();
+		CellParams->SortedBoundaryMortonCodes = GraphBuilder.CreateSRV(MortonCodesBuffer);
+		CellParams->BoundaryCellStart = GraphBuilder.CreateUAV(BoundaryCellStartBuffer);
+		CellParams->BoundaryCellEnd = GraphBuilder.CreateUAV(BoundaryCellEndBuffer);
+		CellParams->BoundaryParticleCount = BoundaryParticleCount;
+
+		const int32 NumGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FComputeBoundaryCellStartEndCS::ThreadGroupSize);
+
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ComputeBoundaryCellStartEnd(%d)", BoundaryParticleCount),
+			CellStartEndShader,
+			CellParams,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
+
+	// Extract persistent buffers
+	GraphBuilder.QueueBufferExtraction(SortedBoundaryBuffer, &PersistentSortedBoundaryBuffer);
+	GraphBuilder.QueueBufferExtraction(BoundaryCellStartBuffer, &PersistentBoundaryCellStart);
+	GraphBuilder.QueueBufferExtraction(BoundaryCellEndBuffer, &PersistentBoundaryCellEnd);
+
+	bBoundaryZOrderValid = true;
+	bBoundaryZOrderDirty = false;
+
+	UE_LOG(LogGPUBoundarySkinning, Verbose,
+		TEXT("BoundaryZOrderSort completed: %d particles, Preset=%d"),
+		BoundaryParticleCount, static_cast<int32>(GridResolutionPreset));
 }

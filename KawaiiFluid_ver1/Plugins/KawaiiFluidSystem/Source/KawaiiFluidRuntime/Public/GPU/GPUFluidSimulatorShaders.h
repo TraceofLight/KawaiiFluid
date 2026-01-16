@@ -266,6 +266,11 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
 		SHADER_PARAMETER(int32, BoundaryParticleCount)
 		SHADER_PARAMETER(int32, bUseBoundaryDensity)
+		// Z-Order sorted boundary particles (Akinci 2012 + Z-Order optimization)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, SortedBoundaryParticles)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellStart)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellEnd)
+		SHADER_PARAMETER(int32, bUseBoundaryZOrder)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -1641,20 +1646,35 @@ public:
 };
 
 // Boundary adhesion (Force-based, Akinci 2013)
+// Supports both Z-Order mode and Legacy Spatial Hash mode
 class FBoundaryAdhesionCS : public FGlobalShader
 {
 public:
 	DECLARE_GLOBAL_SHADER(FBoundaryAdhesionCS);
 	SHADER_USE_PARAMETER_STRUCT(FBoundaryAdhesionCS, FGlobalShader);
 
+	// Permutation domain for grid resolution (Z-Order neighbor search)
+	using FPermutationDomain = TShaderPermutationDomain<FGridResolutionDim>;
+
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
 		SHADER_PARAMETER(int32, ParticleCount)
+		// Legacy boundary particles (unsorted)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
 		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		// Legacy Spatial Hash (fallback mode)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellCounts)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryParticleIndices)
 		SHADER_PARAMETER(float, BoundaryCellSize)
+		// Z-Order sorted boundary particles (new mode)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, SortedBoundaryParticles)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellStart)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellEnd)
+		SHADER_PARAMETER(int32, bUseBoundaryZOrder)
+		// Z-Order bounds (must match fluid simulation)
+		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
+		SHADER_PARAMETER(float, CellSize)
+		// Adhesion parameters
 		SHADER_PARAMETER(float, AdhesionStrength)
 		SHADER_PARAMETER(float, AdhesionRadius)
 		SHADER_PARAMETER(float, CohesionStrength)
@@ -1673,6 +1693,17 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
 		OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
 		OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
+
+		// Get grid resolution from permutation for Z-Order neighbor search
+		const FPermutationDomain PermutationVector(Parameters.PermutationId);
+		const int32 GridPreset = PermutationVector.Get<FGridResolutionDim>();
+		const int32 AxisBits = GridResolutionPermutation::GetAxisBits(GridPreset);
+		const int32 GridSize = GridResolutionPermutation::GetGridResolution(GridPreset);
+		const int32 MaxCells = GridResolutionPermutation::GetMaxCells(GridPreset);
+
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), AxisBits);
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_SIZE"), GridSize);
+		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), MaxCells);
 	}
 };
 
@@ -2194,6 +2225,183 @@ public:
 	END_SHADER_PARAMETER_STRUCT()
 
 	// Increased to 512 to match FluidCellStartEnd.usf
+	static constexpr int32 ThreadGroupSize = 512;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+
+		// Get grid resolution from permutation
+		const FPermutationDomain PermutationVector(Parameters.PermutationId);
+		const int32 GridPreset = PermutationVector.Get<FGridResolutionDim>();
+		const int32 AxisBits = GridResolutionPermutation::GetAxisBits(GridPreset);
+		const int32 MaxCells = GridResolutionPermutation::GetMaxCells(GridPreset);
+
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), AxisBits);
+		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), MaxCells);
+	}
+};
+
+//=============================================================================
+// Boundary Particle Z-Order Sorting Shaders
+// Enables O(K) neighbor search for boundary particles instead of O(M) traversal
+// Pipeline: Morton Code → Radix Sort → Reorder → BoundaryCellStart/End
+//=============================================================================
+
+/**
+ * Compute Boundary Morton Codes Compute Shader
+ * Converts boundary particle positions to Morton codes for Z-Order sorting
+ */
+class FComputeBoundaryMortonCodesCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FComputeBoundaryMortonCodesCS);
+	SHADER_USE_PARAMETER_STRUCT(FComputeBoundaryMortonCodesCS, FGlobalShader);
+
+	// Permutation domain for grid resolution
+	using FPermutationDomain = TShaderPermutationDomain<FGridResolutionDim>;
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticlesIn)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BoundaryMortonCodes)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BoundaryParticleIndices)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		SHADER_PARAMETER(FVector3f, BoundsMin)
+		SHADER_PARAMETER(float, CellSize)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+
+		// Get grid resolution from permutation
+		const FPermutationDomain PermutationVector(Parameters.PermutationId);
+		const int32 GridPreset = PermutationVector.Get<FGridResolutionDim>();
+		const int32 AxisBits = GridResolutionPermutation::GetAxisBits(GridPreset);
+		const int32 GridSize = GridResolutionPermutation::GetGridResolution(GridPreset);
+		const int32 MaxCells = GridResolutionPermutation::GetMaxCells(GridPreset);
+
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), AxisBits);
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_SIZE"), GridSize);
+		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), MaxCells);
+	}
+};
+
+/**
+ * Clear Boundary Cell Indices Compute Shader
+ * Initializes BoundaryCellStart/End arrays to INVALID_INDEX
+ */
+class FClearBoundaryCellIndicesCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FClearBoundaryCellIndicesCS);
+	SHADER_USE_PARAMETER_STRUCT(FClearBoundaryCellIndicesCS, FGlobalShader);
+
+	// Permutation domain for grid resolution
+	using FPermutationDomain = TShaderPermutationDomain<FGridResolutionDim>;
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BoundaryCellStart)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BoundaryCellEnd)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 512;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+
+		// Get grid resolution from permutation
+		const FPermutationDomain PermutationVector(Parameters.PermutationId);
+		const int32 GridPreset = PermutationVector.Get<FGridResolutionDim>();
+		const int32 AxisBits = GridResolutionPermutation::GetAxisBits(GridPreset);
+		const int32 MaxCells = GridResolutionPermutation::GetMaxCells(GridPreset);
+
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), AxisBits);
+		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), MaxCells);
+	}
+};
+
+/**
+ * Reorder Boundary Particles Compute Shader
+ * Physically reorders boundary particles based on sorted Morton code indices
+ */
+class FReorderBoundaryParticlesCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FReorderBoundaryParticlesCS);
+	SHADER_USE_PARAMETER_STRUCT(FReorderBoundaryParticlesCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, OldBoundaryParticles)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, SortedBoundaryIndices)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUBoundaryParticle>, SortedBoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Compute Boundary Cell Start/End Compute Shader
+ * Determines the range [start, end] of boundary particles in each cell
+ * Must be called AFTER boundary particles are sorted by Morton code
+ */
+class FComputeBoundaryCellStartEndCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FComputeBoundaryCellStartEndCS);
+	SHADER_USE_PARAMETER_STRUCT(FComputeBoundaryCellStartEndCS, FGlobalShader);
+
+	// Permutation domain for grid resolution
+	using FPermutationDomain = TShaderPermutationDomain<FGridResolutionDim>;
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, SortedBoundaryMortonCodes)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BoundaryCellStart)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, BoundaryCellEnd)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+	END_SHADER_PARAMETER_STRUCT()
+
 	static constexpr int32 ThreadGroupSize = 512;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)

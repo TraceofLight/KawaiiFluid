@@ -393,6 +393,9 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 
 		// Set simulation origin for bounds offset (preset bounds are relative to component)
 		Params.SimulationOrigin = OwnerComp->GetComponentLocation();
+
+		// Static boundary particles (Akinci 2012) - density contribution from walls/floors
+		Params.bEnableStaticBoundaryParticles = OwnerComp->bEnableStaticBoundaryParticles;
 	}
 
 	// Containment bounds for GPU collision (supports OBB with rotation)

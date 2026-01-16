@@ -16,6 +16,10 @@
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
 #include "GPU/GPUFluidSimulator.h"
 #include "DrawDebugHelpers.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
+#include "Engine/OverlapResult.h"
 
 UKawaiiFluidComponent::UKawaiiFluidComponent()
 {
@@ -322,6 +326,12 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	if (bEnableDebugDraw)
 	{
 		DrawDebugParticles();
+	}
+
+	// Static Boundary Debug Draw: 벽/바닥의 boundary particle 시각화
+	if (bShowStaticBoundaryParticles)
+	{
+		DrawDebugStaticBoundaryParticles();
 	}
 
 	// VSM Integration: Update shadow proxy with particle data
@@ -1342,6 +1352,344 @@ FColor UKawaiiFluidComponent::ComputeDebugDrawColor(int32 ParticleIndex, int32 T
 		return FColor::White;
 	}
 }
+
+void UKawaiiFluidComponent::DrawDebugStaticBoundaryParticles()
+{
+	if (!bShowStaticBoundaryParticles)
+	{
+		return;
+	}
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	const bool bIsGameWorld = World->IsGameWorld();
+
+	// Game mode: GPU 시뮬레이션에서 데이터 사용
+	if (bIsGameWorld)
+	{
+		if (!SimulationModule)
+		{
+			return;
+		}
+
+		FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
+		if (!GPUSimulator || !GPUSimulator->HasStaticBoundaryParticles())
+		{
+			return;
+		}
+
+		const TArray<FGPUBoundaryParticle>& BoundaryParticles = GPUSimulator->GetStaticBoundaryParticles();
+		const int32 NumParticles = BoundaryParticles.Num();
+
+		if (NumParticles == 0)
+		{
+			return;
+		}
+
+		// Draw boundary particles
+		for (int32 i = 0; i < NumParticles; ++i)
+		{
+			const FGPUBoundaryParticle& Particle = BoundaryParticles[i];
+			const FVector Position(Particle.Position.X, Particle.Position.Y, Particle.Position.Z);
+
+			DrawDebugPoint(World, Position, StaticBoundaryPointSize, StaticBoundaryColor, false, -1.0f, 0);
+
+			if (bShowStaticBoundaryNormals)
+			{
+				const FVector Normal(Particle.Normal.X, Particle.Normal.Y, Particle.Normal.Z);
+				const FVector NormalEnd = Position + Normal * StaticBoundaryNormalLength;
+				DrawDebugDirectionalArrow(World, Position, NormalEnd, StaticBoundaryNormalLength * 0.3f, FColor::Yellow, false, -1.0f, 0, 1.0f);
+			}
+		}
+	}
+#if WITH_EDITOR
+	// Editor mode: 에디터 미리보기 데이터 사용
+	else
+	{
+		// 주기적으로 boundary particle 재생성 (30프레임마다)
+		if (GFrameCounter - LastEditorPreviewFrame > 30)
+		{
+			GenerateEditorBoundaryParticlesPreview();
+			LastEditorPreviewFrame = GFrameCounter;
+		}
+
+		const int32 NumParticles = EditorPreviewBoundaryPositions.Num();
+		if (NumParticles == 0)
+		{
+			return;
+		}
+
+		// Draw boundary particles
+		for (int32 i = 0; i < NumParticles; ++i)
+		{
+			const FVector& Position = EditorPreviewBoundaryPositions[i];
+			DrawDebugPoint(World, Position, StaticBoundaryPointSize, StaticBoundaryColor, false, -1.0f, 0);
+
+			if (bShowStaticBoundaryNormals && EditorPreviewBoundaryNormals.IsValidIndex(i))
+			{
+				const FVector& Normal = EditorPreviewBoundaryNormals[i];
+				const FVector NormalEnd = Position + Normal * StaticBoundaryNormalLength;
+				DrawDebugDirectionalArrow(World, Position, NormalEnd, StaticBoundaryNormalLength * 0.3f, FColor::Yellow, false, -1.0f, 0, 1.0f);
+			}
+		}
+
+		// Log particle count periodically
+		static int32 LogCounter = 0;
+		if (++LogCounter % 300 == 1)
+		{
+			UE_LOG(LogTemp, Log, TEXT("[StaticBoundary Editor] Drawing %d boundary particles"), NumParticles);
+		}
+	}
+#endif
+}
+
+#if WITH_EDITOR
+void UKawaiiFluidComponent::GenerateEditorBoundaryParticlesPreview()
+{
+	EditorPreviewBoundaryPositions.Reset();
+	EditorPreviewBoundaryNormals.Reset();
+
+	UWorld* World = GetWorld();
+	if (!World || !SimulationModule)
+	{
+		return;
+	}
+
+	// Get smoothing radius from preset
+	float SmoothingRadius = 20.0f;
+	if (Preset)
+	{
+		SmoothingRadius = Preset->SmoothingRadius;
+	}
+	const float Spacing = SmoothingRadius * 0.5f;
+
+	// Get volume bounds
+	const FVector VolumeCenter = GetComponentLocation();
+	float BoundsExtent = SimulationModule->BoundsExtent;
+	if (BoundsExtent <= 0.0f)
+	{
+		BoundsExtent = 500.0f;  // Default fallback
+	}
+	const FVector HalfExtent(BoundsExtent * 0.5f);
+	const FBox VolumeBounds(VolumeCenter - HalfExtent, VolumeCenter + HalfExtent);
+
+	// Find overlapping static mesh actors
+	TArray<FOverlapResult> OverlapResults;
+	FCollisionQueryParams QueryParams;
+	QueryParams.bReturnPhysicalMaterial = false;
+	QueryParams.AddIgnoredActor(GetOwner());
+
+	World->OverlapMultiByObjectType(
+		OverlapResults,
+		VolumeCenter,
+		FQuat::Identity,
+		FCollisionObjectQueryParams(ECollisionChannel::ECC_WorldStatic),
+		FCollisionShape::MakeBox(HalfExtent),
+		QueryParams
+	);
+
+	// Helper lambda: Generate boundary particles on a box face
+	auto GenerateBoxFaceParticles = [this, Spacing](
+		const FVector& FaceCenter, const FVector& Normal,
+		const FVector& UAxis, const FVector& VAxis,
+		float UExtent, float VExtent)
+	{
+		const int32 NumU = FMath::Max(1, FMath::CeilToInt(UExtent * 2.0f / Spacing));
+		const int32 NumV = FMath::Max(1, FMath::CeilToInt(VExtent * 2.0f / Spacing));
+
+		for (int32 iu = 0; iu <= NumU; ++iu)
+		{
+			for (int32 iv = 0; iv <= NumV; ++iv)
+			{
+				const float U = -UExtent + (2.0f * UExtent * iu / NumU);
+				const float V = -VExtent + (2.0f * VExtent * iv / NumV);
+
+				FVector Position = FaceCenter + UAxis * U + VAxis * V;
+				EditorPreviewBoundaryPositions.Add(Position);
+				EditorPreviewBoundaryNormals.Add(Normal);
+			}
+		}
+	};
+
+	// Helper lambda: Generate boundary particles on a sphere
+	auto GenerateSphereParticles = [this, Spacing](const FVector& Center, float Radius)
+	{
+		const float GoldenRatio = (1.0f + FMath::Sqrt(5.0f)) / 2.0f;
+		const float AngleIncrement = PI * 2.0f * GoldenRatio;
+		const float SurfaceArea = 4.0f * PI * Radius * Radius;
+		const int32 NumPoints = FMath::Max(4, FMath::CeilToInt(SurfaceArea / (Spacing * Spacing)));
+
+		for (int32 i = 0; i < NumPoints; ++i)
+		{
+			const float T = static_cast<float>(i) / static_cast<float>(NumPoints - 1);
+			const float Phi = FMath::Acos(1.0f - 2.0f * T);
+			const float Theta = AngleIncrement * i;
+
+			const float SinPhi = FMath::Sin(Phi);
+			const float CosPhi = FMath::Cos(Phi);
+
+			FVector Normal(SinPhi * FMath::Cos(Theta), SinPhi * FMath::Sin(Theta), CosPhi);
+			FVector Position = Center + Normal * Radius;
+
+			EditorPreviewBoundaryPositions.Add(Position);
+			EditorPreviewBoundaryNormals.Add(Normal);
+		}
+	};
+
+	// Process each overlapping static mesh
+	for (const FOverlapResult& Result : OverlapResults)
+	{
+		UPrimitiveComponent* PrimComp = Result.GetComponent();
+		UStaticMeshComponent* StaticMeshComp = Cast<UStaticMeshComponent>(PrimComp);
+		if (!StaticMeshComp || !StaticMeshComp->GetStaticMesh())
+		{
+			continue;
+		}
+
+		UBodySetup* BodySetup = StaticMeshComp->GetStaticMesh()->GetBodySetup();
+		if (!BodySetup)
+		{
+			continue;
+		}
+
+		const FKAggregateGeom& AggGeom = BodySetup->AggGeom;
+		const FTransform ComponentTransform = StaticMeshComp->GetComponentTransform();
+
+		// Process Spheres
+		for (const FKSphereElem& SphereElem : AggGeom.SphereElems)
+		{
+			const FTransform SphereTransform = SphereElem.GetTransform() * ComponentTransform;
+			const FVector Center = SphereTransform.GetLocation();
+			const float Radius = SphereElem.Radius * ComponentTransform.GetScale3D().GetMax();
+
+			if (VolumeBounds.IsInside(Center) || VolumeBounds.ComputeSquaredDistanceToPoint(Center) < Radius * Radius)
+			{
+				GenerateSphereParticles(Center, Radius);
+			}
+		}
+
+		// Process Boxes
+		for (const FKBoxElem& BoxElem : AggGeom.BoxElems)
+		{
+			const FTransform BoxTransform = BoxElem.GetTransform() * ComponentTransform;
+			const FVector Center = BoxTransform.GetLocation();
+			const FQuat Rotation = BoxTransform.GetRotation();
+			const FVector Scale = ComponentTransform.GetScale3D();
+			const FVector Extent(BoxElem.X * 0.5f * Scale.X, BoxElem.Y * 0.5f * Scale.Y, BoxElem.Z * 0.5f * Scale.Z);
+
+			// Check if box overlaps with volume
+			if (!VolumeBounds.Intersect(FBox(Center - Extent, Center + Extent)))
+			{
+				continue;
+			}
+
+			// Local axes
+			const FVector LocalX = Rotation.RotateVector(FVector::ForwardVector);
+			const FVector LocalY = Rotation.RotateVector(FVector::RightVector);
+			const FVector LocalZ = Rotation.RotateVector(FVector::UpVector);
+
+			// Generate particles on 6 faces
+			GenerateBoxFaceParticles(Center + LocalX * Extent.X, LocalX, LocalY, LocalZ, Extent.Y, Extent.Z);
+			GenerateBoxFaceParticles(Center - LocalX * Extent.X, -LocalX, LocalY, LocalZ, Extent.Y, Extent.Z);
+			GenerateBoxFaceParticles(Center + LocalY * Extent.Y, LocalY, LocalX, LocalZ, Extent.X, Extent.Z);
+			GenerateBoxFaceParticles(Center - LocalY * Extent.Y, -LocalY, LocalX, LocalZ, Extent.X, Extent.Z);
+			GenerateBoxFaceParticles(Center + LocalZ * Extent.Z, LocalZ, LocalX, LocalY, Extent.X, Extent.Y);
+			GenerateBoxFaceParticles(Center - LocalZ * Extent.Z, -LocalZ, LocalX, LocalY, Extent.X, Extent.Y);
+		}
+
+		// Process Convex elements (simplified - just use center point with bounding sphere)
+		for (const FKConvexElem& ConvexElem : AggGeom.ConvexElems)
+		{
+			const TArray<FVector>& VertexData = ConvexElem.VertexData;
+			if (VertexData.Num() < 4)
+			{
+				continue;
+			}
+
+			// Calculate world-space center and vertices
+			FVector CenterSum = FVector::ZeroVector;
+			TArray<FVector> WorldVerts;
+			WorldVerts.Reserve(VertexData.Num());
+
+			for (const FVector& Vertex : VertexData)
+			{
+				const FVector WorldVertex = ComponentTransform.TransformPosition(Vertex);
+				WorldVerts.Add(WorldVertex);
+				CenterSum += WorldVertex;
+			}
+
+			const FVector ConvexCenter = CenterSum / static_cast<float>(WorldVerts.Num());
+
+			// Find faces and generate particles on them
+			const TArray<int32>& IndexData = ConvexElem.IndexData;
+			if (IndexData.Num() >= 3)
+			{
+				TSet<uint32> ProcessedNormals;
+
+				for (int32 i = 0; i + 2 < IndexData.Num(); i += 3)
+				{
+					const int32 I0 = IndexData[i];
+					const int32 I1 = IndexData[i + 1];
+					const int32 I2 = IndexData[i + 2];
+
+					if (!WorldVerts.IsValidIndex(I0) || !WorldVerts.IsValidIndex(I1) || !WorldVerts.IsValidIndex(I2))
+					{
+						continue;
+					}
+
+					const FVector V0 = WorldVerts[I0];
+					const FVector V1 = WorldVerts[I1];
+					const FVector V2 = WorldVerts[I2];
+
+					FVector Normal = FVector::CrossProduct(V1 - V0, V2 - V0);
+					const float NormalLen = Normal.Size();
+					if (NormalLen <= KINDA_SMALL_NUMBER)
+					{
+						continue;
+					}
+
+					Normal /= NormalLen;
+					if (FVector::DotProduct(Normal, ConvexCenter - V0) > 0.0f)
+					{
+						Normal = -Normal;
+					}
+
+					// Deduplicate normals (same face check)
+					const int32 Nx = FMath::RoundToInt(Normal.X * 100.0f);
+					const int32 Ny = FMath::RoundToInt(Normal.Y * 100.0f);
+					const int32 Nz = FMath::RoundToInt(Normal.Z * 100.0f);
+					const uint32 Hash = HashCombine(HashCombine(GetTypeHash(Nx), GetTypeHash(Ny)), GetTypeHash(Nz));
+					if (ProcessedNormals.Contains(Hash))
+					{
+						continue;
+					}
+					ProcessedNormals.Add(Hash);
+
+					// Add triangle vertices as boundary points (simplified)
+					const FVector TriCenter = (V0 + V1 + V2) / 3.0f;
+					EditorPreviewBoundaryPositions.Add(TriCenter);
+					EditorPreviewBoundaryNormals.Add(Normal);
+
+					// Add edge midpoints for better coverage
+					EditorPreviewBoundaryPositions.Add((V0 + V1) * 0.5f);
+					EditorPreviewBoundaryNormals.Add(Normal);
+					EditorPreviewBoundaryPositions.Add((V1 + V2) * 0.5f);
+					EditorPreviewBoundaryNormals.Add(Normal);
+					EditorPreviewBoundaryPositions.Add((V2 + V0) * 0.5f);
+					EditorPreviewBoundaryNormals.Add(Normal);
+				}
+			}
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[StaticBoundary Editor] Generated %d preview boundary particles from %d overlapping meshes"),
+		EditorPreviewBoundaryPositions.Num(), OverlapResults.Num());
+}
+#endif
 
 //========================================
 // InstanceData (Re-instancing 시 파티클 데이터 보존)

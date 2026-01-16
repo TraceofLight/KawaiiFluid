@@ -246,6 +246,26 @@ IMPLEMENT_GLOBAL_SHADER(FComputeCellStartEndCS,
 	"ComputeCellStartEndCS", SF_Compute);
 
 //=============================================================================
+// Boundary Particle Z-Order Sorting Shaders
+//=============================================================================
+
+IMPLEMENT_GLOBAL_SHADER(FComputeBoundaryMortonCodesCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"ComputeBoundaryMortonCodesCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FClearBoundaryCellIndicesCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"ClearBoundaryCellIndicesCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FReorderBoundaryParticlesCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"ReorderBoundaryParticlesCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FComputeBoundaryCellStartEndCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"ComputeBoundaryCellStartEndCS", SF_Compute);
+
+//=============================================================================
 // Pass Builder Implementation
 //=============================================================================
 

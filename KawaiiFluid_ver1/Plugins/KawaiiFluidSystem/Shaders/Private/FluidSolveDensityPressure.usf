@@ -595,9 +595,11 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	sumGradC2 += dot(gradC_i, gradC_i);
 
 	//=========================================================================
-	// Boundary Particles density contribution (Akinci 2012)
-	// ρ_i += Σ_k ψ_k W(|x_i - x_k|, h)
+	// Boundary Particles contribution (Akinci 2012)
+	// 1. Density: ρ_i += Σ_k ψ_k W(|x_i - x_k|, h)
+	// 2. Pressure gradient: Δx_i += λ_i * ψ_k * ∇W(x_i - x_k) / ρ_0
 	// This makes fluid particles "see" the boundary as solid, preventing penetration
+	// AND pushes fluid away from boundaries (prevents wall climbing)
 	//=========================================================================
 	if (bUseBoundaryDensity && BoundaryParticleCount > 0)
 	{
@@ -614,6 +616,16 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 				float w = Poly6Kernel(r2, h2);
 				// Psi is the boundary particle's volume contribution (like mass for fluid)
 				density += boundary.Psi * Poly6Coeff * w;
+
+				// Pressure gradient contribution from boundary (Akinci 2012)
+				// This pushes fluid AWAY from boundaries, preventing wall climbing
+				float3 r = r_cm * CM_TO_M;
+				float3 gradW = SpikyGradientFast(r, r2, h, h2);
+				gradW *= SpikyCoeff * CM_TO_M;
+
+				// Boundary particle pressure response: λ_i * ψ_k * ∇W
+				// Note: boundary λ = 0, so only fluid particle's λ contributes
+				deltaP += lambda_i_prev * boundary.Psi * gradW;
 			}
 		}
 	}

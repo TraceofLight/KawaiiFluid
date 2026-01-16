@@ -475,6 +475,41 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Debug")
 	void DisableDebugDraw();
 
+	//========================================
+	// Static Boundary Debug Visualization
+	// (Shows boundary particles on walls/floors for density contribution)
+	//========================================
+
+	//========================================
+	// Static Boundary Particles (Akinci 2012)
+	// Enables density contribution from walls/floors
+	//========================================
+
+	/** Enable static boundary particles for density contribution at walls/floors (Akinci 2012)
+	 * This helps prevent density deficit near boundaries which causes wall climbing artifacts */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Boundary")
+	bool bEnableStaticBoundaryParticles = true;
+
+	/** Show static boundary particles (walls, floors) generated for density contribution (Akinci 2012) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug|Boundary")
+	bool bShowStaticBoundaryParticles = false;
+
+	/** Static boundary particle debug point size */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug|Boundary", meta = (EditCondition = "bShowStaticBoundaryParticles", ClampMin = "1.0", ClampMax = "50.0"))
+	float StaticBoundaryPointSize = 4.0f;
+
+	/** Static boundary particle debug color */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug|Boundary", meta = (EditCondition = "bShowStaticBoundaryParticles"))
+	FColor StaticBoundaryColor = FColor::Cyan;
+
+	/** Show surface normals for static boundary particles */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug|Boundary", meta = (EditCondition = "bShowStaticBoundaryParticles"))
+	bool bShowStaticBoundaryNormals = false;
+
+	/** Length of normal debug lines */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug|Boundary", meta = (EditCondition = "bShowStaticBoundaryParticles && bShowStaticBoundaryNormals", ClampMin = "1.0", ClampMax = "100.0"))
+	float StaticBoundaryNormalLength = 10.0f;
+
 protected:
 	//========================================
 	// Modules
@@ -535,6 +570,21 @@ private:
 
 	/** Draw debug particles using DrawDebugPoint */
 	void DrawDebugParticles();
+
+	/** Draw static boundary particles for debug visualization */
+	void DrawDebugStaticBoundaryParticles();
+
+#if WITH_EDITOR
+	/** Generate boundary particles for editor preview (without GPU simulation) */
+	void GenerateEditorBoundaryParticlesPreview();
+
+	/** Cached boundary particles for editor preview */
+	TArray<FVector> EditorPreviewBoundaryPositions;
+	TArray<FVector> EditorPreviewBoundaryNormals;
+
+	/** Last frame editor preview was generated */
+	uint64 LastEditorPreviewFrame = 0;
+#endif
 
 	/** Compute debug color for a particle */
 	FColor ComputeDebugDrawColor(int32 ParticleIndex, int32 TotalCount, const FVector& Position, float Density) const;

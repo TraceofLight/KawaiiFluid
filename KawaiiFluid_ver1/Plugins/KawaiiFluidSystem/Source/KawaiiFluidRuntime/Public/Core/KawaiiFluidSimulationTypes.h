@@ -259,6 +259,14 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 	float BoundsFriction = 0.1f;
 
 	//========================================
+	// Static Boundary Particles (Akinci 2012)
+	//========================================
+
+	/** Enable static boundary particles for density contribution at walls/floors
+	 * This helps prevent density deficit near boundaries which causes wall climbing artifacts */
+	bool bEnableStaticBoundaryParticles = true;
+
+	//========================================
 	// Collision Event Settings
 	//========================================
 

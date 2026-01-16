@@ -7,6 +7,7 @@
 #include "RenderGraphResources.h"
 #include "RHIResources.h"
 #include "GPU/GPUFluidParticle.h"
+#include "Core/KawaiiFluidSimulationTypes.h"  // For EGridResolutionPreset
 
 class FRDGBuilder;
 
@@ -21,7 +22,8 @@ class FRDGBuilder;
  * - Persistent local boundary particles (uploaded once per mesh)
  * - Per-frame bone transform updates
  * - GPU-based skinning transform
- * - Spatial hash for boundary adhesion
+ * - Z-Order (Morton code) sorting for O(K) neighbor search
+ * - BoundaryCellStart/End for cache-coherent access
  */
 class KAWAIIFLUIDRUNTIME_API FGPUBoundarySkinningManager
 {
@@ -102,8 +104,13 @@ public:
 	/**
 	 * Add boundary skinning pass to transform local particles to world space
 	 * @param GraphBuilder - RDG builder
+	 * @param OutWorldBoundaryBuffer - Output: World-space boundary particles buffer
+	 * @param OutBoundaryParticleCount - Output: Number of boundary particles
 	 */
-	void AddBoundarySkinningPass(FRDGBuilder& GraphBuilder);
+	void AddBoundarySkinningPass(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferRef& OutWorldBoundaryBuffer,
+		int32& OutBoundaryParticleCount);
 
 	/**
 	 * Add boundary adhesion pass
@@ -111,18 +118,72 @@ public:
 	 * @param ParticlesUAV - Fluid particles buffer
 	 * @param CurrentParticleCount - Number of fluid particles
 	 * @param Params - Simulation parameters
+	 * @param InSameFrameBoundaryBuffer - Optional: Same-frame boundary buffer (for first frame support)
+	 * @param InSameFrameBoundaryCount - Optional: Same-frame boundary particle count
 	 */
 	void AddBoundaryAdhesionPass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
 		int32 CurrentParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef InSameFrameBoundaryBuffer = nullptr,
+		int32 InSameFrameBoundaryCount = 0);
 
 	/** Get world boundary buffer for other passes */
 	TRefCountPtr<FRDGPooledBuffer>& GetWorldBoundaryBuffer() { return PersistentWorldBoundaryBuffer; }
 
 	/** Check if world boundary buffer is valid */
 	bool HasWorldBoundaryBuffer() const { return PersistentWorldBoundaryBuffer.IsValid(); }
+
+	//=========================================================================
+	// Z-Order Sorting for Boundary Particles
+	// Enables O(K) neighbor search instead of O(M) full traversal
+	//=========================================================================
+
+	/**
+	 * Execute Z-Order sorting pipeline for boundary particles
+	 * Called after BoundarySkinningPass to sort world-space boundary particles
+	 * @param GraphBuilder - RDG builder
+	 * @param Params - Simulation parameters (for CellSize, bounds)
+	 * @param InSameFrameBoundaryBuffer - Optional: Same-frame boundary buffer (for first frame support)
+	 * @param InSameFrameBoundaryCount - Optional: Same-frame boundary particle count
+	 */
+	void ExecuteBoundaryZOrderSort(
+		FRDGBuilder& GraphBuilder,
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef InSameFrameBoundaryBuffer = nullptr,
+		int32 InSameFrameBoundaryCount = 0);
+
+	/** Set Z-Order configuration */
+	void SetBoundaryZOrderConfig(EGridResolutionPreset Preset, const FVector3f& BoundsMin, const FVector3f& BoundsMax)
+	{
+		GridResolutionPreset = Preset;
+		ZOrderBoundsMin = BoundsMin;
+		ZOrderBoundsMax = BoundsMax;
+	}
+
+	/** Enable/disable Z-Order sorting for boundary */
+	void SetBoundaryZOrderEnabled(bool bEnabled) { bUseBoundaryZOrder = bEnabled; }
+	bool IsBoundaryZOrderEnabled() const { return bUseBoundaryZOrder; }
+
+	/** Check if Z-Order data is valid */
+	bool HasBoundaryZOrderData() const
+	{
+		return bBoundaryZOrderValid
+			&& PersistentSortedBoundaryBuffer.IsValid()
+			&& PersistentBoundaryCellStart.IsValid()
+			&& PersistentBoundaryCellEnd.IsValid();
+	}
+
+	/** Get sorted boundary buffer (Z-Order sorted) */
+	TRefCountPtr<FRDGPooledBuffer>& GetSortedBoundaryBuffer() { return PersistentSortedBoundaryBuffer; }
+
+	/** Get boundary cell start/end buffers */
+	TRefCountPtr<FRDGPooledBuffer>& GetBoundaryCellStartBuffer() { return PersistentBoundaryCellStart; }
+	TRefCountPtr<FRDGPooledBuffer>& GetBoundaryCellEndBuffer() { return PersistentBoundaryCellEnd; }
+
+	/** Mark boundary Z-Order as dirty (needs re-sort) */
+	void MarkBoundaryZOrderDirty() { bBoundaryZOrderDirty = true; }
 
 private:
 	//=========================================================================
@@ -169,6 +230,25 @@ private:
 	//=========================================================================
 
 	bool bBoundarySkinningDataDirty = false;
+
+	//=========================================================================
+	// Z-Order Sorting Data
+	//=========================================================================
+
+	bool bUseBoundaryZOrder = true;
+	bool bBoundaryZOrderDirty = true;
+	bool bBoundaryZOrderValid = false;
+
+	// Grid configuration (must match fluid simulation)
+	EGridResolutionPreset GridResolutionPreset = EGridResolutionPreset::Medium;
+	FVector3f ZOrderBoundsMin = FVector3f(-1280.0f, -1280.0f, -1280.0f);
+	FVector3f ZOrderBoundsMax = FVector3f(1280.0f, 1280.0f, 1280.0f);
+
+	// Persistent Z-Order buffers
+	TRefCountPtr<FRDGPooledBuffer> PersistentSortedBoundaryBuffer;
+	TRefCountPtr<FRDGPooledBuffer> PersistentBoundaryCellStart;
+	TRefCountPtr<FRDGPooledBuffer> PersistentBoundaryCellEnd;
+	int32 BoundaryZOrderBufferCapacity = 0;
 
 	//=========================================================================
 	// Thread Safety

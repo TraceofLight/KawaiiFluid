@@ -702,11 +702,15 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	*/
 
 	// Cache collider shapes once per frame (required for IsCacheValid() to return true)
-	CacheColliderShapes(Params.Colliders);
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_CacheColliderShapes);
+		CacheColliderShapes(Params.Colliders);
+	}
 
-	
+
 	// Collect and upload collision primitives to GPU (with bone tracking for adhesion)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_CollectCollisionPrimitives);
 		FGPUCollisionPrimitives CollisionPrimitives;
 		// Use persistent bone data for velocity calculation across frames
 		CollisionPrimitives.BoneTransforms = MoveTemp(PersistentBoneTransforms);
@@ -791,65 +795,69 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 		}
 
 		// Simulation Volume 내 StaticMesh들의 Simple Collision 자동 수집
-		AppendGPUWorldCollisionPrimitives(
-			CollisionPrimitives,
-			Params,
-			GPUWorldQueryBounds,
-			DefaultFriction,
-			DefaultRestitution,
-			PerPolygonActors
-		);
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_WorldCollision);
+			AppendGPUWorldCollisionPrimitives(
+				CollisionPrimitives,
+				Params,
+				GPUWorldQueryBounds,
+				DefaultFriction,
+				DefaultRestitution,
+				PerPolygonActors
+			);
+		}
 
 		// Upload to GPU only if we have primitives
 		if (!CollisionPrimitives.IsEmpty())
 		{
-			// GPU 업로드 로그 (60프레임마다)
-			static int32 GPUUploadLogCounter = 0;
-			if (++GPUUploadLogCounter % 60 == 1)
+			// 1. Upload collision primitives to GPU
 			{
-				const int32 TotalPrimitives = CollisionPrimitives.Spheres.Num()
-					+ CollisionPrimitives.Capsules.Num()
-					+ CollisionPrimitives.Boxes.Num()
-					+ CollisionPrimitives.Convexes.Num();
-
-				UE_LOG(LogTemp, Log, TEXT("========== GPU Collision Upload =========="));
-				UE_LOG(LogTemp, Log, TEXT("  Total Primitives: %d"), TotalPrimitives);
-				UE_LOG(LogTemp, Log, TEXT("    - Spheres: %d"), CollisionPrimitives.Spheres.Num());
-				UE_LOG(LogTemp, Log, TEXT("    - Capsules: %d"), CollisionPrimitives.Capsules.Num());
-				UE_LOG(LogTemp, Log, TEXT("    - Boxes: %d"), CollisionPrimitives.Boxes.Num());
-				UE_LOG(LogTemp, Log, TEXT("    - Convexes: %d (Planes: %d)"),
-					CollisionPrimitives.Convexes.Num(), CollisionPrimitives.ConvexPlanes.Num());
-				UE_LOG(LogTemp, Log, TEXT("    - BoneTransforms: %d"), CollisionPrimitives.BoneTransforms.Num());
-				UE_LOG(LogTemp, Log, TEXT("==========================================="));
+				TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_Upload_Primitives);
+				GPUSimulator->UploadCollisionPrimitives(CollisionPrimitives);
 			}
 
-			GPUSimulator->UploadCollisionPrimitives(CollisionPrimitives);
-
-			// Set adhesion parameters if enabled
-			if (bUseGPUAdhesion && CollisionPrimitives.BoneTransforms.Num() > 0)
+			// 2. Generate static boundary particles from collision primitives (Akinci 2012)
+			// Only regenerate when collision primitives have changed (dirty flag)
+			if (bStaticBoundaryParticlesDirty)
 			{
-				FGPUAdhesionParams AdhesionParams;
-				AdhesionParams.bEnableAdhesion = 0;
-				AdhesionParams.AdhesionStrength = Preset->AdhesionStrength;
-				AdhesionParams.AdhesionRadius = Preset->AdhesionRadius;
-				AdhesionParams.ColliderContactOffset = Preset->AdhesionContactOffset;
-				AdhesionParams.BoneVelocityScale = Preset->AdhesionBoneVelocityScale;
-				AdhesionParams.DetachAccelThreshold = Preset->AdhesionDetachAcceleration;  // Detach on fast acceleration
-				AdhesionParams.DetachDistanceThreshold = Preset->AdhesionDetachDistance; // Detach if too far from surface
-				AdhesionParams.SlidingFriction = DefaultFriction;
-				AdhesionParams.CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
-
-				// Gravity sliding parameters - use ExternalForce as gravity
-				AdhesionParams.Gravity = FVector3f(Params.ExternalForce);
-				AdhesionParams.GravitySlidingScale = 1.0f;  // Full gravity sliding effect
-
-				GPUSimulator->SetAdhesionParams(AdhesionParams);
+				TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_Upload_StaticBoundary);
+				if (Params.bEnableStaticBoundaryParticles)
+				{
+					GPUSimulator->GenerateStaticBoundaryParticles(Preset->SmoothingRadius, Preset->RestDensity);
+				}
+				else
+				{
+					GPUSimulator->ClearStaticBoundaryParticles();
+				}
+				bStaticBoundaryParticlesDirty = false;
 			}
-			else
+
+			// 3. Set adhesion parameters if enabled
 			{
-				FGPUAdhesionParams AdhesionParams;
-				AdhesionParams.bEnableAdhesion = 0;
-				GPUSimulator->SetAdhesionParams(AdhesionParams);
+				TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_Upload_Adhesion);
+				if (bUseGPUAdhesion && CollisionPrimitives.BoneTransforms.Num() > 0)
+				{
+					FGPUAdhesionParams AdhesionParams;
+					AdhesionParams.bEnableAdhesion = 0;
+					AdhesionParams.AdhesionStrength = Preset->AdhesionStrength;
+					AdhesionParams.AdhesionRadius = Preset->AdhesionRadius;
+					AdhesionParams.ColliderContactOffset = Preset->AdhesionContactOffset;
+					AdhesionParams.BoneVelocityScale = Preset->AdhesionBoneVelocityScale;
+					AdhesionParams.DetachAccelThreshold = Preset->AdhesionDetachAcceleration;
+					AdhesionParams.DetachDistanceThreshold = Preset->AdhesionDetachDistance;
+					AdhesionParams.SlidingFriction = DefaultFriction;
+					AdhesionParams.CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+					AdhesionParams.Gravity = FVector3f(Params.ExternalForce);
+					AdhesionParams.GravitySlidingScale = 1.0f;
+
+					GPUSimulator->SetAdhesionParams(AdhesionParams);
+				}
+				else
+				{
+					FGPUAdhesionParams AdhesionParams;
+					AdhesionParams.bEnableAdhesion = 0;
+					GPUSimulator->SetAdhesionParams(AdhesionParams);
+				}
 			}
 		}
 
@@ -863,6 +871,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	// GPU transforms local → world (much faster than CPU)
 	// =====================================================
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_BoundarySkinning);
 		int32 TotalBoundaryParticles = 0;
 
 		for (UFluidInteractionComponent* Interaction : Params.InteractionComponents)
@@ -930,32 +939,35 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	// Run GPU simulation with Accumulator method
 	// Simulate with fixed dt substeps for frame-rate independence
 	// =====================================================
-	
-	const int32 MaxSubstepsPerFrame = Preset->MaxSubsteps;
-	const float MaxAllowedTime = Preset->SubstepDeltaTime * MaxSubstepsPerFrame;
-	AccumulatedTime += FMath::Min(DeltaTime, MaxAllowedTime);
-
-	int32 TotalSubsteps = FMath::Min(
-		FMath::FloorToInt(AccumulatedTime / Preset->SubstepDeltaTime), 
-		MaxSubstepsPerFrame
-	);
-
 	int32 SubstepCount = 0;
-	for (; SubstepCount < TotalSubsteps; ++SubstepCount)
 	{
-		GPUParams.SubstepIndex = SubstepCount;
-		GPUParams.TotalSubsteps = TotalSubsteps;
+		TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_Substeps);
+		const int32 MaxSubstepsPerFrame = Preset->MaxSubsteps;
+		const float MaxAllowedTime = Preset->SubstepDeltaTime * MaxSubstepsPerFrame;
+		AccumulatedTime += FMath::Min(DeltaTime, MaxAllowedTime);
 
-		GPUSimulator->SimulateSubstep(GPUParams);
+		int32 TotalSubsteps = FMath::Min(
+			FMath::FloorToInt(AccumulatedTime / Preset->SubstepDeltaTime),
+			MaxSubstepsPerFrame
+		);
 
-		AccumulatedTime -= Preset->SubstepDeltaTime;
+		for (; SubstepCount < TotalSubsteps; ++SubstepCount)
+		{
+			GPUParams.SubstepIndex = SubstepCount;
+			GPUParams.TotalSubsteps = TotalSubsteps;
+
+			GPUSimulator->SimulateSubstep(GPUParams);
+
+			AccumulatedTime -= Preset->SubstepDeltaTime;
+		}
 	}
-	
+
 	// =====================================================
 	// Phase 2: AABB Filtering for Per-Polygon Collision
 	// Filter particles inside Per-Polygon Collision enabled AABBs
 	// =====================================================
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_PerPolygon);
 		TArray<FGPUFilterAABB> FilterAABBs;
 
 		for (int32 i = 0; i < Params.InteractionComponents.Num(); ++i)
@@ -1504,6 +1516,7 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 		CachedGPUWorldCollisionWorld = Params.World;
 		CachedGPUWorldCollisionChannel = Params.CollisionChannel;
 		bGPUWorldCollisionCacheDirty = false;
+		bStaticBoundaryParticlesDirty = true;  // Regenerate static boundary particles
 
 		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(KawaiiFluidGPUWorldCollision), false);
 		QueryParams.bTraceComplex = false;

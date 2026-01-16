@@ -13,6 +13,7 @@
 #include "GPU/Managers/GPUZOrderSortManager.h"
 #include "GPU/Managers/GPUBoundarySkinningManager.h"
 #include "GPU/Managers/GPUAdhesionManager.h"
+#include "GPU/Managers/GPUStaticBoundaryManager.h"
 #include "Core/FluidAnisotropy.h"
 #include <atomic>
 
@@ -369,6 +370,54 @@ public:
 	int32 GetTotalLocalBoundaryParticleCount() const { return BoundarySkinningManager.IsValid() ? BoundarySkinningManager->GetTotalLocalBoundaryParticleCount() : 0; }
 
 	//=============================================================================
+	// Static Boundary Particles (Delegated to FGPUStaticBoundaryManager)
+	// Generates boundary particles on static mesh colliders for density contribution
+	//=============================================================================
+
+	/**
+	 * Generate boundary particles from static collision primitives
+	 * Call this after uploading collision primitives to generate boundary particles
+	 * for proper density calculation near walls/floors (Akinci 2012)
+	 * @param SmoothingRadius - Fluid smoothing radius (for spacing calculation)
+	 * @param RestDensity - Fluid rest density (for Psi calculation)
+	 */
+	void GenerateStaticBoundaryParticles(float SmoothingRadius, float RestDensity);
+
+	/**
+	 * Clear all static boundary particles
+	 */
+	void ClearStaticBoundaryParticles();
+
+	/**
+	 * Check if static boundary particles are available
+	 */
+	bool HasStaticBoundaryParticles() const { return StaticBoundaryManager.IsValid() && StaticBoundaryManager->HasBoundaryParticles(); }
+
+	/**
+	 * Get static boundary particle count
+	 */
+	int32 GetStaticBoundaryParticleCount() const { return StaticBoundaryManager.IsValid() ? StaticBoundaryManager->GetBoundaryParticleCount() : 0; }
+
+	/**
+	 * Enable/disable static boundary generation
+	 */
+	void SetStaticBoundaryEnabled(bool bEnabled) { if (StaticBoundaryManager.IsValid()) StaticBoundaryManager->SetEnabled(bEnabled); }
+
+	/**
+	 * Check if static boundary generation is enabled
+	 */
+	bool IsStaticBoundaryEnabled() const { return StaticBoundaryManager.IsValid() && StaticBoundaryManager->IsEnabled(); }
+
+	/**
+	 * Get static boundary particles (for debug visualization)
+	 */
+	const TArray<FGPUBoundaryParticle>& GetStaticBoundaryParticles() const
+	{
+		static TArray<FGPUBoundaryParticle> Empty;
+		return StaticBoundaryManager.IsValid() ? StaticBoundaryManager->GetBoundaryParticles() : Empty;
+	}
+
+	//=============================================================================
 	// Stream Compaction (Phase 2 - Per-Polygon Collision)
 	// GPU AABB filtering using parallel prefix sum
 	//=============================================================================
@@ -534,6 +583,13 @@ private:
 		FRDGBufferRef NeighborCountsBuffer = nullptr;
 		FRDGBufferSRVRef NeighborListSRV = nullptr;
 		FRDGBufferSRVRef NeighborCountsSRV = nullptr;
+
+		// Boundary Particle buffers (for same-frame access)
+		// Created in AddBoundarySkinningPass, used in AddSolveDensityPressurePass
+		FRDGBufferRef WorldBoundaryBuffer = nullptr;
+		FRDGBufferSRVRef WorldBoundarySRV = nullptr;
+		int32 WorldBoundaryParticleCount = 0;
+		bool bBoundarySkinningPerformed = false;
 	};
 
 	/** Phase 1: Prepare particle buffer (Spawn, Upload, Reuse, Append) */
@@ -621,7 +677,8 @@ private:
 		FRDGBufferUAVRef NeighborListUAV,
 		FRDGBufferUAVRef NeighborCountsUAV,
 		int32 IterationIndex,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		const FSimulationSpatialData& SpatialData);
 
 	/** Add apply viscosity pass */
 	void AddApplyViscosityPass(
@@ -631,7 +688,8 @@ private:
 		FRDGBufferSRVRef ParticleIndicesSRV,
 		FRDGBufferSRVRef NeighborListSRV,
 		FRDGBufferSRVRef NeighborCountsSRV,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		const FSimulationSpatialData& SpatialData);
 
 	/** Add apply cohesion pass (surface tension / cohesion forces) */
 	void AddApplyCohesionPass(
@@ -695,11 +753,13 @@ private:
 	void AddBoundaryAdhesionPass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
+		const FSimulationSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add boundary skinning pass (GPU transform of bone-local particles to world space) */
 	void AddBoundarySkinningPass(
 		FRDGBuilder& GraphBuilder,
+		FSimulationSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	//=============================================================================
@@ -870,6 +930,13 @@ private:
 	//=============================================================================
 
 	TUniquePtr<FGPUAdhesionManager> AdhesionManager;
+
+	//=============================================================================
+	// Static Boundary Particles (Delegated to FGPUStaticBoundaryManager)
+	// Generates boundary particles on static colliders for density contribution
+	//=============================================================================
+
+	TUniquePtr<FGPUStaticBoundaryManager> StaticBoundaryManager;
 
 	//=============================================================================
 	// Shadow Position Readback (Async GPU→CPU for HISM Shadow Instances)

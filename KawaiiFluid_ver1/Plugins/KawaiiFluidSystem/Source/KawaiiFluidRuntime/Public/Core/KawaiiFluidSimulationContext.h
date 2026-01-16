@@ -416,4 +416,7 @@ protected:
 
 	/** Cached world collision primitives dirty flag */
 	bool bGPUWorldCollisionCacheDirty = true;
+
+	/** Static boundary particles need regeneration flag */
+	bool bStaticBoundaryParticlesDirty = true;
 };
