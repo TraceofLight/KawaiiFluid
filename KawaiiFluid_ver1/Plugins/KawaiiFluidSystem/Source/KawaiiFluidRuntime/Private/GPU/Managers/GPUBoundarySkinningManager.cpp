@@ -244,9 +244,19 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 	else
 	{
 		// Create dummy buffer for first frame (velocity will be 0)
-		PreviousBoundaryBuffer = GraphBuilder.CreateBuffer(
-			FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), FMath::Max(1, WorldBoundaryBufferCapacity)),
-			TEXT("GPUFluidPreviousBoundaryParticles_Dummy")
+		// Must use CreateStructuredBuffer with initial data so RDG marks it as "produced"
+		// Otherwise RDG validation fails: "has a read dependency but was never written to"
+		const int32 DummyCount = FMath::Max(1, WorldBoundaryBufferCapacity);
+		TArray<FGPUBoundaryParticle> DummyData;
+		DummyData.SetNumZeroed(DummyCount);
+		PreviousBoundaryBuffer = CreateStructuredBuffer(
+			GraphBuilder,
+			TEXT("GPUFluidPreviousBoundaryParticles_Dummy"),
+			sizeof(FGPUBoundaryParticle),
+			DummyCount,
+			DummyData.GetData(),
+			DummyCount * sizeof(FGPUBoundaryParticle),
+			ERDGInitialDataFlags::NoCopy
 		);
 	}
 	FRDGBufferSRVRef PreviousBoundarySRV = GraphBuilder.CreateSRV(PreviousBoundaryBuffer);

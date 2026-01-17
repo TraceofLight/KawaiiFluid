@@ -780,8 +780,13 @@ FGPUFluidSimulator::FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStruc
 		if (!PersistentCellCountsBuffer.IsValid())
 		{
 			// Create minimal dummy buffers (1 element each) - not actually used
+			// Must use QueueBufferUpload so RDG marks them as "produced"
+			// Otherwise RDG validation fails: "has a read dependency but was never written to"
+			static uint32 ZeroData = 0;
 			SpatialData.CellCountsBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1), TEXT("SpatialHash.CellCounts.Dummy"));
+			GraphBuilder.QueueBufferUpload(SpatialData.CellCountsBuffer, &ZeroData, sizeof(uint32));
 			SpatialData.ParticleIndicesBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1), TEXT("SpatialHash.ParticleIndices.Dummy"));
+			GraphBuilder.QueueBufferUpload(SpatialData.ParticleIndicesBuffer, &ZeroData, sizeof(uint32));
 		}
 		else
 		{
