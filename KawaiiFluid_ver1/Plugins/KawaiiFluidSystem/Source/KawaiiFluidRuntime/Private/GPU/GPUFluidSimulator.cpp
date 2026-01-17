@@ -1835,6 +1835,7 @@ void FGPUFluidSimulator::ReleaseShadowReadbackObjects()
 	ShadowReadbackWriteIndex = 0;
 	ReadyShadowPositions.Empty();
 	ReadyShadowVelocities.Empty();
+	ReadyShadowNeighborCounts.Empty();
 	ReadyShadowAnisotropyAxis1.Empty();
 	ReadyShadowAnisotropyAxis2.Empty();
 	ReadyShadowAnisotropyAxis3.Empty();
@@ -1933,11 +1934,13 @@ void FGPUFluidSimulator::ProcessShadowReadback()
 		FScopeLock Lock(&BufferLock);
 		ReadyShadowPositions.SetNumUninitialized(ParticleCount);
 		ReadyShadowVelocities.SetNumUninitialized(ParticleCount);
+		ReadyShadowNeighborCounts.SetNumUninitialized(ParticleCount);
 
 		for (int32 i = 0; i < ParticleCount; ++i)
 		{
 			ReadyShadowPositions[i] = ParticleData[i].Position;
 			ReadyShadowVelocities[i] = ParticleData[i].Velocity;
+			ReadyShadowNeighborCounts[i] = ParticleData[i].NeighborCount;
 		}
 
 		ReadyShadowPositionsFrame.store(ShadowReadbackFrameNumbers[ReadIdx]);
@@ -2004,6 +2007,32 @@ bool FGPUFluidSimulator::GetShadowPositionsAndVelocities(TArray<FVector>& OutPos
 	{
 		OutPositions[i] = FVector(ReadyShadowPositions[i]);
 		OutVelocities[i] = FVector(ReadyShadowVelocities[i]);
+	}
+
+	return true;
+}
+
+/**
+ * @brief Get neighbor counts for isolation detection (non-blocking).
+ * @param OutNeighborCounts Output array of neighbor counts per particle.
+ * @return true if valid data was retrieved.
+ */
+bool FGPUFluidSimulator::GetShadowNeighborCounts(TArray<int32>& OutNeighborCounts) const
+{
+	if (ReadyShadowPositionsFrame.load() == 0 || ReadyShadowNeighborCounts.Num() == 0)
+	{
+		OutNeighborCounts.Empty();
+		return false;
+	}
+
+	FScopeLock Lock(&const_cast<FCriticalSection&>(BufferLock));
+
+	const int32 Count = ReadyShadowNeighborCounts.Num();
+	OutNeighborCounts.SetNumUninitialized(Count);
+
+	for (int32 i = 0; i < Count; ++i)
+	{
+		OutNeighborCounts[i] = static_cast<int32>(ReadyShadowNeighborCounts[i]);
 	}
 
 	return true;

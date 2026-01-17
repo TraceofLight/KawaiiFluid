@@ -984,6 +984,9 @@ private:
 	TArray<FVector4f> ReadyShadowAnisotropyAxis2;
 	TArray<FVector4f> ReadyShadowAnisotropyAxis3;
 
+	/** Ready neighbor counts (copied from shadow readback, for isolation detection) */
+	TArray<uint32> ReadyShadowNeighborCounts;
+
 	/** Async readback objects for anisotropy data (separate from position readback) */
 	FRHIGPUBufferReadback* ShadowAnisotropyReadbacks[NUM_SHADOW_READBACK_BUFFERS][3] = { {nullptr} };
 
@@ -1078,6 +1081,25 @@ public:
 		TArray<FVector4>& OutAnisotropyAxis1,
 		TArray<FVector4>& OutAnisotropyAxis2,
 		TArray<FVector4>& OutAnisotropyAxis3) const;
+
+	//=============================================================================
+	// Neighbor Count Readback API (for isolation detection)
+	// Note: Neighbor counts are automatically included in shadow position readback
+	// since FGPUFluidParticle already contains NeighborCount field.
+	//=============================================================================
+
+	/**
+	 * Check if neighbor count data is ready for use
+	 * @return true if shadow readback has completed (neighbor counts are included)
+	 */
+	bool HasReadyNeighborCountData() const { return ReadyShadowNeighborCounts.Num() > 0; }
+
+	/**
+	 * Get neighbor counts (non-blocking, for isolation detection)
+	 * @param OutNeighborCounts - Output array of neighbor counts per particle
+	 * @return true if valid data was retrieved
+	 */
+	bool GetShadowNeighborCounts(TArray<int32>& OutNeighborCounts) const;
 
 private:
 	/** Allocate shadow readback objects */

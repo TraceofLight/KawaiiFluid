@@ -20,6 +20,8 @@
 #include "Engine/StaticMesh.h"
 #include "PhysicsEngine/BodySetup.h"
 #include "Engine/OverlapResult.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 
 UKawaiiFluidComponent::UKawaiiFluidComponent()
 {
@@ -374,6 +376,9 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 							CachedAnisotropyAxis3 = NewAnisotropyAxis3;
 							LastShadowReadbackFrame = GFrameCounter;
 							LastShadowReadbackTime = FPlatformTime::Seconds();
+
+							// Also cache neighbor counts for isolation detection
+							GPUSimulator->GetShadowNeighborCounts(CachedNeighborCounts);
 						}
 					}
 					else if (CachedShadowPositions.Num() > 0 && CachedShadowVelocities.Num() == CachedShadowPositions.Num())
@@ -411,9 +416,14 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 					if (NumParticles > 0)
 					{
 						Positions.SetNum(NumParticles);
+						CachedShadowVelocities.SetNum(NumParticles);
+						CachedNeighborCounts.SetNum(NumParticles);
+
 						for (int32 i = 0; i < NumParticles; ++i)
 						{
 							Positions[i] = Particles[i].Position;
+							CachedShadowVelocities[i] = Particles[i].Velocity;
+							CachedNeighborCounts[i] = Particles[i].NeighborIndices.Num();
 						}
 					}
 				}
@@ -438,6 +448,84 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 					// Note: Anisotropy-based ellipsoid shadows are disabled due to flickering
 					// caused by per-frame particle index reordering from GPU Morton sorting
 					RendererSubsystem->UpdateShadowInstances(Positions.GetData(), NumParticles, ParticleRadius);
+
+					// Spawn splash VFX based on condition mode (with state change detection)
+					if (SplashVFX)
+					{
+						int32 SpawnCount = 0;
+						const bool bHasVelocityData = CachedShadowVelocities.Num() == NumParticles;
+						const bool bHasNeighborData = CachedNeighborCounts.Num() == NumParticles;
+						const bool bHasPrevNeighborData = PrevNeighborCounts.Num() == NumParticles;
+
+						for (int32 i = 0; i < NumParticles && SpawnCount < MaxSplashVFXPerFrame; ++i)
+						{
+							// Velocity condition: fast-moving particle
+							bool bFastMoving = false;
+							FVector VelocityDir = FVector::UpVector;
+							if (bHasVelocityData)
+							{
+								const float Speed = CachedShadowVelocities[i].Size();
+								bFastMoving = Speed > SplashVelocityThreshold;
+								VelocityDir = CachedShadowVelocities[i].GetSafeNormal();
+							}
+
+							// Isolation condition: few neighbors
+							bool bIsolated = false;
+							bool bJustBecameIsolated = false;
+							if (bHasNeighborData)
+							{
+								bIsolated = CachedNeighborCounts[i] <= IsolationNeighborThreshold;
+
+								// State change detection: was not isolated -> now isolated
+								if (bHasPrevNeighborData)
+								{
+									const bool bWasIsolated = PrevNeighborCounts[i] <= IsolationNeighborThreshold;
+									bJustBecameIsolated = bIsolated && !bWasIsolated;
+								}
+								else
+								{
+									// First frame with data - treat as state change if isolated
+									bJustBecameIsolated = bIsolated;
+								}
+							}
+
+							// Evaluate spawn condition based on mode
+							// For isolation-related modes, only spawn on state change (non-isolated -> isolated)
+							bool bShouldSpawn = false;
+							switch (SplashConditionMode)
+							{
+							case ESplashConditionMode::VelocityAndIsolation:
+								bShouldSpawn = bFastMoving && bJustBecameIsolated;
+								break;
+							case ESplashConditionMode::VelocityOrIsolation:
+								bShouldSpawn = bFastMoving || bJustBecameIsolated;
+								break;
+							case ESplashConditionMode::VelocityOnly:
+								bShouldSpawn = bFastMoving;
+								break;
+							case ESplashConditionMode::IsolationOnly:
+								bShouldSpawn = bJustBecameIsolated;
+								break;
+							}
+
+							if (bShouldSpawn)
+							{
+								UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+									GetWorld(),
+									SplashVFX,
+									Positions[i],
+									VelocityDir.Rotation()
+								);
+								++SpawnCount;
+							}
+						}
+
+						// Update previous neighbor counts for next frame's state change detection
+						if (bHasNeighborData)
+						{
+							PrevNeighborCounts = CachedNeighborCounts;
+						}
+					}
 				}
 				else
 				{

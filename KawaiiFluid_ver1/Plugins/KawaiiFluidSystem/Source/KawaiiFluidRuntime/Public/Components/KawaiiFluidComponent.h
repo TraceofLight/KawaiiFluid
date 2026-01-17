@@ -14,6 +14,7 @@ class UKawaiiFluidComponent;
 class UKawaiiFluidPresetDataAsset;
 class UKawaiiFluidSimulationVolumeComponent;
 class AKawaiiFluidSimulationVolume;
+class UNiagaraSystem;
 
 /**
  * Instance data for preserving particle data during re-construction
@@ -84,6 +85,18 @@ enum class EStreamLayerMode : uint8
 {
 	VelocityBased     UMETA(DisplayName = "Velocity Based", ToolTip = "Spawn rate automatically adjusts to velocity for continuous stream"),
 	FixedRate         UMETA(DisplayName = "Fixed Rate", ToolTip = "Spawn fixed number of layers per second"),
+};
+
+/**
+ * Splash VFX condition mode
+ */
+UENUM(BlueprintType)
+enum class ESplashConditionMode : uint8
+{
+	VelocityAndIsolation UMETA(DisplayName = "Velocity AND Isolation", ToolTip = "Fast-moving AND isolated particles (most accurate, like FleX diffuse)"),
+	VelocityOrIsolation  UMETA(DisplayName = "Velocity OR Isolation", ToolTip = "Fast-moving OR isolated particles (more VFX spawns)"),
+	VelocityOnly         UMETA(DisplayName = "Velocity Only", ToolTip = "Only fast-moving particles"),
+	IsolationOnly        UMETA(DisplayName = "Isolation Only", ToolTip = "Only isolated particles"),
 };
 
 /**
@@ -380,6 +393,30 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Rendering")
 	bool bEnableShadow = true;
 
+	//========================================
+	// Splash VFX
+	//========================================
+
+	/** Niagara system to spawn for splash/spray effects on fast-moving particles */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|VFX")
+	TObjectPtr<UNiagaraSystem> SplashVFX;
+
+	/** Velocity threshold to trigger splash VFX (world units/sec) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|VFX", meta = (ClampMin = "0", EditCondition = "SplashVFX != nullptr"))
+	float SplashVelocityThreshold = 200.0f;
+
+	/** Maximum splash VFX spawns per frame (performance limit) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|VFX", meta = (ClampMin = "1", ClampMax = "50", EditCondition = "SplashVFX != nullptr"))
+	int32 MaxSplashVFXPerFrame = 10;
+
+	/** Condition mode for splash VFX triggering */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|VFX", meta = (EditCondition = "SplashVFX != nullptr"))
+	ESplashConditionMode SplashConditionMode = ESplashConditionMode::VelocityAndIsolation;
+
+	/** Neighbor count threshold for isolation (particles with this many or fewer neighbors are considered isolated) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|VFX", meta = (ClampMin = "0", ClampMax = "10", EditCondition = "SplashVFX != nullptr && SplashConditionMode != ESplashConditionMode::VelocityOnly"))
+	int32 IsolationNeighborThreshold = 2;
+
 	/** ISM Renderer Settings (per-Component, debug/preview purpose) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Rendering", meta = (EditCondition = "bEnableRendering", DisplayName = "ISM Settings"))
 	FKawaiiFluidISMRendererSettings ISMSettings;
@@ -606,6 +643,12 @@ private:
 
 	/** Cached shadow velocities for prediction */
 	TArray<FVector> CachedShadowVelocities;
+
+	/** Cached neighbor counts for isolation detection */
+	TArray<int32> CachedNeighborCounts;
+
+	/** Previous frame neighbor counts for state change detection (non-isolated -> isolated) */
+	TArray<int32> PrevNeighborCounts;
 
 	/** Cached anisotropy axis 1 (xyz=direction, w=scale) for ellipsoid shadows */
 	TArray<FVector4> CachedAnisotropyAxis1;
