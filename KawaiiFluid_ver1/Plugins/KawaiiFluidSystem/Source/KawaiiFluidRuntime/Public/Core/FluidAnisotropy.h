@@ -60,15 +60,15 @@ struct KAWAIIFLUIDRUNTIME_API FFluidAnisotropyParams
 	EFluidAnisotropyMode Mode = EFluidAnisotropyMode::DensityBased;
 
 	/** Overall anisotropy scale (higher = more stretched ellipsoids) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy", meta = (ClampMin = "0.5", ClampMax = "3", UIMin = "0.5", UIMax = "3"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy", meta = (ClampMin = "0.5", ClampMax = "10", UIMin = "0.5", UIMax = "10"))
 	float AnisotropyScale = 1.0f;
 
 	/** Minimum ellipsoid scale (prevents too thin shapes) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy", meta = (ClampMin = "0.1", ClampMax = "1", UIMin = "0.1", UIMax = "1"))
 	float AnisotropyMin = 0.2f;
 
-	/** Maximum ellipsoid scale (prevents excessive stretching) - FleX recommends 1.0~2.0 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy", meta = (ClampMin = "1", ClampMax = "3", UIMin = "1", UIMax = "3"))
+	/** Maximum ellipsoid scale (prevents excessive stretching) - FleX recommends 1.0~2.0, but higher values can improve surface smoothing */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy", meta = (ClampMin = "1", ClampMax = "10", UIMin = "1", UIMax = "10"))
 	float AnisotropyMax = 2.0f;
 
 	/** Velocity stretch factor (velocity-based mode) */

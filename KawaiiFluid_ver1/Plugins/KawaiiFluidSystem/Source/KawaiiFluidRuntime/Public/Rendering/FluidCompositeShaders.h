@@ -9,7 +9,7 @@
 #include "SceneTextureParameters.h" 
 
 /**
- * Composite 패스를 위한 셰이더 파라미터
+ * @brief Shader parameters for composite pass.
  */
 BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     // ------------------------------------------------------
@@ -42,7 +42,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     SHADER_PARAMETER(float, FresnelStrength)
     SHADER_PARAMETER(float, RefractiveIndex)
     SHADER_PARAMETER(float, AbsorptionCoefficient)
-    SHADER_PARAMETER(FLinearColor, AbsorptionColorCoefficients)  // RGB별 흡수 계수 (Beer's Law)
+    SHADER_PARAMETER(FLinearColor, AbsorptionColorCoefficients)  // Per-channel absorption (Beer's Law)
     SHADER_PARAMETER(float, SpecularStrength)
     SHADER_PARAMETER(float, SpecularRoughness)
     SHADER_PARAMETER(FLinearColor, EnvironmentLightColor)
@@ -69,7 +69,18 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     SHADER_PARAMETER_SAMPLER(SamplerState, ReflectionCubemapSampler)
     SHADER_PARAMETER(float, ReflectionIntensity)
     SHADER_PARAMETER(float, ReflectionMipLevel)
-    SHADER_PARAMETER(int, bUseReflectionCubemap)  // 1 = Cubemap 사용, 0 = fallback 색상
+    SHADER_PARAMETER(int, bUseReflectionCubemap)  // 1 = use Cubemap, 0 = fallback color
+
+    // ------------------------------------------------------
+    // Screen Space Reflections (SSR)
+    // ------------------------------------------------------
+    SHADER_PARAMETER(int, bEnableSSR)           // Enable SSR
+    SHADER_PARAMETER(int, SSRMaxSteps)          // Ray march max steps
+    SHADER_PARAMETER(float, SSRStepSize)        // Step size (pixels)
+    SHADER_PARAMETER(float, SSRThickness)       // Hit detection thickness
+    SHADER_PARAMETER(float, SSRIntensity)       // SSR intensity
+    SHADER_PARAMETER(float, SSREdgeFade)        // Screen edge fade
+    SHADER_PARAMETER(FVector2f, ViewportSize)   // Viewport size (pixels)
 
     // ------------------------------------------------------
     // Render Targets (Output)

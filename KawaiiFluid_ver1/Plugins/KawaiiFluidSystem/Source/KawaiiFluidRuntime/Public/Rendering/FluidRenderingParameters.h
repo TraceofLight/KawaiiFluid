@@ -93,15 +93,15 @@ enum class EDepthSmoothingFilter : uint8
 };
 
 /**
- * 유체 렌더링 파라미터
- * SSFR 파이프라인 전반에 사용되는 설정들
+ * @brief Fluid rendering parameters.
+ * Settings used throughout the SSFR pipeline.
  */
 USTRUCT(BlueprintType)
 struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 {
 	GENERATED_BODY()
 
-	/** 렌더링 활성화 */
+	/** Enable rendering */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
 	bool bEnableRendering = true;
 
@@ -113,7 +113,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
 	EMetaballShadingMode ShadingMode = EMetaballShadingMode::PostProcess;
 
-	/** 파티클 렌더링 반경 (스크린 스페이스, cm) */
+	/** Particle render radius (screen space, cm) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Depth",
 		meta = (ClampMin = "0.5", ClampMax = "100.0"))
 	float ParticleRenderRadius = 15.0f;
@@ -122,17 +122,17 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing")
 	EDepthSmoothingFilter SmoothingFilter = EDepthSmoothingFilter::NarrowRange;
 
-	/** Depth smoothing 강도 (0=없음, 1=최대) */
+	/** Depth smoothing strength (0=none, 1=max) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SmoothingStrength = 0.5f;
 
-	/** Bilateral/Narrow-Range filter 반경 (픽셀) */
+	/** Bilateral/Narrow-Range filter radius (pixels) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (ClampMin = "1", ClampMax = "50"))
 	int32 BilateralFilterRadius = 20;
 
-	/** Depth threshold (bilateral filter용) */
+	/** Depth threshold (for bilateral filter) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (ClampMin = "0.001", ClampMax = "100.0"))
 	float DepthThreshold = 10.0f;
@@ -142,10 +142,10 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	//========================================
 
 	/**
-	 * Narrow-Range threshold 비율
-	 * threshold = ParticleRadius × 이 값
-	 * 낮을수록 엣지 보존 강함, 높을수록 스무딩 강함
-	 * 1.0~3.0: 타이트한 엣지, 5.0~10.0: 부드러운 표면
+	 * Narrow-Range threshold ratio.
+	 * threshold = ParticleRadius * this value.
+	 * Lower = stronger edge preservation, higher = more smoothing.
+	 * 1.0~3.0: tight edges, 5.0~10.0: smooth surface.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::NarrowRange",
@@ -153,9 +153,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float NarrowRangeThresholdRatio = 3.0f;
 
 	/**
-	 * Narrow-Range clamp 비율
-	 * 앞쪽(카메라 방향) 샘플 클램핑 강도
-	 * ParticleRadius × 이 값으로 제한
+	 * Narrow-Range clamp ratio.
+	 * Front-facing (toward camera) sample clamping strength.
+	 * Clamped to ParticleRadius * this value.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::NarrowRange",
@@ -163,9 +163,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float NarrowRangeClampRatio = 1.0f;
 
 	/**
-	 * Narrow-Range Grazing Angle 부스트 강도
-	 * 얕은 각도에서 threshold를 높여 더 많은 샘플 포함
-	 * 0 = 부스트 없음, 1 = 그레이징 시 2배 threshold
+	 * Narrow-Range grazing angle boost strength.
+	 * Increases threshold at shallow angles to include more samples.
+	 * 0 = no boost, 1 = 2x threshold at grazing angles.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::NarrowRange",
@@ -177,9 +177,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	//========================================
 
 	/**
-	 * Curvature Flow 시간 단계 (Dt)
-	 * 높을수록 한 iteration당 더 많이 스무딩됨
-	 * 0.05~0.15 권장 (안정성)
+	 * Curvature Flow time step (Dt).
+	 * Higher = more smoothing per iteration.
+	 * 0.05~0.15 recommended (stability).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
@@ -187,9 +187,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float CurvatureFlowDt = 0.1f;
 
 	/**
-	 * Curvature Flow 깊이 임계값
-	 * 이 값보다 큰 깊이 차이는 실루엣으로 간주하여 스무딩 안 함
-	 * 파티클 반지름의 3-10배 권장
+	 * Curvature Flow depth threshold.
+	 * Depth differences larger than this are treated as silhouette (no smoothing).
+	 * 3-10x particle radius recommended.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
@@ -197,9 +197,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float CurvatureFlowDepthThreshold = 100.0f;
 
 	/**
-	 * Curvature Flow iteration 횟수
-	 * 높을수록 부드럽지만 비용 증가
-	 * Grazing angle 해결에는 50+ 권장
+	 * Curvature Flow iteration count.
+	 * Higher = smoother but more expensive.
+	 * 50+ recommended for grazing angle issues.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
@@ -207,58 +207,58 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	int32 CurvatureFlowIterations = 50;
 
 	/**
-	 * Grazing Angle 부스트 강도
-	 * 얕은 각도에서 보일 때 스무딩을 더 강하게 적용
-	 * 0 = 부스트 없음, 1 = 그레이징 시 2배 스무딩
+	 * Grazing angle boost strength.
+	 * Applies stronger smoothing at shallow viewing angles.
+	 * 0 = no boost, 1 = 2x smoothing at grazing angles.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
 		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
 			ClampMin = "0.0", ClampMax = "2.0"))
 	float CurvatureFlowGrazingBoost = 1.0f;
 
-	/** 유체 색상 */
+	/** Fluid color */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
 	FLinearColor FluidColor = FLinearColor(0.2f, 0.5f, 0.8f, 1.0f);
 
 	/**
-	 * Fresnel 강도 배율 (IOR에서 F0 자동 계산 후 적용)
-	 * 1.0 = 물리적으로 정확한 반사, 2.0 = 과장된 반사, 0.5 = 약한 반사
-	 * F0 = ((1-IOR)/(1+IOR))^2 * FresnelStrength
+	 * Fresnel strength multiplier (applied after F0 is auto-calculated from IOR).
+	 * 1.0 = physically accurate reflection, 2.0 = exaggerated, 0.5 = weak.
+	 * F0 = ((1-IOR)/(1+IOR))^2 * FresnelStrength.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "5.0"))
 	float FresnelStrength = 1.0f;
 
-	/** 굴절률 (IOR) */
+	/** Index of Refraction (IOR) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "1.0", ClampMax = "2.0"))
 	float RefractiveIndex = 1.33f;
 
-	/** 흡수 계수 (thickness 기반 색상 감쇠) - 전체 스케일 */
+	/** Absorption coefficient (thickness-based color attenuation) - overall scale */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "10.0"))
 	float AbsorptionCoefficient = 2.0f;
 
 	/**
-	 * RGB별 흡수 계수 (Beer's Law)
-	 * 물: R=0.4, G=0.1, B=0.05 (빨강을 많이 흡수하여 파랗게 보임)
-	 * 슬라임: R=0.1, G=0.3, B=0.4 (파랑을 많이 흡수하여 녹색/노란색 계열)
-	 * 높은 값 = 해당 색상이 더 빨리 흡수됨 (두꺼운 부분에서 안 보임)
+	 * Per-channel absorption coefficients (Beer's Law).
+	 * Water: R=0.4, G=0.1, B=0.05 (absorbs red, appears blue).
+	 * Slime: R=0.1, G=0.3, B=0.4 (absorbs blue, appears green/yellow).
+	 * Higher value = that color is absorbed faster (invisible in thick areas).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
 	FLinearColor AbsorptionColorCoefficients = FLinearColor(0.4f, 0.1f, 0.05f, 1.0f);
 
-	/** 스펙큘러 강도 */
+	/** Specular strength */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float SpecularStrength = 1.0f;
 
-	/** 스펙큘러 거칠기 */
+	/** Specular roughness */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.01", ClampMax = "1.0"))
 	float SpecularRoughness = 0.2f;
 
-	/** 환경광 색상 (Cubemap 없을 때 fallback 색상, Ambient 기본색) */
+	/** Environment light color (fallback when no Cubemap, base ambient color) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
 	FLinearColor EnvironmentLightColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
@@ -267,84 +267,137 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	//========================================
 
 	/**
-	 * Ambient 조명 강도 스케일
-	 * EnvironmentLightColor에 곱해지는 배율
-	 * 0 = Ambient 없음 (완전히 어두운 면 가능), 1 = 강한 Ambient
+	 * Ambient lighting intensity scale.
+	 * Multiplied with EnvironmentLightColor.
+	 * 0 = no ambient (fully dark surfaces possible), 1 = strong ambient.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float AmbientScale = 0.15f;
 
 	/**
-	 * Beer's Law 투과율 스케일
-	 * 두께에 따른 빛 흡수 속도 조절
-	 * 낮을수록 투명, 높을수록 두꺼운 부분이 불투명
+	 * Beer's Law transmittance scale.
+	 * Controls light absorption rate based on thickness.
+	 * Lower = more transparent, higher = thick areas become opaque.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.001", ClampMax = "0.5"))
 	float TransmittanceScale = 0.05f;
 
 	/**
-	 * Alpha 두께 스케일
-	 * 두께가 Alpha에 영향을 미치는 정도
-	 * 낮을수록 투명, 높을수록 불투명
+	 * Alpha thickness scale.
+	 * How much thickness affects alpha.
+	 * Lower = more transparent, higher = more opaque.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.001", ClampMax = "0.2"))
 	float AlphaThicknessScale = 0.02f;
 
 	/**
-	 * 굴절 오프셋 스케일
-	 * 굴절에 의한 UV 오프셋 강도
-	 * 0 = 굴절 없음, 높을수록 강한 왜곡
+	 * Refraction offset scale.
+	 * UV offset strength from refraction.
+	 * 0 = no refraction, higher = stronger distortion.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "0.2"))
 	float RefractionScale = 0.05f;
 
 	/**
-	 * Fresnel 반사 혼합 비율
-	 * BaseColor와 ReflectedColor 혼합 시 Fresnel 영향 정도
-	 * 0 = 반사 없음, 1 = 강한 반사
-	 * 0.8+ 권장: grazing angle에서 반사가 강해져 표면 디테일이 자연스럽게 가려짐
+	 * Fresnel reflection blend ratio.
+	 * How much Fresnel affects BaseColor/ReflectedColor blending.
+	 * 0 = no reflection, 1 = strong reflection.
+	 * 0.8+ recommended: at grazing angles, reflection naturally hides surface detail.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float FresnelReflectionBlend = 0.8f;
 
 	/**
-	 * 흡수 바이어스 (Ray Marching용)
-	 * BaseColor 혼합 시 흡수 기여도에 추가되는 값
-	 * 높을수록 FluidColor가 더 강하게 보임
+	 * Absorption bias (for Ray Marching).
+	 * Added to absorption contribution when blending BaseColor.
+	 * Higher = FluidColor appears stronger.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float AbsorptionBias = 0.7f;
 
+	//========================================
+	// Reflection (SSR + Cubemap Fallback)
+	//========================================
+
 	/**
-	 * 환경 반사용 Cubemap (Reflection Capture)
-	 * 설정하지 않으면 EnvironmentLightColor를 사용
-	 * Scene의 Reflection Capture나 HDRI Cubemap 할당 가능
+	 * Enable SSR (Screen Space Reflections).
+	 * Actual scene objects are reflected on the fluid surface.
+	 * Falls back to Cubemap on SSR miss.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection")
+	bool bEnableSSR = true;
+
+	/**
+	 * SSR ray march max steps.
+	 * Higher = more accurate but more expensive.
+	 * 8~16: low cost, 24~32: high quality.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
+		meta = (EditCondition = "bEnableSSR", ClampMin = "4", ClampMax = "64"))
+	int32 SSRMaxSteps = 16;
+
+	/**
+	 * SSR step size (in pixels).
+	 * Smaller = more precise but shorter reach.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
+		meta = (EditCondition = "bEnableSSR", ClampMin = "0.5", ClampMax = "20.0"))
+	float SSRStepSize = 4.0f;
+
+	/**
+	 * SSR hit detection thickness.
+	 * Higher = more lenient hit detection, lower = more precise.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
+		meta = (EditCondition = "bEnableSSR", ClampMin = "0.1", ClampMax = "5.0"))
+	float SSRThickness = 1.0f;
+
+	/**
+	 * SSR intensity (blended with Cubemap).
+	 * 0 = Cubemap only, 1 = SSR only.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
+		meta = (EditCondition = "bEnableSSR", ClampMin = "0.0", ClampMax = "1.0"))
+	float SSRIntensity = 0.8f;
+
+	/**
+	 * SSR screen edge fade.
+	 * Smoothly fades reflections going off screen.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
+		meta = (EditCondition = "bEnableSSR", ClampMin = "0.0", ClampMax = "0.5"))
+	float SSREdgeFade = 0.1f;
+
+	/**
+	 * Fallback Cubemap (used on SSR miss).
+	 * If not set, uses EnvironmentLightColor.
+	 * Can assign scene Reflection Capture or HDRI Cubemap.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection")
 	TObjectPtr<UTextureCube> ReflectionCubemap = nullptr;
 
-	/** Cubemap 반사 강도 (0 = 반사 없음, 1 = 풀 반사) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
+	/** Cubemap reflection intensity (0 = no reflection, 1 = full reflection) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
 		meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float ReflectionIntensity = 1.0f;
 
-	/** Cubemap Mip 레벨 (높을수록 블러리한 반사, Roughness 연동) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
+	/** Cubemap mip level (higher = blurrier reflection, linked to roughness) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
 		meta = (ClampMin = "0.0", ClampMax = "10.0"))
 	float ReflectionMipLevel = 2.0f;
 
-	/** Thickness 렌더링 스케일 */
+	/** Thickness rendering scale */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Thickness",
 		meta = (ClampMin = "0.1", ClampMax = "10.0"))
 	float ThicknessScale = 1.0f;
 
-	/** Render target 해상도 스케일 (1.0 = 화면 해상도) */
+	/** Render target resolution scale (1.0 = screen resolution) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Performance",
 		meta = (ClampMin = "0.25", ClampMax = "1.0"))
 	float RenderTargetScale = 1.0f;
@@ -451,6 +504,13 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	// SSS parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSIntensity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSColor.ToString()));
+	// SSR parameters
+	Hash = HashCombine(Hash, GetTypeHash(Params.bEnableSSR));
+	Hash = HashCombine(Hash, GetTypeHash(Params.SSRMaxSteps));
+	Hash = HashCombine(Hash, GetTypeHash(Params.SSRStepSize));
+	Hash = HashCombine(Hash, GetTypeHash(Params.SSRThickness));
+	Hash = HashCombine(Hash, GetTypeHash(Params.SSRIntensity));
+	Hash = HashCombine(Hash, GetTypeHash(Params.SSREdgeFade));
 	return Hash;
 }
 
@@ -512,5 +572,12 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 		FMath::IsNearlyEqual(A.SubsurfaceOpacity, B.SubsurfaceOpacity, 0.001f) &&
 		// SSS parameters
 		FMath::IsNearlyEqual(A.SSSIntensity, B.SSSIntensity, 0.001f) &&
-		A.SSSColor.Equals(B.SSSColor, 0.001f);
+		A.SSSColor.Equals(B.SSSColor, 0.001f) &&
+		// SSR parameters
+		A.bEnableSSR == B.bEnableSSR &&
+		A.SSRMaxSteps == B.SSRMaxSteps &&
+		FMath::IsNearlyEqual(A.SSRStepSize, B.SSRStepSize, 0.01f) &&
+		FMath::IsNearlyEqual(A.SSRThickness, B.SSRThickness, 0.01f) &&
+		FMath::IsNearlyEqual(A.SSRIntensity, B.SSRIntensity, 0.01f) &&
+		FMath::IsNearlyEqual(A.SSREdgeFade, B.SSREdgeFade, 0.01f);
 }

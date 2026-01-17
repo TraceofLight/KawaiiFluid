@@ -196,13 +196,22 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	}
 	else
 	{
-		// Fallback: 검정 텍스처 (사용 안 함 플래그로 무시됨)
+		// Fallback: black texture (ignored by bUseReflectionCubemap=0 flag)
 		PassParameters->ReflectionCubemap = GBlackTextureCube->TextureRHI;
 		PassParameters->ReflectionCubemapSampler = TStaticSamplerState<SF_Trilinear>::GetRHI();
 		PassParameters->bUseReflectionCubemap = 0;
 	}
 	PassParameters->ReflectionIntensity = RenderParams.ReflectionIntensity;
 	PassParameters->ReflectionMipLevel = RenderParams.ReflectionMipLevel;
+
+	// SSR parameters
+	PassParameters->bEnableSSR = RenderParams.bEnableSSR ? 1 : 0;
+	PassParameters->SSRMaxSteps = RenderParams.SSRMaxSteps;
+	PassParameters->SSRStepSize = RenderParams.SSRStepSize;
+	PassParameters->SSRThickness = RenderParams.SSRThickness;
+	PassParameters->SSRIntensity = RenderParams.SSRIntensity;
+	PassParameters->SSREdgeFade = RenderParams.SSREdgeFade;
+	PassParameters->ViewportSize = FVector2f(Output.ViewRect.Width(), Output.ViewRect.Height());
 
 	// Render target (blend over existing scene)
 	PassParameters->RenderTargets[0] = FRenderTargetBinding(
