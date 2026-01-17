@@ -19,14 +19,14 @@ static constexpr int32 BOUNDARY_MAX_PARTICLES_PER_CELL = 16;
 
 FGPUBoundarySkinningManager::FGPUBoundarySkinningManager()
 	: bIsInitialized(false)
-	, TotalLocalBoundaryParticleCount(0)
-	, WorldBoundaryBufferCapacity(0)
-	, bBoundarySkinningDataDirty(false)
 	, StaticBoundaryParticleCount(0)
 	, StaticBoundaryBufferCapacity(0)
 	, bStaticBoundaryEnabled(false)
 	, bStaticBoundaryDirty(true)
 	, bStaticZOrderValid(false)
+	, TotalLocalBoundaryParticleCount(0)
+	, WorldBoundaryBufferCapacity(0)
+	, bBoundarySkinningDataDirty(false)
 {
 }
 
