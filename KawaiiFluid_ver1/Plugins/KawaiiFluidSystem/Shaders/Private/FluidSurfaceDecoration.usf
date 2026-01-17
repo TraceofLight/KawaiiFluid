@@ -86,6 +86,8 @@ float PrimaryOpacity;
 float PrimaryNormalZThreshold;
 float PrimaryFlowInfluence;
 float2 PrimaryScrollSpeed;
+int bPrimaryNormalMapEnabled;
+float PrimaryNormalStrength;
 
 // Secondary Layer
 int bSecondaryLayerEnabled;
@@ -93,6 +95,14 @@ float SecondaryTilingScale;
 int SecondaryAddressingMode;  // 0 = Wrap (repeat), 1 = Mirror
 float SecondaryOpacity;
 float SecondaryNormalZThreshold;
+
+// Lighting parameters for texture shading
+int bApplyLightingToTextures;
+float3 LightDirection;  // World space light direction (normalized)
+float3 LightColor;      // Directional light color
+float3 AmbientColor;    // Ambient light color
+float TextureSpecularStrength;
+float TextureSpecularRoughness;
 
 // Debug
 int DebugMode;  // 0=off, 1=AccumulatedFlow, 2=Velocity, 3=Both
@@ -260,6 +270,110 @@ float4 SampleSecondaryLayerTexture(float2 UV)
 		// Wrap (repeat) addressing mode (default)
 		return SecondaryLayerTexture.SampleLevel(BilinearWrapSampler, UV, 0);
 	}
+}
+
+// Sample primary layer normal map with addressing mode support
+float3 SamplePrimaryLayerNormalMap(float2 UV)
+{
+	float4 NormalSample;
+	if (PrimaryAddressingMode == 1)
+	{
+		NormalSample = PrimaryLayerNormalMap.SampleLevel(BilinearMirrorSampler, UV, 0);
+	}
+	else
+	{
+		NormalSample = PrimaryLayerNormalMap.SampleLevel(BilinearWrapSampler, UV, 0);
+	}
+	// Decode from [0,1] to [-1,1]
+	return NormalSample.xyz * 2.0 - 1.0;
+}
+
+// Blend two normals using Reoriented Normal Mapping (RNM)
+// BaseNormal: existing surface normal (world space)
+// DetailNormal: texture normal (tangent space, Z-up)
+// Strength: blend strength (0 = base only, 1 = full detail)
+float3 BlendNormalsRNM(float3 BaseNormal, float3 DetailNormal, float Strength)
+{
+	// Scale detail normal by strength
+	DetailNormal.xy *= Strength;
+
+	// RNM blend formula
+	// Reorient detail normal to base normal's tangent space
+	float3 t = BaseNormal + float3(0, 0, 1);
+	float3 u = DetailNormal * float3(-1, -1, 1);
+	return normalize(t * dot(t, u) - u * t.z);
+}
+
+// Build TBN matrix from world normal (for Z-axis projection)
+// Since we project from Z-axis, tangent is along X, bitangent along Y
+float3x3 BuildTBNFromWorldNormal(float3 WorldNormal)
+{
+	// For Z-axis projection, use world X and Y as tangent/bitangent
+	// Then adjust based on the actual surface normal
+	float3 Up = abs(WorldNormal.z) < 0.999 ? float3(0, 0, 1) : float3(1, 0, 0);
+	float3 Tangent = normalize(cross(Up, WorldNormal));
+	float3 Bitangent = cross(WorldNormal, Tangent);
+	return float3x3(Tangent, Bitangent, WorldNormal);
+}
+
+// Apply normal map to existing world normal
+float3 ApplyNormalMap(float3 WorldNormal, float3 TangentNormal, float Strength)
+{
+	if (Strength <= 0.0)
+	{
+		return WorldNormal;
+	}
+
+	// Build TBN matrix
+	float3x3 TBN = BuildTBNFromWorldNormal(WorldNormal);
+
+	// Transform tangent-space normal to world space
+	float3 DetailWorldNormal = normalize(mul(TangentNormal, TBN));
+
+	// Blend with original normal
+	return normalize(lerp(WorldNormal, DetailWorldNormal, Strength));
+}
+
+// Compute lighting for texture albedo
+// Returns lit color with diffuse + specular
+// Uses View.DirectionalLightDirection if available (same as FluidComposite.usf)
+float3 ComputeTextureLighting(float3 Albedo, float3 WorldNormal, float3 WorldPos)
+{
+	if (bApplyLightingToTextures <= 0)
+	{
+		// No lighting - return albedo as-is
+		return Albedo;
+	}
+
+	// View direction (camera to surface)
+	float3 ViewDir = normalize(CameraPosition - WorldPos);
+
+	// Get light direction from View uniform buffer (same as FluidComposite.usf)
+	// View.DirectionalLightDirection is TO the light, so negate for FROM light
+	float3 EffectiveLightDir = normalize(-View.DirectionalLightDirection);
+	float3 EffectiveLightColor = View.DirectionalLightColor.rgb;
+
+	// Fallback to passed parameters if View light is invalid (zero direction)
+	if (length(View.DirectionalLightDirection) < 0.001)
+	{
+		EffectiveLightDir = -LightDirection;
+		EffectiveLightColor = LightColor;
+	}
+
+	// Diffuse (Lambert)
+	float NoL = saturate(dot(WorldNormal, EffectiveLightDir));
+	float3 Diffuse = Albedo * NoL * EffectiveLightColor;
+
+	// Ambient
+	float3 Ambient = Albedo * AmbientColor;
+
+	// Specular (Blinn-Phong)
+	float3 HalfDir = normalize(EffectiveLightDir + ViewDir);
+	float NoH = saturate(dot(WorldNormal, HalfDir));
+	float Shininess = (1.0 - TextureSpecularRoughness) * 128.0;
+	float3 Specular = pow(NoH, Shininess) * TextureSpecularStrength * EffectiveLightColor;
+
+	return Diffuse + Ambient + Specular;
 }
 
 // Compute foam intensity based on various factors
@@ -491,6 +605,7 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	//-------------------------------------------------------------------------
 	// Primary Layer (custom texture overlay) - Z-axis projection
+	// Now with normal map and lighting support
 	//-------------------------------------------------------------------------
 	if (bPrimaryLayerEnabled > 0)
 	{
@@ -532,7 +647,18 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		float TextureAlpha = LayerSample.a > 0.001 ? LayerSample.a : 1.0;
 		float LayerAlpha = TextureAlpha * PrimaryOpacity;
 
-		DecorationColor = lerp(DecorationColor, LayerSample.rgb, LayerAlpha);
+		// Apply normal map if enabled
+		float3 ShadingNormal = WorldNormal;
+		if (bPrimaryNormalMapEnabled > 0 && PrimaryNormalStrength > 0.0)
+		{
+			float3 TangentNormal = SamplePrimaryLayerNormalMap(PrimaryUV);
+			ShadingNormal = ApplyNormalMap(WorldNormal, TangentNormal, PrimaryNormalStrength);
+		}
+
+		// Compute lighting for texture albedo
+		float3 LitLayerColor = ComputeTextureLighting(LayerSample.rgb, ShadingNormal, WorldPos);
+
+		DecorationColor = lerp(DecorationColor, LitLayerColor, LayerAlpha);
 		DecorationAlpha = max(DecorationAlpha, LayerAlpha);
 	}
 

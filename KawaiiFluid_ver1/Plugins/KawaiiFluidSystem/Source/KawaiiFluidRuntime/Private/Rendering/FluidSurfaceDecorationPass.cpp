@@ -99,8 +99,23 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		SHADER_PARAMETER(float, SecondaryOpacity)
 		SHADER_PARAMETER(float, SecondaryNormalZThreshold)
 
+		// Primary Layer Normal Map
+		SHADER_PARAMETER(int32, bPrimaryNormalMapEnabled)
+		SHADER_PARAMETER(float, PrimaryNormalStrength)
+
+		// Texture Lighting
+		SHADER_PARAMETER(int32, bApplyLightingToTextures)
+		SHADER_PARAMETER(FVector3f, LightDirection)
+		SHADER_PARAMETER(FVector3f, LightColor)
+		SHADER_PARAMETER(FVector3f, AmbientColor)
+		SHADER_PARAMETER(float, TextureSpecularStrength)
+		SHADER_PARAMETER(float, TextureSpecularRoughness)
+
 		// Debug (0=off, 1=AccumulatedFlow, 2=Velocity, 3=Both)
 		SHADER_PARAMETER(int32, DebugMode)
+
+		// View uniform buffer for accessing scene lighting (View.DirectionalLightDirection etc.)
+		SHADER_PARAMETER_STRUCT_REF(FViewUniformShaderParameters, View)
 
 		// Output
 		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float4>, OutputTexture)
@@ -324,6 +339,28 @@ void RenderFluidSurfaceDecorationPass(
 	PassParameters->SecondaryAddressingMode = static_cast<int32>(Params.SecondaryLayer.AddressingMode);
 	PassParameters->SecondaryOpacity = Params.SecondaryLayer.Opacity;
 	PassParameters->SecondaryNormalZThreshold = Params.SecondaryLayer.NormalZThreshold;
+
+	// Primary Layer Normal Map
+	const bool bPrimaryHasNormalMap = Params.PrimaryLayer.NormalMap.Get() != nullptr;
+	PassParameters->bPrimaryNormalMapEnabled = bPrimaryHasNormalMap ? 1 : 0;
+	PassParameters->PrimaryNormalStrength = Params.PrimaryLayer.NormalStrength;
+
+	// Texture Lighting
+	PassParameters->bApplyLightingToTextures = Params.bApplyLightingToTextures ? 1 : 0;
+	// Use default lighting direction (sunlight from above-right)
+	// This provides a reasonable default; future enhancement could find DirectionalLight in scene
+	// Direction is FROM light source (shader uses NoL = dot(N, -LightDir))
+	FVector3f LightDir = FVector3f(0.577f, 0.577f, -0.577f);  // Normalized (1,1,-1) - light from upper right
+	FVector3f LightCol = FVector3f(1.0f, 0.98f, 0.95f);       // Slightly warm white
+	FVector3f AmbientCol = FVector3f(0.15f, 0.15f, 0.18f);    // Slightly cool ambient
+	PassParameters->LightDirection = LightDir;
+	PassParameters->LightColor = LightCol;
+	PassParameters->AmbientColor = AmbientCol;
+	PassParameters->TextureSpecularStrength = Params.TextureSpecularStrength;
+	PassParameters->TextureSpecularRoughness = Params.TextureSpecularRoughness;
+
+	// View uniform buffer for scene lighting access
+	PassParameters->View = View.ViewUniformBuffer;
 
 	// Debug mode: 0=off, 1=AccumulatedFlow, 2=Velocity, 3=Both
 	// Change this value to debug flow accumulation:

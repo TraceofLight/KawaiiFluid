@@ -45,6 +45,10 @@ struct KAWAIIFLUIDRUNTIME_API FSurfaceDecorationLayer
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer")
 	TObjectPtr<UTexture2D> NormalMap = nullptr;
 
+	/** Normal map strength (0 = no effect, 1 = full normal map) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer", meta = (EditCondition = "NormalMap != nullptr", ClampMin = "0.0", ClampMax = "2.0"))
+	float NormalStrength = 1.0f;
+
 	/** Texture tiling scale (0.01 = 1 tile per 100 units/1m, 0.1 = 1 tile per 10 units) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Layer", meta = (ClampMin = "0.0001", ClampMax = "1.0"))
 	float TilingScale = 0.01f;
@@ -302,6 +306,22 @@ struct KAWAIIFLUIDRUNTIME_API FSurfaceDecorationParams
 	/** Blend decoration with base fluid color */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Decoration", meta = (EditCondition = "bEnabled", ClampMin = "0.0", ClampMax = "1.0"))
 	float BlendWithFluidColor = 0.5f;
+
+	//========================================
+	// Texture Lighting
+	//========================================
+
+	/** Apply lighting to texture layers (preserves fluid surface normals) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Decoration|Lighting", meta = (EditCondition = "bEnabled"))
+	bool bApplyLightingToTextures = true;
+
+	/** Specular strength for textured surfaces */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Decoration|Lighting", meta = (EditCondition = "bEnabled && bApplyLightingToTextures", ClampMin = "0.0", ClampMax = "2.0"))
+	float TextureSpecularStrength = 0.3f;
+
+	/** Specular roughness for textured surfaces (0 = sharp, 1 = diffuse) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Surface Decoration|Lighting", meta = (EditCondition = "bEnabled && bApplyLightingToTextures", ClampMin = "0.0", ClampMax = "1.0"))
+	float TextureSpecularRoughness = 0.5f;
 
 	FSurfaceDecorationParams() = default;
 };
