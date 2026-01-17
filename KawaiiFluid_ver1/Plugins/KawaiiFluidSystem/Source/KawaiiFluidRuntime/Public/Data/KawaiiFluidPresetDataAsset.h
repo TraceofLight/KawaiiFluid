@@ -238,6 +238,54 @@ public:
 	float DetachThreshold = 500.0f;
 
 	//========================================
+	// Boundary Interaction (Moving Characters/Objects)
+	//========================================
+
+	/**
+	 * Enable relative velocity based pressure damping
+	 * When enabled, reduces pressure repulsion when boundary is approaching fluid
+	 * This prevents fluid from "flying away" when characters move fast
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Boundary Interaction")
+	bool bEnableRelativeVelocityDamping = true;
+
+	/**
+	 * Strength of relative velocity damping for pressure
+	 * 0 = no damping (original behavior), 1 = full damping (fluid sticks to boundary)
+	 * Recommended: 0.5 ~ 0.8
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Boundary Interaction",
+		meta = (EditCondition = "bEnableRelativeVelocityDamping", ClampMin = "0.0", ClampMax = "1.0"))
+	float RelativeVelocityDampingStrength = 0.6f;
+
+	/**
+	 * Strength of boundary velocity transfer to fluid
+	 * Higher = fluid follows boundary more closely
+	 * 1.0 = full velocity inheritance
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Boundary Interaction",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float BoundaryVelocityTransferStrength = 0.8f;
+
+	/**
+	 * Relative speed threshold (cm/s) where detachment begins
+	 * When fluid-boundary relative speed exceeds this, velocity transfer reduces
+	 * Typical walking: 300~500 cm/s, Running: 600~1000 cm/s
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Boundary Interaction",
+		meta = (ClampMin = "0.0", ClampMax = "5000.0"))
+	float BoundaryDetachSpeedThreshold = 500.0f;
+
+	/**
+	 * Relative speed (cm/s) for full detachment
+	 * Above this speed, no velocity transfer from boundary
+	 * Should be > BoundaryDetachSpeedThreshold
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Boundary Interaction",
+		meta = (ClampMin = "0.0", ClampMax = "10000.0"))
+	float BoundaryMaxDetachSpeed = 1500.0f;
+
+	//========================================
 	// Stack Pressure Parameters
 	//========================================
 

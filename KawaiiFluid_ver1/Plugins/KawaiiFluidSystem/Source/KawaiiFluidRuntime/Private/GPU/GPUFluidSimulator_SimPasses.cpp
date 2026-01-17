@@ -141,6 +141,9 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	PassParameters->InvW_DeltaQ = Params.InvW_DeltaQ;
 	// Iteration control for neighbor caching
 	PassParameters->IterationIndex = IterationIndex;
+	// Relative Velocity Pressure Damping (prevents fluid flying away from fast boundaries)
+	PassParameters->bEnableRelativeVelocityDamping = Params.bEnableRelativeVelocityDamping;
+	PassParameters->RelativeVelocityDampingStrength = Params.RelativeVelocityDampingStrength;
 
 	// =========================================================================
 	// Boundary Particles for density contribution (Akinci 2012)
@@ -400,6 +403,11 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 
 	// MortonBoundsMin is required for GetMortonCellIDFromCellCoord in shader
 	PassParameters->MortonBoundsMin = SimulationBoundsMin;
+
+	// Improved Boundary Velocity Transfer
+	PassParameters->BoundaryVelocityTransferStrength = Params.BoundaryVelocityTransferStrength;
+	PassParameters->BoundaryDetachSpeedThreshold = Params.BoundaryDetachSpeedThreshold;
+	PassParameters->BoundaryMaxDetachSpeed = Params.BoundaryMaxDetachSpeed;
 
 	// Debug: Log Viscosity boundary Z-Order status (every 120 frames)
 	static int32 ViscosityDebugCounter = 0;

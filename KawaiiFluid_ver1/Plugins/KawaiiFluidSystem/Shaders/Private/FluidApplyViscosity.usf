@@ -69,6 +69,11 @@ StructuredBuffer<uint> BoundaryCellEnd;
 int bUseBoundaryZOrder;
 float3 MortonBoundsMin;  // Required for GetMortonCellIDFromCellCoord
 
+// Improved Boundary Velocity Transfer
+float BoundaryVelocityTransferStrength;
+float BoundaryDetachSpeedThreshold;
+float BoundaryMaxDetachSpeed;
+
 //=============================================================================
 // Z-Order Cell ID Calculation (uses shader parameters)
 // Must match FluidSolveDensityPressure.usf's GetMortonCellIDFromCellCoord
@@ -367,15 +372,17 @@ void ApplyViscosityCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 								// Use adhesionRadius for kernel instead of smoothingRadius
 								float w = Poly6Kernel(r2, adhesionRadius2) * Poly6Coeff;
 
-								// Non-linear velocity transfer: slow = follow, fast = detach
-								float boundarySpeed = length(boundary.Velocity);
-								float speedThreshold = 5000000.0f;
-								float maxSpeed = 12000000.0f;
-								float speedFactor = 1.0 - smoothstep(speedThreshold, maxSpeed, boundarySpeed);
+								// Relative velocity based transfer (improved version)
+								// Low relative speed = high transfer, high = low transfer (natural detachment)
+								float3 relativeVelocity = vel - boundary.Velocity;
+								float relativeSpeed = length(relativeVelocity);
+
+								float detachFactor = smoothstep(BoundaryDetachSpeedThreshold, BoundaryMaxDetachSpeed, relativeSpeed);
+								float transferFactor = (1.0f - detachFactor) * BoundaryVelocityTransferStrength;
 
 								float3 velDiff = boundary.Velocity - vel;
-								velocityCorrection += velDiff * w * boundary.Psi * clampedAdhesion * speedFactor;
-								weightSum += w * boundary.Psi * clampedAdhesion;
+								velocityCorrection += velDiff * w * boundary.Psi * clampedAdhesion * transferFactor;
+								weightSum += w * boundary.Psi * clampedAdhesion * transferFactor;
 							}
 						}
 					}
@@ -399,15 +406,17 @@ void ApplyViscosityCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 					// Use adhesionRadius for kernel instead of smoothingRadius
 					float w = Poly6Kernel(r2, adhesionRadius2) * Poly6Coeff;
 
-					// Non-linear velocity transfer: slow = follow, fast = detach
-					float boundarySpeed = length(boundary.Velocity);
-					float speedThreshold = 5000000.0f;
-					float maxSpeed = 12000000.0f;
-					float speedFactor = 1.0 - smoothstep(speedThreshold, maxSpeed, boundarySpeed);
+					// Relative velocity based transfer (improved version)
+					// Low relative speed = high transfer, high = low transfer (natural detachment)
+					float3 relativeVelocity = vel - boundary.Velocity;
+					float relativeSpeed = length(relativeVelocity);
+
+					float detachFactor = smoothstep(BoundaryDetachSpeedThreshold, BoundaryMaxDetachSpeed, relativeSpeed);
+					float transferFactor = (1.0f - detachFactor) * BoundaryVelocityTransferStrength;
 
 					float3 velDiff = boundary.Velocity - vel;
-					velocityCorrection += velDiff * w * boundary.Psi * clampedAdhesion * speedFactor;
-					weightSum += w * boundary.Psi * clampedAdhesion;
+					velocityCorrection += velDiff * w * boundary.Psi * clampedAdhesion * transferFactor;
+					weightSum += w * boundary.Psi * clampedAdhesion * transferFactor;
 				}
 			}
 		}

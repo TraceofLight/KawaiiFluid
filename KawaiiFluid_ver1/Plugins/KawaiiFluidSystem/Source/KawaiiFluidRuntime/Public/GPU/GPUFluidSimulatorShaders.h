@@ -271,6 +271,9 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellStart)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellEnd)
 		SHADER_PARAMETER(int32, bUseBoundaryZOrder)
+		// Relative Velocity Pressure Damping (prevents fluid flying away from fast boundaries)
+		SHADER_PARAMETER(int32, bEnableRelativeVelocityDamping)
+		SHADER_PARAMETER(float, RelativeVelocityDampingStrength)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -342,6 +345,10 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellEnd)
 		SHADER_PARAMETER(int32, bUseBoundaryZOrder)
 		SHADER_PARAMETER(FVector3f, MortonBoundsMin)  // Required for GetMortonCellIDFromCellCoord
+		// Improved Boundary Velocity Transfer
+		SHADER_PARAMETER(float, BoundaryVelocityTransferStrength)
+		SHADER_PARAMETER(float, BoundaryDetachSpeedThreshold)
+		SHADER_PARAMETER(float, BoundaryMaxDetachSpeed)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;

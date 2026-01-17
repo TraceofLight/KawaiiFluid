@@ -420,6 +420,13 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 	// Stack Pressure (weight transfer from stacked attached particles)
 	GPUParams.StackPressureScale = Preset->bEnableStackPressure ? Preset->StackPressureScale : 0.0f;
 
+	// Boundary Interaction (Moving Characters/Objects)
+	GPUParams.bEnableRelativeVelocityDamping = Preset->bEnableRelativeVelocityDamping ? 1 : 0;
+	GPUParams.RelativeVelocityDampingStrength = Preset->RelativeVelocityDampingStrength;
+	GPUParams.BoundaryVelocityTransferStrength = Preset->BoundaryVelocityTransferStrength;
+	GPUParams.BoundaryDetachSpeedThreshold = Preset->BoundaryDetachSpeedThreshold;
+	GPUParams.BoundaryMaxDetachSpeed = Preset->BoundaryMaxDetachSpeed;
+
 	// Gravity from preset
 	GPUParams.Gravity = FVector3f(Preset->Gravity);
 

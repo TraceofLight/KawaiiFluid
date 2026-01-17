@@ -136,8 +136,13 @@ struct FGPUFluidSimulationParams
 
 	// Stack Pressure (weight transfer from stacked attached particles)
 	float StackPressureScale;     // Stack pressure strength (0 = disabled, 1.0 = default)
-	float Padding3;               // Alignment padding
-	float Padding4;               // Alignment padding
+
+	// Boundary Interaction (Moving Characters/Objects)
+	int32 bEnableRelativeVelocityDamping;   // Enable relative velocity pressure damping
+	float RelativeVelocityDampingStrength;  // 0~1, how much to reduce pressure when boundary approaches
+	float BoundaryVelocityTransferStrength; // 0~1, how much fluid follows boundary velocity
+	float BoundaryDetachSpeedThreshold;     // cm/s, relative speed where detachment begins
+	float BoundaryMaxDetachSpeed;           // cm/s, relative speed for full detachment
 
 	FGPUFluidSimulationParams()
 		: RestDensity(1000.0f)
@@ -175,8 +180,11 @@ struct FGPUFluidSimulationParams
 		, TensileDeltaQ(0.2f)
 		, InvW_DeltaQ(0.0f)
 		, StackPressureScale(0.0f)
-		, Padding3(0.0f)
-		, Padding4(0.0f)
+		, bEnableRelativeVelocityDamping(1)
+		, RelativeVelocityDampingStrength(0.6f)
+		, BoundaryVelocityTransferStrength(0.8f)
+		, BoundaryDetachSpeedThreshold(500.0f)
+		, BoundaryMaxDetachSpeed(1500.0f)
 	{
 	}
 

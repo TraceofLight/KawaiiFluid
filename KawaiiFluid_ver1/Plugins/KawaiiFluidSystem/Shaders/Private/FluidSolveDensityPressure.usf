@@ -79,6 +79,10 @@ StructuredBuffer<uint> BoundaryCellStart;
 StructuredBuffer<uint> BoundaryCellEnd;
 int bUseBoundaryZOrder;
 
+// Relative Velocity Pressure Damping (prevents fluid flying away from fast boundaries)
+int bEnableRelativeVelocityDamping;
+float RelativeVelocityDampingStrength;
+
 //=============================================================================
 // Z-Order Cell ID Calculation (uses shader parameters)
 // Morton code functions are provided by FluidMortonUtils.ush
@@ -658,7 +662,30 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 								float3 gradW = SpikyGradientFast(r, r2, h, h2);
 								gradW *= SpikyCoeff * CM_TO_M;
 
-								deltaP += lambda_i_prev * boundary.Psi * gradW;
+								// Relative velocity damping: reduce pressure when boundary approaches fluid
+								float pressureDampFactor = 1.0f;
+								if (bEnableRelativeVelocityDamping)
+								{
+									float r_len = sqrt(r2_cm);
+									if (r_len > SMALL_NUMBER)
+									{
+										float3 r_dir = r_cm / r_len;  // Direction from boundary to fluid
+										float3 relVel = particle.Velocity - boundary.Velocity;
+
+										// Negative dot = boundary catching up (approaching)
+										float approachSpeed = -dot(relVel, r_dir);
+
+										// Damp pressure only when approaching (approachSpeed > 0)
+										if (approachSpeed > 0.0f)
+										{
+											// Smooth falloff based on approach speed (cm/s)
+											float dampAmount = saturate(approachSpeed / 1000.0f);
+											pressureDampFactor = 1.0f - dampAmount * RelativeVelocityDampingStrength;
+										}
+									}
+								}
+
+								deltaP += pressureDampFactor * lambda_i_prev * boundary.Psi * gradW;
 							}
 						}
 					}
@@ -688,7 +715,30 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 					float3 gradW = SpikyGradientFast(r, r2, h, h2);
 					gradW *= SpikyCoeff * CM_TO_M;
 
-					deltaP += lambda_i_prev * boundary.Psi * gradW;
+					// Relative velocity damping: reduce pressure when boundary approaches fluid
+					float pressureDampFactor = 1.0f;
+					if (bEnableRelativeVelocityDamping)
+					{
+						float r_len = sqrt(r2_cm);
+						if (r_len > SMALL_NUMBER)
+						{
+							float3 r_dir = r_cm / r_len;  // Direction from boundary to fluid
+							float3 relVel = particle.Velocity - boundary.Velocity;
+
+							// Negative dot = boundary catching up (approaching)
+							float approachSpeed = -dot(relVel, r_dir);
+
+							// Damp pressure only when approaching (approachSpeed > 0)
+							if (approachSpeed > 0.0f)
+							{
+								// Smooth falloff based on approach speed (cm/s)
+								float dampAmount = saturate(approachSpeed / 1000.0f);
+								pressureDampFactor = 1.0f - dampAmount * RelativeVelocityDampingStrength;
+							}
+						}
+					}
+
+					deltaP += pressureDampFactor * lambda_i_prev * boundary.Psi * gradW;
 				}
 			}
 		}
