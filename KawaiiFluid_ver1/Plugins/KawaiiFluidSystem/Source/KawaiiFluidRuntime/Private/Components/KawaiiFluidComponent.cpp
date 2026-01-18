@@ -103,6 +103,9 @@ void UKawaiiFluidComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 스폰 타이머 초기화
+	SpawnAccumulatedTime = 0.0f;
+
 	// 시뮬레이션 모듈 초기화
 	if (SimulationModule)
 	{
@@ -159,6 +162,17 @@ void UKawaiiFluidComponent::BeginPlay()
 	// Module을 Subsystem에 등록 (Component가 아닌 Module!)
 	RegisterToSubsystem();
 
+	// GPU 스폰 제한 설정 (PIE 첫 프레임에서 SpawnMaxParticleCount = 0 방지)
+	// RegisterToSubsystem 이후에 GPU 시뮬레이터가 초기화되어 있어야 함
+	if (SimulationModule && SimulationModule->IsGPUSimulationActive())
+	{
+		if (FGPUFluidSimulator* GPUSim = SimulationModule->GetGPUSimulator())
+		{
+			GPUSim->SetSpawnMaxParticleCount(SpawnSettings.MaxParticleCount);
+			UE_LOG(LogTemp, Log, TEXT("BeginPlay: Set SpawnMaxParticleCount = %d"), SpawnSettings.MaxParticleCount);
+		}
+	}
+
 	// ShapeVolume mode: auto spawn at BeginPlay
 	if (SpawnSettings.IsShapeVolumeMode() && SimulationModule)
 	{
@@ -209,6 +223,10 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 	UWorld* World = GetWorld();
 	const bool bIsGameWorld = World && World->IsGameWorld();
+
+	// Readback 요청 설정 (GPU 시뮬레이션 전에 호출 필요)
+	// Debug Draw, 브러시 모드, Recycle 모드에서 readback 필요
+	GetFluidStatsCollector().SetReadbackRequested(bEnableDebugDraw || bBrushModeActive || SpawnSettings.bRecycleOldestParticles);
 
 #if WITH_EDITOR
 	// 브러시 모드에서 에디터 시뮬레이션 실행
@@ -338,9 +356,6 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 
 	// Debug Draw: DrawDebugPoint 기반 Z-Order 시각화
-	// GPU 모드에서 readback 필요 - Stats Collector에 요청
-	// 브러시 모드에서도 파티클 제거를 위해 readback 필요
-	GetFluidStatsCollector().SetDebugReadbackRequested(bEnableDebugDraw || bBrushModeActive);
 	if (bEnableDebugDraw)
 	{
 		DrawDebugParticles();
@@ -591,13 +606,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 	{
 		return;
 	}
-
-	// 최대 파티클 수 체크
-	if (SpawnSettings.MaxParticleCount > 0 && SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
-	{
-		return;
-	}
-
+	
 	// Hexagonal Stream 모드: Hexagonal Packing 레이어 기반 스폰
 	if (SpawnSettings.EmitterType == EFluidEmitterType::HexagonalStream)
 	{
@@ -616,28 +625,17 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 
 		if (SpawnSettings.StreamLayerMode == EStreamLayerMode::VelocityBased)
 		{
-			// Velocity-based: LayerInterval = (Spacing * LayerSpacingRatio) / Speed
-			// LayerSpacingRatio가 작을수록 레이어가 촘촘하게 스폰되어 연속적인 스트림 형성
-			// 1.0 = 레이어 간격이 파티클 간격과 동일 (끊겨 보일 수 있음)
-			// 0.5 = 레이어가 2배 촘촘하게 (연속적인 모양)
 			const float LayerSpacingRatio = FMath::Clamp(SpawnSettings.StreamLayerSpacingRatio, 0.2f, 1.0f);
 			LayerInterval = (Spacing * LayerSpacingRatio) / Speed;
 		}
 		else  // FixedRate
 		{
-			// 고정 레이어/초 모드
 			LayerInterval = 1.0f / FMath::Max(SpawnSettings.StreamLayersPerSecond, 1.0f);
 		}
 
 		SpawnAccumulatedTime += DeltaTime;
 
-		// 연속적인 스트림을 위해 여러 레이어 스폰 시 위치 오프셋 적용
-		// 각 레이어는 스폰 시점 차이만큼 유체 진행 방향으로 오프셋
-		const FQuat Rotation = GetComponentQuat();
-		const FVector BaseLocation = GetComponentLocation() + Rotation.RotateVector(SpawnSettings.SpawnOffset);
-		const FVector WorldDirection = Rotation.RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
-
-		// 스폰해야 할 레이어 수 계산
+		// 스폰할 레이어 수 계산
 		int32 LayersToSpawn = 0;
 		float TempAccumulatedTime = SpawnAccumulatedTime;
 		while (TempAccumulatedTime >= LayerInterval)
@@ -646,26 +644,34 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 			TempAccumulatedTime -= LayerInterval;
 		}
 
-		// 잔여 시간: 이전 프레임의 마지막 스폰 이후 경과한 추가 시간
-		// 이 시간만큼 이전 레이어가 더 이동했으므로, 새 레이어들도 그만큼 오프셋 필요
+		if (LayersToSpawn == 0)
+		{
+			return;
+		}
+
+		// 비-Recycle 모드: max 도달 시 스폰 중단
+		if (!SpawnSettings.bRecycleOldestParticles && SpawnSettings.MaxParticleCount > 0 &&
+			SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
+		{
+			return;
+		}
+
+		//========================================
+		// 1. 스폰 (실제 개수 반환됨)
+		//========================================
+		const FQuat Rotation = GetComponentQuat();
+		const FVector BaseLocation = GetComponentLocation() + Rotation.RotateVector(SpawnSettings.SpawnOffset);
+		const FVector WorldDirection = Rotation.RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
 		const float ResidualTime = TempAccumulatedTime;
 
-		// 각 레이어를 시간 오프셋에 맞는 위치에 스폰
-		// 가장 먼저 스폰됐어야 할 레이어(가장 멀리 이동한)부터 순서대로
+		int32 TotalSpawned = 0;
 		for (int32 i = LayersToSpawn - 1; i >= 0; --i)
 		{
-			// i번째 레이어는 i * LayerInterval 전에 스폰됐어야 함
-			// 그동안 Speed * time만큼 이동했을 것
-			// i = LayersToSpawn-1 (oldest): 가장 멀리 이동
-			// i = 0 (newest, now): 이동 없음
-			// 추가로 잔여 시간만큼 모든 레이어를 오프셋하여 프레임 간 연속성 보장
 			float TimeOffset = static_cast<float>(i) * LayerInterval + ResidualTime;
 			float PositionOffset = Speed * TimeOffset;
-
-			// 유체 진행 방향으로 오프셋된 위치에서 스폰
 			FVector OffsetLocation = BaseLocation + WorldDirection * PositionOffset;
 
-			SimulationModule->SpawnParticleDirectionalHexLayer(
+			TotalSpawned += SimulationModule->SpawnParticleDirectionalHexLayer(
 				OffsetLocation,
 				WorldDirection,
 				Speed,
@@ -675,12 +681,19 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 			);
 
 			SpawnAccumulatedTime -= LayerInterval;
+		}
 
-			// 최대 파티클 수 체크
-			if (SpawnSettings.MaxParticleCount > 0 && SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
+		//========================================
+		// 2. Recycle: 스폰 후 초과분 Despawn 요청
+		//    (GPU 순서: Despawn → Spawn 이므로 정상 작동)
+		//========================================
+		if (SpawnSettings.bRecycleOldestParticles && SpawnSettings.MaxParticleCount > 0 && TotalSpawned > 0)
+		{
+			const int32 CurrentCount = SimulationModule->GetParticleCount();  // 이미 pending spawn 포함
+			if (CurrentCount > SpawnSettings.MaxParticleCount)
 			{
-				SpawnAccumulatedTime = 0.0f;
-				break;
+				const int32 ToRemove = CurrentCount - SpawnSettings.MaxParticleCount;
+				SimulationModule->RemoveOldestParticles(ToRemove);
 			}
 		}
 	}
@@ -695,16 +708,46 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		SpawnAccumulatedTime += DeltaTime;
 		const float SpawnInterval = 1.0f / SpawnSettings.ParticlesPerSecond;
 
-		while (SpawnAccumulatedTime >= SpawnInterval)
+		// 스폰할 파티클 수 계산
+		int32 SpawnCount = 0;
+		float TempAccumulatedTime = SpawnAccumulatedTime;
+		while (TempAccumulatedTime >= SpawnInterval)
+		{
+			++SpawnCount;
+			TempAccumulatedTime -= SpawnInterval;
+		}
+
+		if (SpawnCount == 0)
+		{
+			return;
+		}
+
+		// 비-Recycle 모드: max 도달 시 스폰 중단
+		if (!SpawnSettings.bRecycleOldestParticles && SpawnSettings.MaxParticleCount > 0 &&
+			SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
+		{
+			return;
+		}
+
+		//========================================
+		// 1. 스폰
+		//========================================
+		for (int32 i = 0; i < SpawnCount; ++i)
 		{
 			SpawnDirectionalParticle();
 			SpawnAccumulatedTime -= SpawnInterval;
+		}
 
-			// 최대 파티클 수 체크
-			if (SpawnSettings.MaxParticleCount > 0 && SimulationModule->GetParticleCount() >= SpawnSettings.MaxParticleCount)
+		//========================================
+		// 2. Recycle: 스폰 후 초과분 Despawn 요청
+		//========================================
+		if (SpawnSettings.bRecycleOldestParticles && SpawnSettings.MaxParticleCount > 0)
+		{
+			const int32 CurrentCount = SimulationModule->GetParticleCount();
+			if (CurrentCount > SpawnSettings.MaxParticleCount)
 			{
-				SpawnAccumulatedTime = 0.0f;
-				break;
+				const int32 ToRemove = CurrentCount - SpawnSettings.MaxParticleCount;
+				SimulationModule->RemoveOldestParticles(ToRemove);
 			}
 		}
 	}
@@ -1142,7 +1185,7 @@ void UKawaiiFluidComponent::AddParticlesInRadius(const FVector& WorldCenter, flo
                                                   int32 Count, const FVector& Velocity,
                                                   float Randomness, const FVector& SurfaceNormal)
 {
-	if (!SimulationModule)
+	if (!SimulationModule || Count <= 0)
 	{
 		return;
 	}
@@ -1154,10 +1197,27 @@ void UKawaiiFluidComponent::AddParticlesInRadius(const FVector& WorldCenter, flo
 	SimulationModule->Modify();
 #endif
 
+	// MaxParticleCount 체크 (브러시는 단순하게 - 공간 있으면 스폰)
+	int32 ActualCount = Count;
+	if (SpawnSettings.MaxParticleCount > 0)
+	{
+		const int32 CurrentCount = SimulationModule->GetParticleCount();
+		const int32 Available = SpawnSettings.MaxParticleCount - CurrentCount;
+
+		if (Available <= 0)
+		{
+			return;  // 공간 없음 - 스폰 안함
+		}
+		else if (Available < Count)
+		{
+			ActualCount = Available;  // 남은 공간만큼만
+		}
+	}
+
 	// 노말 정규화 (안전)
 	const FVector Normal = SurfaceNormal.GetSafeNormal();
 
-	for (int32 i = 0; i < Count; ++i)
+	for (int32 i = 0; i < ActualCount; ++i)
 	{
 		// 랜덤 방향 생성
 		FVector RandomDir = FMath::VRand();

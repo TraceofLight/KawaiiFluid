@@ -1,6 +1,7 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Modules/KawaiiFluidSimulationModule.h"
+#include <algorithm>  // For std::nth_element
 #include "Core/SpatialHash.h"
 #include "Collision/FluidCollider.h"
 #include "Components/FluidInteractionComponent.h"
@@ -151,8 +152,24 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 
 	const int32 UploadCount = Particles.Num();
 
+	// 업로드된 파티클 중 최대 ID 찾기 (ID 중복 방지를 위해)
+	int32 MaxParticleID = -1;
+	for (const FFluidParticle& Particle : Particles)
+	{
+		MaxParticleID = FMath::Max(MaxParticleID, Particle.ParticleID);
+	}
+
 	// CPU에서 GPU로 업로드
 	CachedGPUSimulator->UploadParticles(Particles);
+
+	// GPU와 CPU의 NextParticleID를 동기화 (PIE 전환 시 ID 충돌 방지)
+	if (MaxParticleID >= 0)
+	{
+		const int32 NewNextID = MaxParticleID + 1;
+		CachedGPUSimulator->SetNextParticleID(NewNextID);
+		NextParticleID = NewNextID;  // CPU도 동기화
+		UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Set NextParticleID to %d (GPU & CPU synced)"), NewNextID);
+	}
 
 	// GPU에 올렸으니 CPU 배열 정리 (중복 업로드 방지 + 메모리 절약)
 	Particles.Empty();
@@ -1430,6 +1447,69 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 	{
 		CachedGPUSimulator->ClearAllParticles();
 	}
+}
+
+int32 UKawaiiFluidSimulationModule::RemoveOldestParticles(int32 Count)
+{
+	if (Count <= 0)
+	{
+		return 0;
+	}
+
+	// GPU 모드
+	if (bGPUSimulationActive && CachedGPUSimulator)
+	{
+		// Readback 데이터 가져오기
+		TArray<FGPUFluidParticle> ReadbackParticles;
+		if (!CachedGPUSimulator->GetReadbackGPUParticles(ReadbackParticles))
+		{
+			// Readback 데이터 없음 - 다음 프레임에 재시도
+			UE_LOG(LogTemp, Warning, TEXT("RemoveOldestParticles: GPU Readback not available yet"));
+			return 0;
+		}
+
+		if (ReadbackParticles.Num() == 0)
+		{
+			return 0;
+		}
+
+		// 제거할 개수 결정
+		const int32 RemoveCount = FMath::Min(Count, ReadbackParticles.Num());
+
+		// 가장 작은 ParticleID N개 찾기 (Partial Sort - O(n) vs Full Sort O(n log n))
+		// Z-Order 정렬이 활성화되면 배열이 공간 기준으로 재정렬되므로 ID 기반 검색 필수
+		TArray<int32> AllParticleIDs;
+		AllParticleIDs.Reserve(ReadbackParticles.Num());
+		for (const FGPUFluidParticle& Particle : ReadbackParticles)
+		{
+			AllParticleIDs.Add(Particle.ParticleID);
+		}
+
+		// Nth element로 RemoveCount번째로 작은 ID 찾기
+		if (RemoveCount < AllParticleIDs.Num())
+		{
+			std::nth_element(AllParticleIDs.GetData(), AllParticleIDs.GetData() + RemoveCount,
+				AllParticleIDs.GetData() + AllParticleIDs.Num());
+		}
+
+		// 삭제할 ID 목록 (가장 오래된 N개 - 앞쪽 RemoveCount개가 가장 작은 ID들)
+		TArray<int32> IDsToRemove;
+		IDsToRemove.Reserve(RemoveCount);
+		for (int32 i = 0; i < RemoveCount; i++)
+		{
+			IDsToRemove.Add(AllParticleIDs[i]);
+		}
+
+		// Despawn 요청 (AllParticleIDs를 AllIDs로 재사용)
+		CachedGPUSimulator->AddDespawnByIDRequests(IDsToRemove, AllParticleIDs);
+
+		UE_LOG(LogTemp, Log, TEXT("RemoveOldestParticles: Removing %d particles (IDs: %d ~ %d from readback), ReadbackCount=%d"),
+			RemoveCount, IDsToRemove[0], IDsToRemove.Last(), ReadbackParticles.Num());
+
+		return RemoveCount;
+	}
+
+	return 0;
 }
 
 TArray<FVector> UKawaiiFluidSimulationModule::GetParticlePositions() const

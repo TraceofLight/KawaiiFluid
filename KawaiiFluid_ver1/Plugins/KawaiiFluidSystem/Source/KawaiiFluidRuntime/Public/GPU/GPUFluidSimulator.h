@@ -617,6 +617,22 @@ public:
 	 */
 	int32 GetNextParticleID() const { return SpawnManager.IsValid() ? SpawnManager->GetNextParticleID() : 0; }
 
+	/**
+	 * Set next particle ID (for PIE transition - sync with uploaded particles)
+	 */
+	void SetNextParticleID(int32 ID) { if (SpawnManager.IsValid()) SpawnManager->SetNextParticleID(ID); }
+
+	/**
+	 * Set target max particle count (user-set soft limit for continuous spawn)
+	 * @param Count - Target count (0 = no limit, use MaxParticleCount)
+	 */
+	void SetSpawnMaxParticleCount(int32 Count) { SpawnMaxParticleCount = Count; }
+
+	/**
+	 * Get target max particle count
+	 */
+	int32 GetSpawnMaxParticleCount() const { return SpawnMaxParticleCount; }
+
 private:
 	//=============================================================================
 	// Internal Methods
@@ -910,6 +926,7 @@ private:
 
 	bool bIsInitialized;
 	int32 MaxParticleCount;
+	int32 SpawnMaxParticleCount;
 	int32 CurrentParticleCount;
 
 	// Cached GPU particle data for upload/readback

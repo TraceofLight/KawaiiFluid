@@ -56,6 +56,7 @@ static int32 GFluidCapturedFrame = 0;  // Tracks which frame was captured (0 = n
 FGPUFluidSimulator::FGPUFluidSimulator()
 	: bIsInitialized(false)
 	, MaxParticleCount(0)
+	, SpawnMaxParticleCount(0)
 	, CurrentParticleCount(0)
 	, ExternalForce(FVector3f::ZeroVector)
 	, MaxVelocity(50000.0f)   // Safety clamp: 50000 cm/s = 500 m/s
@@ -629,7 +630,31 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 	}
 
 	// =====================================================
-	// Phase 2: Buffer Preparation (Select Path)
+	// Phase 2: ID-Based Despawn Processing (BEFORE Spawn!)
+	// Mark dead particles by ParticleID matching (binary search on GPU)
+	// This must happen before spawn to make room for new particles
+	// =====================================================
+	FRDGBufferRef DespawnedBuffer = nullptr;
+	int32 PostDespawnCount = CurrentParticleCount;
+
+	if (SpawnManager.IsValid() && SpawnManager->HasPendingDespawnByIDRequests() && PersistentParticleBuffer.IsValid())
+	{
+		const int32 DespawnCount = SpawnManager->SwapDespawnByIDBuffers();
+
+		// Register persistent buffer and run despawn pass
+		DespawnedBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesForDespawn"));
+		SpawnManager->AddDespawnByIDPass(GraphBuilder, DespawnedBuffer, PostDespawnCount);
+
+		// GPU compaction 후 카운트 업데이트
+		PostDespawnCount -= DespawnCount;
+		PostDespawnCount = FMath::Max(0, PostDespawnCount);
+
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("Despawn Phase: Removed %d particles, %d -> %d"),
+			DespawnCount, CurrentParticleCount, PostDespawnCount);
+	}
+
+	// =====================================================
+	// Phase 3: Buffer Preparation (Select Path)
 	// Choose appropriate buffer strategy based on current state
 	// =====================================================
 
@@ -649,7 +674,7 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
 
 		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount, SpawnMaxParticleCount);
 
 		CurrentParticleCount = FMath::Min(SpawnCount, MaxParticleCount);
 		PreviousParticleCount = CurrentParticleCount;
@@ -660,16 +685,22 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 	// =====================================================
 	// PATH 2: Append Spawn (GPU Spawning with Existing Particles)
 	// Copy existing particles to new buffer, then spawn additional particles on GPU
+	// Uses DespawnedBuffer if despawn was performed, otherwise PersistentParticleBuffer
 	// =====================================================
-	else if (bHasSpawnRequests && PersistentParticleBuffer.IsValid())
+	else if (bHasSpawnRequests && (DespawnedBuffer || PersistentParticleBuffer.IsValid()))
 	{
-		const int32 ExistingCount = CurrentParticleCount;
-		const int32 TotalCount = ExpectedParticleCount;
+		// Use post-despawn count and buffer if despawn was performed
+		const int32 ExistingCount = DespawnedBuffer ? PostDespawnCount : CurrentParticleCount;
+		const int32 TotalCount = ExistingCount + SpawnCount;
 		const int32 BufferCapacity = FMath::Min(TotalCount, MaxParticleCount);
 		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
 		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
 
-		FRDGBufferRef ExistingBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
+		// Use DespawnedBuffer (compacted) if available, otherwise use PersistentParticleBuffer
+		FRDGBufferRef ExistingBuffer = DespawnedBuffer ? DespawnedBuffer :
+			GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
+
+		if (ExistingCount > 0)
 		{
 			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
@@ -688,9 +719,9 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
 
 		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount, SpawnMaxParticleCount);
 
-		CurrentParticleCount = FMath::Min(ExpectedParticleCount, MaxParticleCount);
+		CurrentParticleCount = FMath::Min(TotalCount, MaxParticleCount);
 		PreviousParticleCount = CurrentParticleCount;
 		SpawnManager->OnSpawnComplete(SpawnCount);
 		SpawnManager->ClearActiveRequests();
@@ -719,28 +750,26 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		UE_LOG(LogGPUFluidSimulator, Log, TEXT("PATH 3 (CPU Upload): Uploaded %d particles from CPU to GPU"), BufferCapacity);
 	}
 	// =====================================================
-	// PATH 4: Reuse Buffer (No Changes)
-	// No spawn requests, reuse existing persistent buffer as-is
+	// PATH 4: Reuse or Despawned Buffer
+	// No spawn requests, use despawned buffer if available, otherwise reuse persistent
 	// =====================================================
 	else
 	{
-		if (!PersistentParticleBuffer.IsValid()) return nullptr;
-		ParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticles"));
-	}
-
-	// =====================================================
-	// Phase 3: ID-Based Despawn Processing
-	// Mark dead particles by ParticleID matching (binary search on GPU)
-	// =====================================================
-	if (SpawnManager.IsValid() && SpawnManager->HasPendingDespawnByIDRequests())
-	{
-		const int32 DespawnCount = SpawnManager->SwapDespawnByIDBuffers();
-		SpawnManager->AddDespawnByIDPass(GraphBuilder, ParticleBuffer, CurrentParticleCount);
-
-		// GPU compaction 후 카운트 업데이트
-		CurrentParticleCount -= DespawnCount;
-		CurrentParticleCount = FMath::Max(0, CurrentParticleCount);
-		PreviousParticleCount = CurrentParticleCount;
+		if (DespawnedBuffer)
+		{
+			// Use the compacted buffer from despawn
+			ParticleBuffer = DespawnedBuffer;
+			CurrentParticleCount = PostDespawnCount;
+			PreviousParticleCount = CurrentParticleCount;
+		}
+		else if (PersistentParticleBuffer.IsValid())
+		{
+			ParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticles"));
+		}
+		else
+		{
+			return nullptr;
+		}
 	}
 
 	if (SpawnManager.IsValid()) SpawnManager->ClearActiveRequests();

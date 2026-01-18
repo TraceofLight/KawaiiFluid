@@ -97,6 +97,7 @@ enum class EStreamLayerMode : uint8
 	FixedRate         UMETA(DisplayName = "Fixed Rate", ToolTip = "Spawn fixed number of layers per second"),
 };
 
+
 /**
  * Splash VFX condition mode
  */
@@ -241,6 +242,15 @@ struct FFluidSpawnSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Spawn|Count",
 	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter", EditConditionHides, ClampMin = "0"))
 	int32 MaxParticleCount = 1000;
+
+	/** Recycle oldest particles when MaxParticleCount is reached
+	 * When true: removes oldest particles to make room for new spawns (FIFO queue behavior)
+	 * When false: stops spawning when MaxParticleCount is reached
+	 * Only effective when MaxParticleCount > 0
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Particle Spawn|Count",
+	          meta = (EditCondition = "SpawnType == EFluidSpawnType::Emitter && MaxParticleCount > 0"))
+	bool bRecycleOldestParticles = false;
 
 	// === Common Settings ===
 	/** Initial velocity (ShapeVolume mode only) */

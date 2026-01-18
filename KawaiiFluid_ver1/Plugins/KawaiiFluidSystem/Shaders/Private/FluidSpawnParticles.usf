@@ -44,7 +44,8 @@ RWStructuredBuffer<uint> ParticleCounter;
 
 // Spawn parameters
 int SpawnRequestCount;      // Number of spawn requests this frame
-int MaxParticleCount;       // Maximum particle capacity
+int MaxParticleCount;       // Maximum particle capacity (buffer size)
+int SpawnMaxParticleCount; // User-set soft limit (0 = use MaxParticleCount)
 int NextParticleID;         // Starting ID for new particles
 float DefaultRadius;        // Default radius if request.Radius == 0
 float DefaultMass;          // Default mass if request.Mass == 0
@@ -71,8 +72,9 @@ void SpawnParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	uint particleIdx;
 	InterlockedAdd(ParticleCounter[0], 1, particleIdx);
 
-	// Check if we exceeded capacity
-	if (particleIdx >= (uint)MaxParticleCount)
+	// Check if we exceeded capacity (use TargetMax if set, otherwise MaxParticleCount)
+	uint effectiveMax = (SpawnMaxParticleCount > 0) ? min((uint)SpawnMaxParticleCount, (uint)MaxParticleCount) : (uint)MaxParticleCount;
+	if (particleIdx >= effectiveMax)
 	{
 		// Rollback the counter (we can't spawn this particle)
 		InterlockedAdd(ParticleCounter[0], -1);
@@ -166,8 +168,9 @@ void SpawnParticlesBatchCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	uint particleIdx;
 	InterlockedAdd(ParticleCounter[0], 1, particleIdx);
 
-	// Check if we exceeded capacity
-	if (particleIdx >= (uint)MaxParticleCount)
+	// Check if we exceeded capacity (use TargetMax if set, otherwise MaxParticleCount)
+	uint effectiveMax = (SpawnMaxParticleCount > 0) ? min((uint)SpawnMaxParticleCount, (uint)MaxParticleCount) : (uint)MaxParticleCount;
+	if (particleIdx >= effectiveMax)
 	{
 		InterlockedAdd(ParticleCounter[0], -1);
 		return;

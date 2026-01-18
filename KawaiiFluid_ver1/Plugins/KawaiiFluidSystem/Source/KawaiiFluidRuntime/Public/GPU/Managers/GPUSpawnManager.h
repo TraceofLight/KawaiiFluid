@@ -140,6 +140,9 @@ public:
 	/** Get next particle ID that will be assigned */
 	int32 GetNextParticleID() const { return NextParticleID.load(); }
 
+	/** Set next particle ID (for PIE transition - sync with uploaded particles) */
+	void SetNextParticleID(int32 ID) { NextParticleID.store(ID); }
+
 	//=========================================================================
 	// Render Thread API
 	//=========================================================================
@@ -168,13 +171,15 @@ public:
 	 * @param GraphBuilder - RDG builder
 	 * @param ParticlesUAV - Particle buffer UAV
 	 * @param ParticleCounterUAV - Atomic counter for particle allocation
-	 * @param MaxParticleCount - Maximum particle capacity
+	 * @param MaxParticleCount - Maximum particle capacity (buffer size)
+	 * @param SpawnMaxParticleCount - User-set soft limit (0 = use MaxParticleCount)
 	 */
 	void AddSpawnParticlesPass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
 		FRDGBufferUAVRef ParticleCounterUAV,
-		int32 MaxParticleCount);
+		int32 MaxParticleCount,
+		int32 SpawnMaxParticleCount = 0);
 
 	/**
 	 * Update next particle ID after spawning

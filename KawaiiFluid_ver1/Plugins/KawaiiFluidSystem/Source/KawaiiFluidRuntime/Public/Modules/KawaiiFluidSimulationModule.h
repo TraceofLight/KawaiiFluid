@@ -458,6 +458,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void ClearAllParticles();
 
+	/** 가장 오래된 파티클 N개 제거 (ParticleID가 낮은 순서)
+	 * MaxParticle에 도달했을 때 새 파티클을 위한 공간 확보용
+	 * GPU 모드: Readback 데이터 기반으로 가장 낮은 ID를 찾아 삭제 요청
+	 * @param Count 제거할 파티클 수
+	 * @return 실제 제거 요청된 파티클 수 (Readback 실패 시 0)
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Fluid")
+	int32 RemoveOldestParticles(int32 Count);
+
 	/** 파티클 위치 배열 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	TArray<FVector> GetParticlePositions() const;

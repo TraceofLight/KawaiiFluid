@@ -801,6 +801,7 @@ public:
 		// Spawn parameters
 		SHADER_PARAMETER(int32, SpawnRequestCount)
 		SHADER_PARAMETER(int32, MaxParticleCount)
+		SHADER_PARAMETER(int32, SpawnMaxParticleCount)  // User-set soft limit (0 = use MaxParticleCount)
 		SHADER_PARAMETER(int32, NextParticleID)
 		SHADER_PARAMETER(float, DefaultRadius)
 		SHADER_PARAMETER(float, DefaultMass)
