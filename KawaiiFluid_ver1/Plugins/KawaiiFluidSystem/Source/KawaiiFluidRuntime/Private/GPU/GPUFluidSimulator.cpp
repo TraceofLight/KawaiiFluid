@@ -346,148 +346,52 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 		return;
 	}
 
+	// Must call BeginFrame() before SimulateSubstep()
+	if (!bFrameActive)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("SimulateSubstep called without BeginFrame! Call BeginFrame first."));
+		return;
+	}
+	
 	FGPUFluidSimulator* Self = this;
 	FGPUFluidSimulationParams ParamsCopy = Params;
 
-	// =====================================================
-	// PHASE 1: READ - Readback 처리 (항상 실행)
-	// =====================================================
-	ENQUEUE_RENDER_COMMAND(GPUFluidRead)(
-		[Self](FRHICommandListImmediate& RHICmdList)
+	// Physics simulation only (spawn/despawn done in BeginFrame, readback in EndFrame)
+	ENQUEUE_RENDER_COMMAND(GPUFluidSimulate)(
+		[Self, ParamsCopy](FRHICommandListImmediate& RHICmdList)
 		{
-			// Process collision feedback readback
-			Self->ProcessCollisionFeedbackReadback(RHICmdList);
-			Self->ProcessColliderContactCountReadback(RHICmdList);
+			// Limit logging to first 10 frames
+			static int32 RenderFrameCounter = 0;
+			const bool bLogThisFrame = (RenderFrameCounter++ < 10);
 
-			// Process stats readback
-			const bool bNeedStatsReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
-			if (bNeedStatsReadback)
-			{
-				Self->ProcessStatsReadback();
-			}
+			if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RENDER COMMAND START (Frame %d)"), RenderFrameCounter);
 
-			// Process shadow/anisotropy readback
-			if (Self->bShadowReadbackEnabled.load())
-			{
-				Self->ProcessShadowReadback();
-				Self->ProcessAnisotropyReadback();
-			}
+			// Build and execute RDG
+			FRDGBuilder GraphBuilder(RHICmdList);
+			Self->SimulateSubstep_RDG(GraphBuilder, ParamsCopy);
 
-			// Process source counter readback (중요: AlreadyRequestedIDs cleanup에 필요)
-			if (Self->SpawnManager.IsValid())
-			{
-				Self->SpawnManager->ProcessSourceCounterReadback();
-			}
-		}
-	);
+			if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE START"));
+			GraphBuilder.Execute();
+			if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE COMPLETE"));
 
-	// =====================================================
-	// PHASE 2: SIMULATE - 실제 시뮬레이션 (파티클 있을 때만)
-	// =====================================================
-	// Check simulation requirement (before render commands)
-	const bool bHasPendingSpawns = SpawnManager.IsValid() && SpawnManager->HasPendingSpawnRequests();
-	const bool bNeedSimulation = (CurrentParticleCount > 0 || bHasPendingSpawns);
-	if (bNeedSimulation)
-	{
-		ENQUEUE_RENDER_COMMAND(GPUFluidSimulate)(
-			[Self, ParamsCopy](FRHICommandListImmediate& RHICmdList)
-			{
-				// Limit logging to first 10 frames
-				static int32 RenderFrameCounter = 0;
-				const bool bLogThisFrame = (RenderFrameCounter++ < 10);
-
-				if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RENDER COMMAND START (Frame %d)"), RenderFrameCounter);
-
-				// Build and execute RDG
-				FRDGBuilder GraphBuilder(RHICmdList);
-				Self->SimulateSubstep_RDG(GraphBuilder, ParamsCopy);
-
-				if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE START"));
-				GraphBuilder.Execute();
-				if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE COMPLETE"));
-
-				// Mark that we have valid GPU results
-				Self->bHasValidGPUResults.store(true);
-			}
-		);
-	}
-
-	// =====================================================
-	// PHASE 3: WRITE - Readback Enqueue & Cleanup (항상 실행)
-	// =====================================================
-	ENQUEUE_RENDER_COMMAND(GPUFluidWrite)(
-		[Self, bNeedSimulation](FRHICommandListImmediate& RHICmdList)
-		{
-			// Despawn 후 파티클 없으면 ReadbackGPUParticles 클리어
-			// (Self->CurrentParticleCount는 Phase 2 완료 후 값)
-			if (Self->CurrentParticleCount == 0 && Self->ReadbackGPUParticles.Num() > 0)
-			{
-				Self->ReadbackGPUParticles.Empty();
-				UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> Phase3: Cleared stale ReadbackGPUParticles (CurrentCount=0)"));
-			}
-
-			// Source counter readback enqueue (항상)
-			if (Self->SpawnManager.IsValid() && Self->SpawnManager->GetSourceCounterBuffer().IsValid())
-			{
-				Self->SpawnManager->EnqueueSourceCounterReadback(RHICmdList);
-			}
-
-			// 시뮬레이션이 돌았을 때만 추가 readback enqueue
-			if (bNeedSimulation && Self->CurrentParticleCount > 0)
-			{
-				// Stats readback
-				const bool bNeedReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
-				if (bNeedReadback && Self->PersistentParticleBuffer.IsValid())
-				{
-					Self->EnqueueStatsReadback(RHICmdList,
-						Self->PersistentParticleBuffer->GetRHI(),
-						Self->CurrentParticleCount);
-				}
-
-				// Collision feedback readback
-				if (Self->CollisionManager.IsValid() && Self->CollisionManager->GetFeedbackManager())
-				{
-					Self->CollisionManager->GetFeedbackManager()->EnqueueReadbackCopy(RHICmdList);
-				}
-
-				// Shadow/Anisotropy readback
-				if (Self->bShadowReadbackEnabled.load() && Self->PersistentParticleBuffer.IsValid())
-				{
-					Self->EnqueueShadowPositionReadback(RHICmdList,
-						Self->PersistentParticleBuffer->GetRHI(),
-						Self->CurrentParticleCount);
-
-					if (Self->bAnisotropyReadbackEnabled.load())
-					{
-						Self->EnqueueAnisotropyReadback(RHICmdList, Self->CurrentParticleCount);
-					}
-				}
-			}
+			// Mark that we have valid GPU results
+			Self->bHasValidGPUResults.store(true);
 		}
 	);
 }
 
 void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params)
 {
-	// =====================================================
-	// Phase 1: Swap spawn requests (double buffer for thread safety)
-	// =====================================================
-	if (SpawnManager.IsValid())
-	{
-		SpawnManager->SwapBuffers();
-	}
+	// Spawn/despawn handled in BeginFrame - this is physics only
 
-	const bool bHasSpawnRequests = SpawnManager.IsValid() && SpawnManager->HasActiveRequests();
-	const int32 SpawnCount = SpawnManager.IsValid() ? SpawnManager->GetActiveRequestCount() : 0;
-
-	// Allow simulation to start even with 0 particles if we have spawn requests
-	if (CurrentParticleCount == 0 && !bHasSpawnRequests)
+	// Skip if no particles
+	if (CurrentParticleCount == 0)
 	{
 		return;
 	}
 
-	// Need either cached particles (for full upload), persistent buffer (for reuse/append), or spawn requests
-	if (CachedGPUParticles.Num() == 0 && !PersistentParticleBuffer.IsValid() && !bHasSpawnRequests)
+	// Need persistent buffer for simulation
+	if (!PersistentParticleBuffer.IsValid())
 	{
 		return;
 	}
@@ -495,12 +399,12 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	// Cache CellSize for Ray Marching volume building
 	CachedCellSize = Params.CellSize;
 
-	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluidSimulation (Particles: %d, Spawning: %d)", CurrentParticleCount, SpawnCount);
+	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluidSimulation (Particles: %d)", CurrentParticleCount);
 
 	// =====================================================
-	// Phase 1: Prepare Particle Buffer (Spawn, Upload, Reuse)
+	// Phase 1: Prepare Particle Buffer (CPU Upload or Reuse)
 	// =====================================================
-	FRDGBufferRef ParticleBuffer = PrepareParticleBuffer(GraphBuilder, Params, SpawnCount);
+	FRDGBufferRef ParticleBuffer = PrepareParticleBuffer(GraphBuilder, Params);
 	if (!ParticleBuffer)
 	{
 		return;
@@ -548,19 +452,256 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	ExtractPersistentBuffers(GraphBuilder, ParticleBuffer, SpatialData);
 }
 
+//=============================================================================
+// Frame Lifecycle Functions
+//=============================================================================
+
+void FGPUFluidSimulator::BeginFrame()
+{
+	if (!bIsInitialized)
+	{
+		return;
+	}
+
+	if (bFrameActive)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("BeginFrame called while frame already active! Call EndFrame first."));
+		return;
+	}
+
+	bFrameActive = true;
+	FGPUFluidSimulator* Self = this;
+
+	// Capture pending flags on game thread (before render command)
+	const bool bHasPendingSpawns = SpawnManager.IsValid() && SpawnManager->HasPendingSpawnRequests();
+	const bool bHasPendingDespawns = SpawnManager.IsValid() && SpawnManager->HasPendingDespawnByIDRequests();
+
+	// Single render command for all BeginFrame operations
+	ENQUEUE_RENDER_COMMAND(GPUFluidBeginFrame)(
+		[Self, bHasPendingSpawns, bHasPendingDespawns](FRHICommandListImmediate& RHICmdList)
+		{
+			// =====================================================
+			// Step 1: Process Readbacks (from previous frame)
+			// =====================================================
+			Self->ProcessCollisionFeedbackReadback(RHICmdList);
+			Self->ProcessColliderContactCountReadback(RHICmdList);
+
+			const bool bNeedStatsReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
+			if (bNeedStatsReadback)
+			{
+				Self->ProcessStatsReadback();
+			}
+
+			if (Self->bShadowReadbackEnabled.load())
+			{
+				Self->ProcessShadowReadback();
+				Self->ProcessAnisotropyReadback();
+			}
+
+			if (Self->SpawnManager.IsValid())
+			{
+				Self->SpawnManager->ProcessSourceCounterReadback();
+			}
+
+			// =====================================================
+			// Step 2: Process Spawn/Despawn Operations
+			// =====================================================
+			if (!bHasPendingSpawns && !bHasPendingDespawns)
+			{
+				return;  // No spawn/despawn to process
+			}
+
+			FRDGBuilder GraphBuilder(RHICmdList);
+			FRDGBufferRef ParticleBuffer = nullptr;
+			int32 PostOpCount = Self->CurrentParticleCount;
+
+			// Swap buffers first
+			if (Self->SpawnManager.IsValid())
+			{
+				Self->SpawnManager->SwapBuffers();
+			}
+
+			// Process Despawn (ID-based removal)
+			if (bHasPendingDespawns && Self->SpawnManager.IsValid() && Self->PersistentParticleBuffer.IsValid())
+			{
+				const int32 DespawnCount = Self->SpawnManager->SwapDespawnByIDBuffers();
+				if (DespawnCount > 0)
+				{
+					ParticleBuffer = GraphBuilder.RegisterExternalBuffer(Self->PersistentParticleBuffer, TEXT("GPUFluidParticlesForDespawn"));
+					Self->SpawnManager->AddDespawnByIDPass(GraphBuilder, ParticleBuffer, PostOpCount);
+					PostOpCount = FMath::Max(0, PostOpCount - DespawnCount);
+
+					UE_LOG(LogGPUFluidSimulator, Log, TEXT("BeginFrame: Despawned %d particles, %d -> %d"),
+						DespawnCount, Self->CurrentParticleCount, PostOpCount);
+				}
+			}
+
+			// Process Spawn
+			const int32 SpawnCount = Self->SpawnManager.IsValid() ? Self->SpawnManager->GetActiveRequestCount() : 0;
+			if (SpawnCount > 0)
+			{
+				const bool bFirstSpawn = (PostOpCount == 0) && !ParticleBuffer;
+
+				if (bFirstSpawn)
+				{
+					// PATH 1: First spawn - create new buffer
+					const int32 BufferCapacity = FMath::Min(SpawnCount, Self->MaxParticleCount);
+					FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
+					ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
+
+					TArray<uint32> InitialCounterData;
+					InitialCounterData.Add(0);
+					FRDGBufferRef CounterBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticleCounter"), sizeof(uint32), 1, InitialCounterData.GetData(), sizeof(uint32), ERDGInitialDataFlags::None);
+					FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
+					FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
+
+					Self->SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, Self->MaxParticleCount);
+					PostOpCount = FMath::Min(SpawnCount, Self->MaxParticleCount);
+					Self->SpawnManager->OnSpawnComplete(PostOpCount);
+				}
+				else
+				{
+					// PATH 2: Append spawn - copy existing + spawn new
+					const int32 TotalCount = PostOpCount + SpawnCount;
+					const int32 BufferCapacity = FMath::Min(TotalCount, Self->MaxParticleCount);
+					FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
+					FRDGBufferRef NewParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
+
+					FRDGBufferRef ExistingBuffer = ParticleBuffer ? ParticleBuffer :
+						GraphBuilder.RegisterExternalBuffer(Self->PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
+
+					if (PostOpCount > 0)
+					{
+						FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+						TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
+						FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
+						CopyParams->SourceParticles = GraphBuilder.CreateSRV(ExistingBuffer);
+						CopyParams->DestParticles = GraphBuilder.CreateUAV(NewParticleBuffer);
+						CopyParams->SourceOffset = 0;
+						CopyParams->DestOffset = 0;
+						CopyParams->CopyCount = PostOpCount;
+						FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("GPUFluid::CopyForSpawn(%d)", PostOpCount),
+							CopyShader, CopyParams, FIntVector(FMath::DivideAndRoundUp(PostOpCount, FCopyParticlesCS::ThreadGroupSize), 1, 1));
+					}
+
+					TArray<uint32> InitialCounterData;
+					InitialCounterData.Add(static_cast<uint32>(PostOpCount));
+					FRDGBufferRef CounterBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticleCounter"), sizeof(uint32), 1, InitialCounterData.GetData(), sizeof(uint32), ERDGInitialDataFlags::None);
+					FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
+					FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(NewParticleBuffer);
+
+					Self->SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, Self->MaxParticleCount);
+					PostOpCount = FMath::Min(TotalCount, Self->MaxParticleCount);
+					Self->SpawnManager->OnSpawnComplete(SpawnCount);
+					ParticleBuffer = NewParticleBuffer;
+				}
+
+				UE_LOG(LogGPUFluidSimulator, Log, TEXT("BeginFrame: Spawned %d particles, total now %d"),
+					SpawnCount, PostOpCount);
+			}
+
+			// Clear active requests
+			if (Self->SpawnManager.IsValid())
+			{
+				Self->SpawnManager->ClearActiveRequests();
+			}
+
+			// Extract to persistent buffer
+			if (ParticleBuffer)
+			{
+				GraphBuilder.QueueBufferExtraction(ParticleBuffer, &Self->PersistentParticleBuffer, ERHIAccess::UAVCompute);
+			}
+
+			// Update counts
+			Self->CurrentParticleCount = PostOpCount;
+			Self->PreviousParticleCount = PostOpCount;
+			Self->bNeedsFullUpload = false;
+
+			GraphBuilder.Execute();
+		}
+	);
+}
+
+void FGPUFluidSimulator::EndFrame()
+{
+	if (!bIsInitialized)
+	{
+		return;
+	}
+
+	if (!bFrameActive)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("EndFrame called without BeginFrame!"));
+		return;
+	}
+
+	FGPUFluidSimulator* Self = this;
+
+	ENQUEUE_RENDER_COMMAND(GPUFluidEndFrame)(
+		[Self](FRHICommandListImmediate& RHICmdList)
+		{
+			// Clear stale ReadbackGPUParticles if despawn caused count to become 0
+			if (Self->CurrentParticleCount == 0 && Self->ReadbackGPUParticles.Num() > 0)
+			{
+				Self->ReadbackGPUParticles.Empty();
+				UE_LOG(LogGPUFluidSimulator, Log, TEXT("EndFrame: Cleared stale ReadbackGPUParticles (CurrentCount=0)"));
+			}
+
+			// Enqueue source counter readback
+			if (Self->SpawnManager.IsValid() && Self->SpawnManager->GetSourceCounterBuffer().IsValid())
+			{
+				Self->SpawnManager->EnqueueSourceCounterReadback(RHICmdList);
+			}
+
+			// Only enqueue readbacks if we have particles
+			if (Self->CurrentParticleCount > 0 && Self->PersistentParticleBuffer.IsValid())
+			{
+				// Stats readback
+				const bool bNeedReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
+				if (bNeedReadback)
+				{
+					Self->EnqueueStatsReadback(RHICmdList,
+						Self->PersistentParticleBuffer->GetRHI(),
+						Self->CurrentParticleCount);
+				}
+
+				// Collision feedback readback
+				if (Self->CollisionManager.IsValid() && Self->CollisionManager->GetFeedbackManager())
+				{
+					Self->CollisionManager->GetFeedbackManager()->EnqueueReadbackCopy(RHICmdList);
+				}
+
+				// Shadow/Anisotropy readback
+				if (Self->bShadowReadbackEnabled.load())
+				{
+					Self->EnqueueShadowPositionReadback(RHICmdList,
+						Self->PersistentParticleBuffer->GetRHI(),
+						Self->CurrentParticleCount);
+
+					if (Self->bAnisotropyReadbackEnabled.load())
+					{
+						Self->EnqueueAnisotropyReadback(RHICmdList, Self->CurrentParticleCount);
+					}
+				}
+			}
+
+			Self->bHasValidGPUResults.store(true);
+		}
+	);
+
+	bFrameActive = false;
+}
+
 FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 	FRDGBuilder& GraphBuilder,
-	const FGPUFluidSimulationParams& Params,
-	int32 SpawnCount)
+	const FGPUFluidSimulationParams& Params)
 {
-	// =====================================================
-	// Phase 1: Initialize Variables
-	// Calculate expected counts and determine operation mode
-	// =====================================================
-	FRDGBufferRef ParticleBuffer = nullptr;
+	// Spawn/Despawn are handled in BeginFrame
+	// This function only handles:
+	// - PATH 1: CPU Upload (PIE transfer, save/load)
+	// - PATH 2: Reuse PersistentParticleBuffer
 
-	const bool bHasSpawnRequests = SpawnCount > 0;
-	const bool bFirstSpawnOnly = bHasSpawnRequests && CurrentParticleCount == 0 && !PersistentParticleBuffer.IsValid();
+	FRDGBufferRef ParticleBuffer = nullptr;
 
 	static int32 DebugFrameCounter = 0;
 	const bool bShouldLog = (DebugFrameCounter++ < 10);
@@ -602,114 +743,16 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 
 	if (bShouldLog)
 	{
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("=== BUFFER PATH DEBUG (Frame %d) ==="), DebugFrameCounter);
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bFirstSpawnOnly: %s"), bFirstSpawnOnly ? TEXT("TRUE") : TEXT("FALSE"));
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  bHasSpawnRequests: %s"), bHasSpawnRequests ? TEXT("TRUE") : TEXT("FALSE"));
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  CurrentParticleCount: %d, SpawnCount: %d"), CurrentParticleCount, SpawnCount);
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("=== PrepareParticleBuffer (Frame %d) ==="), DebugFrameCounter);
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("  CurrentParticleCount: %d, bNeedsFullUpload: %s"),
+			CurrentParticleCount, bNeedsFullUpload ? TEXT("TRUE") : TEXT("FALSE"));
 	}
 
 	// =====================================================
-	// Phase 2: ID-Based Despawn Processing (BEFORE Spawn!)
-	// Mark dead particles by ParticleID matching (binary search on GPU)
-	// This must happen before spawn to make room for new particles
-	// =====================================================
-	FRDGBufferRef DespawnedBuffer = nullptr;
-	int32 PostDespawnCount = CurrentParticleCount;
-
-	if (SpawnManager.IsValid() && SpawnManager->HasPendingDespawnByIDRequests() && PersistentParticleBuffer.IsValid())
-	{
-		const int32 DespawnCount = SpawnManager->SwapDespawnByIDBuffers();
-
-		// Register persistent buffer and run despawn pass
-		DespawnedBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesForDespawn"));
-		SpawnManager->AddDespawnByIDPass(GraphBuilder, DespawnedBuffer, PostDespawnCount);
-
-		// GPU compaction 후 카운트 업데이트
-		PostDespawnCount -= DespawnCount;
-		PostDespawnCount = FMath::Max(0, PostDespawnCount);
-
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("Despawn Phase: Removed %d particles, %d -> %d"),
-			DespawnCount, CurrentParticleCount, PostDespawnCount);
-	}
-
-	// =====================================================
-	// Phase 3: Buffer Preparation (Select Path)
-	// Choose appropriate buffer strategy based on current state
-	// =====================================================
-
-	// =====================================================
-	// PATH 1: First Spawn (GPU Direct Creation)
-	// No existing particles, create new buffer and spawn directly on GPU
-	// =====================================================
-	if (bFirstSpawnOnly)
-	{
-		const int32 BufferCapacity = FMath::Min(SpawnCount, MaxParticleCount);
-		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
-		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
-
-		TArray<uint32> InitialCounterData;
-		InitialCounterData.Add(0);
-		FRDGBufferRef CounterBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticleCounter"), sizeof(uint32), 1, InitialCounterData.GetData(), sizeof(uint32), ERDGInitialDataFlags::None);
-		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
-
-		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
-
-		CurrentParticleCount = FMath::Min(SpawnCount, MaxParticleCount);
-		PreviousParticleCount = CurrentParticleCount;
-		bNeedsFullUpload = false;
-		SpawnManager->OnSpawnComplete(CurrentParticleCount);
-		SpawnManager->ClearActiveRequests();
-	}
-	// =====================================================
-	// PATH 2: Append Spawn (GPU Spawning with Existing Particles)
-	// Copy existing particles to new buffer, then spawn additional particles on GPU
-	// Uses DespawnedBuffer if despawn was performed, otherwise PersistentParticleBuffer
-	// =====================================================
-	else if (bHasSpawnRequests && (DespawnedBuffer || PersistentParticleBuffer.IsValid()))
-	{
-		// Use post-despawn count and buffer if despawn was performed
-		const int32 ExistingCount = DespawnedBuffer ? PostDespawnCount : CurrentParticleCount;
-		const int32 TotalCount = ExistingCount + SpawnCount;
-		const int32 BufferCapacity = FMath::Min(TotalCount, MaxParticleCount);
-		FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
-		ParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
-
-		// Use DespawnedBuffer (compacted) if available, otherwise use PersistentParticleBuffer
-		FRDGBufferRef ExistingBuffer = DespawnedBuffer ? DespawnedBuffer :
-			GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
-
-		if (ExistingCount > 0)
-		{
-			FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-			TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
-			FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
-			CopyParams->SourceParticles = GraphBuilder.CreateSRV(ExistingBuffer);
-			CopyParams->DestParticles = GraphBuilder.CreateUAV(ParticleBuffer);
-			CopyParams->SourceOffset = 0;
-			CopyParams->DestOffset = 0;
-			CopyParams->CopyCount = ExistingCount;
-			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("GPUFluid::CopyExistingForSpawn(%d)", ExistingCount), CopyShader, CopyParams, FIntVector(FMath::DivideAndRoundUp(ExistingCount, FCopyParticlesCS::ThreadGroupSize), 1, 1));
-		}
-
-		TArray<uint32> InitialCounterData;
-		InitialCounterData.Add(static_cast<uint32>(ExistingCount));
-		FRDGBufferRef CounterBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticleCounter"), sizeof(uint32), 1, InitialCounterData.GetData(), sizeof(uint32), ERDGInitialDataFlags::None);
-		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
-
-		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
-
-		CurrentParticleCount = FMath::Min(TotalCount, MaxParticleCount);
-		PreviousParticleCount = CurrentParticleCount;
-		SpawnManager->OnSpawnComplete(SpawnCount);
-		SpawnManager->ClearActiveRequests();
-	}
-	// =====================================================
-	// PATH 3: CPU Upload (Upload CachedGPUParticles to GPU)
+	// PATH 1: CPU Upload (Upload CachedGPUParticles to GPU)
 	// Used for PIE transfer and save/load - particles synced from CPU array
 	// =====================================================
-	else if (CachedGPUParticles.Num() > 0 && bNeedsFullUpload)
+	if (CachedGPUParticles.Num() > 0 && bNeedsFullUpload)
 	{
 		const int32 UploadCount = CachedGPUParticles.Num();
 		const int32 BufferCapacity = FMath::Min(UploadCount, MaxParticleCount);
@@ -726,32 +769,21 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		PreviousParticleCount = CurrentParticleCount;
 		bNeedsFullUpload = false;
 
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("PATH 3 (CPU Upload): Uploaded %d particles from CPU to GPU"), BufferCapacity);
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("PATH 1 (CPU Upload): Uploaded %d particles from CPU to GPU"), BufferCapacity);
 	}
 	// =====================================================
-	// PATH 4: Reuse or Despawned Buffer
-	// No spawn requests, use despawned buffer if available, otherwise reuse persistent
+	// PATH 2: Reuse PersistentParticleBuffer
+	// Normal simulation - just register the existing buffer
 	// =====================================================
+	else if (PersistentParticleBuffer.IsValid())
+	{
+		ParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticles"));
+	}
 	else
 	{
-		if (DespawnedBuffer)
-		{
-			// Use the compacted buffer from despawn
-			ParticleBuffer = DespawnedBuffer;
-			CurrentParticleCount = PostDespawnCount;
-			PreviousParticleCount = CurrentParticleCount;
-		}
-		else if (PersistentParticleBuffer.IsValid())
-		{
-			ParticleBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleBuffer, TEXT("GPUFluidParticles"));
-		}
-		else
-		{
-			return nullptr;
-		}
+		return nullptr;
 	}
 
-	if (SpawnManager.IsValid()) SpawnManager->ClearActiveRequests();
 	return ParticleBuffer;
 }
 
@@ -1392,11 +1424,17 @@ void FGPUFluidSimulationTask::Execute(
 	SubstepParams.DeltaTimeSq = SubstepParams.DeltaTime * SubstepParams.DeltaTime;
 	SubstepParams.TotalSubsteps = NumSubsteps;
 
+	// Frame lifecycle: BeginFrame
+	Simulator->BeginFrame();
+
 	for (int32 i = 0; i < NumSubsteps; ++i)
 	{
 		SubstepParams.SubstepIndex = i;
 		Simulator->SimulateSubstep(SubstepParams);
 	}
+
+	// Frame lifecycle: EndFrame
+	Simulator->EndFrame();
 }
 
 //=============================================================================
@@ -1726,25 +1764,9 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 
 	// Determine upload strategy based on persistent buffer state and particle count changes
 	const bool bHasPersistentBuffer = PersistentParticleBuffer.IsValid() && OldCount > 0;
-	const bool bSameCount = bHasPersistentBuffer && (NewCount == OldCount);
 	const bool bCanAppendRuntime = bHasPersistentBuffer && (NewCount > OldCount);
 
-	if (bSameCount)
-	{
-		// Same particle count - NO UPLOAD needed, reuse GPU buffer entirely
-		// GPU simulation results are preserved in PersistentParticleBuffer
-		NewParticleCount = 0;
-		NewParticlesToAppend.Empty();
-		// Note: Don't set bNeedsFullUpload = false here, it should already be false
-
-		static int32 ReuseLogCounter = 0;
-		if (++ReuseLogCounter % 60 == 0)  // Log every 60 frames
-		{
-			UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Reusing GPU buffer (no upload, %d particles)"), OldCount);
-		}
-		return;  // Skip upload entirely!
-	}
-	else if (bCanAppendRuntime)
+	if (bCanAppendRuntime)
 	{
 		// Only cache the NEW particles (indices OldCount to NewCount-1)
 		const int32 NumNewParticles = NewCount - OldCount;

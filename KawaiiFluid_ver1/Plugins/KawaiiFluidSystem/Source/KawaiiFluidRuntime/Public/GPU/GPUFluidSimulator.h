@@ -172,6 +172,28 @@ public:
 	void SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params);
 
 	//=============================================================================
+	// Frame Lifecycle (프레임당 1번씩 호출, Subsystem에서 사용)
+	//=============================================================================
+
+	/**
+	 * Begin frame - Process readbacks, spawn, despawn (call once at frame start)
+	 * Must be called from render thread before any SimulateSubstep calls
+	 * @param Params - Simulation parameters
+	 */
+	void BeginFrame();
+
+	/**
+	 * End frame - Extract persistent buffers, enqueue readbacks (call once at frame end)
+	 * Must be called from render thread after all SimulateSubstep calls
+	 */
+	void EndFrame();
+	
+	/**
+	 * Check if currently in a frame (between BeginFrame and EndFrame)
+	 */
+	bool IsFrameActive() const { return bFrameActive; }
+
+	//=============================================================================
 	// Buffer Access
 	//=============================================================================
 
@@ -723,11 +745,10 @@ private:
 		bool& bBoundaryZOrderPerformed = bSkinnedZOrderPerformed;
 	};
 
-	/** Phase 1: Prepare particle buffer (Spawn, Upload, Reuse, Append) */
+	/** Phase 1: Prepare particle buffer (CPU Upload or Reuse PersistentBuffer) */
 	FRDGBufferRef PrepareParticleBuffer(
 		FRDGBuilder& GraphBuilder,
-		const FGPUFluidSimulationParams& Params,
-		int32 SpawnCount);
+		const FGPUFluidSimulationParams& Params);
 
 	/** Phase 2: Build spatial structures (Z-Order Sort or Hash Table) */
 	FSimulationSpatialData BuildSpatialStructures(
@@ -959,6 +980,9 @@ private:
 	bool bIsInitialized;
 	int32 MaxParticleCount;
 	int32 CurrentParticleCount;
+
+	// Frame lifecycle state
+	bool bFrameActive = false;
 
 	// Cached GPU particle data for upload/readback
 	TArray<FGPUFluidParticle> CachedGPUParticles;

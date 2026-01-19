@@ -99,35 +99,6 @@ void UKawaiiFluidSimulationModule::PreSave(FObjectPreSaveContext SaveContext)
 
 	// 저장 전 GPU 데이터를 CPU Particles 배열로 동기화
 	SyncGPUParticlesToCPU();
-
-	// GPU에서 내 파티클 삭제 (로드 시 UploadCPUParticlesToGPU에서 새 SourceID로 다시 업로드)
-	// bSameCount 문제 방지: GPU 파티클 수가 같으면 UploadParticles가 스킵되므로 미리 삭제
-	if (bGPUSimulationActive && CachedGPUSimulator)
-	{
-		TArray<FGPUFluidParticle> ReadbackParticles;
-		if (CachedGPUSimulator->GetReadbackGPUParticles(ReadbackParticles) && ReadbackParticles.Num() > 0)
-		{
-			TArray<int32> MyParticleIDs;
-			TArray<int32> AllParticleIDs;
-			MyParticleIDs.Reserve(ReadbackParticles.Num());
-			AllParticleIDs.Reserve(ReadbackParticles.Num());
-
-			for (const FGPUFluidParticle& Particle : ReadbackParticles)
-			{
-				AllParticleIDs.Add(Particle.ParticleID);
-				if (Particle.SourceID == CachedSourceID)
-				{
-					MyParticleIDs.Add(Particle.ParticleID);
-				}
-			}
-
-			if (MyParticleIDs.Num() > 0)
-			{
-				CachedGPUSimulator->AddDespawnByIDRequests(MyParticleIDs, AllParticleIDs);
-				UE_LOG(LogTemp, Log, TEXT("PreSave: Queued %d GPU particles for despawn (SourceID=%d)"), MyParticleIDs.Num(), CachedSourceID);
-			}
-		}
-	}
 }
 
 //========================================
@@ -260,32 +231,6 @@ void UKawaiiFluidSimulationModule::OnPreBeginPIE(bool bIsSimulating)
 	// 이 데이터는 PostDuplicate에서 자동으로 딥카피되어 PIE World로 전달됨
 	SyncGPUParticlesToCPU();
 
-	// GPU에서 내 파티클 삭제 (PIE World에서 새 SourceID로 다시 업로드됨)
-	if (bGPUSimulationActive && CachedGPUSimulator)
-	{
-		TArray<FGPUFluidParticle> ReadbackParticles;
-		if (CachedGPUSimulator->GetReadbackGPUParticles(ReadbackParticles) && ReadbackParticles.Num() > 0)
-		{
-			TArray<int32> MyParticleIDs;
-			TArray<int32> AllParticleIDs;
-			MyParticleIDs.Reserve(ReadbackParticles.Num());
-			AllParticleIDs.Reserve(ReadbackParticles.Num());
-
-			for (const FGPUFluidParticle& Particle : ReadbackParticles)
-			{
-				AllParticleIDs.Add(Particle.ParticleID);
-				if (Particle.SourceID == CachedSourceID)
-				{
-					MyParticleIDs.Add(Particle.ParticleID);
-				}
-			}
-
-			if (MyParticleIDs.Num() > 0)
-			{
-				CachedGPUSimulator->AddDespawnByIDRequests(MyParticleIDs, AllParticleIDs);
-			}
-		}
-	}
 
 	UE_LOG(LogTemp, Log, TEXT("OnPreBeginPIE: Synced %d particles for PIE transfer"), Particles.Num());
 }

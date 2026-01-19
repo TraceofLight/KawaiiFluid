@@ -995,6 +995,9 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 			MaxSubstepsPerFrame
 		);
 
+		// Frame lifecycle: BeginFrame (spawn/despawn, readback process)
+		GPUSimulator->BeginFrame();
+
 		for (; SubstepCount < TotalSubsteps; ++SubstepCount)
 		{
 			GPUParams.SubstepIndex = SubstepCount;
@@ -1004,6 +1007,9 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 
 			AccumulatedTime -= Preset->SubstepDeltaTime;
 		}
+
+		// Frame lifecycle: EndFrame (readback enqueue)
+		GPUSimulator->EndFrame();
 	}
 
 	// =====================================================

@@ -212,23 +212,11 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	GetFluidStatsCollector().SetReadbackRequested(bEnableDebugDraw || bBrushModeActive || SpawnSettings.bRecycleOldestParticles);
 
 #if WITH_EDITOR
-	// 브러시 모드에서 에디터 시뮬레이션 실행
-	if (!bIsGameWorld && bBrushModeActive && SimulationModule && SimulationModule->GetSpatialHash())
+	// 에디터에서 시뮬레이션 또는 pending ops 처리
+	if (!bIsGameWorld && SimulationModule && SimulationModule->GetSpatialHash())
 	{
 		if (UKawaiiFluidSimulationContext* Context = SimulationModule->GetSimulationContext())
 		{
-			FKawaiiFluidSimulationParams Params = SimulationModule->BuildSimulationParams();
-			Params.ExternalForce += SimulationModule->GetAccumulatedExternalForce();
-			if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
-			{
-				Params.Colliders.Append(Subsystem->GetGlobalColliders());
-				Params.InteractionComponents.Append(Subsystem->GetGlobalInteractionComponents());
-			}
-
-			// @TODO 이거 풀면 날라가는거 고쳐야함
-			Params.bEnableStaticBoundaryParticles = false;
-			Params.CollisionChannel = Preset->CollisionChannel;
-
 			// GPU 시뮬레이션 설정 (항상 GPU 사용)
 			if (!Context->IsGPUSimulatorReady())
 			{
@@ -240,18 +228,43 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 				SimulationModule->SetGPUSimulationActive(true);
 			}
 
-			float AccumulatedTime = SimulationModule->GetAccumulatedTime();
-			Context->Simulate(
-				SimulationModule->GetParticlesMutable(),
-				Preset,
-				Params,
-				*SimulationModule->GetSpatialHash(),
-				DeltaTime,
-				AccumulatedTime
-			);
-			SimulationModule->SetAccumulatedTime(AccumulatedTime);
+			if (bBrushModeActive)
+			{
+				// 브러시 모드: 전체 시뮬레이션 실행
+				FKawaiiFluidSimulationParams Params = SimulationModule->BuildSimulationParams();
+				Params.ExternalForce += SimulationModule->GetAccumulatedExternalForce();
+				if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
+				{
+					Params.Colliders.Append(Subsystem->GetGlobalColliders());
+					Params.InteractionComponents.Append(Subsystem->GetGlobalInteractionComponents());
+				}
 
-			SimulationModule->ResetExternalForce();
+				// @TODO 이거 풀면 날라가는거 고쳐야함
+				Params.bEnableStaticBoundaryParticles = false;
+				Params.CollisionChannel = Preset->CollisionChannel;
+
+				float AccumulatedTime = SimulationModule->GetAccumulatedTime();
+				Context->Simulate(
+					SimulationModule->GetParticlesMutable(),
+					Preset,
+					Params,
+					*SimulationModule->GetSpatialHash(),
+					DeltaTime,
+					AccumulatedTime
+				);
+				SimulationModule->SetAccumulatedTime(AccumulatedTime);
+				SimulationModule->ResetExternalForce();
+			}
+			else
+			{
+				// 브러시 모드 아님: pending spawn/despawn만 처리 (물리 시뮬 없이)
+				FGPUFluidSimulator* GPUSim = Context->GetGPUSimulator();
+				if (GPUSim && GPUSim->IsReady())
+				{
+					GPUSim->BeginFrame();
+					GPUSim->EndFrame();
+				}
+			}
 		}
 	}
 #endif
