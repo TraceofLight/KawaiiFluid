@@ -1209,6 +1209,51 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					AnisotropyParams.GridResolutionPreset = ZOrderSortManager->GetGridResolutionPreset();
 				}
 
+				// =========================================================================
+				// Boundary Particles for surface-aware anisotropy (Akinci 2012 pattern)
+				// Boundary particles contribute to covariance matrix, influencing ellipsoid
+				// orientation near surfaces for more accurate fluid-surface interactions
+				// =========================================================================
+				const bool bHasSkinnedBoundary = SpatialData.bSkinnedBoundaryPerformed && SpatialData.SkinnedBoundarySRV != nullptr;
+				const bool bHasStaticBoundary = SpatialData.bStaticBoundaryAvailable && SpatialData.StaticBoundarySRV != nullptr;
+
+				if (bHasSkinnedBoundary)
+				{
+					// Use Skinned boundary (SkeletalMesh - same-frame skinning)
+					AnisotropyParams.BoundaryParticlesSRV = SpatialData.SkinnedBoundarySRV;
+					AnisotropyParams.BoundaryParticleCount = SpatialData.SkinnedBoundaryParticleCount;
+					AnisotropyParams.bUseBoundaryAnisotropy = true;
+
+					// Skinned Boundary Z-Order (if available)
+					if (SpatialData.bSkinnedZOrderPerformed && SpatialData.SkinnedZOrderSortedSRV != nullptr)
+					{
+						AnisotropyParams.SortedBoundaryParticlesSRV = SpatialData.SkinnedZOrderSortedSRV;
+						AnisotropyParams.BoundaryCellStartSRV = SpatialData.SkinnedZOrderCellStartSRV;
+						AnisotropyParams.BoundaryCellEndSRV = SpatialData.SkinnedZOrderCellEndSRV;
+						AnisotropyParams.bUseBoundaryZOrder = true;
+					}
+				}
+				else if (bHasStaticBoundary)
+				{
+					// Use Static boundary (StaticMesh - persistent GPU buffer)
+					AnisotropyParams.BoundaryParticlesSRV = SpatialData.StaticBoundarySRV;
+					AnisotropyParams.BoundaryParticleCount = SpatialData.StaticBoundaryParticleCount;
+					AnisotropyParams.bUseBoundaryAnisotropy = true;
+
+					// Static Boundary Z-Order (if available)
+					if (SpatialData.StaticZOrderSortedSRV != nullptr)
+					{
+						AnisotropyParams.SortedBoundaryParticlesSRV = SpatialData.StaticZOrderSortedSRV;
+						AnisotropyParams.BoundaryCellStartSRV = SpatialData.StaticZOrderCellStartSRV;
+						AnisotropyParams.BoundaryCellEndSRV = SpatialData.StaticZOrderCellEndSRV;
+						AnisotropyParams.bUseBoundaryZOrder = true;
+					}
+				}
+
+				// BoundaryWeight: How much boundary particles influence anisotropy (0-1)
+				// 1.0 = full influence (same as fluid particles)
+				AnisotropyParams.BoundaryWeight = 1.0f;
+
 				FFluidAnisotropyPassBuilder::AddAnisotropyPass(GraphBuilder, AnisotropyParams);
 
 				GraphBuilder.QueueBufferExtraction(Axis1Buffer, &PersistentAnisotropyAxis1Buffer, ERHIAccess::SRVCompute);
