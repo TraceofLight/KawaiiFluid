@@ -301,32 +301,23 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		int3 centerCell = WorldToCell(pos, CellSize);
 		int cellRadius = (int)ceil(SmoothingRadius / CellSize);
 
-		//=====================================================================
-		// Per-particle randomized traversal direction (Jacobi bias elimination)
-		// Each axis direction is determined by particle index bits (8 patterns)
-		// This distributes directional bias across particles so it cancels out
-		//=====================================================================
-		int dirX = (idx & 1) ? -1 : 1;
-		int dirY = (idx & 2) ? -1 : 1;
-		int dirZ = (idx & 4) ? -1 : 1;
-		int startX = (dirX > 0) ? -cellRadius : cellRadius;
-		int startY = (dirY > 0) ? -cellRadius : cellRadius;
-		int startZ = (dirZ > 0) ? -cellRadius : cellRadius;
-		int endX = -startX;
-		int endY = -startY;
-		int endZ = -startZ;
+		// Alternate traversal direction per iteration to eliminate Jacobi bias
+		// All threads use same direction (no warp divergence), but direction flips each iteration
+		int dir = (IterationIndex & 1) ? -1 : 1;
+		int startR = (dir > 0) ? -cellRadius : cellRadius;
+		int endR = -startR + dir;
 
 		if (bUseZOrderSorting)
 		{
 			//=================================================================
 			// Z-Order Mode: Sequential memory access via CellStart/End
-			// Uses randomized traversal direction per particle
+			// Uniform direction per iteration (no warp divergence + no Jacobi bias)
 			//=================================================================
-			for (int dz = startZ; dz != endZ + dirZ; dz += dirZ)
+			for (int dz = startR; dz != endR; dz += dir)
 			{
-				for (int dy = startY; dy != endY + dirY; dy += dirY)
+				for (int dy = startR; dy != endR; dy += dir)
 				{
-					for (int dx = startX; dx != endX + dirX; dx += dirX)
+					for (int dx = startR; dx != endR; dx += dir)
 					{
 						int3 neighborCell = centerCell + int3(dx, dy, dz);
 						uint cellID = GetMortonCellIDFromCellCoord(neighborCell);
@@ -398,13 +389,13 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			//=================================================================
 			// Legacy Hash Table Mode
-			// Uses randomized traversal direction per particle
+			// Uniform direction per iteration (no warp divergence + no Jacobi bias)
 			//=================================================================
-			for (int dz = startZ; dz != endZ + dirZ; dz += dirZ)
+			for (int dz = startR; dz != endR; dz += dir)
 			{
-				for (int dy = startY; dy != endY + dirY; dy += dirY)
+				for (int dy = startR; dy != endR; dy += dir)
 				{
-					for (int dx = startX; dx != endX + dirX; dx += dirX)
+					for (int dx = startR; dx != endR; dx += dir)
 					{
 						int3 neighborCell = centerCell + int3(dx, dy, dz);
 						uint hash = HashCell(neighborCell);
@@ -493,12 +484,18 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	{
 		//=====================================================================
 		// Subsequent Iterations: Use cached neighbor list (NO hash lookup!)
+		// Alternate iteration direction to eliminate Jacobi bias
 		//=====================================================================
 		uint cachedCount = NeighborCounts[idx];
 		uint baseIdx = idx * MAX_NEIGHBORS_PER_PARTICLE;
 
-		for (uint n = 0; n < cachedCount; ++n)
+		// Alternate direction through cached list based on iteration
+		// Even iterations: forward (0 → count), Odd iterations: reverse (count → 0)
+		bool reverseOrder = (IterationIndex & 1) != 0;
+
+		for (uint ni = 0; ni < cachedCount; ++ni)
 		{
+			uint n = reverseOrder ? (cachedCount - 1 - ni) : ni;
 			uint neighborIdx = NeighborList[baseIdx + n];
 
 			FGPUFluidParticle neighbor = Particles[neighborIdx];
@@ -576,34 +573,27 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	//=========================================================================
 	if (bUseBoundaryDensity && BoundaryParticleCount > 0)
 	{
+		// Alternate traversal direction per iteration to eliminate Jacobi bias
+		int bDir = (IterationIndex & 1) ? -1 : 1;
+		int3 bCenterCell = WorldToCell(pos, CellSize);
+		int bCellRadius = (int)ceil(SmoothingRadius / CellSize);
+		int bStartR = (bDir > 0) ? -bCellRadius : bCellRadius;
+		int bEndR = -bStartR + bDir;
+
 		if (bUseBoundaryZOrder)
 		{
 			//=================================================================
 			// Z-Order Mode: O(K) neighbor search using Morton code
 			// SortedBoundaryParticles are sorted by Morton code
-			// Uses randomized traversal direction per particle (Jacobi bias elimination)
+			// Uniform direction per iteration (no warp divergence + no Jacobi bias)
 			//=================================================================
-			int3 centerCell = WorldToCell(pos, CellSize);
-			int cellRadius = (int)ceil(SmoothingRadius / CellSize);
-
-			// Per-particle randomized direction (same pattern as fluid neighbor search)
-			int dirX = (idx & 1) ? -1 : 1;
-			int dirY = (idx & 2) ? -1 : 1;
-			int dirZ = (idx & 4) ? -1 : 1;
-			int startX = (dirX > 0) ? -cellRadius : cellRadius;
-			int startY = (dirY > 0) ? -cellRadius : cellRadius;
-			int startZ = (dirZ > 0) ? -cellRadius : cellRadius;
-			int endX = -startX;
-			int endY = -startY;
-			int endZ = -startZ;
-
-			for (int dz = startZ; dz != endZ + dirZ; dz += dirZ)
+			for (int dz = bStartR; dz != bEndR; dz += bDir)
 			{
-				for (int dy = startY; dy != endY + dirY; dy += dirY)
+				for (int dy = bStartR; dy != bEndR; dy += bDir)
 				{
-					for (int dx = startX; dx != endX + dirX; dx += dirX)
+					for (int dx = bStartR; dx != bEndR; dx += bDir)
 					{
-						int3 neighborCell = centerCell + int3(dx, dy, dz);
+						int3 neighborCell = bCenterCell + int3(dx, dy, dz);
 						uint cellID = GetMortonCellIDFromCellCoord(neighborCell);
 						uint bCellStart = BoundaryCellStart[cellID];
 						uint bCellEnd = BoundaryCellEnd[cellID];
