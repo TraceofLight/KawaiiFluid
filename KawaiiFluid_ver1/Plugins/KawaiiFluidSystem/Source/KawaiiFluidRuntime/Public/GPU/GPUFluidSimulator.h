@@ -69,8 +69,22 @@ public:
 	 * Upload CPU particle data to GPU
 	 * Call this before simulation each frame
 	 * @param CPUParticles - Source particles (will be converted to GPU format)
+	 * @param bAppend - If true, append to existing particles instead of replacing (for batched multi-component uploads)
 	 */
-	void UploadParticles(const TArray<FFluidParticle>& CPUParticles);
+	void UploadParticles(const TArray<FFluidParticle>& CPUParticles, bool bAppend = false);
+
+	/**
+	 * Finalize batch upload after multiple UploadParticles(bAppend=true) calls
+	 * Creates the GPU persistent buffer from all accumulated CachedGPUParticles
+	 * Call this once after all components have finished uploading
+	 */
+	void FinalizeUpload();
+
+	/**
+	 * Clear accumulated particles (call before batch upload begins)
+	 * Resets CachedGPUParticles for fresh batch upload
+	 */
+	void ClearCachedParticles();
 
 	/**
 	 * Download GPU particle data back to CPU
@@ -95,6 +109,15 @@ public:
 	 * @return true if valid GPU data was retrieved
 	 */
 	bool GetAllGPUParticlesSync(TArray<FFluidParticle>& OutParticles);
+
+	/**
+	 * Get particles filtered by SourceID (for batched simulation)
+	 * Only returns particles belonging to the specified source component
+	 * @param SourceID - Source component ID to filter by
+	 * @param OutParticles - Output array (will be populated with filtered particles)
+	 * @return true if valid GPU data was retrieved
+	 */
+	bool GetParticlesBySourceID(int32 SourceID, TArray<FFluidParticle>& OutParticles);
 
 	/**
 	 * Get current particle count on GPU

@@ -683,11 +683,6 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 			CurrentGPUCount, PendingSpawnCount, GPUSimulator.Get());
 	}
 
-	if (CurrentGPUCount == 0 && PendingSpawnCount == 0)
-	{
-		return;  // Nothing to simulate
-	}
-
 	// Build GPU simulation parameters
 	const float SubstepDT = Preset->SubstepDeltaTime;
 	FGPUFluidSimulationParams GPUParams = BuildGPUSimParams(Preset, Params, SubstepDT);

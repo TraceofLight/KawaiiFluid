@@ -328,8 +328,9 @@ void FGPUFluidSimulator::ResizeBuffers(FRHICommandListBase& RHICmdList, int32 Ne
 		ParticleIndicesUAV = RHICmdList.CreateUnorderedAccessView(ParticleIndicesBufferRHI, FRHIViewDesc::CreateBufferUAV().SetTypeFromBuffer(ParticleIndicesBufferRHI));
 	}
 
-	// Resize cached array
-	CachedGPUParticles.SetNumUninitialized(NewCapacity);
+	// Reserve capacity for cached array (but don't set Num - will be filled by UploadParticles)
+	CachedGPUParticles.Empty();
+	CachedGPUParticles.Reserve(NewCapacity);
 
 	UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Resized GPU buffers to capacity: %d"), NewCapacity);
 }
@@ -345,131 +346,123 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 		return;
 	}
 
-	// Check if we have particles OR pending spawn requests
-	// (Allow simulation to start with spawn requests even if CurrentParticleCount == 0)
-	const bool bHasPendingSpawns = SpawnManager.IsValid() && SpawnManager->HasPendingSpawnRequests();
-	if (CurrentParticleCount == 0 && !bHasPendingSpawns)
-	{
-		return;
-	}
-
 	FGPUFluidSimulator* Self = this;
 	FGPUFluidSimulationParams ParamsCopy = Params;
 
 	// =====================================================
-	// PRE-SIMULATION: Check IsReady() and Lock readback buffers (2 frames ago)
-	// Using FRHIGPUBufferReadback - only Lock when IsReady() == true (no flush!)
+	// PHASE 1: READ - Readback 처리 (항상 실행)
 	// =====================================================
-	ENQUEUE_RENDER_COMMAND(GPUFluidReadback)(
+	ENQUEUE_RENDER_COMMAND(GPUFluidRead)(
 		[Self](FRHICommandListImmediate& RHICmdList)
 		{
-			// Process collision feedback readback (reads from readback enqueued 2 frames ago)
-			// Delegated to CollisionFeedbackManager
+			// Process collision feedback readback
 			Self->ProcessCollisionFeedbackReadback(RHICmdList);
-
-			// Process collider contact count readback (reads from readback enqueued 2 frames ago)
-			// Delegated to CollisionFeedbackManager
 			Self->ProcessColliderContactCountReadback(RHICmdList);
+
+			// Process stats readback
+			const bool bNeedStatsReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
+			if (bNeedStatsReadback)
+			{
+				Self->ProcessStatsReadback();
+			}
+
+			// Process shadow/anisotropy readback
+			if (Self->bShadowReadbackEnabled.load())
+			{
+				Self->ProcessShadowReadback();
+				Self->ProcessAnisotropyReadback();
+			}
+
+			// Process source counter readback (중요: AlreadyRequestedIDs cleanup에 필요)
+			if (Self->SpawnManager.IsValid())
+			{
+				Self->SpawnManager->ProcessSourceCounterReadback();
+			}
 		}
 	);
 
 	// =====================================================
-	// MAIN SIMULATION: Execute GPU simulation and EnqueueCopy to readback buffers
-	// Lock is NOT here - it's in the previous render command (only when IsReady)
+	// PHASE 2: SIMULATE - 실제 시뮬레이션 (파티클 있을 때만)
 	// =====================================================
-	ENQUEUE_RENDER_COMMAND(GPUFluidSimulate)(
-		[Self, ParamsCopy](FRHICommandListImmediate& RHICmdList)
-		{
-			// Limit logging to first 10 frames
-			static int32 RenderFrameCounter = 0;
-			const bool bLogThisFrame = (RenderFrameCounter++ < 10);
-
-			if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RENDER COMMAND START (Frame %d)"), RenderFrameCounter);
-
-			// Note: Don't reset PersistentParticleBuffer here - it breaks Phase 2 GPU→GPU rendering
-			// The buffer is maintained across frames for renderer access
-
-			// Build and execute RDG
-			FRDGBuilder GraphBuilder(RHICmdList);
-			Self->SimulateSubstep_RDG(GraphBuilder, ParamsCopy);
-
-			if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE START"));
-			GraphBuilder.Execute();
-			if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE COMPLETE"));
-
-			// =====================================================
-			// Phase 2: Async Stats/Recycle Readback (for ParticleID-based operations)
-			// Uses FRHIGPUBufferReadback for non-blocking readback (2-3 frame latency)
-			// =====================================================
-
-			// Check if any readback is needed (detailed stats OR debug visualization OR recycle)
-			const bool bNeedReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
-
-			if (bNeedReadback && Self->PersistentParticleBuffer.IsValid())
+	// Check simulation requirement (before render commands)
+	const bool bHasPendingSpawns = SpawnManager.IsValid() && SpawnManager->HasPendingSpawnRequests();
+	const bool bNeedSimulation = (CurrentParticleCount > 0 || bHasPendingSpawns);
+	if (bNeedSimulation)
+	{
+		ENQUEUE_RENDER_COMMAND(GPUFluidSimulate)(
+			[Self, ParamsCopy](FRHICommandListImmediate& RHICmdList)
 			{
-				// First, process any previously completed readback
-				Self->ProcessStatsReadback();
+				// Limit logging to first 10 frames
+				static int32 RenderFrameCounter = 0;
+				const bool bLogThisFrame = (RenderFrameCounter++ < 10);
 
-				// Then enqueue new readback for this frame
-				if (Self->CurrentParticleCount > 0)
+				if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RENDER COMMAND START (Frame %d)"), RenderFrameCounter);
+
+				// Build and execute RDG
+				FRDGBuilder GraphBuilder(RHICmdList);
+				Self->SimulateSubstep_RDG(GraphBuilder, ParamsCopy);
+
+				if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE START"));
+				GraphBuilder.Execute();
+				if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE COMPLETE"));
+
+				// Mark that we have valid GPU results
+				Self->bHasValidGPUResults.store(true);
+			}
+		);
+	}
+
+	// =====================================================
+	// PHASE 3: WRITE - Readback Enqueue & Cleanup (항상 실행)
+	// =====================================================
+	ENQUEUE_RENDER_COMMAND(GPUFluidWrite)(
+		[Self, bNeedSimulation](FRHICommandListImmediate& RHICmdList)
+		{
+			// Despawn 후 파티클 없으면 ReadbackGPUParticles 클리어
+			// (Self->CurrentParticleCount는 Phase 2 완료 후 값)
+			if (Self->CurrentParticleCount == 0 && Self->ReadbackGPUParticles.Num() > 0)
+			{
+				Self->ReadbackGPUParticles.Empty();
+				UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> Phase3: Cleared stale ReadbackGPUParticles (CurrentCount=0)"));
+			}
+
+			// Source counter readback enqueue (항상)
+			if (Self->SpawnManager.IsValid() && Self->SpawnManager->GetSourceCounterBuffer().IsValid())
+			{
+				Self->SpawnManager->EnqueueSourceCounterReadback(RHICmdList);
+			}
+
+			// 시뮬레이션이 돌았을 때만 추가 readback enqueue
+			if (bNeedSimulation && Self->CurrentParticleCount > 0)
+			{
+				// Stats readback
+				const bool bNeedReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
+				if (bNeedReadback && Self->PersistentParticleBuffer.IsValid())
 				{
 					Self->EnqueueStatsReadback(RHICmdList,
 						Self->PersistentParticleBuffer->GetRHI(),
 						Self->CurrentParticleCount);
+				}
 
-					if (bLogThisFrame)
+				// Collision feedback readback
+				if (Self->CollisionManager.IsValid() && Self->CollisionManager->GetFeedbackManager())
+				{
+					Self->CollisionManager->GetFeedbackManager()->EnqueueReadbackCopy(RHICmdList);
+				}
+
+				// Shadow/Anisotropy readback
+				if (Self->bShadowReadbackEnabled.load() && Self->PersistentParticleBuffer.IsValid())
+				{
+					Self->EnqueueShadowPositionReadback(RHICmdList,
+						Self->PersistentParticleBuffer->GetRHI(),
+						Self->CurrentParticleCount);
+
+					if (Self->bAnisotropyReadbackEnabled.load())
 					{
-						UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> ASYNC READBACK: Enqueued %d particles"), Self->CurrentParticleCount);
+						Self->EnqueueAnisotropyReadback(RHICmdList, Self->CurrentParticleCount);
 					}
 				}
 			}
-
-			// =====================================================
-			// Phase 3: Collision Feedback Readback (Particle -> Player Interaction)
-			// Delegated to FGPUCollisionFeedbackManager
-			// =====================================================
-			if (Self->CollisionManager.IsValid() && Self->CollisionManager->GetFeedbackManager())
-			{
-				Self->CollisionManager->GetFeedbackManager()->EnqueueReadbackCopy(RHICmdList);
-			}
-
-			// =====================================================
-			// Phase 4: Shadow Position Readback (for HISM Shadow Instances)
-			// Async GPU→CPU using FRHIGPUBufferReadback (no stall)
-			// =====================================================
-			if (Self->bShadowReadbackEnabled.load() && Self->PersistentParticleBuffer.IsValid())
-			{
-				// First, process any previously completed readback
-				Self->ProcessShadowReadback();
-				Self->ProcessAnisotropyReadback();
-
-				// Then enqueue new readback for this frame
-				Self->EnqueueShadowPositionReadback(RHICmdList,
-					Self->PersistentParticleBuffer->GetRHI(),
-					Self->CurrentParticleCount);
-
-				// Enqueue anisotropy readback if enabled
-				if (Self->bAnisotropyReadbackEnabled.load())
-				{
-					Self->EnqueueAnisotropyReadback(RHICmdList, Self->CurrentParticleCount);
-				}
-			}
-
-			// =====================================================
-			// Phase 5: Source Counter Readback (per-source particle count)
-			// Used for per-component MaxParticleCount tracking
-			// =====================================================
-			if (Self->SpawnManager.IsValid())
-			{
-				// First, process any previously completed readback
-				Self->SpawnManager->ProcessSourceCounterReadback();
-
-				// Then enqueue new readback for this frame
-				Self->SpawnManager->EnqueueSourceCounterReadback(RHICmdList);
-			}
-
-			// Mark that we have valid GPU results (buffer is ready for rendering)
-			Self->bHasValidGPUResults.store(true);
 		}
 	);
 }
@@ -773,6 +766,12 @@ FGPUFluidSimulator::FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStruc
 {
 	FSimulationSpatialData SpatialData;
 
+	// Skip when no particles (avoid unnecessary GPU work)
+	if (CurrentParticleCount == 0)
+	{
+		return SpatialData;
+	}
+
 	// Pass 1: Predict Positions
 	AddPredictPositionsPass(GraphBuilder, OutParticlesUAV, Params);
 
@@ -956,6 +955,12 @@ void FGPUFluidSimulator::ExecutePhysicsSolver(
 	FSimulationSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
+	// Skip physics solver when no particles (avoid 0-size buffer creation)
+	if (CurrentParticleCount == 0)
+	{
+		return;
+	}
+
 	// Create/resize neighbor caching buffers
 	const int32 NeighborListSize = CurrentParticleCount * GPU_MAX_NEIGHBORS_PER_PARTICLE;
 
@@ -998,6 +1003,12 @@ void FGPUFluidSimulator::ExecuteCollisionAndAdhesion(
 	const FSimulationSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
+	// Skip when no particles
+	if (CurrentParticleCount == 0)
+	{
+		return;
+	}
+
 	AddBoundsCollisionPass(GraphBuilder, ParticlesUAV, Params);
 	AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAV, Params);
 	AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAV, Params);
@@ -1053,6 +1064,12 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 	const FSimulationSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
+	// Skip when no particles (SpatialData buffers may be invalid)
+	if (CurrentParticleCount == 0)
+	{
+		return;
+	}
+
 	AddFinalizePositionsPass(GraphBuilder, ParticlesUAV, Params);
 
 	// Combined Viscosity + Cohesion pass (merged for ~35-40% performance improvement)
@@ -1637,7 +1654,7 @@ void FGPUFluidSimulator::ConvertFromGPU(FFluidParticle& OutCPUParticle, const FG
 	// Note: bIsAttached is not updated from GPU - CPU handles attachment state
 }
 
-void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUParticles)
+void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUParticles, bool bAppend)
 {
 	if (!bIsInitialized)
 	{
@@ -1648,11 +1665,55 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 	const int32 NewCount = CPUParticles.Num();
 	if (NewCount == 0)
 	{
+		// bAppend=true일 때는 빈 배열이면 아무것도 안함
+		if (bAppend)
+		{
+			return;
+		}
 		CurrentParticleCount = 0;
 		CachedGPUParticles.Empty();
 		return;
 	}
 
+	FScopeLock Lock(&BufferLock);
+
+	//=========================================================================
+	// Append Mode (배칭 환경에서 여러 컴포넌트가 순차적으로 업로드)
+	//=========================================================================
+	if (bAppend)
+	{
+		const int32 AppendOffset = CachedGPUParticles.Num();
+		const int32 TotalAfterAppend = AppendOffset + NewCount;
+
+		if (TotalAfterAppend > MaxParticleCount)
+		{
+			UE_LOG(LogGPUFluidSimulator, Warning,
+				TEXT("UploadParticles (Append): Total count (%d + %d = %d) exceeds capacity (%d)"),
+				AppendOffset, NewCount, TotalAfterAppend, MaxParticleCount);
+			return;
+		}
+
+		// CachedGPUParticles에 추가
+		const int32 OldNum = CachedGPUParticles.Num();
+		CachedGPUParticles.SetNumUninitialized(TotalAfterAppend);
+
+		for (int32 i = 0; i < NewCount; ++i)
+		{
+			CachedGPUParticles[OldNum + i] = ConvertToGPU(CPUParticles[i]);
+		}
+
+		UE_LOG(LogGPUFluidSimulator, Log,
+			TEXT("UploadParticles (Append): Added %d particles at offset %d (total: %d)"),
+			NewCount, AppendOffset, TotalAfterAppend);
+
+		// 아직 CreateImmediatePersistentBuffer() 호출 안함
+		// 모든 컴포넌트의 업로드가 끝난 후 마지막에 한번 호출해야 함
+		return;
+	}
+
+	//=========================================================================
+	// Replace Mode (기존 동작 - 전체 교체)
+	//=========================================================================
 	if (NewCount > MaxParticleCount)
 	{
 		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("UploadParticles: Particle count (%d) exceeds capacity (%d)"),
@@ -1660,15 +1721,13 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 		return;
 	}
 
-	FScopeLock Lock(&BufferLock);
-
 	// Store old count for comparison BEFORE updating
 	const int32 OldCount = CurrentParticleCount;
 
 	// Determine upload strategy based on persistent buffer state and particle count changes
 	const bool bHasPersistentBuffer = PersistentParticleBuffer.IsValid() && OldCount > 0;
 	const bool bSameCount = bHasPersistentBuffer && (NewCount == OldCount);
-	const bool bCanAppend = bHasPersistentBuffer && (NewCount > OldCount);
+	const bool bCanAppendRuntime = bHasPersistentBuffer && (NewCount > OldCount);
 
 	if (bSameCount)
 	{
@@ -1685,7 +1744,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 		}
 		return;  // Skip upload entirely!
 	}
-	else if (bCanAppend)
+	else if (bCanAppendRuntime)
 	{
 		// Only cache the NEW particles (indices OldCount to NewCount-1)
 		const int32 NumNewParticles = NewCount - OldCount;
@@ -1727,6 +1786,35 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 		// 이미 버퍼를 생성했으므로 Simulate()의 PATH 3 스킵
 		bNeedsFullUpload = false;
 	}
+}
+
+void FGPUFluidSimulator::FinalizeUpload()
+{
+	FScopeLock Lock(&BufferLock);
+
+	if (CachedGPUParticles.Num() == 0)
+	{
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT("FinalizeUpload: No particles to upload"));
+		return;
+	}
+
+	UE_LOG(LogGPUFluidSimulator, Log, TEXT("FinalizeUpload: Creating persistent buffer for %d particles"), CachedGPUParticles.Num());
+
+	// GPU 버퍼 생성
+	CreateImmediatePersistentBuffer();
+
+	// 플래그 설정
+	bNeedsFullUpload = false;
+}
+
+void FGPUFluidSimulator::ClearCachedParticles()
+{
+	FScopeLock Lock(&BufferLock);
+
+	CachedGPUParticles.Empty();
+	CurrentParticleCount = 0;
+
+	UE_LOG(LogGPUFluidSimulator, Log, TEXT("ClearCachedParticles: Cleared cached particles"));
 }
 
 void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
@@ -1772,6 +1860,24 @@ void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
 		}
 	);
 
+	// Readback 데이터도 즉시 채움
+	// 이유: CreateImmediatePersistentBuffer는 시뮬레이션 없이 직접 GPU에 업로드하므로
+	// 시뮬레이션 기반 Readback이 아직 없음. GetReadbackGPUParticles()가 작동하려면
+	// ReadbackGPUParticles와 bHasValidGPUResults가 필요함.
+	// 없으면: Clear, Despawn 등 Readback 의존 기능이 작동 안 함
+	{
+		FScopeLock Lock(&BufferLock);
+		ReadbackGPUParticles = CachedGPUParticles;
+		bHasValidGPUResults.store(true);
+	}
+
+	
+	// SourceCounter 초기화 (레벨 로드 시 스폰 셰이더를 거치지 않으므로 직접 초기화)
+	if (SpawnManager.IsValid())
+	{
+		SpawnManager->InitializeSourceCountersFromParticles(CachedGPUParticles);
+	}
+	
 	// 렌더 스레드 완료까지 대기 (레벨 로드 시 한 번만 호출되므로 성능 영향 적음)
 	FlushRenderingCommands();
 }
@@ -2050,6 +2156,73 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FFluidParticle>& OutParti
 	UE_LOG(LogGPUFluidSimulator, Log, TEXT("GetAllGPUParticlesSync: Retrieved %d particles (sync readback)"), Count);
 
 	return true;
+}
+
+bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FFluidParticle>& OutParticles)
+{
+	OutParticles.Reset();
+
+	if (!bHasValidGPUResults.load())
+	{
+		return false;
+	}
+
+	FScopeLock Lock(&BufferLock);
+
+	if (ReadbackGPUParticles.Num() == 0)
+	{
+		return false;
+	}
+
+	// SourceID로 필터링
+	for (const FGPUFluidParticle& GPUParticle : ReadbackGPUParticles)
+	{
+		if (GPUParticle.SourceID != SourceID)
+		{
+			continue;
+		}
+
+		FFluidParticle OutParticle;
+
+		FVector NewPosition = FVector(GPUParticle.Position);
+		FVector NewVelocity = FVector(GPUParticle.Velocity);
+
+		const float MaxValidValue = 1000000.0f;
+		bool bValidPosition = !NewPosition.ContainsNaN() && NewPosition.GetAbsMax() < MaxValidValue;
+		bool bValidVelocity = !NewVelocity.ContainsNaN() && NewVelocity.GetAbsMax() < MaxValidValue;
+
+		if (bValidPosition)
+		{
+			OutParticle.Position = NewPosition;
+			OutParticle.PredictedPosition = FVector(GPUParticle.PredictedPosition);
+		}
+
+		if (bValidVelocity)
+		{
+			OutParticle.Velocity = NewVelocity;
+		}
+
+		OutParticle.Mass = FMath::IsFinite(GPUParticle.Mass) ? GPUParticle.Mass : 1.0f;
+		OutParticle.Density = FMath::IsFinite(GPUParticle.Density) ? GPUParticle.Density : 0.0f;
+		OutParticle.Lambda = FMath::IsFinite(GPUParticle.Lambda) ? GPUParticle.Lambda : 0.0f;
+		OutParticle.ParticleID = GPUParticle.ParticleID;
+		OutParticle.SourceID = GPUParticle.SourceID;
+
+		OutParticle.bIsAttached = (GPUParticle.Flags & EGPUParticleFlags::IsAttached) != 0;
+		OutParticle.bIsSurfaceParticle = (GPUParticle.Flags & EGPUParticleFlags::IsSurface) != 0;
+		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
+		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
+		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
+
+		if (GPUParticle.NeighborCount > 0)
+		{
+			OutParticle.NeighborIndices.SetNum(GPUParticle.NeighborCount);
+		}
+
+		OutParticles.Add(MoveTemp(OutParticle));
+	}
+
+	return OutParticles.Num() > 0;
 }
 
 //=============================================================================

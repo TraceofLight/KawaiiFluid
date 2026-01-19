@@ -622,3 +622,86 @@ void FGPUSpawnManager::ClearSourceCounters(FRDGBuilder& GraphBuilder)
 
 	UE_LOG(LogGPUSpawnManager, Log, TEXT("Cleared all source counters"));
 }
+
+void FGPUSpawnManager::InitializeSourceCountersFromParticles(const TArray<FGPUFluidParticle>& Particles)
+{
+	if (Particles.Num() == 0)
+	{
+		return;
+	}
+
+	// Count particles by SourceID
+	TArray<int32> SourceCounts;
+	SourceCounts.SetNumZeroed(EGPUParticleSource::MaxSourceCount);
+
+	for (const FGPUFluidParticle& Particle : Particles)
+	{
+		const int32 SourceID = Particle.SourceID;
+		if (SourceID >= 0 && SourceID < EGPUParticleSource::MaxSourceCount)
+		{
+			SourceCounts[SourceID]++;
+		}
+	}
+
+	// Update CPU cache immediately
+	{
+		FScopeLock Lock(&SourceCountLock);
+		CachedSourceCounts = SourceCounts;
+	}
+
+	// GPU 버퍼 생성 또는 업데이트
+	TArray<uint32> CountsUint32;
+	CountsUint32.SetNumUninitialized(EGPUParticleSource::MaxSourceCount);
+	for (int32 i = 0; i < EGPUParticleSource::MaxSourceCount; ++i)
+	{
+		CountsUint32[i] = static_cast<uint32>(SourceCounts[i]);
+	}
+
+	FGPUSpawnManager* Self = this;
+	TArray<uint32> CountsCopy = CountsUint32;
+
+	ENQUEUE_RENDER_COMMAND(InitializeSourceCounters)(
+		[Self, CountsCopy](FRHICommandListImmediate& RHICmdList)
+		{
+			FRDGBuilder GraphBuilder(RHICmdList, RDG_EVENT_NAME("InitializeSourceCounters"));
+
+			FRDGBufferRef CounterBuffer;
+			if (!Self->SourceCounterBuffer.IsValid())
+			{
+				// 버퍼가 없으면 초기 데이터와 함께 생성
+				CounterBuffer = CreateStructuredBuffer(
+					GraphBuilder,
+					TEXT("GPUSourceCounters"),
+					sizeof(uint32),
+					EGPUParticleSource::MaxSourceCount,
+					CountsCopy.GetData(),
+					CountsCopy.Num() * sizeof(uint32),
+					ERDGInitialDataFlags::None
+				);
+				GraphBuilder.QueueBufferExtraction(CounterBuffer, &Self->SourceCounterBuffer);
+			}
+			else
+			{
+				// 버퍼가 있으면 업로드만
+				CounterBuffer = GraphBuilder.RegisterExternalBuffer(Self->SourceCounterBuffer, TEXT("GPUSourceCounters"));
+				GraphBuilder.QueueBufferUpload(CounterBuffer, CountsCopy.GetData(), CountsCopy.Num() * sizeof(uint32));
+			}
+
+			GraphBuilder.Execute();
+		}
+	);
+
+	FlushRenderingCommands();
+
+	// Log source counts
+	int32 TotalCounted = 0;
+	for (int32 i = 0; i < EGPUParticleSource::MaxSourceCount; ++i)
+	{
+		if (CachedSourceCounts[i] > 0)
+		{
+			UE_LOG(LogGPUSpawnManager, Log, TEXT("InitializeSourceCounters: SourceID %d = %d particles"), i, CachedSourceCounts[i]);
+			TotalCounted += CachedSourceCounts[i];
+		}
+	}
+	UE_LOG(LogGPUSpawnManager, Log, TEXT("InitializeSourceCounters: Total %d particles from %d input"), TotalCounted, Particles.Num());
+}

@@ -165,6 +165,13 @@ public:
 	 */
 	void ClearSourceCounters(FRDGBuilder& GraphBuilder);
 
+	/**
+	 * Initialize source counters from uploaded particles (for level load)
+	 * Counts particles by SourceID and uploads to GPU buffer + CPU cache
+	 * @param Particles - Array of particles to count by SourceID
+	 */
+	void InitializeSourceCountersFromParticles(const TArray<FGPUFluidParticle>& Particles);
+
 	//=========================================================================
 	// Configuration
 	//=========================================================================

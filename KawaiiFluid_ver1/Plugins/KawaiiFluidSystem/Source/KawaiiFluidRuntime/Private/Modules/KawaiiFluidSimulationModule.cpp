@@ -99,6 +99,35 @@ void UKawaiiFluidSimulationModule::PreSave(FObjectPreSaveContext SaveContext)
 
 	// 저장 전 GPU 데이터를 CPU Particles 배열로 동기화
 	SyncGPUParticlesToCPU();
+
+	// GPU에서 내 파티클 삭제 (로드 시 UploadCPUParticlesToGPU에서 새 SourceID로 다시 업로드)
+	// bSameCount 문제 방지: GPU 파티클 수가 같으면 UploadParticles가 스킵되므로 미리 삭제
+	if (bGPUSimulationActive && CachedGPUSimulator)
+	{
+		TArray<FGPUFluidParticle> ReadbackParticles;
+		if (CachedGPUSimulator->GetReadbackGPUParticles(ReadbackParticles) && ReadbackParticles.Num() > 0)
+		{
+			TArray<int32> MyParticleIDs;
+			TArray<int32> AllParticleIDs;
+			MyParticleIDs.Reserve(ReadbackParticles.Num());
+			AllParticleIDs.Reserve(ReadbackParticles.Num());
+
+			for (const FGPUFluidParticle& Particle : ReadbackParticles)
+			{
+				AllParticleIDs.Add(Particle.ParticleID);
+				if (Particle.SourceID == CachedSourceID)
+				{
+					MyParticleIDs.Add(Particle.ParticleID);
+				}
+			}
+
+			if (MyParticleIDs.Num() > 0)
+			{
+				CachedGPUSimulator->AddDespawnByIDRequests(MyParticleIDs, AllParticleIDs);
+				UE_LOG(LogTemp, Log, TEXT("PreSave: Queued %d GPU particles for despawn (SourceID=%d)"), MyParticleIDs.Num(), CachedSourceID);
+			}
+		}
+	}
 }
 
 //========================================
@@ -120,21 +149,15 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 		return;
 	}
 
-	TArray<FFluidParticle> TempParticles;
+	TArray<FFluidParticle> MyParticles;
 	bool bSyncSuccess = false;
 
 	if (CachedGPUSimulator->IsReady())
 	{
-		// Async readback 완료됨 -> 기존 방식
-		if (CachedGPUSimulator->GetAllGPUParticles(TempParticles))
+		// 내 SourceID 파티클만 필터링해서 가져오기 (배칭 환경 대응)
+		if (CachedGPUSimulator->GetParticlesBySourceID(CachedSourceID, MyParticles))
 		{
-			Particles = MoveTemp(TempParticles);
-			bSyncSuccess = true;
-		}
-		// Async readback 안 됨 -> 동기 리드백 강제
-		else if (CachedGPUSimulator->GetAllGPUParticlesSync(TempParticles))
-		{
-			Particles = MoveTemp(TempParticles);
+			Particles = MoveTemp(MyParticles);
 			bSyncSuccess = true;
 		}
 	}
@@ -142,9 +165,18 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 	// GPU의 NextParticleID도 CPU로 동기화 (PIE 전환 시 ID 충돌 방지)
 	if (bSyncSuccess)
 	{
-		const int32 GPUNextID = CachedGPUSimulator->GetNextParticleID();
-		NextParticleID = GPUNextID;
-		UE_LOG(LogTemp, Log, TEXT("SyncGPUParticlesToCPU: Synced %d particles, NextParticleID = %d"), Particles.Num(), NextParticleID);
+		// 내 파티클 중 최대 ID 찾기
+		int32 MaxParticleID = -1;
+		for (const FFluidParticle& P : Particles)
+		{
+			MaxParticleID = FMath::Max(MaxParticleID, P.ParticleID);
+		}
+		if (MaxParticleID >= 0)
+		{
+			NextParticleID = MaxParticleID + 1;
+		}
+		UE_LOG(LogTemp, Log, TEXT("SyncGPUParticlesToCPU: SourceID=%d, Synced %d particles, NextParticleID = %d"),
+			CachedSourceID, Particles.Num(), NextParticleID);
 	}
 }
 
@@ -163,29 +195,39 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 
 	const int32 UploadCount = Particles.Num();
 
-	// 업로드된 파티클 중 최대 ID 찾기 (ID 중복 방지를 위해)
+	// 업로드된 파티클 중 최대 ID 찾기 + SourceID를 현재 컴포넌트로 바인딩
+	// (PIE 전환/옵션 변경 시 새로 할당받은 SourceID 적용)
 	int32 MaxParticleID = -1;
-	for (const FFluidParticle& Particle : Particles)
+	for (FFluidParticle& Particle : Particles)
 	{
 		MaxParticleID = FMath::Max(MaxParticleID, Particle.ParticleID);
+		Particle.SourceID = CachedSourceID;
 	}
 
-	// CPU에서 GPU로 업로드
-	CachedGPUSimulator->UploadParticles(Particles);
+	// CPU에서 GPU로 업로드 (bAppend=true: 배칭 환경에서 다른 컴포넌트 파티클 보존)
+	CachedGPUSimulator->UploadParticles(Particles, /*bAppend=*/true);
+
+	// 모든 append 후 GPU 버퍼 생성/갱신
+	CachedGPUSimulator->FinalizeUpload();
 
 	// GPU와 CPU의 NextParticleID를 동기화 (PIE 전환 시 ID 충돌 방지)
 	if (MaxParticleID >= 0)
 	{
 		const int32 NewNextID = MaxParticleID + 1;
-		CachedGPUSimulator->SetNextParticleID(NewNextID);
-		NextParticleID = NewNextID;  // CPU도 동기화
-		UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Set NextParticleID to %d (GPU & CPU synced)"), NewNextID);
+		const int32 CurrentNextID = CachedGPUSimulator->GetNextParticleID();
+		// 여러 컴포넌트가 업로드할 때 가장 큰 ID 기준으로만 업데이트
+		if (NewNextID > CurrentNextID)
+		{
+			CachedGPUSimulator->SetNextParticleID(NewNextID);
+			NextParticleID = NewNextID;
+			UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Set NextParticleID to %d (GPU & CPU synced)"), NewNextID);
+		}
 	}
 
 	// GPU에 올렸으니 CPU 배열 정리 (중복 업로드 방지 + 메모리 절약)
 	Particles.Empty();
 
-	UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Uploaded %d particles to GPU"), UploadCount);
+	UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Uploaded %d particles (SourceID=%d) to GPU"), UploadCount, CachedSourceID);
 }
 
 void UKawaiiFluidSimulationModule::BeginDestroy()
@@ -217,6 +259,33 @@ void UKawaiiFluidSimulationModule::OnPreBeginPIE(bool bIsSimulating)
 	// PIE 시작 전 GPU 파티클을 CPU로 동기화
 	// 이 데이터는 PostDuplicate에서 자동으로 딥카피되어 PIE World로 전달됨
 	SyncGPUParticlesToCPU();
+
+	// GPU에서 내 파티클 삭제 (PIE World에서 새 SourceID로 다시 업로드됨)
+	if (bGPUSimulationActive && CachedGPUSimulator)
+	{
+		TArray<FGPUFluidParticle> ReadbackParticles;
+		if (CachedGPUSimulator->GetReadbackGPUParticles(ReadbackParticles) && ReadbackParticles.Num() > 0)
+		{
+			TArray<int32> MyParticleIDs;
+			TArray<int32> AllParticleIDs;
+			MyParticleIDs.Reserve(ReadbackParticles.Num());
+			AllParticleIDs.Reserve(ReadbackParticles.Num());
+
+			for (const FGPUFluidParticle& Particle : ReadbackParticles)
+			{
+				AllParticleIDs.Add(Particle.ParticleID);
+				if (Particle.SourceID == CachedSourceID)
+				{
+					MyParticleIDs.Add(Particle.ParticleID);
+				}
+			}
+
+			if (MyParticleIDs.Num() > 0)
+			{
+				CachedGPUSimulator->AddDespawnByIDRequests(MyParticleIDs, AllParticleIDs);
+			}
+		}
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("OnPreBeginPIE: Synced %d particles for PIE transfer"), Particles.Num());
 }
