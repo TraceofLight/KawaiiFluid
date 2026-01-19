@@ -96,12 +96,68 @@ float AttachedStretchScale;   // Perpendicular stretch (1.5 = 150%)
 float3 MortonBoundsMin;       // Grid origin for Morton code calculation
 
 //-----------------------------------------------------------------------------
+// Boundary Particles for anisotropy calculation (Akinci 2012 style)
+//-----------------------------------------------------------------------------
+struct FGPUBoundaryParticle
+{
+	float3 Position;    // World position
+	float Psi;          // Boundary particle "mass" (volume contribution)
+	float3 Normal;      // Surface normal
+	int OwnerID;        // Owner component ID
+	float3 Velocity;    // World velocity (for moving boundaries)
+	float Padding;      // Alignment padding
+};
+
+// Legacy brute-force mode
+StructuredBuffer<FGPUBoundaryParticle> BoundaryParticles;
+int BoundaryParticleCount;
+int bUseBoundaryAnisotropy;
+
+// Z-Order sorted mode (cache-friendly)
+StructuredBuffer<FGPUBoundaryParticle> SortedBoundaryParticles;
+StructuredBuffer<uint> BoundaryCellStart;
+StructuredBuffer<uint> BoundaryCellEnd;
+int bUseBoundaryZOrder;
+float BoundaryWeight;
+
+// Temporal Smoothing
+StructuredBuffer<float4> PrevAnisotropyAxis1;
+StructuredBuffer<float4> PrevAnisotropyAxis2;
+StructuredBuffer<float4> PrevAnisotropyAxis3;
+int bEnableTemporalSmoothing;
+float TemporalSmoothFactor;
+int bHasPreviousFrame;
+
+//-----------------------------------------------------------------------------
+// Z-Order Cell ID Calculation (uses shader parameters)
+// Morton code functions are provided by FluidMortonUtils.ush
+//-----------------------------------------------------------------------------
+
+// Compute Morton-based cell ID from cell coordinates (integer)
+// This version uses shader parameters (MortonBoundsMin, CellSize) directly.
+uint GetMortonCellIDFromCellCoord(int3 cellCoord)
+{
+	// Compute grid minimum cell (same as in FluidMortonCode.usf)
+	int3 gridMin = int3(floor(MortonBoundsMin / CellSize));
+
+	// Offset cell coordinates to make them positive (relative to grid min)
+	int3 offset = cellCoord - gridMin;
+
+	// Clamp to valid range for current preset
+	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
+	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+
+	// Compute Morton code using preset-specific function from FluidMortonUtils.ush
+	return Morton3D(uoffset.x, uoffset.y, uoffset.z);
+}
+
+//-----------------------------------------------------------------------------
 // FleX / Yu & Turk Style Constants
 //-----------------------------------------------------------------------------
 
 // Eigenvalue ratio clamping (prevents too-thin ellipsoids)
-// kr = 10 means minimum scale is 10% of maximum (very flat pancakes)
-#define K_R 10.0f
+// kr = 4 means minimum scale is 25% of maximum (FleX style, more rounded)
+#define K_R 4.0f
 
 // Minimum neighbors for covariance calculation (PCA requires at least 4)
 #define MIN_NEIGHBORS_FOR_ANISOTROPY 4
@@ -585,6 +641,100 @@ void CalculateDensityBased(
 		}
 	}
 
+	// =========================================================================
+	// Boundary Particle contribution to covariance (Akinci 2012 style)
+	// Boundary particles contribute to the covariance matrix to influence
+	// ellipsoid orientation near surfaces
+	// =========================================================================
+	if (bUseBoundaryAnisotropy && BoundaryParticleCount > 0)
+	{
+		if (bUseBoundaryZOrder)
+		{
+			// =================================================================
+			// Z-Order Mode: O(K) neighbor search using Morton code
+			// =================================================================
+			for (int dz = -CellRadius; dz <= CellRadius; ++dz)
+			{
+				for (int dy = -CellRadius; dy <= CellRadius; ++dy)
+				{
+					for (int dx = -CellRadius; dx <= CellRadius; ++dx)
+					{
+						int3 NeighborCell = CenterCell + int3(dx, dy, dz);
+						uint CellID = GetMortonCellIDFromCellCoord(NeighborCell);
+						uint BStart = BoundaryCellStart[CellID];
+						uint BEnd = BoundaryCellEnd[CellID];
+
+						// Skip empty cells
+						if (BStart == INVALID_INDEX || BEnd == INVALID_INDEX)
+						{
+							continue;
+						}
+
+						// Sequential access through sorted boundary particles
+						for (uint bi = BStart; bi <= BEnd; ++bi)
+						{
+							FGPUBoundaryParticle boundary = SortedBoundaryParticles[bi];
+							float3 Diff = boundary.Position - CenterPos;
+							float Dist2 = dot(Diff, Diff);
+
+							if (Dist2 < H2)
+							{
+								float Dist = sqrt(Dist2);
+								float W = KernelWeight(Dist, SmoothingRadius) * BoundaryWeight;
+
+								if (W > 0.0001f)
+								{
+									SumWX += W * boundary.Position;
+									TotalWeight += W;
+									NeighborCount++;
+
+									SumWXX_00 += W * boundary.Position.x * boundary.Position.x;
+									SumWXX_01 += W * boundary.Position.x * boundary.Position.y;
+									SumWXX_02 += W * boundary.Position.x * boundary.Position.z;
+									SumWXX_11 += W * boundary.Position.y * boundary.Position.y;
+									SumWXX_12 += W * boundary.Position.y * boundary.Position.z;
+									SumWXX_22 += W * boundary.Position.z * boundary.Position.z;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			// =================================================================
+			// Legacy Mode: O(M) brute-force
+			// =================================================================
+			for (int bi = 0; bi < BoundaryParticleCount; ++bi)
+			{
+				FGPUBoundaryParticle boundary = BoundaryParticles[bi];
+				float3 Diff = boundary.Position - CenterPos;
+				float Dist2 = dot(Diff, Diff);
+
+				if (Dist2 < H2)
+				{
+					float Dist = sqrt(Dist2);
+					float W = KernelWeight(Dist, SmoothingRadius) * BoundaryWeight;
+
+					if (W > 0.0001f)
+					{
+						SumWX += W * boundary.Position;
+						TotalWeight += W;
+						NeighborCount++;
+
+						SumWXX_00 += W * boundary.Position.x * boundary.Position.x;
+						SumWXX_01 += W * boundary.Position.x * boundary.Position.y;
+						SumWXX_02 += W * boundary.Position.x * boundary.Position.z;
+						SumWXX_11 += W * boundary.Position.y * boundary.Position.y;
+						SumWXX_12 += W * boundary.Position.y * boundary.Position.z;
+						SumWXX_22 += W * boundary.Position.z * boundary.Position.z;
+					}
+				}
+			}
+		}
+	}
+
 	OutNeighborCount = NeighborCount;
 
 	// Need minimum neighbors for reliable covariance
@@ -913,6 +1063,36 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			Scale2 = exp(LogScale2);
 			Scale3 = exp(LogScale3);
 		}
+	}
+
+	// =========================================================================
+	// Temporal Smoothing: Blend with previous frame (NVIDIA FleX style)
+	// - Handle eigenvector sign ambiguity (v and -v are both valid)
+	// - Blend scales in log space for volume preservation
+	// =========================================================================
+	if (bEnableTemporalSmoothing && bHasPreviousFrame)
+	{
+		float4 Prev1 = PrevAnisotropyAxis1[Idx];
+		float4 Prev2 = PrevAnisotropyAxis2[Idx];
+		float4 Prev3 = PrevAnisotropyAxis3[Idx];
+
+		// Handle eigenvector sign ambiguity (flip if pointing opposite direction)
+		if (dot(Axis1, Prev1.xyz) < 0.0f) Axis1 = -Axis1;
+		if (dot(Axis2, Prev2.xyz) < 0.0f) Axis2 = -Axis2;
+		if (dot(Axis3, Prev3.xyz) < 0.0f) Axis3 = -Axis3;
+
+		// Blend axes (normalized lerp)
+		Axis1 = normalize(lerp(Axis1, Prev1.xyz, TemporalSmoothFactor));
+		Axis2 = normalize(lerp(Axis2, Prev2.xyz, TemporalSmoothFactor));
+		Axis3 = normalize(lerp(Axis3, Prev3.xyz, TemporalSmoothFactor));
+
+		// Blend scales in log space (volume preservation)
+		float LogScale1 = lerp(log(max(Scale1, 0.001f)), log(max(Prev1.w, 0.001f)), TemporalSmoothFactor);
+		float LogScale2 = lerp(log(max(Scale2, 0.001f)), log(max(Prev2.w, 0.001f)), TemporalSmoothFactor);
+		float LogScale3 = lerp(log(max(Scale3, 0.001f)), log(max(Prev3.w, 0.001f)), TemporalSmoothFactor);
+		Scale1 = exp(LogScale1);
+		Scale2 = exp(LogScale2);
+		Scale3 = exp(LogScale3);
 	}
 
 	// Write output (direction.xyz + scale.w)

@@ -83,6 +83,16 @@ struct KAWAIIFLUIDRUNTIME_API FFluidAnisotropyParams
 	 *  Higher values reduce GPU cost but may cause visual lag on fast movement */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy|Optimization", meta = (ClampMin = "1", ClampMax = "10", UIMin = "1", UIMax = "10"))
 	int32 UpdateInterval = 1;
+
+	/** Enable temporal smoothing to reduce jitter between frames */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy|Temporal")
+	bool bEnableTemporalSmoothing = true;
+
+	/** Smoothing factor (0.0 = no smoothing/use current, 1.0 = full previous frame)
+	 *  Recommended: 0.7~0.9 for smooth animation */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Anisotropy|Temporal",
+		meta = (ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1", EditCondition = "bEnableTemporalSmoothing"))
+	float TemporalSmoothFactor = 0.8f;
 };
 
 // FAnisotropyComputeParams is defined in GPU/FluidAnisotropyComputeShader.h

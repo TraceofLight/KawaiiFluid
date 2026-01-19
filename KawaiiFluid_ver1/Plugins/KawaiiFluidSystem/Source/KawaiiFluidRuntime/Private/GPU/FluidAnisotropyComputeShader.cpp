@@ -1,7 +1,7 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "GPU/FluidAnisotropyComputeShader.h"
-#include "GPU/GPUFluidParticle.h"
+#include "GPU/GPUFluidParticle.h"  // Contains FGPUBoundaryParticle
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ShaderParameterUtils.h"
@@ -108,6 +108,86 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 		CellEndSRV = GraphBuilder.CreateSRV(DummyBuffer);
 	}
 
+	// =========================================================================
+	// Boundary Particles for anisotropy calculation
+	// =========================================================================
+	FRDGBufferSRVRef BoundaryParticlesSRV = Params.BoundaryParticlesSRV;
+	FRDGBufferSRVRef SortedBoundaryParticlesSRV = Params.SortedBoundaryParticlesSRV;
+	FRDGBufferSRVRef BoundaryCellStartSRV = Params.BoundaryCellStartSRV;
+	FRDGBufferSRVRef BoundaryCellEndSRV = Params.BoundaryCellEndSRV;
+
+	// Create dummy buffer for legacy BoundaryParticles if not provided
+	if (!BoundaryParticlesSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyBoundaryParticles_Anisotropy"));
+		FGPUBoundaryParticle ZeroBoundary = {};
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroBoundary, sizeof(FGPUBoundaryParticle));
+		BoundaryParticlesSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	// Create dummy buffers for Z-Order sorted Boundary if not provided
+	if (!SortedBoundaryParticlesSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoundaryParticle), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummySortedBoundaryParticles_Anisotropy"));
+		FGPUBoundaryParticle ZeroBoundary = {};
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroBoundary, sizeof(FGPUBoundaryParticle));
+		SortedBoundaryParticlesSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	if (!BoundaryCellStartSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyBoundaryCellStart_Anisotropy"));
+		uint32 InvalidIndex = 0xFFFFFFFF;
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &InvalidIndex, sizeof(uint32));
+		BoundaryCellStartSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	if (!BoundaryCellEndSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyBoundaryCellEnd_Anisotropy"));
+		uint32 InvalidIndex = 0xFFFFFFFF;
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &InvalidIndex, sizeof(uint32));
+		BoundaryCellEndSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	// =========================================================================
+	// Temporal Smoothing buffers
+	// =========================================================================
+	FRDGBufferSRVRef PrevAxis1SRV = Params.PrevAxis1SRV;
+	FRDGBufferSRVRef PrevAxis2SRV = Params.PrevAxis2SRV;
+	FRDGBufferSRVRef PrevAxis3SRV = Params.PrevAxis3SRV;
+
+	if (!PrevAxis1SRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyPrevAnisotropyAxis1"));
+		FVector4f DefaultAxis = FVector4f(1, 0, 0, 1);  // Default identity axis
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &DefaultAxis, sizeof(FVector4f));
+		PrevAxis1SRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	if (!PrevAxis2SRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyPrevAnisotropyAxis2"));
+		FVector4f DefaultAxis = FVector4f(0, 1, 0, 1);  // Default identity axis
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &DefaultAxis, sizeof(FVector4f));
+		PrevAxis2SRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	if (!PrevAxis3SRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector4f), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyPrevAnisotropyAxis3"));
+		FVector4f DefaultAxis = FVector4f(0, 0, 1, 1);  // Default identity axis
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &DefaultAxis, sizeof(FVector4f));
+		PrevAxis3SRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
 	// Input buffers
 	PassParameters->InPhysicsParticles = Params.PhysicsParticlesSRV;
 	PassParameters->InAttachments = AttachmentsSRV;
@@ -145,6 +225,26 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 	// Attached particle anisotropy params
 	PassParameters->AttachedFlattenScale = Params.AttachedFlattenScale;
 	PassParameters->AttachedStretchScale = Params.AttachedStretchScale;
+
+	// Boundary Particles for anisotropy calculation
+	PassParameters->BoundaryParticles = BoundaryParticlesSRV;
+	PassParameters->BoundaryParticleCount = Params.BoundaryParticleCount;
+	PassParameters->bUseBoundaryAnisotropy = Params.bUseBoundaryAnisotropy ? 1 : 0;
+
+	// Boundary Z-Order sorted buffers
+	PassParameters->SortedBoundaryParticles = SortedBoundaryParticlesSRV;
+	PassParameters->BoundaryCellStart = BoundaryCellStartSRV;
+	PassParameters->BoundaryCellEnd = BoundaryCellEndSRV;
+	PassParameters->bUseBoundaryZOrder = Params.bUseBoundaryZOrder ? 1 : 0;
+	PassParameters->BoundaryWeight = Params.BoundaryWeight;
+
+	// Temporal Smoothing
+	PassParameters->PrevAnisotropyAxis1 = PrevAxis1SRV;
+	PassParameters->PrevAnisotropyAxis2 = PrevAxis2SRV;
+	PassParameters->PrevAnisotropyAxis3 = PrevAxis3SRV;
+	PassParameters->bEnableTemporalSmoothing = Params.bEnableTemporalSmoothing ? 1 : 0;
+	PassParameters->TemporalSmoothFactor = Params.TemporalSmoothFactor;
+	PassParameters->bHasPreviousFrame = Params.bHasPreviousFrame ? 1 : 0;
 
 	const int32 ThreadGroupSize = FFluidAnisotropyCS::ThreadGroupSize;
 	const int32 NumGroups = FMath::DivideAndRoundUp(Params.ParticleCount, ThreadGroupSize);

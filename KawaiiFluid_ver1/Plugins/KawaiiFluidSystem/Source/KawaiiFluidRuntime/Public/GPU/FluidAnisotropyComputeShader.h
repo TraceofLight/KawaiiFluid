@@ -13,6 +13,7 @@
 // Forward declaration
 struct FGPUFluidParticle;
 struct FGPUParticleAttachment;
+struct FGPUBoundaryParticle;
 
 //=============================================================================
 // GPU Compute Parameters for Anisotropy Shader Dispatch
@@ -68,6 +69,26 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 	// Attached particle anisotropy params
 	float AttachedFlattenScale = 0.3f;	// How much to flatten attached particles (0.3 = 30% of original height)
 	float AttachedStretchScale = 1.5f;	// How much to stretch perpendicular to normal
+
+	// Boundary Particles for anisotropy calculation (covariance contribution)
+	FRDGBufferSRVRef BoundaryParticlesSRV = nullptr;		// Legacy brute-force (FGPUBoundaryParticle)
+	int32 BoundaryParticleCount = 0;
+	bool bUseBoundaryAnisotropy = false;
+
+	// Boundary Z-Order sorted buffers
+	FRDGBufferSRVRef SortedBoundaryParticlesSRV = nullptr;
+	FRDGBufferSRVRef BoundaryCellStartSRV = nullptr;
+	FRDGBufferSRVRef BoundaryCellEndSRV = nullptr;
+	bool bUseBoundaryZOrder = false;
+	float BoundaryWeight = 1.0f;	// Weight for boundary contribution to covariance
+
+	// Temporal Smoothing parameters
+	FRDGBufferSRVRef PrevAxis1SRV = nullptr;
+	FRDGBufferSRVRef PrevAxis2SRV = nullptr;
+	FRDGBufferSRVRef PrevAxis3SRV = nullptr;
+	bool bEnableTemporalSmoothing = true;
+	float TemporalSmoothFactor = 0.8f;  // 0.0 = no smoothing, 1.0 = previous frame only
+	bool bHasPreviousFrame = false;
 };
 
 // Constants (must match FluidSpatialHash.ush and FluidAnisotropyCompute.usf)
@@ -128,6 +149,26 @@ public:
 		// Attached particle anisotropy params
 		SHADER_PARAMETER(float, AttachedFlattenScale)  // How flat (0.3 = 30% height)
 		SHADER_PARAMETER(float, AttachedStretchScale)  // Perpendicular stretch
+
+		// Boundary Particles for anisotropy calculation
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+		SHADER_PARAMETER(int32, bUseBoundaryAnisotropy)
+
+		// Boundary Z-Order sorted buffers
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, SortedBoundaryParticles)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellStart)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellEnd)
+		SHADER_PARAMETER(int32, bUseBoundaryZOrder)
+		SHADER_PARAMETER(float, BoundaryWeight)
+
+		// Temporal Smoothing
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FVector4f>, PrevAnisotropyAxis1)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FVector4f>, PrevAnisotropyAxis2)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FVector4f>, PrevAnisotropyAxis3)
+		SHADER_PARAMETER(int32, bEnableTemporalSmoothing)
+		SHADER_PARAMETER(float, TemporalSmoothFactor)
+		SHADER_PARAMETER(int32, bHasPreviousFrame)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 64;
