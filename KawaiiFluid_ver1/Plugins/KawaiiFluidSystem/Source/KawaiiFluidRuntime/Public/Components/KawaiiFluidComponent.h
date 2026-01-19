@@ -688,4 +688,7 @@ private:
 
 	/** Time of last shadow readback (for prediction delta calculation) */
 	double LastShadowReadbackTime = 0.0;
+
+	/** Buffer for shadow position prediction to avoid per-frame allocation */
+	TArray<FVector> ShadowPredictionBuffer;
 };

@@ -169,9 +169,10 @@ public:
 	 * @param ParticlePositions Array of particle world positions.
 	 * @param NumParticles Number of particles.
 	 * @param ParticleRadius Radius of each particle (used for shadow sphere size).
+	 * Uses pooling based on MaxParticles to minimize reallocation
 	 */
-	void UpdateShadowInstances(const FVector* ParticlePositions, int32 NumParticles, float ParticleRadius);
-
+	void UpdateShadowInstances(const FVector* ParticlePositions, int32 NumParticles, float ParticleRadius, int32 MaxParticles = 0);
+	
 	/**
 	 * @brief Update shadow instances with anisotropy data for ellipsoid shadows.
 	 * Creates oriented ellipsoid instances at particle locations.

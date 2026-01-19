@@ -1158,6 +1158,22 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectional(FVector Position, F
 int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Position, FVector Direction, float Speed,
                                                                       float Radius, float Spacing, float Jitter)
 {
+	TArray<FGPUSpawnRequest> BatchRequests;
+	int32 SpawnedCount = SpawnParticleDirectionalHexLayerBatch(Position, Direction, Speed, Radius, Spacing, Jitter, BatchRequests);
+
+	// Send batch requests
+	if (BatchRequests.Num() > 0 && CachedGPUSimulator)
+	{
+		CachedGPUSimulator->AddSpawnRequests(BatchRequests);
+	}
+
+	return SpawnedCount;
+}
+
+int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayerBatch(FVector Position, FVector Direction, float Speed,
+                                                                          float Radius, float Spacing, float Jitter,
+                                                                          TArray<FGPUSpawnRequest>& OutBatch)
+{
 	// 방향 정규화
 	FVector Dir = Direction.GetSafeNormal();
 	if (Dir.IsNearlyZero())
@@ -1190,6 +1206,9 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Pos
 
 	int32 SpawnedCount = 0;
 	const FVector SpawnVel = Dir * Speed;
+
+	const float ParticleMass = Preset ? Preset->ParticleMass : 1.0f;
+	const float ParticleRadius = Preset ? Preset->ParticleRadius : 5.0f;
 
 	// Hexagonal grid 순회
 	for (int32 RowIdx = -HalfRows; RowIdx <= HalfRows; ++RowIdx)
@@ -1227,7 +1246,16 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Pos
 			if (LocalX * LocalX + LocalYFinal * LocalYFinal <= RadiusSq)
 			{
 				FVector SpawnPos = Position + Right * LocalX + Up * LocalYFinal;
-				SpawnParticle(SpawnPos, SpawnVel);
+				
+				// Create request and add to batch
+				FGPUSpawnRequest Request;
+				Request.Position = FVector3f(SpawnPos);
+				Request.Velocity = FVector3f(SpawnVel);
+				Request.Mass = ParticleMass;
+				Request.Radius = ParticleRadius;
+				Request.SourceID = CachedSourceID;
+
+				OutBatch.Add(Request);
 				++SpawnedCount;
 			}
 		}

@@ -449,6 +449,11 @@ public:
 	int32 SpawnParticleDirectionalHexLayer(FVector Position, FVector Direction, float Speed,
 	                                        float Radius, float Spacing = 0.0f, float Jitter = 0.15f);
 
+	/** C++ only: Batch version that collects requests without sending. Caller must send batch manually. */
+	int32 SpawnParticleDirectionalHexLayerBatch(FVector Position, FVector Direction, float Speed,
+	                                             float Radius, float Spacing, float Jitter,
+	                                             TArray<FGPUSpawnRequest>& OutBatch);
+
 	/** 모든 파티클 제거 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void ClearAllParticles();

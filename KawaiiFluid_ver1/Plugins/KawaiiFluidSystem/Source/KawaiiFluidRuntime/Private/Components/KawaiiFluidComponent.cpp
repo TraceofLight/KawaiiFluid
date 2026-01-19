@@ -212,57 +212,60 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	GetFluidStatsCollector().SetReadbackRequested(bEnableDebugDraw || bBrushModeActive || SpawnSettings.bRecycleOldestParticles);
 
 #if WITH_EDITOR
-	// 에디터에서 시뮬레이션 또는 pending ops 처리
-	if (!bIsGameWorld && SimulationModule && SimulationModule->GetSpatialHash())
 	{
-		if (UKawaiiFluidSimulationContext* Context = SimulationModule->GetSimulationContext())
+		TRACE_CPUPROFILER_EVENT_SCOPE(TICKCOMPONENT_SIMULATION)
+		// 에디터에서 시뮬레이션 또는 pending ops 처리
+		if (!bIsGameWorld && SimulationModule && SimulationModule->GetSpatialHash())
 		{
-			// GPU 시뮬레이션 설정 (항상 GPU 사용)
-			if (!Context->IsGPUSimulatorReady())
+			if (UKawaiiFluidSimulationContext* Context = SimulationModule->GetSimulationContext())
 			{
-				Context->InitializeGPUSimulator(Preset->MaxParticles);
-			}
-			if (Context->IsGPUSimulatorReady())
-			{
-				SimulationModule->SetGPUSimulator(Context->GetGPUSimulator());
-				SimulationModule->SetGPUSimulationActive(true);
-			}
-
-			if (bBrushModeActive)
-			{
-				// 브러시 모드: 전체 시뮬레이션 실행
-				FKawaiiFluidSimulationParams Params = SimulationModule->BuildSimulationParams();
-				Params.ExternalForce += SimulationModule->GetAccumulatedExternalForce();
-				if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
+				// GPU 시뮬레이션 설정 (항상 GPU 사용)
+				if (!Context->IsGPUSimulatorReady())
 				{
-					Params.Colliders.Append(Subsystem->GetGlobalColliders());
-					Params.InteractionComponents.Append(Subsystem->GetGlobalInteractionComponents());
+					Context->InitializeGPUSimulator(Preset->MaxParticles);
+				}
+				if (Context->IsGPUSimulatorReady())
+				{
+					SimulationModule->SetGPUSimulator(Context->GetGPUSimulator());
+					SimulationModule->SetGPUSimulationActive(true);
 				}
 
-				// @TODO 이거 풀면 날라가는거 고쳐야함
-				Params.bEnableStaticBoundaryParticles = false;
-				Params.CollisionChannel = Preset->CollisionChannel;
-
-				float AccumulatedTime = SimulationModule->GetAccumulatedTime();
-				Context->Simulate(
-					SimulationModule->GetParticlesMutable(),
-					Preset,
-					Params,
-					*SimulationModule->GetSpatialHash(),
-					DeltaTime,
-					AccumulatedTime
-				);
-				SimulationModule->SetAccumulatedTime(AccumulatedTime);
-				SimulationModule->ResetExternalForce();
-			}
-			else
-			{
-				// 브러시 모드 아님: pending spawn/despawn만 처리 (물리 시뮬 없이)
-				FGPUFluidSimulator* GPUSim = Context->GetGPUSimulator();
-				if (GPUSim && GPUSim->IsReady())
+				if (bBrushModeActive)
 				{
-					GPUSim->BeginFrame();
-					GPUSim->EndFrame();
+					// 브러시 모드: 전체 시뮬레이션 실행
+					FKawaiiFluidSimulationParams Params = SimulationModule->BuildSimulationParams();
+					Params.ExternalForce += SimulationModule->GetAccumulatedExternalForce();
+					if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
+					{
+						Params.Colliders.Append(Subsystem->GetGlobalColliders());
+						Params.InteractionComponents.Append(Subsystem->GetGlobalInteractionComponents());
+					}
+
+					// @TODO 이거 풀면 날라가는거 고쳐야함
+					Params.bEnableStaticBoundaryParticles = false;
+					Params.CollisionChannel = Preset->CollisionChannel;
+
+					float AccumulatedTime = SimulationModule->GetAccumulatedTime();
+					Context->Simulate(
+						SimulationModule->GetParticlesMutable(),
+						Preset,
+						Params,
+						*SimulationModule->GetSpatialHash(),
+						DeltaTime,
+						AccumulatedTime
+					);
+					SimulationModule->SetAccumulatedTime(AccumulatedTime);
+					SimulationModule->ResetExternalForce();
+				}
+				else
+				{
+					// 브러시 모드 아님: pending spawn/despawn만 처리 (물리 시뮬 없이)
+					FGPUFluidSimulator* GPUSim = Context->GetGPUSimulator();
+					if (GPUSim && GPUSim->IsReady())
+					{
+						GPUSim->BeginFrame();
+						GPUSim->EndFrame();
+					}
 				}
 			}
 		}
@@ -271,6 +274,8 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 	// Containment 설정 및 충돌 처리 (시뮬레이션 후에 적용)
 	// Containment 프로퍼티는 SimulationModule에 있음
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(Containment_Setting_Collision)
 	if (SimulationModule && SimulationModule->bEnableContainment)
 	{
 		// Center와 Rotation은 동적으로 설정 (다른 값들은 SimulationModule의 UPROPERTY)
@@ -284,10 +289,12 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		);
 		SimulationModule->ResolveContainmentCollisions();
 	}
+}
 
 	// Containment Wireframe 시각화
 	if (SimulationModule && SimulationModule->bEnableContainment && SimulationModule->bShowContainmentWireframe)
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Containment_VISUAL)
 		const FVector Center = GetComponentLocation();
 		const FQuat Rotation = GetComponentQuat();
 		DrawDebugBox(
@@ -310,6 +317,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 #if WITH_EDITOR
 	if (SimulationModule && !bIsGameWorld && !GetTargetSimulationVolume())
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Simulation_Volume_Visualization)
 		// Use BoundsExtent from SimulationModule (calculated from CellSize * GridResolution)
 		const float BoundsExtent = SimulationModule->BoundsExtent;
 		const FVector HalfExtent = FVector(BoundsExtent * 0.5f);
@@ -336,6 +344,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	// Emitter mode: continuous spawn (Stream, Spray)
 	if (bIsGameWorld && SpawnSettings.IsEmitterMode())
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(Process_Continuous_Spawn)
 		ProcessContinuousSpawn(DeltaTime);
 	}
 
@@ -368,15 +377,18 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	{
 		if (UFluidRendererSubsystem* RendererSubsystem = World->GetSubsystem<UFluidRendererSubsystem>())
 		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(VSM Integration)
 			if (RendererSubsystem->bEnableVSMIntegration && bEnableShadow)
 			{
-				TArray<FVector> Positions;
+				// Use member buffer to avoid per-frame allocation
+				ShadowPredictionBuffer.Reset();
+				TArray<FVector>& Positions = ShadowPredictionBuffer;
 				int32 NumParticles = 0;
-
+		
 				// Check if GPU simulation is active
 				FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 				const bool bGPUActive = SimulationModule->IsGPUSimulationActive() && GPUSimulator != nullptr;
-
+		
 				// 파티클 수가 0이면 ISM 클리어하고 스킵
 				const int32 ActualParticleCount = bGPUActive ? GPUSimulator->GetParticleCount() : SimulationModule->GetParticleCount();
 				if (ActualParticleCount <= 0)
@@ -386,16 +398,16 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 					RendererSubsystem->UpdateShadowInstances(nullptr, 0, 0.0f);
 					return;
 				}
-
+		
 				if (bGPUActive)
 				{
 					// GPU Mode: Enable async shadow readback and get positions
 					GPUSimulator->SetShadowReadbackEnabled(true);
 					GPUSimulator->SetAnisotropyReadbackEnabled(true);
-
+		
 					TArray<FVector> NewVelocities;
 					TArray<FVector4> NewAnisotropyAxis1, NewAnisotropyAxis2, NewAnisotropyAxis3;
-
+		
 					if (GPUSimulator->HasReadyShadowPositions())
 					{
 						// New readback data available - update cache (with anisotropy)
@@ -403,14 +415,15 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 							Positions, NewVelocities,
 							NewAnisotropyAxis1, NewAnisotropyAxis2, NewAnisotropyAxis3);
 						NumParticles = Positions.Num();
-
+		
 						if (NumParticles > 0)
 						{
-							CachedShadowPositions = Positions;
-							CachedShadowVelocities = NewVelocities;
-							CachedAnisotropyAxis1 = NewAnisotropyAxis1;
-							CachedAnisotropyAxis2 = NewAnisotropyAxis2;
-							CachedAnisotropyAxis3 = NewAnisotropyAxis3;
+							// Use Move for arrays that won't be used after this (avoids deep copy)
+							CachedShadowPositions = Positions;  // Keep copy - needed for UpdateShadowInstances below
+							CachedShadowVelocities = MoveTemp(NewVelocities);
+							CachedAnisotropyAxis1 = MoveTemp(NewAnisotropyAxis1);
+							CachedAnisotropyAxis2 = MoveTemp(NewAnisotropyAxis2);
+							CachedAnisotropyAxis3 = MoveTemp(NewAnisotropyAxis3);
 							LastShadowReadbackFrame = GFrameCounter;
 							LastShadowReadbackTime = FPlatformTime::Seconds();
 
@@ -423,18 +436,19 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 						// No new data - predict positions using cached velocity
 						const double CurrentTime = FPlatformTime::Seconds();
 						const float PredictionDelta = static_cast<float>(CurrentTime - LastShadowReadbackTime);
-
+		
 						// Clamp prediction delta to avoid extreme extrapolation
 						const float ClampedDelta = FMath::Clamp(PredictionDelta, 0.0f, 0.1f);
-
+		
 						NumParticles = CachedShadowPositions.Num();
 						Positions.SetNumUninitialized(NumParticles);
-
-						for (int32 i = 0; i < NumParticles; ++i)
+		
+						// Parallelize prediction loop
+						ParallelFor(NumParticles, [&](int32 i)
 						{
 							// Predict: Position += Velocity * DeltaTime
 							Positions[i] = CachedShadowPositions[i] + CachedShadowVelocities[i] * ClampedDelta;
-						}
+						});
 						// Note: Anisotropy is not predicted, use cached values directly
 					}
 					else if (CachedShadowPositions.Num() > 0)
@@ -467,11 +481,42 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 				if (NumParticles > 0)
 				{
-					// Calculate fluid bounds from positions
+					// Calculate fluid bounds from positions (Parallel Reduction)
 					FBox FluidBounds(ForceInit);
-					for (int32 i = 0; i < NumParticles; ++i)
+
+					if (NumParticles > 1024)
 					{
-						FluidBounds += Positions[i];
+						const int32 ChunkSize = 1024;
+						const int32 NumChunks = FMath::DivideAndRoundUp(NumParticles, ChunkSize);
+						TArray<FBox> ChunkBounds;
+						ChunkBounds.Init(FBox(ForceInit), NumChunks);
+
+						ParallelFor(NumChunks, [&](int32 ChunkIndex)
+						{
+							const int32 StartIndex = ChunkIndex * ChunkSize;
+							const int32 EndIndex = FMath::Min(StartIndex + ChunkSize, NumParticles);
+							
+							FBox LocalBox(ForceInit);
+							for (int32 i = StartIndex; i < EndIndex; ++i)
+							{
+								LocalBox += Positions[i];
+							}
+							ChunkBounds[ChunkIndex] = LocalBox;
+						});
+
+						// 각 청크의 결과를 메인 Bounds에 병합
+						for (const FBox& Box : ChunkBounds)
+						{
+							FluidBounds += Box;
+						}
+					}
+					else
+					{
+						// 파티클 수가 적으면 단일 스레드에서 처리 (오버헤드 방지)
+						for (int32 i = 0; i < NumParticles; ++i)
+						{
+							FluidBounds += Positions[i];
+						}
 					}
 
 					// Expand bounds by particle radius
@@ -482,9 +527,13 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 					RendererSubsystem->UpdateShadowProxyState();
 
 					// Update HISM shadow instances with uniform spheres
-					// Note: Anisotropy-based ellipsoid shadows are disabled due to flickering
-					// caused by per-frame particle index reordering from GPU Morton sorting
-					RendererSubsystem->UpdateShadowInstances(Positions.GetData(), NumParticles, ParticleRadius);
+					// Pass MaxParticleCount for efficient instance pooling (avoids reallocations)
+					RendererSubsystem->UpdateShadowInstances(
+						Positions.GetData(), 
+						NumParticles, 
+						ParticleRadius, 
+						SpawnSettings.MaxParticleCount
+					);
 
 					// Spawn splash VFX based on condition mode (with state change detection)
 					if (SplashVFX)
@@ -662,6 +711,12 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		const FVector WorldDirection = Rotation.RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
 		const float ResidualTime = TempAccumulatedTime;
 
+		// Collect all layers into single batch to minimize lock contention
+		TArray<FGPUSpawnRequest> AllLayersBatch;
+		const float RadiusSq = SpawnSettings.StreamRadius * SpawnSettings.StreamRadius;
+		const int32 EstimatedPerLayer = FMath::CeilToInt((PI * RadiusSq) / (Spacing * Spacing));
+		AllLayersBatch.Reserve(EstimatedPerLayer * LayersToSpawn);
+
 		int32 TotalSpawned = 0;
 		for (int32 i = LayersToSpawn - 1; i >= 0; --i)
 		{
@@ -669,16 +724,26 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 			float PositionOffset = Speed * TimeOffset;
 			FVector OffsetLocation = BaseLocation + WorldDirection * PositionOffset;
 
-			TotalSpawned += SimulationModule->SpawnParticleDirectionalHexLayer(
+			TotalSpawned += SimulationModule->SpawnParticleDirectionalHexLayerBatch(
 				OffsetLocation,
 				WorldDirection,
 				Speed,
 				SpawnSettings.StreamRadius,
 				Spacing,
-				SpawnSettings.StreamJitter
+				SpawnSettings.StreamJitter,
+				AllLayersBatch  // Collect to batch, don't send yet
 			);
 
 			SpawnAccumulatedTime -= LayerInterval;
+		}
+
+		// Send all layers in single batch
+		if (AllLayersBatch.Num() > 0)
+		{
+			if (FGPUFluidSimulator* GPUSim = SimulationModule->GetGPUSimulator())
+			{
+				GPUSim->AddSpawnRequests(AllLayersBatch);
+			}
 		}
 
 		//========================================

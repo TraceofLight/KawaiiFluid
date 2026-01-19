@@ -208,12 +208,7 @@ void UFluidRendererSubsystem::UpdateShadowProxyState()
 	}
 }
 
-/**
- * @brief Update shadow instances from particle positions.
- * @param ParticlePositions Array of particle world positions.
- * @param NumParticles Number of particles.
- */
-void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePositions, int32 NumParticles, float ParticleRadius)
+void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePositions, int32 NumParticles, float ParticleRadius, int32 MaxParticles)
 {
 	check(IsInGameThread());
 
@@ -222,13 +217,27 @@ void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePosit
 	{
 		if (IsValid(ShadowInstanceComponent))
 		{
-			ShadowInstanceComponent->ClearInstances();
+			// Instead of clearing, just hide if we have a reasonable number of instances
+			const int32 CurrentCount = ShadowInstanceComponent->GetInstanceCount();
+			if (CurrentCount > 0 && CurrentCount < 5000)
+			{
+				CachedInstanceTransforms.SetNum(CurrentCount);
+				for (auto& Transform : CachedInstanceTransforms)
+				{
+					Transform.SetScale3D(FVector::ZeroVector);
+				}
+				ShadowInstanceComponent->BatchUpdateInstancesTransforms(0, CachedInstanceTransforms, false, true, false);
+			}
+			else
+			{
+				ShadowInstanceComponent->ClearInstances();
+			}
 			ShadowInstanceComponent->MarkRenderStateDirty();
 		}
 		return;
 	}
 
-	// Early return if VSM integration is disabled (but clearing above still happens)
+	// Early return if VSM integration is disabled
 	if (!bEnableVSMIntegration)
 	{
 		return;
@@ -240,11 +249,10 @@ void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePosit
 		return;
 	}
 
-	// Lazy creation of Actor (moved here from UpdateShadowProxyState for better timing)
-	// Use IsValid() to catch stale pointers from previous PIE sessions
+	// Lazy creation of Actor
 	if (!IsValid(ShadowProxyActor))
 	{
-		ShadowProxyActor = nullptr;  // Clear stale pointer
+		ShadowProxyActor = nullptr;
 		FActorSpawnParameters SpawnParams;
 		SpawnParams.Name = TEXT("FluidShadowProxyActor");
 		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -261,11 +269,10 @@ void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePosit
 		}
 	}
 
-	// Lazy creation of ISM component (ISM is better than HISM for dynamic updates)
-	// Use IsValid() to catch stale pointers from previous PIE sessions
+	// Lazy creation of ISM component
 	if (!IsValid(ShadowInstanceComponent))
 	{
-		ShadowInstanceComponent = nullptr;  // Clear stale pointer
+		ShadowInstanceComponent = nullptr;
 
 		// Load sphere mesh if not already loaded (also check validity)
 		if (!IsValid(ShadowSphereMesh))
@@ -316,57 +323,85 @@ void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePosit
 		return;
 	}
 
-	// Calculate number of instances based on skip factor and max limit
+	// Calculate number of instances needed for active particles
 	const int32 SkipFactor = FMath::Max(1, ParticleSkipFactor);
-	int32 NumInstances = (NumParticles + SkipFactor - 1) / SkipFactor;
-
+	int32 NumActiveInstances = (NumParticles + SkipFactor - 1) / SkipFactor;
 	if (MaxShadowInstances > 0)
 	{
-		NumInstances = FMath::Min(NumInstances, MaxShadowInstances);
+		NumActiveInstances = FMath::Min(NumActiveInstances, MaxShadowInstances);
 	}
 
-	// Prepare transforms
-	CachedInstanceTransforms.SetNumUninitialized(NumInstances);
-
-	const FVector SphereScale = FVector(ParticleRadius / 50.0f);  // Default sphere is 100 units diameter
-
-	for (int32 i = 0, InstanceIdx = 0; i < NumParticles && InstanceIdx < NumInstances; i += SkipFactor, ++InstanceIdx)
+	// Calculate target capacity (MaxParticles or current active count with padding)
+	int32 TargetCapacity = NumActiveInstances;
+	if (MaxParticles > 0)
 	{
-		FTransform& InstanceTransform = CachedInstanceTransforms[InstanceIdx];
+		TargetCapacity = FMath::Max(TargetCapacity, (MaxParticles + SkipFactor - 1) / SkipFactor);
+	}
 
-		// Validate position - skip particles with NaN/Inf positions
-		const FVector& Position = ParticlePositions[i];
-		if (!FMath::IsFinite(Position.X) || !FMath::IsFinite(Position.Y) || !FMath::IsFinite(Position.Z))
+	// Current state
+	const int32 CurrentCapacity = ShadowInstanceComponent->GetInstanceCount();
+	
+	// Determine if we need to rebuild (reallocate)
+	// Rebuild if:
+	// 1. Current capacity is insufficient
+	// 2. Current capacity is excessively large (waste > 50% AND > 1000 instances)
+	const bool bInsufficient = CurrentCapacity < NumActiveInstances;
+	const bool bExcessive = (CurrentCapacity > TargetCapacity * 1.5f) && (CurrentCapacity - TargetCapacity > 1000);
+
+	// Prepare transforms buffer
+	// Use the larger of Current or Target capacity to ensure we fill everything
+	const int32 BufferSize = bInsufficient ? TargetCapacity : CurrentCapacity;
+	CachedInstanceTransforms.SetNumUninitialized(BufferSize);
+
+	const FVector SphereScale = FVector(ParticleRadius / 50.0f);
+	
+	// 1. Fill active instances
+	// Parallelize this loop for performance
+	ParallelFor(NumActiveInstances, [&](int32 InstanceIdx)
+	{
+		const int32 ParticleIdx = InstanceIdx * SkipFactor;
+		if (ParticleIdx < NumParticles)
 		{
-			InstanceTransform.SetLocation(FVector::ZeroVector);
-			InstanceTransform.SetRotation(FQuat::Identity);
-			InstanceTransform.SetScale3D(FVector::ZeroVector);  // Zero scale = invisible
-			continue;
+			const FVector& Position = ParticlePositions[ParticleIdx];
+			FTransform& OutTransform = CachedInstanceTransforms[InstanceIdx];
+
+			if (FMath::IsFinite(Position.X) && FMath::IsFinite(Position.Y) && FMath::IsFinite(Position.Z))
+			{
+				OutTransform.SetTranslation(Position);
+				OutTransform.SetRotation(FQuat::Identity);
+				OutTransform.SetScale3D(SphereScale);
+			}
+			else
+			{
+				OutTransform.SetIdentity();
+				OutTransform.SetScale3D(FVector::ZeroVector);
+			}
 		}
+	});
 
-		InstanceTransform.SetLocation(Position);
-		InstanceTransform.SetRotation(FQuat::Identity);
-		InstanceTransform.SetScale3D(SphereScale);
-	}
-
-	const int32 CurrentInstanceCount = ShadowInstanceComponent->GetInstanceCount();
-	const int32 TargetInstanceCount = NumInstances;
-
-	if (TargetInstanceCount == 0)
+	// 2. Fill remaining instances (padding/pooling) with zero scale
+	if (BufferSize > NumActiveInstances)
 	{
-		if (CurrentInstanceCount > 0)
+		const int32 Remaining = BufferSize - NumActiveInstances;
+		// Simple loop is fast enough for zeroing
+		for (int32 i = NumActiveInstances; i < BufferSize; ++i)
 		{
-			ShadowInstanceComponent->ClearInstances();
+			CachedInstanceTransforms[i].SetIdentity();
+			CachedInstanceTransforms[i].SetScale3D(FVector::ZeroVector);
 		}
-		return;
 	}
 
-	// Optimized update strategy for ISM:
-	// - If count matches: use BatchUpdateInstancesTransforms (most efficient)
-	// - If count differs: rebuild entirely (ClearInstances + AddInstances)
-	if (CurrentInstanceCount == TargetInstanceCount)
+	// Apply to ISM Component
+	if (bInsufficient || bExcessive)
 	{
-		// Batch update all transforms at once - much faster than individual updates
+		// Full Rebuild
+		ShadowInstanceComponent->ClearInstances();
+		// Add instances (false = don't return indices, true = mark dirty)
+		ShadowInstanceComponent->AddInstances(CachedInstanceTransforms, false, true);
+	}
+	else
+	{
+		// Batch Update (Fast path)
 		ShadowInstanceComponent->BatchUpdateInstancesTransforms(
 			0,
 			CachedInstanceTransforms,
@@ -374,12 +409,6 @@ void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePosit
 			true,   // bMarkRenderStateDirty
 			false   // bTeleport
 		);
-	}
-	else
-	{
-		// Instance count changed - rebuild entirely
-		ShadowInstanceComponent->ClearInstances();
-		ShadowInstanceComponent->AddInstances(CachedInstanceTransforms, false, true);
 	}
 }
 
