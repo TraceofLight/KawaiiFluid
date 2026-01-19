@@ -216,8 +216,7 @@ void FGPUSpawnManager::AddSpawnParticlesPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	FRDGBufferUAVRef ParticleCounterUAV,
-	int32 MaxParticleCount,
-	int32 SpawnMaxParticleCount)
+	int32 MaxParticleCount)
 {
 	if (ActiveSpawnRequests.Num() == 0)
 	{
@@ -246,7 +245,6 @@ void FGPUSpawnManager::AddSpawnParticlesPass(
 	PassParameters->ParticleCounter = ParticleCounterUAV;
 	PassParameters->SpawnRequestCount = ActiveSpawnRequests.Num();
 	PassParameters->MaxParticleCount = MaxParticleCount;
-	PassParameters->SpawnMaxParticleCount = SpawnMaxParticleCount;
 	PassParameters->NextParticleID = NextParticleID.load();
 	PassParameters->DefaultRadius = DefaultSpawnRadius;
 	PassParameters->DefaultMass = DefaultSpawnMass;

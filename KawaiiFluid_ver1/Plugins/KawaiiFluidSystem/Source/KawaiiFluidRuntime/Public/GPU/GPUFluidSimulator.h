@@ -622,17 +622,6 @@ public:
 	 */
 	void SetNextParticleID(int32 ID) { if (SpawnManager.IsValid()) SpawnManager->SetNextParticleID(ID); }
 
-	/**
-	 * Set target max particle count (user-set soft limit for continuous spawn)
-	 * @param Count - Target count (0 = no limit, use MaxParticleCount)
-	 */
-	void SetSpawnMaxParticleCount(int32 Count) { SpawnMaxParticleCount = Count; }
-
-	/**
-	 * Get target max particle count
-	 */
-	int32 GetSpawnMaxParticleCount() const { return SpawnMaxParticleCount; }
-
 private:
 	//=============================================================================
 	// Internal Methods
@@ -926,7 +915,6 @@ private:
 
 	bool bIsInitialized;
 	int32 MaxParticleCount;
-	int32 SpawnMaxParticleCount;
 	int32 CurrentParticleCount;
 
 	// Cached GPU particle data for upload/readback
@@ -1120,6 +1108,25 @@ private:
 	/** Enable flag for shadow readback */
 	std::atomic<bool> bShadowReadbackEnabled{false};
 
+	//=============================================================================
+	// Stats/Recycle Readback (Async GPU→CPU for ParticleID-based operations)
+	// Uses FRHIGPUBufferReadback for non-blocking readback (2-3 frame latency)
+	//=============================================================================
+
+	static constexpr int32 NUM_STATS_READBACK_BUFFERS = 3;  // Triple buffering
+
+	/** Async readback objects for full particle data (for ID-based operations) */
+	FRHIGPUBufferReadback* StatsReadbacks[NUM_STATS_READBACK_BUFFERS] = { nullptr };
+
+	/** Current write index for stats readback ring buffer */
+	int32 StatsReadbackWriteIndex = 0;
+
+	/** Frame number tracking for each stats readback buffer */
+	uint64 StatsReadbackFrameNumbers[NUM_STATS_READBACK_BUFFERS] = { 0 };
+
+	/** Particle count for each stats readback buffer */
+	int32 StatsReadbackParticleCounts[NUM_STATS_READBACK_BUFFERS] = { 0 };
+
 	/** Enable flag for anisotropy readback (requires bShadowReadbackEnabled) */
 	std::atomic<bool> bAnisotropyReadbackEnabled{false};
 
@@ -1237,6 +1244,22 @@ private:
 
 	/** Process anisotropy readback */
 	void ProcessAnisotropyReadback();
+
+	//=============================================================================
+	// Stats/Recycle Readback Internal Functions
+	//=============================================================================
+
+	/** Allocate stats readback objects */
+	void AllocateStatsReadbackObjects(FRHICommandListImmediate& RHICmdList);
+
+	/** Release stats readback objects */
+	void ReleaseStatsReadbackObjects();
+
+	/** Enqueue stats readback (full particle data for ID-based operations) */
+	void EnqueueStatsReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount);
+
+	/** Process stats readback (check for completion, copy to ReadbackGPUParticles) */
+	void ProcessStatsReadback();
 };
 
 /**

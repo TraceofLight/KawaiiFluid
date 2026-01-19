@@ -56,7 +56,6 @@ static int32 GFluidCapturedFrame = 0;  // Tracks which frame was captured (0 = n
 FGPUFluidSimulator::FGPUFluidSimulator()
 	: bIsInitialized(false)
 	, MaxParticleCount(0)
-	, SpawnMaxParticleCount(0)
 	, CurrentParticleCount(0)
 	, ExternalForce(FVector3f::ZeroVector)
 	, MaxVelocity(50000.0f)   // Safety clamp: 50000 cm/s = 500 m/s
@@ -183,6 +182,9 @@ void FGPUFluidSimulator::Release()
 
 	// Release Shadow Readback objects
 	ReleaseShadowReadbackObjects();
+
+	// Release Stats Readback objects
+	ReleaseStatsReadbackObjects();
 
 	bIsInitialized = false;
 	MaxParticleCount = 0;
@@ -396,56 +398,28 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 			if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE COMPLETE"));
 
 			// =====================================================
-			// Phase 2: Conditional readback for detailed stats only
-			// Normal mode: GPU buffer is source of truth (no CPU readback)
-			// Detailed stats mode: Perform readback for velocity/density analysis
+			// Phase 2: Async Stats/Recycle Readback (for ParticleID-based operations)
+			// Uses FRHIGPUBufferReadback for non-blocking readback (2-3 frame latency)
 			// =====================================================
 
-			// Check if any readback is needed (detailed stats OR debug visualization)
+			// Check if any readback is needed (detailed stats OR debug visualization OR recycle)
 			const bool bNeedReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
 
-			if (bNeedReadback && Self->StagingBufferRHI.IsValid() && Self->PersistentParticleBuffer.IsValid())
+			if (bNeedReadback && Self->PersistentParticleBuffer.IsValid())
 			{
-				const int32 ParticleCount = Self->CurrentParticleCount;
-				const int32 CopySize = ParticleCount * sizeof(FGPUFluidParticle);
-				const uint32 SourceBufferSize = Self->PersistentParticleBuffer->GetRHI()->GetSize();
+				// First, process any previously completed readback
+				Self->ProcessStatsReadback();
 
-				if (ParticleCount > 0 && CopySize > 0 && static_cast<uint32>(CopySize) <= SourceBufferSize)
+				// Then enqueue new readback for this frame
+				if (Self->CurrentParticleCount > 0)
 				{
-					// Transition persistent buffer for copy
-					RHICmdList.Transition(FRHITransitionInfo(
+					Self->EnqueueStatsReadback(RHICmdList,
 						Self->PersistentParticleBuffer->GetRHI(),
-						ERHIAccess::UAVCompute,
-						ERHIAccess::CopySrc));
-
-					// Copy from GPU buffer to staging buffer
-					RHICmdList.CopyBufferRegion(
-						Self->StagingBufferRHI,
-						0,
-						Self->PersistentParticleBuffer->GetRHI(),
-						0,
-						CopySize);
-
-					// Read from staging buffer to CPU
-					{
-						FScopeLock Lock(&Self->BufferLock);
-						Self->ReadbackGPUParticles.SetNumUninitialized(ParticleCount);
-
-						FGPUFluidParticle* DataPtr = (FGPUFluidParticle*)RHICmdList.LockBuffer(
-							Self->StagingBufferRHI, 0, CopySize, RLM_ReadOnly);
-						FMemory::Memcpy(Self->ReadbackGPUParticles.GetData(), DataPtr, CopySize);
-						RHICmdList.UnlockBuffer(Self->StagingBufferRHI);
-					}
-
-					// Transition back for next frame's compute
-					RHICmdList.Transition(FRHITransitionInfo(
-						Self->PersistentParticleBuffer->GetRHI(),
-						ERHIAccess::CopySrc,
-						ERHIAccess::UAVCompute));
+						Self->CurrentParticleCount);
 
 					if (bLogThisFrame)
 					{
-						UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> READBACK: Copied %d particles for detailed stats"), ParticleCount);
+						UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> ASYNC READBACK: Enqueued %d particles"), Self->CurrentParticleCount);
 					}
 				}
 			}
@@ -577,7 +551,6 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 	// Phase 1: Initialize Variables
 	// Calculate expected counts and determine operation mode
 	// =====================================================
-	const int32 ExpectedParticleCount = CurrentParticleCount + SpawnCount;
 	FRDGBufferRef ParticleBuffer = nullptr;
 
 	const bool bHasSpawnRequests = SpawnCount > 0;
@@ -674,7 +647,7 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
 
 		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount, SpawnMaxParticleCount);
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
 
 		CurrentParticleCount = FMath::Min(SpawnCount, MaxParticleCount);
 		PreviousParticleCount = CurrentParticleCount;
@@ -719,7 +692,7 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
 
 		FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
-		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount, SpawnMaxParticleCount);
+		SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, MaxParticleCount);
 
 		CurrentParticleCount = FMath::Min(TotalCount, MaxParticleCount);
 		PreviousParticleCount = CurrentParticleCount;
@@ -1639,7 +1612,6 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 		}
 
 		NewParticleCount = NumNewParticles;
-		CurrentParticleCount = NewCount;
 
 		UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Appending %d new particles (total: %d)"),
 			NumNewParticles, NewCount);
@@ -1663,7 +1635,6 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUPartic
 
 		NewParticleCount = 0;
 		NewParticlesToAppend.Empty();
-		CurrentParticleCount = NewCount;
 
 		// 즉시 PersistentParticleBuffer 생성 (시뮬레이션 없이 렌더링 가능하도록)
 		CreateImmediatePersistentBuffer();
@@ -1680,27 +1651,27 @@ void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
 		return;
 	}
 
-	const int32 Count = CachedGPUParticles.Num();
+	CurrentParticleCount = CachedGPUParticles.Num();
 
 	// 렌더 스레드로 복사할 데이터 준비
 	TArray<FGPUFluidParticle> ParticlesCopy = CachedGPUParticles;
 	FGPUFluidSimulator* Self = this;
 
 	ENQUEUE_RENDER_COMMAND(CreateImmediatePersistentBuffer)(
-		[Self, ParticlesCopy = MoveTemp(ParticlesCopy), Count](FRHICommandListImmediate& RHICmdList)
+		[Self, ParticlesCopy = MoveTemp(ParticlesCopy)](FRHICommandListImmediate& RHICmdList)
 		{
 			// RDG를 통해 버퍼 생성 및 즉시 추출
 			FRDGBuilder GraphBuilder(RHICmdList, RDG_EVENT_NAME("ImmediateBufferCreate"));
 
 			// 버퍼 생성
-			FRDGBufferDesc Desc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), Count);
+			FRDGBufferDesc Desc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), Self->CurrentParticleCount);
 			FRDGBufferRef Buffer = GraphBuilder.CreateBuffer(Desc, TEXT("ImmediatePersistentParticles"));
 
 			// CPU → GPU 업로드
 			GraphBuilder.QueueBufferUpload(
 				Buffer,
 				ParticlesCopy.GetData(),
-				Count * sizeof(FGPUFluidParticle));
+				Self->CurrentParticleCount * sizeof(FGPUFluidParticle));
 
 			// PersistentParticleBuffer로 추출
 			GraphBuilder.QueueBufferExtraction(
@@ -1712,7 +1683,7 @@ void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
 			GraphBuilder.Execute();
 			
 			UE_LOG(LogGPUFluidSimulator, Log,
-				TEXT("CreateImmediatePersistentBuffer: Created buffer with %d particles"), Count);
+				TEXT("CreateImmediatePersistentBuffer: Created buffer with %d particles"), Self->CurrentParticleCount);
 		}
 	);
 
@@ -2213,7 +2184,9 @@ void FGPUFluidSimulator::EnqueueShadowPositionReadback(FRHICommandListImmediate&
 	const int32 CopySize = ParticleCount * sizeof(FGPUFluidParticle);
 
 	// Enqueue async copy
+	RHICmdList.Transition(FRHITransitionInfo(SourceBuffer, ERHIAccess::UAVCompute, ERHIAccess::CopySrc));
 	ShadowPositionReadbacks[WriteIdx]->EnqueueCopy(RHICmdList, SourceBuffer, CopySize);
+	RHICmdList.Transition(FRHITransitionInfo(SourceBuffer, ERHIAccess::CopySrc, ERHIAccess::UAVCompute));
 	ShadowReadbackFrameNumbers[WriteIdx] = GFrameCounterRenderThread;
 	ShadowReadbackParticleCounts[WriteIdx] = ParticleCount;
 }
@@ -2428,9 +2401,15 @@ void FGPUFluidSimulator::EnqueueAnisotropyReadback(FRHICommandListImmediate& RHI
 	// All buffers are valid and large enough - now safe to store particle count and enqueue
 	ShadowAnisotropyReadbackParticleCounts[WriteIdx] = ParticleCount;
 
+	RHICmdList.Transition(FRHITransitionInfo(Axis1RHI, ERHIAccess::UAVCompute, ERHIAccess::CopySrc));
+	RHICmdList.Transition(FRHITransitionInfo(Axis2RHI, ERHIAccess::UAVCompute, ERHIAccess::CopySrc));
+	RHICmdList.Transition(FRHITransitionInfo(Axis3RHI, ERHIAccess::UAVCompute, ERHIAccess::CopySrc));
 	ShadowAnisotropyReadbacks[WriteIdx][0]->EnqueueCopy(RHICmdList, Axis1RHI, RequiredSize);
 	ShadowAnisotropyReadbacks[WriteIdx][1]->EnqueueCopy(RHICmdList, Axis2RHI, RequiredSize);
 	ShadowAnisotropyReadbacks[WriteIdx][2]->EnqueueCopy(RHICmdList, Axis3RHI, RequiredSize);
+	RHICmdList.Transition(FRHITransitionInfo(Axis1RHI, ERHIAccess::CopySrc, ERHIAccess::UAVCompute));
+	RHICmdList.Transition(FRHITransitionInfo(Axis2RHI, ERHIAccess::CopySrc, ERHIAccess::UAVCompute));
+	RHICmdList.Transition(FRHITransitionInfo(Axis3RHI, ERHIAccess::CopySrc, ERHIAccess::UAVCompute));
 }
 
 /**
@@ -2502,6 +2481,131 @@ void FGPUFluidSimulator::ProcessAnisotropyReadback()
 
 	// Invalidate the index to prevent reading the same data again
 	LastProcessedShadowReadbackIndex = -1;
+}
+
+//=============================================================================
+// Stats/Recycle Readback Implementation (Async GPU→CPU for ParticleID-based operations)
+//=============================================================================
+
+void FGPUFluidSimulator::AllocateStatsReadbackObjects(FRHICommandListImmediate& RHICmdList)
+{
+	for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
+	{
+		if (StatsReadbacks[i] == nullptr)
+		{
+			StatsReadbacks[i] = new FRHIGPUBufferReadback(*FString::Printf(TEXT("StatsReadback_%d"), i));
+		}
+		StatsReadbackFrameNumbers[i] = 0;
+		StatsReadbackParticleCounts[i] = 0;
+	}
+
+	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Stats readback objects allocated (NumBuffers=%d)"), NUM_STATS_READBACK_BUFFERS);
+}
+
+void FGPUFluidSimulator::ReleaseStatsReadbackObjects()
+{
+	for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
+	{
+		if (StatsReadbacks[i] != nullptr)
+		{
+			delete StatsReadbacks[i];
+			StatsReadbacks[i] = nullptr;
+		}
+		StatsReadbackFrameNumbers[i] = 0;
+		StatsReadbackParticleCounts[i] = 0;
+	}
+	StatsReadbackWriteIndex = 0;
+}
+
+void FGPUFluidSimulator::EnqueueStatsReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount)
+{
+	if (ParticleCount <= 0 || SourceBuffer == nullptr)
+	{
+		return;
+	}
+
+	// Validate source buffer size
+	const uint32 SourceBufferSize = SourceBuffer->GetSize();
+	const uint32 RequiredSize = ParticleCount * sizeof(FGPUFluidParticle);
+	if (RequiredSize > SourceBufferSize)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning,
+			TEXT("EnqueueStatsReadback: CopySize (%u) exceeds SourceBuffer size (%u). ParticleCount=%d, Skipping."),
+			RequiredSize, SourceBufferSize, ParticleCount);
+		return;
+	}
+
+	// Allocate readback objects if needed
+	if (StatsReadbacks[0] == nullptr)
+	{
+		AllocateStatsReadbackObjects(RHICmdList);
+	}
+
+	// Get current write index and advance for next frame
+	const int32 WriteIdx = StatsReadbackWriteIndex;
+	StatsReadbackWriteIndex = (StatsReadbackWriteIndex + 1) % NUM_STATS_READBACK_BUFFERS;
+
+	// Enqueue async copy (full particle data)
+	const uint32 CopySize = ParticleCount * sizeof(FGPUFluidParticle);
+	RHICmdList.Transition(FRHITransitionInfo(SourceBuffer, ERHIAccess::UAVCompute, ERHIAccess::CopySrc));
+	StatsReadbacks[WriteIdx]->EnqueueCopy(RHICmdList, SourceBuffer, CopySize);
+	RHICmdList.Transition(FRHITransitionInfo(SourceBuffer, ERHIAccess::CopySrc, ERHIAccess::UAVCompute));
+	StatsReadbackFrameNumbers[WriteIdx] = GFrameCounterRenderThread;
+	StatsReadbackParticleCounts[WriteIdx] = ParticleCount;
+}
+
+void FGPUFluidSimulator::ProcessStatsReadback()
+{
+	if (StatsReadbacks[0] == nullptr)
+	{
+		return;
+	}
+
+	// Search for oldest ready buffer
+	int32 ReadIdx = -1;
+	uint64 OldestFrame = UINT64_MAX;
+
+	for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
+	{
+		if (StatsReadbacks[i] != nullptr &&
+			StatsReadbackFrameNumbers[i] > 0 &&
+			StatsReadbacks[i]->IsReady())
+		{
+			if (StatsReadbackFrameNumbers[i] < OldestFrame)
+			{
+				OldestFrame = StatsReadbackFrameNumbers[i];
+				ReadIdx = i;
+			}
+		}
+	}
+
+	if (ReadIdx < 0)
+	{
+		return;  // No ready buffers
+	}
+
+	const int32 ParticleCount = StatsReadbackParticleCounts[ReadIdx];
+	if (ParticleCount <= 0)
+	{
+		return;
+	}
+
+	// Lock and copy full particle data
+	const int32 BufferSize = ParticleCount * sizeof(FGPUFluidParticle);
+	const FGPUFluidParticle* ParticleData = (const FGPUFluidParticle*)StatsReadbacks[ReadIdx]->Lock(BufferSize);
+
+	if (ParticleData)
+	{
+		FScopeLock Lock(&BufferLock);
+		ReadbackGPUParticles.SetNumUninitialized(ParticleCount);
+		FMemory::Memcpy(ReadbackGPUParticles.GetData(), ParticleData, BufferSize);
+		bHasValidGPUResults.store(true);
+	}
+
+	StatsReadbacks[ReadIdx]->Unlock();
+
+	// Mark buffer as available for next write cycle
+	StatsReadbackFrameNumbers[ReadIdx] = 0;
 }
 
 /**

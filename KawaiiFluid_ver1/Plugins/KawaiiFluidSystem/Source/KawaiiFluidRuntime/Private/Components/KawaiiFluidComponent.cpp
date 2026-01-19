@@ -162,17 +162,6 @@ void UKawaiiFluidComponent::BeginPlay()
 	// Module을 Subsystem에 등록 (Component가 아닌 Module!)
 	RegisterToSubsystem();
 
-	// GPU 스폰 제한 설정 (PIE 첫 프레임에서 SpawnMaxParticleCount = 0 방지)
-	// RegisterToSubsystem 이후에 GPU 시뮬레이터가 초기화되어 있어야 함
-	if (SimulationModule && SimulationModule->IsGPUSimulationActive())
-	{
-		if (FGPUFluidSimulator* GPUSim = SimulationModule->GetGPUSimulator())
-		{
-			GPUSim->SetSpawnMaxParticleCount(SpawnSettings.MaxParticleCount);
-			UE_LOG(LogTemp, Log, TEXT("BeginPlay: Set SpawnMaxParticleCount = %d"), SpawnSettings.MaxParticleCount);
-		}
-	}
-
 	// ShapeVolume mode: auto spawn at BeginPlay
 	if (SpawnSettings.IsShapeVolumeMode() && SimulationModule)
 	{

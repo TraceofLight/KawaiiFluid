@@ -172,14 +172,12 @@ public:
 	 * @param ParticlesUAV - Particle buffer UAV
 	 * @param ParticleCounterUAV - Atomic counter for particle allocation
 	 * @param MaxParticleCount - Maximum particle capacity (buffer size)
-	 * @param SpawnMaxParticleCount - User-set soft limit (0 = use MaxParticleCount)
 	 */
 	void AddSpawnParticlesPass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
 		FRDGBufferUAVRef ParticleCounterUAV,
-		int32 MaxParticleCount,
-		int32 SpawnMaxParticleCount = 0);
+		int32 MaxParticleCount);
 
 	/**
 	 * Update next particle ID after spawning

@@ -121,6 +121,7 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 	}
 
 	TArray<FFluidParticle> TempParticles;
+	bool bSyncSuccess = false;
 
 	if (CachedGPUSimulator->IsReady())
 	{
@@ -128,12 +129,22 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 		if (CachedGPUSimulator->GetAllGPUParticles(TempParticles))
 		{
 			Particles = MoveTemp(TempParticles);
+			bSyncSuccess = true;
 		}
 		// Async readback 안 됨 -> 동기 리드백 강제
 		else if (CachedGPUSimulator->GetAllGPUParticlesSync(TempParticles))
 		{
 			Particles = MoveTemp(TempParticles);
+			bSyncSuccess = true;
 		}
+	}
+
+	// GPU의 NextParticleID도 CPU로 동기화 (PIE 전환 시 ID 충돌 방지)
+	if (bSyncSuccess)
+	{
+		const int32 GPUNextID = CachedGPUSimulator->GetNextParticleID();
+		NextParticleID = GPUNextID;
+		UE_LOG(LogTemp, Log, TEXT("SyncGPUParticlesToCPU: Synced %d particles, NextParticleID = %d"), Particles.Num(), NextParticleID);
 	}
 }
 
@@ -748,89 +759,56 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 
 int32 UKawaiiFluidSimulationModule::SpawnParticle(FVector Position, FVector Velocity)
 {
+	if (!CachedGPUSimulator)
+	{
+		return -1;
+	}
+
 	const float Mass = Preset ? Preset->ParticleMass : 1.0f;
 	const float Radius = Preset ? Preset->ParticleRadius : 5.0f;
-	const int32 ParticleID = NextParticleID++;
 
-	// GPU mode: send spawn request directly to GPU (no CPU Particles array)
-	if (bGPUSimulationActive && CachedGPUSimulator)
-	{
-		FGPUSpawnRequest Request;
-		Request.Position = FVector3f(Position);
-		Request.Velocity = FVector3f(Velocity);
-		Request.Mass = Mass;
-		Request.Radius = Radius;
-		Request.SourceID = CachedSourceID;  // Propagate source identification
+	FGPUSpawnRequest Request;
+	Request.Position = FVector3f(Position);
+	Request.Velocity = FVector3f(Velocity);
+	Request.Mass = Mass;
+	Request.Radius = Radius;
+	Request.SourceID = CachedSourceID;
 
-		// Use batch API to preserve Radius value
-		TArray<FGPUSpawnRequest> Requests;
-		Requests.Add(Request);
-		CachedGPUSimulator->AddSpawnRequests(Requests);
+	TArray<FGPUSpawnRequest> Requests;
+	Requests.Add(Request);
+	CachedGPUSimulator->AddSpawnRequests(Requests);
 
-		static int32 GPUSpawnLogCounter = 0;
-		if (++GPUSpawnLogCounter % 60 == 1)
-		{
-			UE_LOG(LogTemp, Log, TEXT("SpawnParticle: GPU path - PendingCount=%d, Simulator=%p"),
-				CachedGPUSimulator->GetPendingSpawnCount(), CachedGPUSimulator);
-		}
-		return ParticleID;
-	}
-
-	// Debug: CPU path should not be used in GPU mode
-	static int32 CPUSpawnLogCounter = 0;
-	if (++CPUSpawnLogCounter % 60 == 1)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("SpawnParticle: CPU path (bGPUActive=%d, Simulator=%p)"),
-			bGPUSimulationActive ? 1 : 0, CachedGPUSimulator);
-	}
-
-	// CPU mode: add to Particles array
-	FFluidParticle NewParticle(Position, ParticleID);
-	NewParticle.Velocity = Velocity;
-	NewParticle.Mass = Mass;
-	NewParticle.SourceID = CachedSourceID;  // Propagate source identification
-	Particles.Add(NewParticle);
-	return ParticleID;
+	return -1;  // GPU assigns ID asynchronously
 }
 
 void UKawaiiFluidSimulationModule::SpawnParticles(FVector Location, int32 Count, float SpawnRadius)
 {
-	const float Mass = Preset ? Preset->ParticleMass : 1.0f;
-	const float Radius = Preset ? Preset->ParticleRadius : 5.0f;
-
-	// GPU mode: batch spawn requests
-	if (bGPUSimulationActive && CachedGPUSimulator)
+	if (!CachedGPUSimulator)
 	{
-		TArray<FGPUSpawnRequest> SpawnRequests;
-		SpawnRequests.Reserve(Count);
-
-		for (int32 i = 0; i < Count; ++i)
-		{
-			FVector RandomOffset = FMath::VRand() * FMath::FRandRange(0.0f, SpawnRadius);
-			FVector SpawnPos = Location + RandomOffset;
-
-			FGPUSpawnRequest Request;
-			Request.Position = FVector3f(SpawnPos);
-			Request.Velocity = FVector3f::ZeroVector;
-			Request.Mass = Mass;
-			Request.Radius = Radius;
-			Request.SourceID = CachedSourceID;  // Propagate source identification
-			SpawnRequests.Add(Request);
-			NextParticleID++;
-		}
-
-		CachedGPUSimulator->AddSpawnRequests(SpawnRequests);
 		return;
 	}
 
-	// CPU mode: add to Particles array
-	Particles.Reserve(Particles.Num() + Count);
+	const float Mass = Preset ? Preset->ParticleMass : 1.0f;
+	const float Radius = Preset ? Preset->ParticleRadius : 5.0f;
+
+	TArray<FGPUSpawnRequest> SpawnRequests;
+	SpawnRequests.Reserve(Count);
+
 	for (int32 i = 0; i < Count; ++i)
 	{
 		FVector RandomOffset = FMath::VRand() * FMath::FRandRange(0.0f, SpawnRadius);
 		FVector SpawnPos = Location + RandomOffset;
-		SpawnParticle(SpawnPos);
+
+		FGPUSpawnRequest Request;
+		Request.Position = FVector3f(SpawnPos);
+		Request.Velocity = FVector3f::ZeroVector;
+		Request.Mass = Mass;
+		Request.Radius = Radius;
+		Request.SourceID = CachedSourceID;
+		SpawnRequests.Add(Request);
 	}
+
+	CachedGPUSimulator->AddSpawnRequests(SpawnRequests);
 }
 
 int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float Radius, float Spacing,
@@ -896,7 +874,6 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float R
 						Request.Radius = ParticleRadius;
 						Request.SourceID = CachedSourceID;  // Propagate source identification
 						SpawnRequests.Add(Request);
-						NextParticleID++;
 						++SpawnedCount;
 					}
 				}
@@ -910,38 +887,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float R
 		return SpawnedCount;
 	}
 
-	// CPU mode: add to Particles array
-	Particles.Reserve(Particles.Num() + FMath::CeilToInt(EstimatedCount));
-
-	for (int32 x = -GridSize; x <= GridSize; ++x)
-	{
-		for (int32 y = -GridSize; y <= GridSize; ++y)
-		{
-			for (int32 z = -GridSize; z <= GridSize; ++z)
-			{
-				FVector LocalPos(x * Spacing, y * Spacing, z * Spacing);
-
-				if (LocalPos.SizeSquared() <= RadiusSq)
-				{
-					FVector SpawnPos = Center + LocalPos;
-
-					if (bJitter && JitterRange > 0.0f)
-					{
-						SpawnPos += FVector(
-							FMath::FRandRange(-JitterRange, JitterRange),
-							FMath::FRandRange(-JitterRange, JitterRange),
-							FMath::FRandRange(-JitterRange, JitterRange)
-						);
-					}
-
-					SpawnParticle(SpawnPos, WorldVelocity);
-					++SpawnedCount;
-				}
-			}
-		}
-	}
-
-	return SpawnedCount;
+	return 0;
 }
 
 int32 UKawaiiFluidSimulationModule::SpawnParticlesBox(FVector Center, FVector Extent, float Spacing,
@@ -1446,6 +1392,8 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 	if (bGPUSimulationActive && CachedGPUSimulator)
 	{
 		CachedGPUSimulator->ClearAllParticles();
+		// GPU의 NextParticleID도 리셋 (ID 동기화)
+		CachedGPUSimulator->SetNextParticleID(0);
 	}
 }
 
