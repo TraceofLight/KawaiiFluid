@@ -46,7 +46,7 @@ static bool GenerateIntermediateTextures(
 	}
 
 	// Use RenderParams for rendering parameters
-	float BlurRadius = static_cast<float>(RenderParams.BilateralFilterRadius);
+	float BlurRadius = static_cast<float>(RenderParams.SmoothingRadius);
 
 	// Calculate DepthFalloff considering anisotropy
 	// When anisotropy is enabled, ellipsoids become flat and create larger depth jumps at edges
@@ -73,7 +73,7 @@ static bool GenerateIntermediateTextures(
 		return false;
 	}
 
-	// 2. Smoothing Pass - select filter based on parameter
+	// 2. Smoothing Pass - Narrow-Range Filter (Truong & Yuksel 2018)
 	FRDGTextureRef SmoothedDepthTexture = nullptr;
 
 	// Calculate adjusted particle radius for anisotropy
@@ -84,33 +84,12 @@ static bool GenerateIntermediateTextures(
 		AdjustedParticleRadius *= AnisotropyMultiplier;
 	}
 
-	if (RenderParams.SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow)
-	{
-		// Curvature Flow (van der Laan 2009) - Laplacian diffusion with grazing-aware weighting
-		RenderFluidCurvatureFlowSmoothingPass(
-			GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
-			AdjustedParticleRadius,
-			RenderParams.CurvatureFlowDt,
-			RenderParams.CurvatureFlowDepthThreshold,
-			RenderParams.CurvatureFlowIterations,
-			RenderParams.CurvatureFlowGrazingBoost);
-	}
-	else if (RenderParams.SmoothingFilter == EDepthSmoothingFilter::NarrowRange)
-	{
-		// Narrow-Range Filter (Truong & Yuksel 2018) - better edge preservation with grazing-aware threshold
-		RenderFluidNarrowRangeSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
-		                                    BlurRadius, AdjustedParticleRadius,
-		                                    RenderParams.NarrowRangeThresholdRatio,
-		                                    RenderParams.NarrowRangeClampRatio,
-		                                    NumIterations,
-		                                    RenderParams.NarrowRangeGrazingBoost);
-	}
-	else
-	{
-		// Bilateral Filter (classic)
-		RenderFluidSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
-		                         BlurRadius, DepthFalloff, NumIterations);
-	}
+	RenderFluidNarrowRangeSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
+	                                    BlurRadius, AdjustedParticleRadius,
+	                                    RenderParams.NarrowRangeThresholdRatio,
+	                                    RenderParams.NarrowRangeClampRatio,
+	                                    NumIterations,
+	                                    RenderParams.NarrowRangeGrazingBoost);
 
 	if (!SmoothedDepthTexture)
 	{

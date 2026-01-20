@@ -99,8 +99,7 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 	LocalParameters.SpecularStrength = Settings.SpecularStrength;
 	LocalParameters.SpecularRoughness = Settings.SpecularRoughness;
 	LocalParameters.ParticleRenderRadius = Settings.ParticleRenderRadius;
-	LocalParameters.SmoothingFilter = Settings.SmoothingFilter;
-	LocalParameters.BilateralFilterRadius = Settings.BilateralFilterRadius;
+	LocalParameters.SmoothingRadius = Settings.SmoothingRadius;
 	LocalParameters.RenderTargetScale = Settings.RenderTargetScale;
 	LocalParameters.ThicknessScale = Settings.ThicknessScale;
 	LocalParameters.Metallic = Settings.Metallic;

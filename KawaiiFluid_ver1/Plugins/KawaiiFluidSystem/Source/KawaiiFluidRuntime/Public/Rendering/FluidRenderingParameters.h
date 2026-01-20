@@ -117,23 +117,6 @@ enum class ESSRDebugMode : uint8
 };
 
 /**
- * Depth smoothing filter type for SSFR.
- * Different filters have different characteristics for edge preservation and performance.
- */
-UENUM(BlueprintType)
-enum class EDepthSmoothingFilter : uint8
-{
-	/** Bilateral filter - classic approach with depth-aware smoothing */
-	Bilateral UMETA(DisplayName = "Bilateral Filter"),
-
-	/** Narrow-Range filter (Truong & Yuksel 2018) - better edge preservation, especially with anisotropy */
-	NarrowRange UMETA(DisplayName = "Narrow-Range Filter"),
-
-	/** Curvature Flow (van der Laan 2009) - Laplacian diffusion, reduces grazing angle artifacts */
-	CurvatureFlow UMETA(DisplayName = "Curvature Flow")
-};
-
-/**
  * @brief Fluid rendering parameters.
  * Settings used throughout the SSFR pipeline.
  */
@@ -159,103 +142,49 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 		meta = (ClampMin = "0.5", ClampMax = "100.0"))
 	float ParticleRenderRadius = 15.0f;
 
-	/** Depth smoothing filter type */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing")
-	EDepthSmoothingFilter SmoothingFilter = EDepthSmoothingFilter::NarrowRange;
-
-	/** Depth smoothing strength (0=none, 1=max) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float SmoothingStrength = 0.5f;
-
-	/** Bilateral/Narrow-Range filter radius (pixels) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (ClampMin = "1", ClampMax = "50"))
-	int32 BilateralFilterRadius = 20;
-
-	/** Depth threshold (for bilateral filter) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (ClampMin = "0.001", ClampMax = "100.0"))
-	float DepthThreshold = 10.0f;
-
-	//========================================
-	// Narrow-Range Filter Parameters
-	//========================================
-
 	/**
-	 * Narrow-Range threshold ratio.
-	 * threshold = ParticleRadius * this value.
-	 * Lower = stronger edge preservation, higher = more smoothing.
-	 * 1.0~3.0: tight edges, 5.0~10.0: smooth surface.
+	 * Depth smoothing filter radius in pixels.
+	 * Controls how many neighboring pixels are sampled during smoothing.
+	 * Larger values produce smoother surfaces but may blur fine details.
+	 * Recommended: 10~30 for typical fluid, 30~50 for slime/gel.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::NarrowRange",
-			ClampMin = "0.5", ClampMax = "20.0"))
+		meta = (ClampMin = "1", ClampMax = "50"))
+	int32 SmoothingRadius = 20;
+
+	/**
+	 * Depth difference threshold for including neighbor samples.
+	 * Calculated as: threshold = ParticleRadius * ThresholdRatio.
+	 * Samples with depth difference > threshold are excluded to preserve edges.
+	 * Lower values (1~3): Sharp edges, visible particle boundaries.
+	 * Higher values (5~10): Smoother surface, less edge definition.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
+		meta = (ClampMin = "0.5", ClampMax = "20.0", DisplayName = "Threshold Ratio"))
 	float NarrowRangeThresholdRatio = 3.0f;
 
 	/**
-	 * Narrow-Range clamp ratio.
-	 * Front-facing (toward camera) sample clamping strength.
-	 * Clamped to ParticleRadius * this value.
+	 * Clamp ratio for front-facing depth samples.
+	 * Limits how much a pixel can be "pulled forward" toward the camera.
+	 * Prevents holes while allowing surface to extend naturally.
+	 * Lower values (0.5~1.0): Tighter clamping, fewer artifacts.
+	 * Higher values (1.5~3.0): More aggressive smoothing.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::NarrowRange",
-			ClampMin = "0.1", ClampMax = "5.0"))
+		meta = (ClampMin = "0.1", ClampMax = "5.0", DisplayName = "Clamp Ratio"))
 	float NarrowRangeClampRatio = 1.0f;
 
 	/**
-	 * Narrow-Range grazing angle boost strength.
-	 * Increases threshold at shallow angles to include more samples.
-	 * 0 = no boost, 1 = 2x threshold at grazing angles.
+	 * Boost smoothing at shallow viewing angles (grazing angles).
+	 * Fluid surfaces viewed at steep angles often appear bumpy.
+	 * This multiplies the threshold at grazing angles for more aggressive smoothing.
+	 * 0.0: No boost (same smoothing everywhere).
+	 * 1.0: 2x threshold at grazing angles.
+	 * 2.0: 3x threshold at grazing angles.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::NarrowRange",
-			ClampMin = "0.0", ClampMax = "2.0"))
+		meta = (ClampMin = "0.0", ClampMax = "2.0", DisplayName = "Grazing Angle Boost"))
 	float NarrowRangeGrazingBoost = 1.0f;
-
-	//========================================
-	// Curvature Flow Parameters
-	//========================================
-
-	/**
-	 * Curvature Flow time step (Dt).
-	 * Higher = more smoothing per iteration.
-	 * 0.05~0.15 recommended (stability).
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
-			ClampMin = "0.01", ClampMax = "0.5"))
-	float CurvatureFlowDt = 0.1f;
-
-	/**
-	 * Curvature Flow depth threshold.
-	 * Depth differences larger than this are treated as silhouette (no smoothing).
-	 * 3-10x particle radius recommended.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
-			ClampMin = "1.0", ClampMax = "500.0"))
-	float CurvatureFlowDepthThreshold = 100.0f;
-
-	/**
-	 * Curvature Flow iteration count.
-	 * Higher = smoother but more expensive.
-	 * 50+ recommended for grazing angle issues.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
-			ClampMin = "1", ClampMax = "200"))
-	int32 CurvatureFlowIterations = 50;
-
-	/**
-	 * Grazing angle boost strength.
-	 * Applies stronger smoothing at shallow viewing angles.
-	 * 0 = no boost, 1 = 2x smoothing at grazing angles.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Smoothing",
-		meta = (EditCondition = "SmoothingFilter == EDepthSmoothingFilter::CurvatureFlow",
-			ClampMin = "0.0", ClampMax = "2.0"))
-	float CurvatureFlowGrazingBoost = 1.0f;
 
 	/** Fluid color */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
@@ -793,18 +722,11 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.ReflectionIntensity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ReflectionMipLevel));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ParticleRenderRadius));
-	Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Params.SmoothingFilter)));
-	Hash = HashCombine(Hash, GetTypeHash(Params.SmoothingStrength));
-	Hash = HashCombine(Hash, GetTypeHash(Params.BilateralFilterRadius));
+	Hash = HashCombine(Hash, GetTypeHash(Params.SmoothingRadius));
 	// Narrow-Range parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.NarrowRangeThresholdRatio));
 	Hash = HashCombine(Hash, GetTypeHash(Params.NarrowRangeClampRatio));
 	Hash = HashCombine(Hash, GetTypeHash(Params.NarrowRangeGrazingBoost));
-	// Curvature Flow parameters
-	Hash = HashCombine(Hash, GetTypeHash(Params.CurvatureFlowDt));
-	Hash = HashCombine(Hash, GetTypeHash(Params.CurvatureFlowDepthThreshold));
-	Hash = HashCombine(Hash, GetTypeHash(Params.CurvatureFlowIterations));
-	Hash = HashCombine(Hash, GetTypeHash(Params.CurvatureFlowGrazingBoost));
 	// Anisotropy parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.AnisotropyParams.bEnabled));
 	Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Params.AnisotropyParams.Mode)));
@@ -881,18 +803,11 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 		FMath::IsNearlyEqual(A.ReflectionIntensity, B.ReflectionIntensity, 0.001f) &&
 		FMath::IsNearlyEqual(A.ReflectionMipLevel, B.ReflectionMipLevel, 0.001f) &&
 		FMath::IsNearlyEqual(A.ParticleRenderRadius, B.ParticleRenderRadius, 0.001f) &&
-		A.SmoothingFilter == B.SmoothingFilter &&
-		FMath::IsNearlyEqual(A.SmoothingStrength, B.SmoothingStrength, 0.001f) &&
-		A.BilateralFilterRadius == B.BilateralFilterRadius &&
+		A.SmoothingRadius == B.SmoothingRadius &&
 		// Narrow-Range parameters
 		FMath::IsNearlyEqual(A.NarrowRangeThresholdRatio, B.NarrowRangeThresholdRatio, 0.01f) &&
 		FMath::IsNearlyEqual(A.NarrowRangeClampRatio, B.NarrowRangeClampRatio, 0.01f) &&
 		FMath::IsNearlyEqual(A.NarrowRangeGrazingBoost, B.NarrowRangeGrazingBoost, 0.01f) &&
-		// Curvature Flow parameters
-		FMath::IsNearlyEqual(A.CurvatureFlowDt, B.CurvatureFlowDt, 0.001f) &&
-		FMath::IsNearlyEqual(A.CurvatureFlowDepthThreshold, B.CurvatureFlowDepthThreshold, 0.1f) &&
-		A.CurvatureFlowIterations == B.CurvatureFlowIterations &&
-		FMath::IsNearlyEqual(A.CurvatureFlowGrazingBoost, B.CurvatureFlowGrazingBoost, 0.01f) &&
 		// Anisotropy parameters
 		A.AnisotropyParams.bEnabled == B.AnisotropyParams.bEnabled &&
 		A.AnisotropyParams.Mode == B.AnisotropyParams.Mode &&

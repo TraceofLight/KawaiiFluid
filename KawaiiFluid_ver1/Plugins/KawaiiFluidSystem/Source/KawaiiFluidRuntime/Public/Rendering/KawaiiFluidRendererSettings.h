@@ -126,16 +126,17 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	float SpecularRoughness = 0.2f;
 
 	//========================================
-	// Smoothing
+	// Smoothing (Narrow-Range Filter)
 	//========================================
 
-	/** Depth smoothing filter type */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Smoothing", meta = (EditCondition = "bEnabled"))
-	EDepthSmoothingFilter SmoothingFilter = EDepthSmoothingFilter::NarrowRange;
-
-	/** Bilateral filter radius */
+	/**
+	 * Depth smoothing filter radius in pixels.
+	 * Controls how many neighboring pixels are sampled during smoothing.
+	 * Larger values produce smoother surfaces but may blur fine details.
+	 * Recommended: 10~30 for typical fluid, 30~50 for slime/gel.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Smoothing", meta = (EditCondition = "bEnabled", ClampMin = "1", ClampMax = "100"))
-	int32 BilateralFilterRadius = 20;
+	int32 SmoothingRadius = 20;
 
 	//========================================
 	// Anisotropy
