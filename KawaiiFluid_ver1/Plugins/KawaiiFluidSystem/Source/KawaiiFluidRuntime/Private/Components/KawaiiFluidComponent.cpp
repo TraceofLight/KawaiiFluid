@@ -52,6 +52,14 @@ void UKawaiiFluidComponent::PostEditChangeProperty(FPropertyChangedEvent& Proper
 			SimulationModule->OnPresetChangedExternal(Preset);
 		}
 	}
+	
+	if (UKawaiiFluidRenderingModule* RenderingMod = GetRenderingModule())
+	{
+		if (UKawaiiFluidMetaballRenderer* MR = RenderingMod->GetMetaballRenderer())
+		{
+			MR->SetPreset(Preset);
+		}
+	}
 }
 #endif
 
