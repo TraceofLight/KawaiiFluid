@@ -351,7 +351,7 @@ public:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void OnRegister() override;
-	virtual void OnUnregister() override;
+	virtual void OnComponentDestroyed(bool bDestroyingOK) override;
 	virtual TStructOnScope<FActorComponentInstanceData> GetComponentInstanceData() const override;
 
 #if WITH_EDITOR

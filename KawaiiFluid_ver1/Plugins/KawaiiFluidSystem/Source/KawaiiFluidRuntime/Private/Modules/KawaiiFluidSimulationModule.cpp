@@ -409,6 +409,7 @@ void UKawaiiFluidSimulationModule::Shutdown()
 		return;
 	}
 
+	ClearAllParticles();
 	Particles.Empty();
 	Colliders.Empty();
 	SpatialHash.Reset();

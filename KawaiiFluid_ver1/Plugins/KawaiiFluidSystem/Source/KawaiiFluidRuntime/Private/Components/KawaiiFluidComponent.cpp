@@ -109,43 +109,40 @@ void UKawaiiFluidComponent::OnRegister()
 	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: OnRegister completed"), *GetName());
 }
 
-void UKawaiiFluidComponent::OnUnregister()
+void UKawaiiFluidComponent::OnComponentDestroyed(bool bDestroyingOK)
 {
-	if (IsBeingDestroyed())
+	// Volume에서 등록 해제
+	if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
 	{
-		// Volume에서 등록 해제
-		if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
-		{
-			if (SimulationModule)
-			{
-				Volume->UnregisterModule(SimulationModule);
-			}
-		}
-
-		// Subsystem에서 등록 해제
-		UnregisterFromSubsystem();
-
-		// 이벤트 클리어
-		OnParticleHit.Clear();
-
-		// 렌더링 모듈 정리
-		if (RenderingModule)
-		{
-			RenderingModule->Cleanup();
-			RenderingModule = nullptr;
-		}
-
-		// 시뮬레이션 모듈 정리
 		if (SimulationModule)
 		{
-			SimulationModule->Shutdown();
-			SimulationModule = nullptr;
+			Volume->UnregisterModule(SimulationModule);
 		}
-
-		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: OnUnregister cleanup completed"), *GetName());
 	}
 
-	Super::OnUnregister();
+	// Subsystem에서 등록 해제
+	UnregisterFromSubsystem();
+
+	// 이벤트 클리어
+	OnParticleHit.Clear();
+
+	// 렌더링 모듈 정리
+	if (RenderingModule)
+	{
+		RenderingModule->Cleanup();
+		RenderingModule = nullptr;
+	}
+
+	// 시뮬레이션 모듈 정리
+	if (SimulationModule)
+	{
+		SimulationModule->Shutdown();
+		SimulationModule = nullptr;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: OnUnregister cleanup completed"), *GetName());
+	
+	Super::OnComponentDestroyed(bDestroyingOK);
 }
 
 void UKawaiiFluidComponent::BeginPlay()
