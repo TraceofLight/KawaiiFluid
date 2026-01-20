@@ -174,6 +174,7 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	PassParameters->FluidDepthTexture = IntermediateTextures.SmoothedDepthTexture;
 	PassParameters->FluidNormalTexture = IntermediateTextures.NormalTexture;
 	PassParameters->FluidThicknessTexture = IntermediateTextures.ThicknessTexture;
+	PassParameters->OcclusionMaskTexture = IntermediateTextures.OcclusionMaskTexture;
 	PassParameters->SceneDepthTexture = SceneDepthTexture;
 	PassParameters->SceneColorTexture = SceneColorTexture;
 	PassParameters->View = View.ViewUniformBuffer;

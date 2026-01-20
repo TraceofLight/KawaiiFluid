@@ -25,7 +25,8 @@ void RenderFluidDepthPass(
 	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef& OutLinearDepthTexture,
-	FRDGTextureRef& OutVelocityTexture)
+	FRDGTextureRef& OutVelocityTexture,
+	FRDGTextureRef& OutOcclusionMaskTexture)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "FluidDepthPass_Batched");
 
@@ -52,6 +53,15 @@ void RenderFluidDepthPass(
 
 	OutVelocityTexture = GraphBuilder.CreateTexture(VelocityDesc, TEXT("FluidVelocity"));
 
+	// OcclusionMask Texture 생성 (1.0 = visible, 0.0 = occluded by scene geometry)
+	FRDGTextureDesc OcclusionMaskDesc = FRDGTextureDesc::Create2D(
+		View.UnscaledViewRect.Size(),
+		PF_R8,  // Single channel, 8-bit is sufficient for mask
+		FClearValueBinding(FLinearColor(0.0f, 0.0f, 0.0f, 0.0f)),
+		TexCreate_ShaderResource | TexCreate_RenderTargetable);
+
+	OutOcclusionMaskTexture = GraphBuilder.CreateTexture(OcclusionMaskDesc, TEXT("FluidOcclusionMask"));
+
 	// Z-Test 용도의 Depth Texture 생성
 	FRDGTextureDesc HardwareDepthDesc = FRDGTextureDesc::Create2D(
 		View.UnscaledViewRect.Size(),
@@ -65,6 +75,7 @@ void RenderFluidDepthPass(
 	// Clear render targets
 	AddClearRenderTargetPass(GraphBuilder, OutLinearDepthTexture, FLinearColor(MAX_flt, 0, 0, 0));
 	AddClearRenderTargetPass(GraphBuilder, OutVelocityTexture, FLinearColor(0, 0, 0, 0));
+	AddClearRenderTargetPass(GraphBuilder, OutOcclusionMaskTexture, FLinearColor(0, 0, 0, 0));  // Default: occluded
 	AddClearDepthStencilPass(GraphBuilder, FluidDepthStencil, true, 0.0f, true, 0);
 
 	// Get ParticleRenderRadius from first renderer's LocalParameters
@@ -196,6 +207,12 @@ void RenderFluidDepthPass(
 		// MRT[1]: Screen-space velocity for flow texture
 		PassParameters->RenderTargets[1] = FRenderTargetBinding(
 			OutVelocityTexture,
+			ERenderTargetLoadAction::ELoad
+		);
+
+		// MRT[2]: OcclusionMask for composite pass (1.0 = visible, 0.0 = occluded)
+		PassParameters->RenderTargets[2] = FRenderTargetBinding(
+			OutOcclusionMaskTexture,
 			ERenderTargetLoadAction::ELoad
 		);
 

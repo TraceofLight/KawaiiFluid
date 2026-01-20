@@ -61,10 +61,11 @@ static bool GenerateIntermediateTextures(
 	}
 	int32 NumIterations = 3;
 
-	// 1. Depth Pass (outputs linear depth + screen-space velocity)
+	// 1. Depth Pass (outputs linear depth + screen-space velocity + occlusion mask)
 	FRDGTextureRef DepthTexture = nullptr;
 	FRDGTextureRef VelocityTexture = nullptr;
-	RenderFluidDepthPass(GraphBuilder, View, Renderers, SceneDepthTexture, DepthTexture, VelocityTexture);
+	FRDGTextureRef OcclusionMaskTexture = nullptr;
+	RenderFluidDepthPass(GraphBuilder, View, Renderers, SceneDepthTexture, DepthTexture, VelocityTexture, OcclusionMaskTexture);
 
 	if (!DepthTexture)
 	{
@@ -153,6 +154,7 @@ static bool GenerateIntermediateTextures(
 	OutIntermediateTextures.NormalTexture = NormalTexture;
 	OutIntermediateTextures.ThicknessTexture = SmoothedThicknessTexture;
 	OutIntermediateTextures.VelocityTexture = VelocityTexture;
+	OutIntermediateTextures.OcclusionMaskTexture = OcclusionMaskTexture;
 
 	return true;
 }

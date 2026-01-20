@@ -18,6 +18,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     SHADER_PARAMETER_RDG_TEXTURE(Texture2D, FluidDepthTexture)     // Linear Depth (R32F)
     SHADER_PARAMETER_RDG_TEXTURE(Texture2D, FluidNormalTexture)    // Reconstructed Normal
     SHADER_PARAMETER_RDG_TEXTURE(Texture2D, FluidThicknessTexture) // Thickness
+    SHADER_PARAMETER_RDG_TEXTURE(Texture2D, OcclusionMaskTexture)  // 1.0=visible, 0.0=occluded
 
     // ------------------------------------------------------
     // Scene Input

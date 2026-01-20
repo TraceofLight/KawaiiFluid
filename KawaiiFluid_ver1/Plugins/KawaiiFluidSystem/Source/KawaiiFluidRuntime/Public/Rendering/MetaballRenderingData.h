@@ -24,6 +24,9 @@ struct FMetaballIntermediateTextures
 	/** Screen-space velocity texture for flow effects (RG16F: velocity.xy) */
 	FRDGTextureRef VelocityTexture = nullptr;
 
+	/** OcclusionMask texture (R8: 1.0 = visible, 0.0 = occluded by scene geometry) */
+	FRDGTextureRef OcclusionMaskTexture = nullptr;
+
 	/** Accumulated flow UV offset texture (RG16F: accumulated offset.xy) */
 	FRDGTextureRef AccumulatedFlowTexture = nullptr;
 
@@ -46,6 +49,7 @@ struct FMetaballIntermediateTextures
 		NormalTexture = nullptr;
 		ThicknessTexture = nullptr;
 		VelocityTexture = nullptr;
+		OcclusionMaskTexture = nullptr;
 		AccumulatedFlowTexture = nullptr;
 		GBufferATexture = nullptr;
 		GBufferBTexture = nullptr;

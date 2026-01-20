@@ -11,10 +11,11 @@ class UKawaiiFluidMetaballRenderer;
 typedef FRDGTexture* FRDGTextureRef;
 
 /**
- * Fluid Depth 렌더링 패스 (Batched path)
- * 지정된 렌더러 리스트만 렌더링 (배치 최적화용)
- * @param OutLinearDepthTexture 출력: 선형 깊이 텍스처 (R32F)
- * @param OutVelocityTexture 출력: 스크린 공간 속도 텍스처 (RG16F) - Flow 텍스처용
+ * @brief Fluid Depth rendering pass (Batched path).
+ * Renders only the specified renderer list (for batch optimization).
+ * @param OutLinearDepthTexture Output: Linear depth texture (R32F).
+ * @param OutVelocityTexture Output: Screen-space velocity texture (RG16F) for flow effects.
+ * @param OutOcclusionMaskTexture Output: Occlusion mask texture (R8) - 1.0=visible, 0.0=occluded.
  */
 void RenderFluidDepthPass(
 	FRDGBuilder& GraphBuilder,
@@ -22,4 +23,5 @@ void RenderFluidDepthPass(
 	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef& OutLinearDepthTexture,
-	FRDGTextureRef& OutVelocityTexture);
+	FRDGTextureRef& OutVelocityTexture,
+	FRDGTextureRef& OutOcclusionMaskTexture);
