@@ -59,39 +59,91 @@ void UKawaiiFluidComponent::OnRegister()
 {
 	Super::OnRegister();
 
-#if WITH_EDITOR
-	// 에디터 모드에서 렌더링 모듈 초기화 (PIE가 아닐 때만)
 	UWorld* World = GetWorld();
-	if (World && !World->IsGameWorld() && bEnableRendering && RenderingModule && SimulationModule)
+	if (!World || !SimulationModule)
 	{
-		// Component->Preset 사용 (없으면 기본 생성)
-		if (!Preset)
-		{
-			Preset = NewObject<UKawaiiFluidPresetDataAsset>(this, NAME_None, RF_Transient);
-		}
-		// Module에 Preset 설정 후 초기화
-		SimulationModule->Initialize(Preset);
-		
-		// RenderingModule 초기화 (Preset 포함)
+		return;
+	}
+
+	// 이미 초기화된 경우 스킵 (property 변경으로 인한 re-register 대응)
+	if (SimulationModule->IsInitialized())
+	{
+		return;
+	}
+
+	// Component->Preset 사용 (없으면 기본 생성)
+	if (!Preset)
+	{
+		Preset = NewObject<UKawaiiFluidPresetDataAsset>(this, NAME_None, RF_Transient);
+		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidComponent [%s]: No Preset assigned, using default values"), *GetName());
+	}
+
+	// 시뮬레이션 모듈 초기화
+	SimulationModule->Initialize(Preset);
+
+	// 이벤트 콜백 연결
+	SimulationModule->SetCollisionEventCallback(
+		FOnModuleCollisionEvent::CreateUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent)
+	);
+
+	// Volume 등록
+	if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
+	{
+		Volume->RegisterModule(SimulationModule);
+	}
+
+	// 렌더링 모듈 초기화
+	if (bEnableRendering && RenderingModule)
+	{
 		RenderingModule->Initialize(World, this, SimulationModule, Preset);
 
-		// ISM 설정 적용
 		if (UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
 		{
 			ISMRenderer->ApplySettings(ISMSettings);
 		}
-		
-		RegisterToSubsystem();
 	}
-#endif
+
+	// Subsystem에 등록
+	RegisterToSubsystem();
+
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: OnRegister completed"), *GetName());
 }
 
 void UKawaiiFluidComponent::OnUnregister()
 {
-#if WITH_EDITOR
-	// 에디터 모드에서 정리
-	UnregisterFromSubsystem();
-#endif
+	if (IsBeingDestroyed())
+	{
+		// Volume에서 등록 해제
+		if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
+		{
+			if (SimulationModule)
+			{
+				Volume->UnregisterModule(SimulationModule);
+			}
+		}
+
+		// Subsystem에서 등록 해제
+		UnregisterFromSubsystem();
+
+		// 이벤트 클리어
+		OnParticleHit.Clear();
+
+		// 렌더링 모듈 정리
+		if (RenderingModule)
+		{
+			RenderingModule->Cleanup();
+			RenderingModule = nullptr;
+		}
+
+		// 시뮬레이션 모듈 정리
+		if (SimulationModule)
+		{
+			SimulationModule->Shutdown();
+			SimulationModule = nullptr;
+		}
+
+		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: OnUnregister cleanup completed"), *GetName());
+	}
 
 	Super::OnUnregister();
 }
@@ -102,59 +154,6 @@ void UKawaiiFluidComponent::BeginPlay()
 
 	// 스폰 타이머 초기화
 	SpawnAccumulatedTime = 0.0f;
-
-	// 시뮬레이션 모듈 초기화
-	if (SimulationModule)
-	{
-		// Component->Preset 사용 (없으면 기본 생성)
-		if (!Preset)
-		{
-			Preset = NewObject<UKawaiiFluidPresetDataAsset>(this, NAME_None, RF_Transient);
-			UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidComponent [%s]: No Preset assigned, using default values"), *GetName());
-		}
-		// Module에 Preset 설정 후 초기화
-		SimulationModule->Initialize(Preset);
-		
-		// 이벤트 콜백 항상 연결 (Module에서 bEnableCollisionEvents 체크)
-		SimulationModule->SetCollisionEventCallback(
-			FOnModuleCollisionEvent::CreateUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent)
-		);
-
-		// Volume registration is now handled internally by SimulationModule
-		// When Module has TargetSimulationVolume set, it auto-registers with the volume
-		if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
-		{
-			Volume->RegisterModule(SimulationModule);
-		}
-	}
-
-	// 렌더링 모듈 초기화 (중복 초기화 방지)
-	if (bEnableRendering && RenderingModule && SimulationModule)
-	{
-		if (RenderingModule->IsInitialized())
-		{
-			// 이미 초기화됨 (에디터에서 복제된 경우 등)
-			UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: RenderingModule already initialized, skipping"), *GetName());
-		}
-		else
-		{
-			// 1. RenderingModule 초기화 (Preset 포함)
-			RenderingModule->Initialize(GetWorld(), this, SimulationModule, Preset);
-
-			// 2. ISM 렌더러 설정 적용
-			if (UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
-			{
-				ISMRenderer->ApplySettings(ISMSettings);
-			}
-
-			UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: Rendering initialized (ISM: %s, Metaball: from Preset)"),
-				*GetName(),
-				ISMSettings.bEnabled ? TEXT("Enabled") : TEXT("Disabled"));
-		}
-	}
-
-	// Module을 Subsystem에 등록 (Component가 아닌 Module!)
-	RegisterToSubsystem();
 
 	// ShapeVolume mode: auto spawn at BeginPlay
 	if (SpawnSettings.IsShapeVolumeMode() && SimulationModule)
@@ -167,35 +166,7 @@ void UKawaiiFluidComponent::BeginPlay()
 
 void UKawaiiFluidComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// Unregister module from TargetVolumeComponent
-	if (UKawaiiFluidSimulationVolumeComponent* Volume = GetTargetVolumeComponent())
-	{
-		if (SimulationModule)
-		{
-			Volume->UnregisterModule(SimulationModule);
-		}
-	}
-
-	// Subsystem에서 등록 해제
-	UnregisterFromSubsystem();
-
-	// 이벤트 클리어
-	OnParticleHit.Clear();
-
-	// 렌더링 모듈 정리
-	if (RenderingModule)
-	{
-		// RenderingModule 정리
-		RenderingModule->Cleanup();
-		RenderingModule = nullptr;
-	}
-	// 시뮬레이션 모듈 정리
-	if (SimulationModule)
-	{
-		SimulationModule->Shutdown();
-		SimulationModule = nullptr;
-	}
-
+	// 정리는 OnUnregister에서 처리됨 (IsBeingDestroyed 체크 후)
 	Super::EndPlay(EndPlayReason);
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidComponent EndPlay: %s"), *GetName());
 }
@@ -2044,6 +2015,9 @@ FKawaiiFluidComponentInstanceData::FKawaiiFluidComponentInstanceData(const UKawa
 {
 	if (SourceComponent && SourceComponent->GetSimulationModule())
 	{
+		// GPU 모드 시 CPU 배열로 동기화 후 저장 (const_cast: 저장 전 동기화 필수)
+		SourceComponent->GetSimulationModule()->SyncGPUParticlesToCPU();
+
 		SavedParticles = SourceComponent->GetSimulationModule()->GetParticles();
 		SavedNextParticleID = SourceComponent->GetSimulationModule()->GetNextParticleID();
 
@@ -2064,6 +2038,10 @@ void FKawaiiFluidComponentInstanceData::ApplyToComponent(UActorComponent* Compon
 			{
 				FluidComponent->GetSimulationModule()->GetParticlesMutable() = SavedParticles;
 				FluidComponent->GetSimulationModule()->SetNextParticleID(SavedNextParticleID);
+
+				// GPU 활성 시 복원된 파티클을 GPU로 업로드
+				// (OnRegister에서 RegisterModule 호출 시점에는 아직 복원 안 됨)
+				FluidComponent->GetSimulationModule()->UploadCPUParticlesToGPU();
 
 				UE_LOG(LogTemp, Log, TEXT("InstanceData: Restored %d particles to %s"),
 					SavedParticles.Num(), *FluidComponent->GetName());
