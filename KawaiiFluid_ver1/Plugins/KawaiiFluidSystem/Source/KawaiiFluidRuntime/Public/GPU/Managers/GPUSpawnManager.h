@@ -194,6 +194,15 @@ public:
 	/** Set next particle ID (for PIE transition - sync with uploaded particles) */
 	void SetNextParticleID(int32 ID) { NextParticleID.store(ID); }
 
+	/** Reset NextParticleID to 0 when particle count is 0 (prevents overflow) */
+	void TryResetParticleID(int32 CurrentParticleCount)
+	{
+		if (CurrentParticleCount == 0)
+		{
+			NextParticleID.store(0);
+		}
+	}
+
 	//=========================================================================
 	// Render Thread API
 	//=========================================================================

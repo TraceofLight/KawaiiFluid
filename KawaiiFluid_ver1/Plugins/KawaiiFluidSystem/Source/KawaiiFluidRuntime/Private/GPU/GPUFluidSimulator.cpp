@@ -660,6 +660,12 @@ void FGPUFluidSimulator::EndFrame()
 				UE_LOG(LogGPUFluidSimulator, Log, TEXT("EndFrame: Cleared stale ReadbackGPUParticles (CurrentCount=0)"));
 			}
 
+			// Reset NextParticleID when particle count is 0 (prevents overflow)
+			if (Self->CurrentParticleCount == 0 && Self->SpawnManager.IsValid())
+			{
+				Self->SpawnManager->TryResetParticleID(Self->CurrentParticleCount);
+			}
+
 			// Enqueue source counter readback
 			if (Self->SpawnManager.IsValid() && Self->SpawnManager->GetSourceCounterBuffer().IsValid())
 			{
