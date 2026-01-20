@@ -91,6 +91,15 @@ void UKawaiiFluidSimulationVolumeComponent::PostEditChangeProperty(FPropertyChan
 		}
 	}
 
+	// When CellSize changes, recalculate volume size to maintain Medium preset
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationVolumeComponent, CellSize))
+	{
+		const float MediumGridResolution = static_cast<float>(GridResolutionPresetHelper::GetGridResolution(EGridResolutionPreset::Medium));
+		const float NewDefaultSize = MediumGridResolution * CellSize;
+		UniformVolumeSize = NewDefaultSize;
+		VolumeSize = FVector(NewDefaultSize);
+	}
+
 	// Handle size-related property changes
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationVolumeComponent, bUniformSize) ||
 		PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationVolumeComponent, UniformVolumeSize) ||

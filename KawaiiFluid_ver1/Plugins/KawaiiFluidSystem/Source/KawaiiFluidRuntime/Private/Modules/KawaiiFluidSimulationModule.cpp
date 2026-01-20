@@ -66,6 +66,10 @@ void UKawaiiFluidSimulationModule::PostLoad()
 	{
 		PreBeginPIEHandle = FEditorDelegates::PreBeginPIE.AddUObject(this, &UKawaiiFluidSimulationModule::OnPreBeginPIE);
 	}
+
+	// Update volume info to fix any mismatch between CellSize and VolumeSize
+	// This ensures internal grid preset is calculated correctly based on current Preset
+	UpdateVolumeInfoDisplay();
 #endif
 }
 
@@ -357,6 +361,19 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 	{
 		if (!TargetSimulationVolume)
 		{
+			RecalculateVolumeBounds();
+		}
+	}
+	// CellSize 변경 시 - Recalculate volume size to maintain Medium preset
+	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, CellSize))
+	{
+		if (!TargetSimulationVolume)
+		{
+			// Recalculate volume size based on Medium Z-Order preset
+			const float MediumGridResolution = static_cast<float>(GridResolutionPresetHelper::GetGridResolution(EGridResolutionPreset::Medium));
+			const float NewDefaultSize = MediumGridResolution * CellSize;
+			UniformVolumeSize = NewDefaultSize;
+			VolumeSize = FVector(NewDefaultSize);
 			RecalculateVolumeBounds();
 		}
 	}
@@ -2284,6 +2301,13 @@ void UKawaiiFluidSimulationModule::UpdateVolumeInfoDisplay()
 		if (Preset && Preset->SmoothingRadius > 0.0f)
 		{
 			CellSize = Preset->SmoothingRadius;
+
+			// Always recalculate volume size based on Medium preset
+			// This ensures the default grid preset is Medium for the given CellSize
+			const float MediumGridResolution = static_cast<float>(GridResolutionPresetHelper::GetGridResolution(EGridResolutionPreset::Medium));
+			const float NewDefaultSize = MediumGridResolution * CellSize;
+			UniformVolumeSize = NewDefaultSize;
+			VolumeSize = FVector(NewDefaultSize);
 		}
 		// Calculate bounds from internal settings (uses GridResolutionPreset)
 		RecalculateVolumeBounds();
