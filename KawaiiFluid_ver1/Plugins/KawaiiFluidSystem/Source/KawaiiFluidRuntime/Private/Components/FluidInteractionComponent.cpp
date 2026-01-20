@@ -597,22 +597,34 @@ for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 				FVector ParticleVelocity(Feedback.ParticleVelocity.X, Feedback.ParticleVelocity.Y, Feedback.ParticleVelocity.Z);
 				FVector ParticleVelocityInMS = ParticleVelocity * 0.01f;
 
-				// 절대 속도 기반 충격력 (상대 속도 아님)
-				// 이유: 캐릭터가 빠르게 움직여도 정지한 물에서는 넘어지지 않아야 함
-				// 오직 빠르게 움직이는 유체만 캐릭터를 밀어낼 수 있음
-				float ParticleSpeed = ParticleVelocityInMS.Size();  // Absolute velocity
+				// 속도 선택: 상대 속도 vs 절대 속도
+				FVector EffectiveVelocity;
+				if (bUseRelativeVelocityForForce)
+				{
+					// 상대 속도 (v_fluid - v_body): 물속 저항 구현에 적합
+					// 정지된 물속을 달리면 저항이 발생함
+					EffectiveVelocity = ParticleVelocityInMS - BodyVelocityInMS;
+				}
+				else
+				{
+					// 절대 속도 (v_fluid): 파도/폭포 밀림 효과에 적합
+					// 빠르게 움직이는 유체만 캐릭터를 밀어냄
+					EffectiveVelocity = ParticleVelocityInMS;
+				}
+				
+				float EffectiveSpeed = EffectiveVelocity.Size();
 
 				DensitySum += Feedback.Density;
 				ForceContactCount++;
 
-				if (ParticleSpeed < SMALL_NUMBER)
+				if (EffectiveSpeed < SMALL_NUMBER)
 				{
 					continue;
 				}
 
-				// 충격력 공식: F = ½ρCdA|v|² (v는 유체의 절대 속도)
-				float ImpactMagnitude = 0.5f * Feedback.Density * DragCoefficient * AreaInM2 * ParticleSpeed * ParticleSpeed;
-				FVector ImpactDirection = ParticleVelocityInMS.GetSafeNormal();
+				// 충격력 공식: F = ½ρCdA|v|²
+				float ImpactMagnitude = 0.5f * Feedback.Density * DragCoefficient * AreaInM2 * EffectiveSpeed * EffectiveSpeed;
+				FVector ImpactDirection = EffectiveVelocity.GetSafeNormal();
 				ForceAccum += ImpactDirection * ImpactMagnitude;
 			}
 

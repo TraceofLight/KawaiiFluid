@@ -266,6 +266,16 @@ public:
 	float DragForceMultiplier = 0.01f;
 
 	/**
+	 * OnFluidForceUpdate에서 상대 속도 사용 여부
+	 * true: 상대 속도 (v_fluid - v_body) - 물속 저항 구현에 적합
+	 * false: 절대 속도 (v_fluid) - 파도/폭포 밀림 효과에 적합
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Force Feedback",
+	          meta = (EditCondition = "bEnableForceFeedback",
+	                  ToolTip = "OnFluidForceUpdate에서 상대 속도 사용.\ntrue: 상대 속도 (v_fluid - v_body) - 정지된 물속을 달릴 때 저항 발생\nfalse: 절대 속도 (v_fluid) - 파도/폭포가 캐릭터를 밀어냄\n일반적으로 true 권장."))
+	bool bUseRelativeVelocityForForce = true;
+
+	/**
 	 * 유체 태그별 트리거를 위한 최소 파티클 수
 	 * 이 수 이상의 파티클이 충돌해야 OnFluidEnter 이벤트 발생
 	 */
