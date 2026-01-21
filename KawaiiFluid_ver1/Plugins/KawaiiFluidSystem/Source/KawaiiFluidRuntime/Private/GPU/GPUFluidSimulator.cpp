@@ -647,6 +647,13 @@ void FGPUFluidSimulator::EndFrame()
 			{
 				Self->ReadbackGPUParticles.Empty();
 				UE_LOG(LogGPUFluidSimulator, Log, TEXT("EndFrame: Cleared stale ReadbackGPUParticles (CurrentCount=0)"));
+
+				// [Critial Fix] Cleanup despawn tracking when particles are 0.
+				// This allows reusing the same IDs immediately after a full clear.
+				if (Self->SpawnManager.IsValid())
+				{
+					Self->SpawnManager->CleanupCompletedRequests(TSet<int32>());
+				}
 			}
 
 			// Reset NextParticleID when particle count is 0 (prevents overflow)
@@ -1126,7 +1133,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 	AddApplyViscosityAndCohesionPass(GraphBuilder, ParticlesUAV, SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV, SpatialData.NeighborListSRV, SpatialData.NeighborCountsSRV, Params, SpatialData);
 
 	// Particle Sleeping Pass (NVIDIA Flex stabilization)
-	if (Params.bEnableParticleSleeping && SpatialData.NeighborListSRV && SpatialData.NeighborCountsSRV)
+	if (false && Params.bEnableParticleSleeping && SpatialData.NeighborListSRV && SpatialData.NeighborCountsSRV)
 	{
 		// Ensure SleepCounters buffer exists and has correct size
 		if (!SleepCountersBuffer.IsValid() || SleepCountersCapacity < CurrentParticleCount)

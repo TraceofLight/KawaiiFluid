@@ -92,6 +92,13 @@ public:
 	void AddDespawnByIDRequest(int32 ParticleID);
 
 	/**
+	 * Cleanup AlreadyRequestedIDs based on currently alive particles.
+	 * Call this when readback data is updated to ensure IDs can be reused for future despawns.
+	 * @param CurrentAliveIDs - Set of IDs currently alive on GPU
+	 */
+	void CleanupCompletedRequests(const TSet<int32>& CurrentAliveIDs);
+
+	/**
 	 * Add multiple despawn requests by particle IDs (thread-safe, more efficient)
 	 * @param ParticleIDs - Array of particle IDs to despawn
 	 * @param AllCurrentReadbackIDs - All particle IDs in current readback (for cleanup of already-removed IDs)

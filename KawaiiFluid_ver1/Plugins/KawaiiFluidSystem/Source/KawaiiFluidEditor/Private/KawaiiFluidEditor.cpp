@@ -11,6 +11,12 @@
 #include "AssetToolsModule.h"
 #include "PropertyEditorModule.h"
 #include "EditorModeRegistry.h"
+#include "ThumbnailRendering/ThumbnailManager.h"
+#include "Thumbnail/KawaiiFluidPresetThumbnailRenderer.h"
+#include "Data/KawaiiFluidPresetDataAsset.h"
+#include "Editor.h"
+#include "ObjectTools.h"
+#include "UObject/ObjectSaveContext.h"
 
 #define LOCTEXT_NAMESPACE "FKawaiiFluidEditorModule"
 
@@ -38,10 +44,26 @@ void FKawaiiFluidEditorModule::StartupModule()
 		FSlateIcon(),
 		false  // 툴바에 표시 안함
 	);
+
+	// 커스텀 썸네일 렌더러 등록
+	UThumbnailManager::Get().RegisterCustomRenderer(
+		UKawaiiFluidPresetDataAsset::StaticClass(),
+		UKawaiiFluidPresetThumbnailRenderer::StaticClass());
+
+	// 에셋 저장 시 썸네일 자동 갱신 이벤트 바인딩
+	UPackage::PreSavePackageWithContextEvent.AddRaw(this, &FKawaiiFluidEditorModule::HandleAssetPreSave);
 }
 
 void FKawaiiFluidEditorModule::ShutdownModule()
 {
+	// 이벤트 바인딩 해제
+	UPackage::PreSavePackageWithContextEvent.RemoveAll(this);
+
+	if (!GExitPurge && !IsEngineExitRequested() && UObjectInitialized())
+	{
+		UThumbnailManager::Get().UnregisterCustomRenderer(UKawaiiFluidPresetDataAsset::StaticClass());
+	}
+	
 	// Unregister Fluid Brush Editor Mode
 	FEditorModeRegistry::Get().UnregisterMode(FFluidBrushEditorMode::EM_FluidBrush);
 
@@ -58,6 +80,25 @@ void FKawaiiFluidEditorModule::ShutdownModule()
 FKawaiiFluidEditorModule& FKawaiiFluidEditorModule::Get()
 {
 	return FModuleManager::LoadModuleChecked<FKawaiiFluidEditorModule>("KawaiiFluidEditor");
+}
+
+void FKawaiiFluidEditorModule::HandleAssetPreSave(UPackage* InPackage, FObjectPreSaveContext InContext)
+{
+	if (!InPackage) return;
+
+	// 패키지 내부에 우리 프리셋 에셋이 있는지 확인합니다.
+	TArray<UObject*> ObjectsInPackage;
+	GetObjectsWithOuter(InPackage, ObjectsInPackage);
+
+	for (UObject* Obj : ObjectsInPackage)
+	{
+		if (UKawaiiFluidPresetDataAsset* Preset = Cast<UKawaiiFluidPresetDataAsset>(Obj))
+		{
+			// 이 시점에 ThumbnailTools를 호출하면, Draw가 그린 최신 결과가 
+			// .uasset 파일의 썸네일 섹션에 물리적으로 기록됩니다.
+			ThumbnailTools::GenerateThumbnailForObjectToSaveToDisk(Preset);
+		}
+	}
 }
 
 void FKawaiiFluidEditorModule::RegisterAssetTypeActions()

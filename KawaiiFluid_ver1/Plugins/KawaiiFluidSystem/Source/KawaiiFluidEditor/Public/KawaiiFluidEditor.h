@@ -39,6 +39,9 @@ private:
 	/** Unregister property customizations */
 	void UnregisterPropertyCustomizations();
 
+	/** Handle asset pre-save event to generate thumbnail */
+	void HandleAssetPreSave(UPackage* InPackage, FObjectPreSaveContext InContext);
+
 private:
 	/** Registered asset type actions */
 	TArray<TSharedPtr<IAssetTypeActions>> RegisteredAssetTypeActions;

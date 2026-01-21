@@ -160,6 +160,32 @@ void FGPUSpawnManager::AddDespawnByIDRequest(int32 ParticleID)
 	bHasPendingDespawnByIDRequests.store(true);
 }
 
+void FGPUSpawnManager::CleanupCompletedRequests(const TSet<int32>& CurrentAliveIDs)
+{
+	FScopeLock Lock(&DespawnByIDLock);
+
+	// Remove IDs from tracking if they are no longer in the alive set
+	// This means they have been successfully despawned and confirmed by readback
+	TArray<int32> ToRemove;
+	for (int32 ID : AlreadyRequestedIDs)
+	{
+		if (!CurrentAliveIDs.Contains(ID))
+		{
+			ToRemove.Add(ID);
+		}
+	}
+
+	for (int32 ID : ToRemove)
+	{
+		AlreadyRequestedIDs.Remove(ID);
+	}
+
+	if (ToRemove.Num() > 0)
+	{
+		UE_LOG(LogGPUSpawnManager, Verbose, TEXT("CleanupCompletedRequests: Cleared %d IDs from tracking"), ToRemove.Num());
+	}
+}
+
 void FGPUSpawnManager::AddDespawnByIDRequests(const TArray<int32>& ParticleIDs, const TArray<int32>& AllCurrentReadbackIDs)
 {
 	if (ParticleIDs.Num() == 0)
@@ -169,20 +195,8 @@ void FGPUSpawnManager::AddDespawnByIDRequests(const TArray<int32>& ParticleIDs, 
 
 	FScopeLock Lock(&DespawnByIDLock);
 
-	// Cleanup: Readback에 없는 ID는 AlreadyRequestedIDs에서 제거 (이미 GPU에서 제거됨)
-	TSet<int32> ReadbackSet(AllCurrentReadbackIDs);
-	TArray<int32> ToRemove;
-	for (int32 ID : AlreadyRequestedIDs)
-	{
-		if (!ReadbackSet.Contains(ID))  // Readback에 없음 = 이미 제거됨
-		{
-			ToRemove.Add(ID);
-		}
-	}
-	for (int32 ID : ToRemove)
-	{
-		AlreadyRequestedIDs.Remove(ID);
-	}
+	// Cleanup IDs that are already removed on GPU
+	CleanupCompletedRequests(TSet<int32>(AllCurrentReadbackIDs));
 
 	// 중복 필터링: 이미 제거 요청한 ID는 제외
 	int32 OriginalCount = ParticleIDs.Num();
@@ -203,7 +217,7 @@ void FGPUSpawnManager::AddDespawnByIDRequests(const TArray<int32>& ParticleIDs, 
 	}
 
 	UE_LOG(LogGPUSpawnManager, Log, TEXT("AddDespawnByIDRequests: %d requested, %d new, %d duplicates, %d cleaned (total pending: %d)"),
-		OriginalCount, FilteredCount, OriginalCount - FilteredCount, ToRemove.Num(), PendingDespawnByIDs.Num());
+		OriginalCount, FilteredCount, OriginalCount - FilteredCount, OriginalCount - FilteredCount, PendingDespawnByIDs.Num());
 }
 
 int32 FGPUSpawnManager::SwapDespawnByIDBuffers()

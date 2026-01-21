@@ -426,6 +426,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void RecalculateDerivedParameters();
 
+#if WITH_EDITORONLY_DATA
+	/** Thumbnail rendering info (camera angle, distance, etc.) */
+	UPROPERTY(VisibleAnywhere, Instanced, Category = "Thumbnail")
+	TObjectPtr<class UThumbnailInfo> ThumbnailInfo;
+#endif
+
 #if WITH_EDITOR
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 

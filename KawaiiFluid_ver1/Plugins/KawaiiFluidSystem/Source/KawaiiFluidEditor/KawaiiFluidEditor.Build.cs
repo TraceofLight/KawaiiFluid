@@ -48,6 +48,7 @@ public class KawaiiFluidEditor : ModuleRules
 				"WorkspaceMenuStructure",
 				"LevelEditor",
 				"RenderCore",
+				"Renderer",
 				"Projects",
 				"ApplicationCore",
 			}

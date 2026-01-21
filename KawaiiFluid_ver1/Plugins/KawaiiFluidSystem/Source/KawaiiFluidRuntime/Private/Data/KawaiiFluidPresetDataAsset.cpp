@@ -1,6 +1,8 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "Data/KawaiiFluidPresetDataAsset.h"
+
+#include "EditorFramework/ThumbnailInfo.h"
 #include "GPU/GPUFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
 
 UKawaiiFluidPresetDataAsset::UKawaiiFluidPresetDataAsset()
@@ -71,6 +73,13 @@ void UKawaiiFluidPresetDataAsset::PostEditChangeProperty(FPropertyChangedEvent& 
 
 		// Notify subscribers (e.g., SimulationModules) about property changes
 		OnPropertyChanged.Broadcast(this);
+	}
+	
+	// 썸네일 정보가 있다면 변경 사실을 알림
+	if (ThumbnailInfo)
+	{
+		// 이 호출이 핵심입니다. 썸네일 캐시를 무효화하고 재렌더링을 트리거합니다.
+		ThumbnailInfo->PostEditChange();
 	}
 }
 #endif

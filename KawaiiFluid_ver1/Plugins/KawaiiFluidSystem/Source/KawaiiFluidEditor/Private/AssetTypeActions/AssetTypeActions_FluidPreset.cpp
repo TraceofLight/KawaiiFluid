@@ -4,6 +4,7 @@
 #include "KawaiiFluidEditor.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "Editor/KawaiiFluidPresetAssetEditor.h"
+#include "ThumbnailRendering/SceneThumbnailInfo.h"
 
 #define LOCTEXT_NAMESPACE "AssetTypeActions_FluidPreset"
 
@@ -39,6 +40,18 @@ void FAssetTypeActions_FluidPreset::OpenAssetEditor(const TArray<UObject*>& InOb
 			NewEditor->InitFluidPresetEditor(Mode, EditWithinLevelEditor, Preset);
 		}
 	}
+}
+
+UThumbnailInfo* FAssetTypeActions_FluidPreset::GetThumbnailInfo(UObject* Asset) const
+{
+	UKawaiiFluidPresetDataAsset* Preset = CastChecked<UKawaiiFluidPresetDataAsset>(Asset);
+	UThumbnailInfo* ThumbnailInfo = Preset->ThumbnailInfo;
+	if (ThumbnailInfo == nullptr)
+	{
+		ThumbnailInfo = NewObject<USceneThumbnailInfo>(Preset, NAME_None, RF_Transactional);
+		Preset->ThumbnailInfo = ThumbnailInfo;
+	}
+	return ThumbnailInfo;
 }
 
 #undef LOCTEXT_NAMESPACE

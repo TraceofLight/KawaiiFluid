@@ -107,9 +107,6 @@ bool FFluidBrushEditorMode::InputKey(FEditorViewportClient* ViewportClient, FVie
 			bPainting = true;
 			LastStrokeTime = 0.0;
 
-			// 드래그 시작 시 트랜잭션 생성 (Undo 한 번에 전체 드래그 취소)
-			DragTransaction = MakeUnique<FScopedTransaction>(LOCTEXT("FluidBrushDrag", "Fluid Brush Drag"));
-
 			if (bValidLocation)
 			{
 				ApplyBrush();
@@ -119,10 +116,6 @@ bool FFluidBrushEditorMode::InputKey(FEditorViewportClient* ViewportClient, FVie
 		else if (Event == IE_Released)
 		{
 			bPainting = false;
-
-			// 드래그 종료 시 트랜잭션 커밋
-			DragTransaction.Reset();
-
 			return true;
 		}
 	}
