@@ -640,7 +640,7 @@ void AKawaiiFluidVolume::InitializeRendering()
 	UKawaiiFluidPresetDataAsset* Preset = VolumeComponent->GetPreset();
 
 	// Initialize RenderingModule with SimulationModule as data provider
-	// Rendering parameters (PipelineType, ShadingMode, etc.) are taken from Preset->RenderingParameters
+	// Rendering parameters (PipelineType, etc.) are taken from Preset->RenderingParameters
 	RenderingModule->Initialize(World, VolumeComponent, SimulationModule, Preset);
 
 	// Configure MetaballRenderer based on preset's RenderingParameters
@@ -651,18 +651,17 @@ void AKawaiiFluidVolume::InitializeRendering()
 		{
 			MetaballRenderer->SetEnabled(Preset->RenderingParameters.bEnableRendering);
 
-			// UpdatePipeline() creates the correct pipeline based on preset's PipelineType and ShadingMode
+			// UpdatePipeline() creates the correct pipeline based on preset's PipelineType
 			// GetLocalParameters() returns Preset->RenderingParameters
 			MetaballRenderer->UpdatePipeline();
 
-			UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: MetaballRenderer configured (Enabled: %s, Pipeline: %d, Shading: %d)"),
+			UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: MetaballRenderer configured (Enabled: %s, Pipeline: %d)"),
 				*GetName(),
 				Preset->RenderingParameters.bEnableRendering ? TEXT("true") : TEXT("false"),
-				static_cast<int32>(Preset->RenderingParameters.PipelineType),
-				static_cast<int32>(Preset->RenderingParameters.ShadingMode));
-		}
+				static_cast<int32>(Preset->RenderingParameters.PipelineType));
+	}
 
-		// Connect MetaballRenderer to SimulationContext
+	// Connect MetaballRenderer to SimulationContext
 		// This is done here because MetaballRenderer wasn't created yet when
 		// Subsystem::RegisterModule was called in InitializeSimulation
 		if (SimulationContext)

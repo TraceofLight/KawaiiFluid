@@ -16,31 +16,10 @@ class FSceneView;
  * Contains shading functions for the ScreenSpace rendering pipeline.
  * These are stateless functions called by FKawaiiMetaballScreenSpacePipeline.
  *
- * Supports:
- * - GBuffer shading mode (writes to GBuffer for deferred lighting)
- * - PostProcess shading mode (custom shading at Tonemap timing)
+ * Supports PostProcess shading mode (custom shading with Blinn-Phong, Fresnel, Beer's Law).
  */
 namespace KawaiiScreenSpaceShading
 {
-	/**
-	 * Render GBuffer shading pass (writes to GBuffer A/B/C/D)
-	 *
-	 * Writes fluid surface data to GBuffer for integration with
-	 * Unreal's deferred lighting (Lumen, VSM, GI).
-	 *
-	 * @param GraphBuilder - RDG builder
-	 * @param View - Scene view
-	 * @param RenderParams - Fluid rendering parameters
-	 * @param IntermediateTextures - Intermediate textures (depth, normal, thickness + GBuffer refs)
-	 * @param SceneDepthTexture - Scene depth texture
-	 */
-	void RenderGBufferShading(
-		FRDGBuilder& GraphBuilder,
-		const FSceneView& View,
-		const FFluidRenderingParameters& RenderParams,
-		const FMetaballIntermediateTextures& IntermediateTextures,
-		FRDGTextureRef SceneDepthTexture);
-
 	/**
 	 * Render PostProcess shading pass
 	 *

@@ -138,64 +138,6 @@ static bool GenerateIntermediateTextures(
 	return true;
 }
 
-void FKawaiiMetaballScreenSpacePipeline::ExecutePostBasePass(
-	FRDGBuilder& GraphBuilder,
-	const FSceneView& View,
-	const FFluidRenderingParameters& RenderParams,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-	FRDGTextureRef SceneDepthTexture)
-{
-	if (Renderers.Num() == 0)
-	{
-		return;
-	}
-
-	// PostProcess mode uses PrepareForTonemap + ExecuteTonemap at Tonemap timing
-	if (RenderParams.ShadingMode == EMetaballShadingMode::PostProcess)
-	{
-		// Nothing to do here - PostProcess mode preparation happens in PrepareForTonemap
-		return;
-	}
-
-	// Translucent mode is not supported by ScreenSpace pipeline
-	if (RenderParams.ShadingMode == EMetaballShadingMode::Translucent)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Translucent shading mode is not supported. Use RayMarchingPipeline."));
-		return;
-	}
-
-	// GBuffer/Opaque mode - write to GBuffer
-	if (RenderParams.ShadingMode == EMetaballShadingMode::GBuffer ||
-		RenderParams.ShadingMode == EMetaballShadingMode::Opaque)
-	{
-		RDG_EVENT_SCOPE(GraphBuilder, "MetaballPipeline_ScreenSpace_PostBasePass_GBuffer");
-
-		// Generate intermediate textures
-		FMetaballIntermediateTextures IntermediateTextures;
-		if (!GenerateIntermediateTextures(GraphBuilder, View, RenderParams, Renderers, SceneDepthTexture, IntermediateTextures))
-		{
-			return;
-		}
-
-		// Get GBuffer textures from SceneTextures
-		const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
-		const FSceneTextures& SceneTexturesRef = ViewInfo.GetSceneTextures();
-		IntermediateTextures.GBufferATexture = SceneTexturesRef.GBufferA;
-		IntermediateTextures.GBufferBTexture = SceneTexturesRef.GBufferB;
-		IntermediateTextures.GBufferCTexture = SceneTexturesRef.GBufferC;
-		IntermediateTextures.GBufferDTexture = SceneTexturesRef.GBufferD;
-
-		// Call GBuffer shading
-		KawaiiScreenSpaceShading::RenderGBufferShading(
-			GraphBuilder,
-			View,
-			RenderParams,
-			IntermediateTextures,
-			SceneDepthTexture);
-
-		UE_LOG(LogTemp, Log, TEXT("FKawaiiMetaballScreenSpacePipeline: GBuffer write completed"));
-	}
-}
 
 void FKawaiiMetaballScreenSpacePipeline::PrepareRender(
 	FRDGBuilder& GraphBuilder,
@@ -281,20 +223,6 @@ void FKawaiiMetaballScreenSpacePipeline::PrepareRender(
 	UE_LOG(LogTemp, Verbose, TEXT("FKawaiiMetaballScreenSpacePipeline: PrepareForTonemap completed - intermediate textures cached"));
 }
 
-void FKawaiiMetaballScreenSpacePipeline::ExecutePrePostProcess(
-	FRDGBuilder& GraphBuilder,
-	const FSceneView& View,
-	const FFluidRenderingParameters& RenderParams,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-	FRDGTextureRef SceneDepthTexture,
-	FRDGTextureRef SceneColorTexture,
-	FScreenPassRenderTarget Output,
-	FRDGTextureRef GBufferATexture,
-	FRDGTextureRef GBufferDTexture)
-{
-	// ScreenSpace pipeline does not use PrePostProcess timing
-	// Translucent mode requires RayMarchingPipeline
-}
 
 void FKawaiiMetaballScreenSpacePipeline::ExecuteRender(
 	FRDGBuilder& GraphBuilder,
@@ -310,11 +238,6 @@ void FKawaiiMetaballScreenSpacePipeline::ExecuteRender(
 		return;
 	}
 
-	// Only PostProcess shading mode uses Tonemap timing
-	if (RenderParams.ShadingMode != EMetaballShadingMode::PostProcess)
-	{
-		return;
-	}
 
 	// Validate cached intermediate textures
 	if (!CachedIntermediateTextures.IsValid())

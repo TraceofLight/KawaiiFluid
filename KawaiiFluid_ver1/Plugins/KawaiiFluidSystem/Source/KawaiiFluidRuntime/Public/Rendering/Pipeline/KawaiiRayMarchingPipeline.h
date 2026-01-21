@@ -34,25 +34,7 @@ public:
 	// IKawaiiMetaballRenderingPipeline Interface
 	//========================================
 
-	/** Execute at PostBasePass timing - prepares volumes for ray marching */
-	virtual void ExecutePostBasePass(
-		FRDGBuilder& GraphBuilder,
-		const FSceneView& View,
-		const FFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture) override;
 
-	/** Execute at PrePostProcess timing - main ray marching pass */
-	virtual void ExecutePrePostProcess(
-		FRDGBuilder& GraphBuilder,
-		const FSceneView& View,
-		const FFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture,
-		FRDGTextureRef SceneColorTexture,
-		FScreenPassRenderTarget Output,
-		FRDGTextureRef GBufferATexture = nullptr,
-		FRDGTextureRef GBufferDTexture = nullptr) override;
 
 	/** Prepare intermediate textures for ray marching */
 	virtual void PrepareRender(
@@ -62,7 +44,7 @@ public:
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
 		FRDGTextureRef SceneDepthTexture) override;
 
-	/** Execute at Tonemap timing - temporal blending and final composite */
+	/** Execute rendering - ray marching and final composite */
 	virtual void ExecuteRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,

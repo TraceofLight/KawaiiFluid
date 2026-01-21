@@ -39,19 +39,10 @@ public:
 		FPostProcessingPassDelegateArray& InOutPassCallbacks,
 		bool bIsPassEnabled) override;
 
-	/**
-	 * GBuffer mode rendering - called right after BasePass, before Lighting
-	 * This is the correct injection point for GBuffer write
-	 */
-	virtual void PostRenderBasePassDeferred_RenderThread(
-		FRDGBuilder& GraphBuilder,
-		FSceneView& InView,
-		const FRenderTargetBindingSlots& RenderTargets,
-		TRDGUniformBufferRef<FSceneTextureUniformParameters> SceneTextures) override;
 
 	/**
-	 * TransparencyPass - called after Lighting, before PostProcessing
-	 * This is the correct injection point for transparency/refraction effects
+	 * PrePostProcess - called after Lighting, before PostProcessing
+	 * All fluid rendering (ScreenSpace, RayMarching) happens here
 	 * Both GBuffer and SceneColor are at internal resolution here
 	 */
 	virtual void PrePostProcessPass_RenderThread(

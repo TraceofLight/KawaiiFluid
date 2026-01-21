@@ -4,7 +4,6 @@
 #include "Rendering/FluidRenderingParameters.h"
 #include "Rendering/MetaballRenderingData.h"
 #include "Rendering/FluidCompositeShaders.h"
-#include "Rendering/Shaders/FluidGBufferWriteShaders.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphEvent.h"
 #include "SceneView.h"
@@ -32,122 +31,6 @@ static TAutoConsoleVariable<int32> CVarFluidSSRDebugMode(
 	TEXT("13: XY distance detail (Cyan=XY far, Red=close but no penetration)"),
 	ECVF_RenderThreadSafe);
 
-void KawaiiScreenSpaceShading::RenderGBufferShading(
-	FRDGBuilder& GraphBuilder,
-	const FSceneView& View,
-	const FFluidRenderingParameters& RenderParams,
-	const FMetaballIntermediateTextures& IntermediateTextures,
-	FRDGTextureRef SceneDepthTexture)
-{
-	// Validate input textures
-	if (!IntermediateTextures.SmoothedDepthTexture ||
-		!IntermediateTextures.NormalTexture ||
-		!IntermediateTextures.ThicknessTexture ||
-		!SceneDepthTexture)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiScreenSpaceShading::RenderGBufferShading: Missing input textures"));
-		return;
-	}
-
-	// Validate GBuffer textures
-	if (!IntermediateTextures.GBufferATexture ||
-		!IntermediateTextures.GBufferBTexture ||
-		!IntermediateTextures.GBufferCTexture ||
-		!IntermediateTextures.GBufferDTexture)
-	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiScreenSpaceShading::RenderGBufferShading: Missing GBuffer textures!"));
-		return;
-	}
-
-	RDG_EVENT_SCOPE(GraphBuilder, "MetaballShading_GBuffer_ScreenSpace");
-
-	auto* PassParameters = GraphBuilder.AllocParameters<FFluidGBufferWriteParameters>();
-
-	// Texture bindings
-	PassParameters->SmoothedDepthTexture = IntermediateTextures.SmoothedDepthTexture;
-	PassParameters->NormalTexture = IntermediateTextures.NormalTexture;
-	PassParameters->ThicknessTexture = IntermediateTextures.ThicknessTexture;
-	PassParameters->FluidSceneDepthTexture = SceneDepthTexture;
-
-	// Samplers
-	PassParameters->PointClampSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-	PassParameters->BilinearClampSampler = TStaticSamplerState<SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
-
-	// Material parameters
-	PassParameters->FluidBaseColor = FVector3f(RenderParams.FluidColor.R, RenderParams.FluidColor.G, RenderParams.FluidColor.B);
-	PassParameters->Metallic = RenderParams.Metallic;
-	PassParameters->Roughness = RenderParams.Roughness;
-	PassParameters->SubsurfaceOpacity = RenderParams.SubsurfaceOpacity;
-	PassParameters->AbsorptionCoefficient = RenderParams.AbsorptionCoefficient;
-
-	// View uniforms
-	PassParameters->View = View.ViewUniformBuffer;
-
-	// MRT: GBuffer A/B/C/D
-	PassParameters->RenderTargets[0] = FRenderTargetBinding(
-		IntermediateTextures.GBufferATexture, ERenderTargetLoadAction::ELoad);
-	PassParameters->RenderTargets[1] = FRenderTargetBinding(
-		IntermediateTextures.GBufferBTexture, ERenderTargetLoadAction::ELoad);
-	PassParameters->RenderTargets[2] = FRenderTargetBinding(
-		IntermediateTextures.GBufferCTexture, ERenderTargetLoadAction::ELoad);
-	PassParameters->RenderTargets[3] = FRenderTargetBinding(
-		IntermediateTextures.GBufferDTexture, ERenderTargetLoadAction::ELoad);
-
-	// Depth/Stencil binding (write custom depth)
-	PassParameters->RenderTargets.DepthStencil = FDepthStencilBinding(
-		SceneDepthTexture,
-		ERenderTargetLoadAction::ELoad,
-		ERenderTargetLoadAction::ELoad,
-		FExclusiveDepthStencil::DepthWrite_StencilWrite);
-
-	// Get shaders
-	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(View.GetFeatureLevel());
-	TShaderMapRef<FFluidGBufferWriteVS> VertexShader(GlobalShaderMap);
-	TShaderMapRef<FFluidGBufferWritePS> PixelShader(GlobalShaderMap);
-
-	// Use ViewInfo.ViewRect for GBuffer mode
-	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
-	FIntRect ViewRect = ViewInfo.ViewRect;
-
-	GraphBuilder.AddPass(
-		RDG_EVENT_NAME("MetaballGBuffer_ScreenSpace"),
-		PassParameters,
-		ERDGPassFlags::Raster,
-		[VertexShader, PixelShader, PassParameters, ViewRect](FRHICommandList& RHICmdList)
-		{
-			RHICmdList.SetViewport(ViewRect.Min.X, ViewRect.Min.Y, 0.0f, ViewRect.Max.X,
-			                       ViewRect.Max.Y, 1.0f);
-			RHICmdList.SetScissorRect(true, ViewRect.Min.X, ViewRect.Min.Y, ViewRect.Max.X,
-			                          ViewRect.Max.Y);
-
-			FGraphicsPipelineStateInitializer GraphicsPSOInit;
-			GraphicsPSOInit.BoundShaderState.VertexDeclarationRHI = GEmptyVertexDeclaration.VertexDeclarationRHI;
-			GraphicsPSOInit.BoundShaderState.VertexShaderRHI = VertexShader.GetVertexShader();
-			GraphicsPSOInit.BoundShaderState.PixelShaderRHI = PixelShader.GetPixelShader();
-			GraphicsPSOInit.PrimitiveType = PT_TriangleList;
-
-			// Opaque blending for GBuffer write
-			GraphicsPSOInit.BlendState = TStaticBlendState<>::GetRHI();
-			GraphicsPSOInit.RasterizerState = TStaticRasterizerState<FM_Solid, CM_None>::GetRHI();
-
-			// Write depth
-			GraphicsPSOInit.DepthStencilState = TStaticDepthStencilState<
-				true, CF_DepthNearOrEqual>::GetRHI();
-
-			RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
-			SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
-			SetShaderParameters(RHICmdList, PixelShader, PixelShader.GetPixelShader(),
-			                    *PassParameters);
-			SetShaderParameters(RHICmdList, VertexShader, VertexShader.GetVertexShader(),
-			                    *PassParameters);
-
-			// Draw fullscreen triangle
-			RHICmdList.DrawPrimitive(0, 1, 1);
-		});
-
-	UE_LOG(LogTemp, Log, TEXT("KawaiiScreenSpaceShading: GBuffer write executed successfully"));
-}
-
 void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
@@ -158,11 +41,9 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	FScreenPassRenderTarget Output)
 {
 	// Validate input textures
-	if (!IntermediateTextures.SmoothedDepthTexture ||
-		!IntermediateTextures.NormalTexture ||
-		!IntermediateTextures.ThicknessTexture ||
-		!SceneDepthTexture)
+	if (!IntermediateTextures.SmoothedDepthTexture || !SceneDepthTexture)
 	{
+		UE_LOG(LogTemp, Warning, TEXT("KawaiiScreenSpaceShading::RenderPostProcessShading: Missing required textures (Depth or SceneDepth)"));
 		return;
 	}
 
@@ -172,11 +53,65 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 
 	// Texture bindings
 	PassParameters->FluidDepthTexture = IntermediateTextures.SmoothedDepthTexture;
-	PassParameters->FluidNormalTexture = IntermediateTextures.NormalTexture;
-	PassParameters->FluidThicknessTexture = IntermediateTextures.ThicknessTexture;
-	PassParameters->OcclusionMaskTexture = IntermediateTextures.OcclusionMaskTexture;
+
+	if (IntermediateTextures.NormalTexture)
+	{
+		PassParameters->FluidNormalTexture = IntermediateTextures.NormalTexture;
+	}
+	else
+	{
+		FRDGTextureDesc DummyDesc = FRDGTextureDesc::Create2D(
+			FIntPoint(1, 1), PF_A32B32G32R32F, FClearValueBinding(FLinearColor(0, 0, 1, 0)),
+			TexCreate_ShaderResource | TexCreate_RenderTargetable);
+		FRDGTextureRef DummyTexture = GraphBuilder.CreateTexture(DummyDesc, TEXT("DummyNormal"));
+		AddClearRenderTargetPass(GraphBuilder, DummyTexture, FLinearColor(0, 0, 1, 0));
+		PassParameters->FluidNormalTexture = DummyTexture;
+	}
+
+	if (IntermediateTextures.ThicknessTexture)
+	{
+		PassParameters->FluidThicknessTexture = IntermediateTextures.ThicknessTexture;
+	}
+	else
+	{
+		FRDGTextureDesc DummyDesc = FRDGTextureDesc::Create2D(
+			FIntPoint(1, 1), PF_R32_FLOAT, FClearValueBinding::Black,
+			TexCreate_ShaderResource | TexCreate_RenderTargetable);
+		FRDGTextureRef DummyTexture = GraphBuilder.CreateTexture(DummyDesc, TEXT("DummyThickness"));
+		AddClearRenderTargetPass(GraphBuilder, DummyTexture, FLinearColor::Black);
+		PassParameters->FluidThicknessTexture = DummyTexture;
+	}
+
+	if (IntermediateTextures.OcclusionMaskTexture)
+	{
+		PassParameters->OcclusionMaskTexture = IntermediateTextures.OcclusionMaskTexture;
+	}
+	else
+	{
+		FRDGTextureDesc DummyDesc = FRDGTextureDesc::Create2D(
+			FIntPoint(1, 1), PF_R32_FLOAT, FClearValueBinding::White,
+			TexCreate_ShaderResource | TexCreate_RenderTargetable);
+		FRDGTextureRef DummyTexture = GraphBuilder.CreateTexture(DummyDesc, TEXT("DummyOcclusionMask"));
+		AddClearRenderTargetPass(GraphBuilder, DummyTexture, FLinearColor::White);
+		PassParameters->OcclusionMaskTexture = DummyTexture;
+	}
+
 	PassParameters->SceneDepthTexture = SceneDepthTexture;
-	PassParameters->SceneColorTexture = SceneColorTexture;
+
+	if (SceneColorTexture)
+	{
+		PassParameters->SceneColorTexture = SceneColorTexture;
+	}
+	else
+	{
+		FRDGTextureDesc DummyDesc = FRDGTextureDesc::Create2D(
+			FIntPoint(1, 1), PF_FloatRGBA, FClearValueBinding::Black,
+			TexCreate_ShaderResource | TexCreate_RenderTargetable);
+		FRDGTextureRef DummyTexture = GraphBuilder.CreateTexture(DummyDesc, TEXT("DummySceneColor"));
+		AddClearRenderTargetPass(GraphBuilder, DummyTexture, FLinearColor::Black);
+		PassParameters->SceneColorTexture = DummyTexture;
+	}
+
 	PassParameters->View = View.ViewUniformBuffer;
 	PassParameters->InputSampler = TStaticSamplerState<
 		SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
@@ -248,6 +183,12 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	// - LightColors[i] = FVector4f(Color.R, Color.G, Color.B, 0.0f)
 	// ========================================================================
 	PassParameters->NumLights = 0;  // Default: use View.DirectionalLight fallback
+
+	for (int32 i = 0; i < FLUID_MAX_LIGHTS; ++i)
+	{
+		PassParameters->LightDirectionsAndIntensity[i] = FVector4f(0, 0, 0, 0);
+		PassParameters->LightColors[i] = FVector4f(0, 0, 0, 0);
+	}
 
 	// TODO: Populate lights from FScene if needed
 	// Example future implementation:

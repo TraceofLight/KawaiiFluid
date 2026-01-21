@@ -91,7 +91,6 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 	// Map settings to LocalParameters
 	LocalParameters.bEnableRendering = Settings.bEnabled;
 	LocalParameters.PipelineType = Settings.PipelineType;
-	LocalParameters.ShadingMode = Settings.ShadingMode;
 	LocalParameters.FluidColor = Settings.FluidColor;
 	LocalParameters.FresnelStrength = Settings.FresnelStrength;
 	LocalParameters.RefractiveIndex = Settings.RefractiveIndex;
@@ -102,9 +101,6 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 	LocalParameters.SmoothingRadius = Settings.SmoothingRadius;
 	LocalParameters.RenderTargetScale = Settings.RenderTargetScale;
 	LocalParameters.ThicknessScale = Settings.ThicknessScale;
-	LocalParameters.Metallic = Settings.Metallic;
-	LocalParameters.Roughness = Settings.Roughness;
-	LocalParameters.SubsurfaceOpacity = Settings.SubsurfaceOpacity;
 
 	// Anisotropy parameters
 	LocalParameters.AnisotropyParams = Settings.AnisotropyParams;
@@ -276,10 +272,7 @@ void UKawaiiFluidMetaballRenderer::UpdatePipeline()
 	}
 
 	const TCHAR* PipelineName = (Params.PipelineType == EMetaballPipelineType::RayMarching) ? TEXT("RayMarching") : TEXT("ScreenSpace");
-	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Pipeline=%s, Shading=%s"), PipelineName,
-		Params.ShadingMode == EMetaballShadingMode::PostProcess ? TEXT("PostProcess") :
-		Params.ShadingMode == EMetaballShadingMode::GBuffer ? TEXT("GBuffer") :
-		Params.ShadingMode == EMetaballShadingMode::Opaque ? TEXT("Opaque") : TEXT("Translucent"));
+	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Pipeline=%s, Shading=PostProcess"), PipelineName);
 }
 
 void UKawaiiFluidMetaballRenderer::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)

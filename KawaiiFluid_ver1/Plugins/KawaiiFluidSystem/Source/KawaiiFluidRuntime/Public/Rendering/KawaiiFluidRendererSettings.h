@@ -80,10 +80,6 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 		meta = (EditCondition = "bEnabled", DisplayName = "Pipeline Type"))
 	EMetaballPipelineType PipelineType = EMetaballPipelineType::ScreenSpace;
 
-	/** Shading mode - how the fluid surface is lit/rendered */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering",
-		meta = (EditCondition = "bEnabled", DisplayName = "Shading Mode"))
-	EMetaballShadingMode ShadingMode = EMetaballShadingMode::PostProcess;
 
 	/** Use simulation particle radius for rendering (if true, ignores ParticleRenderRadius) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering", meta = (EditCondition = "bEnabled"))
@@ -162,24 +158,6 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (EditCondition = "bEnabled", ClampMin = "0.1", ClampMax = "10.0"))
 	float ThicknessScale = 1.0f;
 
-	//========================================
-	// G-Buffer Mode Parameters
-	//========================================
-
-	/** Metallic value for GBuffer (G-Buffer shading mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|GBuffer",
-		meta = (EditCondition = "bEnabled && ShadingMode == EMetaballShadingMode::GBuffer", ClampMin = "0.0", ClampMax = "1.0"))
-	float Metallic = 0.1f;
-
-	/** Roughness value for GBuffer (G-Buffer shading mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|GBuffer",
-		meta = (EditCondition = "bEnabled && ShadingMode == EMetaballShadingMode::GBuffer", ClampMin = "0.0", ClampMax = "1.0"))
-	float Roughness = 0.3f;
-
-	/** Subsurface scattering opacity (G-Buffer shading mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|GBuffer",
-		meta = (EditCondition = "bEnabled && ShadingMode == EMetaballShadingMode::GBuffer", ClampMin = "0.0", ClampMax = "1.0"))
-	float SubsurfaceOpacity = 0.5f;
 };
 
 // Backwards compatibility alias

@@ -18,79 +18,27 @@ class UKawaiiFluidMetaballRenderer;
  *
  * A Pipeline handles surface computation (how the fluid surface is determined):
  * - ScreenSpace: Depth -> Smoothing -> Normal -> Thickness passes
+ * - RayMarching: 3D Density Volume with SDF
  *
- * Each Pipeline provides three execution points matching UE render callbacks:
- * - ExecutePostBasePass(): PostRenderBasePassDeferred_RenderThread (GBuffer write)
- * - ExecutePrePostProcess(): PrePostProcessPass_RenderThread (Transparency compositing)
- * - ExecuteTonemap(): SubscribeToPostProcessingPass(Tonemap) (PostProcess shading)
+ * Each Pipeline provides two execution points:
+ * - PrepareRender(): Generate intermediate data (depth, normals, thickness, etc.)
+ * - ExecuteRender(): Apply PostProcess shading (custom lighting)
  *
- * The Pipeline handles ShadingMode internally via switch statements.
+ * All pipelines use PostProcess shading mode.
  */
 class IKawaiiMetaballRenderingPipeline
 {
 public:
 	virtual ~IKawaiiMetaballRenderingPipeline() = default;
 
-	/**
-	 * Execute at PostBasePass timing (PostRenderBasePassDeferred_RenderThread)
-	 * Used for: GBuffer write, Translucent Stencil marking
-	 *
-	 * Called for:
-	 * - GBuffer mode: Write to GBuffer textures
-	 * - Translucent mode: Write to GBuffer + Stencil=0x01 marking
-	 *
-	 * @param GraphBuilder     RDG builder for pass registration
-	 * @param View             Scene view for rendering
-	 * @param RenderParams     Fluid rendering parameters (includes ShadingMode)
-	 * @param Renderers        Array of renderers to process
-	 * @param SceneDepthTexture Scene depth texture
-	 */
-	virtual void ExecutePostBasePass(
-		FRDGBuilder& GraphBuilder,
-		const FSceneView& View,
-		const FFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture) = 0;
+
 
 	/**
-	 * Execute at PrePostProcess timing (PrePostProcessPass_RenderThread)
-	 * Used for: Transparency compositing (Translucent mode only)
+	 * Prepare data for rendering (called at PrePostProcess timing)
+	 * Generates intermediate textures/buffers needed by ExecuteRender.
 	 *
-	 * Called for:
-	 * - Translucent mode: Apply refraction and absorption effects
-	 *
-	 * @param GraphBuilder     RDG builder for pass registration
-	 * @param View             Scene view for rendering
-	 * @param RenderParams     Fluid rendering parameters
-	 * @param Renderers        Array of renderers to process
-	 * @param SceneDepthTexture Scene depth texture (with Stencil marking)
-	 * @param SceneColorTexture Lit scene color texture
-	 * @param Output           Final render target
-	 * @param GBufferATexture  GBuffer A (normals for refraction)
-	 * @param GBufferDTexture  GBuffer D (thickness for absorption)
-	 */
-	virtual void ExecutePrePostProcess(
-		FRDGBuilder& GraphBuilder,
-		const FSceneView& View,
-		const FFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture,
-		FRDGTextureRef SceneColorTexture,
-		FScreenPassRenderTarget Output,
-		FRDGTextureRef GBufferATexture = nullptr,
-		FRDGTextureRef GBufferDTexture = nullptr) = 0;
-
-	/**
-	 * Prepare data for Tonemap shading (called at Tonemap timing)
-	 * Used for: Generating intermediate data needed by ExecuteTonemap
-	 *
-	 * Called for:
-	 * - PostProcess mode: Generate intermediate textures/buffers
-	 *   - ScreenSpace: Depth, Normal, Thickness textures
-	 *
-	 * NOTE: This is NOT the same as ExecutePostBasePass.
-	 *       ExecutePostBasePass is for GBuffer/Translucent modes at PostBasePass timing.
-	 *       PrepareForTonemap is for PostProcess mode at Tonemap timing.
+	 * - ScreenSpace: Depth, Normal, Thickness textures
+	 * - RayMarching: 3D Density Volume with SDF
 	 *
 	 * @param GraphBuilder     RDG builder for pass registration
 	 * @param View             Scene view for rendering
@@ -106,13 +54,12 @@ public:
 		FRDGTextureRef SceneDepthTexture) = 0;
 
 	/**
-	 * Execute at Tonemap timing (SubscribeToPostProcessingPass - Tonemap)
-	 * Used for: PostProcess shading (PostProcess mode only)
+	 * Execute rendering (called at PrePostProcess timing)
+	 * Applies PostProcess shading using intermediate data from PrepareRender.
 	 *
-	 * Called for:
-	 * - PostProcess mode: Apply custom lighting (Blinn-Phong, Fresnel, Beer's Law)
+	 * All pipelines use custom lighting (Blinn-Phong, Fresnel, Beer's Law).
 	 *
-	 * NOTE: PrepareForTonemap must be called before this to prepare intermediate data.
+	 * NOTE: PrepareRender must be called before this.
 	 *
 	 * @param GraphBuilder     RDG builder for pass registration
 	 * @param View             Scene view for rendering

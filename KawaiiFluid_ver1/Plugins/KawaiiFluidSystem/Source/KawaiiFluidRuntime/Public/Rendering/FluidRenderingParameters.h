@@ -22,61 +22,9 @@ enum class EMetaballPipelineType : uint8
 	RayMarching UMETA(DisplayName = "Ray Marching")
 };
 
-/**
- * Metaball Shading Mode
- * Defines how the fluid surface is rendered/lit.
- */
-UENUM(BlueprintType)
-enum class EMetaballShadingMode : uint8
-{
-	/** PostProcess: Custom lighting (Blinn-Phong, Fresnel, Beer's Law) */
-	PostProcess UMETA(DisplayName = "Post Process"),
-
-	/** GBuffer: Legacy GBuffer write for Lumen/VSM integration */
-	GBuffer UMETA(DisplayName = "GBuffer (Legacy)"),
-
-	/** Opaque: Experimental full GBuffer write approach */
-	Opaque UMETA(DisplayName = "Opaque (Experimental)"),
-
-	/** Translucent: Experimental Depth/Normal only to GBuffer, Color/Refraction later */
-	Translucent UMETA(DisplayName = "Translucent (Experimental)")
-};
-
-/**
- * Shading Pass Timing
- * Defines when the shading pass is executed in the rendering pipeline.
- * Each timing corresponds to a specific UE render callback.
- * Used as bitmask flags.
- */
-UENUM(BlueprintType, Meta = (Bitflags, UseEnumValuesAsMaskValuesInEditor = "true"))
-enum class EShadingPassTiming : uint8
-{
-	None = 0 UMETA(Hidden),
-
-	/** PostBasePass: PostRenderBasePassDeferred_RenderThread - GBuffer write, Stencil marking */
-	PostBasePass = 1 << 0 UMETA(DisplayName = "Post Base Pass"),
-
-	/** PrePostProcess: PrePostProcessPass_RenderThread - Transparency compositing (Translucent) */
-	PrePostProcess = 1 << 1 UMETA(DisplayName = "Pre Post Process"),
-
-	/** Tonemap: SubscribeToPostProcessingPass(Tonemap) - PostProcess shading */
-	Tonemap = 1 << 2 UMETA(DisplayName = "Tonemap")
-};
-ENUM_CLASS_FLAGS(EShadingPassTiming)
-
-/**
- * SSFR Rendering Mode (DEPRECATED - use EMetaballPipelineType + EMetaballShadingMode)
- * Kept for backwards compatibility during migration.
- */
-UENUM(BlueprintType)
-enum class ESSFRRenderingMode : uint8
-{
-	/** Custom lighting implementation (Blinn-Phong, Fresnel, Beer's Law) */
-	Custom UMETA(DisplayName = "Custom"),
-
-	/** Write to GBuffer for Lumen/VSM integration */
-	GBuffer UMETA(DisplayName = "G-Buffer")
-};
+// Removed: EMetaballShadingMode (all pipelines use PostProcess lighting only)
+// Removed: EShadingPassTiming (no longer needed)
+// Removed: ESSFRRenderingMode (deprecated)
 
 /**
  * SSR Debug visualization mode.
@@ -133,9 +81,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
 	EMetaballPipelineType PipelineType = EMetaballPipelineType::ScreenSpace;
 
-	/** Shading mode (how surface is lit/rendered) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
-	EMetaballShadingMode ShadingMode = EMetaballShadingMode::PostProcess;
+	// Removed: ShadingMode (all pipelines now use PostProcess lighting only)
 
 	/** Particle render radius (screen space, cm) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Depth",
@@ -411,27 +357,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
 	FLinearColor SSSColor = FLinearColor(1.0f, 0.5f, 0.3f, 1.0f);
 
-	//========================================
-	// G-Buffer Mode Parameters
-	//========================================
-
-	/** Metallic value for GBuffer (G-Buffer mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|GBuffer",
-		meta = (EditCondition = "ShadingMode == EMetaballShadingMode::GBuffer", ClampMin = "0.0",
-			ClampMax = "1.0"))
-	float Metallic = 0.1f;
-
-	/** Roughness value for GBuffer (G-Buffer mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|GBuffer",
-		meta = (EditCondition = "ShadingMode == EMetaballShadingMode::GBuffer", ClampMin = "0.0",
-			ClampMax = "1.0"))
-	float Roughness = 0.3f;
-
-	/** Subsurface scattering opacity (G-Buffer mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|GBuffer",
-		meta = (EditCondition = "ShadingMode == EMetaballShadingMode::GBuffer", ClampMin = "0.0",
-			ClampMax = "1.0"))
-	float SubsurfaceOpacity = 0.5f;
+	// Removed: G-Buffer Mode Parameters (GBuffer/Opaque/Translucent modes removed)
 
 	//========================================
 	// Ray Marching Parameters
@@ -700,7 +626,6 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 {
 	uint32 Hash = GetTypeHash(Params.bEnableRendering);
 	Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Params.PipelineType)));
-	Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Params.ShadingMode)));
 	Hash = HashCombine(Hash, GetTypeHash(Params.FluidColor.ToString()));
 	Hash = HashCombine(Hash, GetTypeHash(Params.F0Override));
 	Hash = HashCombine(Hash, GetTypeHash(Params.FresnelStrength));
@@ -739,9 +664,6 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.SurfaceDecoration.Emissive.bEnabled));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RenderTargetScale));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ThicknessScale));
-	Hash = HashCombine(Hash, GetTypeHash(Params.Metallic));
-	Hash = HashCombine(Hash, GetTypeHash(Params.Roughness));
-	Hash = HashCombine(Hash, GetTypeHash(Params.SubsurfaceOpacity));
 	// SSS parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSIntensity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SSSColor.ToString()));
@@ -781,7 +703,6 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 {
 	return A.bEnableRendering == B.bEnableRendering &&
 		A.PipelineType == B.PipelineType &&
-		A.ShadingMode == B.ShadingMode &&
 		A.FluidColor.Equals(B.FluidColor, 0.001f) &&
 		FMath::IsNearlyEqual(A.F0Override, B.F0Override, 0.001f) &&
 		FMath::IsNearlyEqual(A.FresnelStrength, B.FresnelStrength, 0.001f) &&
@@ -823,9 +744,6 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 		A.SurfaceDecoration.Emissive.bEnabled == B.SurfaceDecoration.Emissive.bEnabled &&
 		FMath::IsNearlyEqual(A.RenderTargetScale, B.RenderTargetScale, 0.001f) &&
 		FMath::IsNearlyEqual(A.ThicknessScale, B.ThicknessScale, 0.001f) &&
-		FMath::IsNearlyEqual(A.Metallic, B.Metallic, 0.001f) &&
-		FMath::IsNearlyEqual(A.Roughness, B.Roughness, 0.001f) &&
-		FMath::IsNearlyEqual(A.SubsurfaceOpacity, B.SubsurfaceOpacity, 0.001f) &&
 		// SSS parameters
 		FMath::IsNearlyEqual(A.SSSIntensity, B.SSSIntensity, 0.001f) &&
 		A.SSSColor.Equals(B.SSSColor, 0.001f) &&

@@ -37,22 +37,6 @@ FKawaiiRayMarchingPipeline::~FKawaiiRayMarchingPipeline()
 {
 }
 
-void FKawaiiRayMarchingPipeline::ExecutePostBasePass(
-	FRDGBuilder& GraphBuilder,
-	const FSceneView& View,
-	const FFluidRenderingParameters& RenderParams,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-	FRDGTextureRef SceneDepthTexture)
-{
-	// Ray marching doesn't use PostBasePass for GBuffer writes
-	// All rendering happens at PrePostProcess/Tonemap timing
-
-	static int32 LogFrameCounter = 0;
-	if (++LogFrameCounter % 60 == 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT("[RayMarching] ExecutePostBasePass - Renderers: %d"), Renderers.Num());
-	}
-}
 
 void FKawaiiRayMarchingPipeline::PrepareRender(
 	FRDGBuilder& GraphBuilder,
@@ -286,29 +270,6 @@ void FKawaiiRayMarchingPipeline::PrepareRender(
 	}
 }
 
-void FKawaiiRayMarchingPipeline::ExecutePrePostProcess(
-	FRDGBuilder& GraphBuilder,
-	const FSceneView& View,
-	const FFluidRenderingParameters& RenderParams,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-	FRDGTextureRef SceneDepthTexture,
-	FRDGTextureRef SceneColorTexture,
-	FScreenPassRenderTarget Output,
-	FRDGTextureRef GBufferATexture,
-	FRDGTextureRef GBufferDTexture)
-{
-	RDG_EVENT_SCOPE(GraphBuilder, "RayMarching.PrePostProcess");
-
-	static int32 LogFrameCounter = 0;
-	if (++LogFrameCounter % 60 == 0)
-	{
-		UE_LOG(LogTemp, Log, TEXT("[RayMarching] ExecutePrePostProcess - Renderers: %d, VolumeValid: %d"),
-			Renderers.Num(), CachedVolumeTextures.IsValid() ? 1 : 0);
-	}
-
-	// Ray marching doesn't use PrePostProcess
-	// Main rendering happens at Tonemap timing
-}
 
 void FKawaiiRayMarchingPipeline::ExecuteRender(
 	FRDGBuilder& GraphBuilder,
