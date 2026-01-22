@@ -31,10 +31,10 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: BeginPlay - TargetVolume=%s"),
 		*GetName(), TargetVolume ? *TargetVolume->GetName() : TEXT("None"));
 
-	// Auto spawn for ShapeVolume mode
-	if (IsShapeVolumeMode() && bAutoSpawnOnBeginPlay && !bAutoSpawnExecuted)
+	// Auto spawn for Shape mode
+	if (IsShapeMode() && bAutoSpawnOnBeginPlay && !bAutoSpawnExecuted)
 	{
-		ExecuteAutoSpawn();
+		SpawnShape();
 	}
 }
 
@@ -64,8 +64,8 @@ void UKawaiiFluidEmitterComponent::TickComponent(float DeltaTime, ELevelTick Tic
 	}
 #endif
 
-	// Process continuous spawning for Emitter mode (game world only)
-	if (bIsGameWorld && IsEmitterMode())
+	// Process continuous spawning for Stream mode (game world only)
+	if (bIsGameWorld && IsStreamMode())
 	{
 		ProcessContinuousSpawn(DeltaTime);
 	}
@@ -95,7 +95,7 @@ float UKawaiiFluidEmitterComponent::GetParticleSpacing() const
 	return 10.0f; // Default fallback
 }
 
-void UKawaiiFluidEmitterComponent::ExecuteAutoSpawn()
+void UKawaiiFluidEmitterComponent::SpawnShape()
 {
 	if (bAutoSpawnExecuted)
 	{
@@ -105,69 +105,35 @@ void UKawaiiFluidEmitterComponent::ExecuteAutoSpawn()
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent::ExecuteAutoSpawn - No target Volume available"));
+		UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent::SpawnShape - No target Volume available"));
 		return;
 	}
 
 	bAutoSpawnExecuted = true;
 
-	const FVector SpawnCenter = GetComponentLocation() + SpawnSettings.SpawnOffset;
+	const FVector SpawnCenter = GetComponentLocation() + SpawnOffset;
 	const float Spacing = GetParticleSpacing();
-	const FVector InitialVelocity = SpawnSettings.InitialVelocity;
 
 	int32 SpawnedCount = 0;
 
-	// Use hexagonal pattern if configured
-	const bool bUseHexagonal = (SpawnSettings.GridPattern == ESpawnGridPattern::Hexagonal);
-
-	switch (SpawnSettings.ShapeType)
+	// Always use hexagonal pattern (only mode supported)
+	switch (ShapeType)
 	{
-	case EFluidShapeType::Sphere:
-		if (bUseHexagonal)
-		{
-			SpawnedCount = SpawnParticlesSphereHexagonal(SpawnCenter, SpawnSettings.SphereRadius, Spacing, InitialVelocity);
-		}
-		else
-		{
-			const int32 Count = SpawnSettings.bAutoCalculateParticleCount ?
-				SpawnSettings.CalculateExpectedParticleCount(Spacing) : SpawnSettings.ParticleCount;
-			SpawnParticlesSphereRandom(SpawnCenter, SpawnSettings.SphereRadius, Count, InitialVelocity);
-			SpawnedCount = Count;
-		}
+	case EKawaiiFluidEmitterShapeType::Sphere:
+		SpawnedCount = SpawnParticlesSphereHexagonal(SpawnCenter, SphereRadius, Spacing, InitialVelocity);
 		break;
 
-	case EFluidShapeType::Box:
-		if (bUseHexagonal)
-		{
-			SpawnedCount = SpawnParticlesBoxHexagonal(SpawnCenter, SpawnSettings.BoxExtent, Spacing, InitialVelocity);
-		}
-		else
-		{
-			const int32 Count = SpawnSettings.bAutoCalculateParticleCount ?
-				SpawnSettings.CalculateExpectedParticleCount(Spacing) : SpawnSettings.ParticleCount;
-			SpawnParticlesBoxRandom(SpawnCenter, SpawnSettings.BoxExtent, Count, InitialVelocity);
-			SpawnedCount = Count;
-		}
+	case EKawaiiFluidEmitterShapeType::Box:
+		SpawnedCount = SpawnParticlesBoxHexagonal(SpawnCenter, BoxExtent, Spacing, InitialVelocity);
 		break;
 
-	case EFluidShapeType::Cylinder:
-		if (bUseHexagonal)
-		{
-			SpawnedCount = SpawnParticlesCylinderHexagonal(SpawnCenter, SpawnSettings.CylinderRadius,
-				SpawnSettings.CylinderHalfHeight, Spacing, InitialVelocity);
-		}
-		else
-		{
-			const int32 Count = SpawnSettings.bAutoCalculateParticleCount ?
-				SpawnSettings.CalculateExpectedParticleCount(Spacing) : SpawnSettings.ParticleCount;
-			SpawnParticlesCylinderRandom(SpawnCenter, SpawnSettings.CylinderRadius,
-				SpawnSettings.CylinderHalfHeight, Count, InitialVelocity);
-			SpawnedCount = Count;
-		}
+	case EKawaiiFluidEmitterShapeType::Cylinder:
+		SpawnedCount = SpawnParticlesCylinderHexagonal(SpawnCenter, CylinderRadius,
+			CylinderHalfHeight, Spacing, InitialVelocity);
 		break;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::ExecuteAutoSpawn - Spawned %d particles"), SpawnedCount);
+	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::SpawnShape - Spawned %d particles"), SpawnedCount);
 }
 
 void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
@@ -178,25 +144,45 @@ void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
 	}
 
 	// Clamp to remaining budget
-	if (SpawnSettings.MaxParticleCount > 0)
+	if (MaxParticleCount > 0)
 	{
-		Count = FMath::Min(Count, SpawnSettings.MaxParticleCount - SpawnedParticleCount);
+		Count = FMath::Min(Count, MaxParticleCount - SpawnedParticleCount);
 	}
 
-	const FVector SpawnPos = GetComponentLocation() + SpawnSettings.SpawnOffset;
-	const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
+	// Get effective spacing
+	float EffectiveSpacing = StreamParticleSpacing;
+	if (EffectiveSpacing <= 0.0f)
+	{
+		if (AKawaiiFluidVolume* Vol = GetTargetVolume())
+		{
+			if (UKawaiiFluidPresetDataAsset* Pst = Vol->GetPreset())
+			{
+				EffectiveSpacing = Pst->SmoothingRadius * 0.5f;
+			}
+		}
+	}
+	if (EffectiveSpacing <= 0.0f)
+	{
+		EffectiveSpacing = 10.0f;
+	}
 
-	SpawnParticleDirectional(SpawnPos, WorldDirection, SpawnSettings.SpawnSpeed, Count,
-		SpawnSettings.EmitterType == EFluidEmitterType::Spray ? SpawnSettings.ConeAngle : 0.0f);
+	const FVector SpawnPos = GetComponentLocation() + SpawnOffset;
+	const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnDirection.GetSafeNormal());
+
+	// Spawn layers instead of random particles
+	for (int32 i = 0; i < Count; ++i)
+	{
+		SpawnStreamLayer(SpawnPos, WorldDirection, SpawnSpeed, StreamRadius, EffectiveSpacing);
+	}
 }
 
 bool UKawaiiFluidEmitterComponent::HasReachedParticleLimit() const
 {
-	if (SpawnSettings.MaxParticleCount <= 0)
+	if (MaxParticleCount <= 0)
 	{
 		return false;
 	}
-	return SpawnedParticleCount >= SpawnSettings.MaxParticleCount;
+	return SpawnedParticleCount >= MaxParticleCount;
 }
 
 void UKawaiiFluidEmitterComponent::ProcessContinuousSpawn(float DeltaTime)
@@ -206,58 +192,15 @@ void UKawaiiFluidEmitterComponent::ProcessContinuousSpawn(float DeltaTime)
 		return;
 	}
 
-	switch (SpawnSettings.EmitterType)
-	{
-	case EFluidEmitterType::Stream:
-		ProcessStreamEmitter(DeltaTime);
-		break;
-	case EFluidEmitterType::HexagonalStream:
-		ProcessHexagonalStreamEmitter(DeltaTime);
-		break;
-	case EFluidEmitterType::Spray:
-		ProcessSprayEmitter(DeltaTime);
-		break;
-	}
+	// Only Stream mode is supported
+	ProcessStreamEmitter(DeltaTime);
 }
 
 void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 {
-	if (SpawnSettings.ParticlesPerSecond <= 0.0f)
-	{
-		return;
-	}
-
-	SpawnAccumulator += DeltaTime;
-	const float SpawnInterval = 1.0f / SpawnSettings.ParticlesPerSecond;
-	int32 ParticlesToSpawn = FMath::FloorToInt(SpawnAccumulator / SpawnInterval);
-
-	if (ParticlesToSpawn > 0)
-	{
-		SpawnAccumulator -= ParticlesToSpawn * SpawnInterval;
-
-		// Recycle if needed
-		RecycleOldestParticlesIfNeeded(ParticlesToSpawn);
-
-		// Clamp to particle limit
-		if (SpawnSettings.MaxParticleCount > 0 && !bRecycleOldestParticles)
-		{
-			ParticlesToSpawn = FMath::Min(ParticlesToSpawn, SpawnSettings.MaxParticleCount - SpawnedParticleCount);
-		}
-
-		if (ParticlesToSpawn > 0)
-		{
-			const FVector SpawnPos = GetComponentLocation() + SpawnSettings.SpawnOffset;
-			const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
-			SpawnParticleDirectional(SpawnPos, WorldDirection, SpawnSettings.SpawnSpeed, ParticlesToSpawn, 0.0f);
-		}
-	}
-}
-
-void UKawaiiFluidEmitterComponent::ProcessHexagonalStreamEmitter(float DeltaTime)
-{
 	// Calculate Spacing exactly like KawaiiFluidComponent does:
 	// Use StreamParticleSpacing if set, otherwise Preset->SmoothingRadius * 0.5f
-	float EffectiveSpacing = SpawnSettings.StreamParticleSpacing;
+	float EffectiveSpacing = StreamParticleSpacing;
 	if (EffectiveSpacing <= 0.0f)
 	{
 		if (AKawaiiFluidVolume* Vol = GetTargetVolume())
@@ -272,32 +215,18 @@ void UKawaiiFluidEmitterComponent::ProcessHexagonalStreamEmitter(float DeltaTime
 	{
 		EffectiveSpacing = 10.0f;  // fallback
 	}
-	const float LayerSpacing = EffectiveSpacing * SpawnSettings.StreamLayerSpacingRatio;
+	const float LayerSpacing = EffectiveSpacing * StreamLayerSpacingRatio;
 
 	float LayersToSpawn = 0.0f;
 
-	if (SpawnSettings.StreamLayerMode == EStreamLayerMode::VelocityBased)
-	{
-		// Calculate layer spawn based on velocity
-		const float DistanceThisFrame = SpawnSettings.SpawnSpeed * DeltaTime;
-		LayerDistanceAccumulator += DistanceThisFrame;
+	// Velocity-based layer spawning (only mode supported)
+	const float DistanceThisFrame = SpawnSpeed * DeltaTime;
+	LayerDistanceAccumulator += DistanceThisFrame;
 
-		if (LayerDistanceAccumulator >= LayerSpacing)
-		{
-			LayersToSpawn = FMath::FloorToFloat(LayerDistanceAccumulator / LayerSpacing);
-			LayerDistanceAccumulator = FMath::Fmod(LayerDistanceAccumulator, LayerSpacing);
-		}
-	}
-	else // FixedRate
+	if (LayerDistanceAccumulator >= LayerSpacing)
 	{
-		SpawnAccumulator += DeltaTime;
-		const float LayerInterval = 1.0f / SpawnSettings.StreamLayersPerSecond;
-
-		if (SpawnAccumulator >= LayerInterval)
-		{
-			LayersToSpawn = FMath::FloorToFloat(SpawnAccumulator / LayerInterval);
-			SpawnAccumulator = FMath::Fmod(SpawnAccumulator, LayerInterval);
-		}
+		LayersToSpawn = FMath::FloorToFloat(LayerDistanceAccumulator / LayerSpacing);
+		LayerDistanceAccumulator = FMath::Fmod(LayerDistanceAccumulator, LayerSpacing);
 	}
 
 	const int32 LayerCount = FMath::FloorToInt(LayersToSpawn);
@@ -306,55 +235,22 @@ void UKawaiiFluidEmitterComponent::ProcessHexagonalStreamEmitter(float DeltaTime
 		return;
 	}
 
-	const FVector SpawnPos = GetComponentLocation() + SpawnSettings.SpawnOffset;
-	const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
+	const FVector SpawnPos = GetComponentLocation() + SpawnOffset;
+	const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnDirection.GetSafeNormal());
 
 	for (int32 i = 0; i < LayerCount; ++i)
 	{
 		// Estimate particles per layer for recycling
 		const int32 EstimatedParticlesPerLayer = FMath::Max(1, FMath::CeilToInt(
-			PI * FMath::Square(SpawnSettings.StreamRadius / EffectiveSpacing)));
+			PI * FMath::Square(StreamRadius / EffectiveSpacing)));
 		RecycleOldestParticlesIfNeeded(EstimatedParticlesPerLayer);
 
-		SpawnHexagonalLayer(SpawnPos, WorldDirection, SpawnSettings.SpawnSpeed,
-			SpawnSettings.StreamRadius, EffectiveSpacing);
+		SpawnStreamLayer(SpawnPos, WorldDirection, SpawnSpeed,
+			StreamRadius, EffectiveSpacing);
 	}
 }
 
-void UKawaiiFluidEmitterComponent::ProcessSprayEmitter(float DeltaTime)
-{
-	if (SpawnSettings.ParticlesPerSecond <= 0.0f)
-	{
-		return;
-	}
-
-	SpawnAccumulator += DeltaTime;
-	const float SpawnInterval = 1.0f / SpawnSettings.ParticlesPerSecond;
-	int32 ParticlesToSpawn = FMath::FloorToInt(SpawnAccumulator / SpawnInterval);
-
-	if (ParticlesToSpawn > 0)
-	{
-		SpawnAccumulator -= ParticlesToSpawn * SpawnInterval;
-
-		// Recycle if needed
-		RecycleOldestParticlesIfNeeded(ParticlesToSpawn);
-
-		// Clamp to particle limit
-		if (SpawnSettings.MaxParticleCount > 0 && !bRecycleOldestParticles)
-		{
-			ParticlesToSpawn = FMath::Min(ParticlesToSpawn, SpawnSettings.MaxParticleCount - SpawnedParticleCount);
-		}
-
-		if (ParticlesToSpawn > 0)
-		{
-			const FVector SpawnPos = GetComponentLocation() + SpawnSettings.SpawnOffset;
-			const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
-			SpawnParticleDirectional(SpawnPos, WorldDirection, SpawnSettings.SpawnSpeed, ParticlesToSpawn, SpawnSettings.ConeAngle);
-		}
-	}
-}
-
-int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center, float Radius, float Spacing, FVector InitialVelocity)
+int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center, float Radius, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f || Radius <= 0.0f) return 0;
@@ -370,7 +266,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 	const float RowSpacingY = AdjustedSpacing * 0.866025f;   // sqrt(3)/2
 	const float LayerSpacingZ = AdjustedSpacing * 0.816497f; // sqrt(2/3)
 	const float RadiusSq = Radius * Radius;
-	const float JitterRange = AdjustedSpacing * SpawnSettings.JitterAmount;
+	const float JitterRange = AdjustedSpacing * JitterAmount;
 
 	// Integer-based grid (matches SimulationModule)
 	const int32 GridSize = FMath::CeilToInt(Radius / AdjustedSpacing) + 1;
@@ -409,7 +305,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 				FVector WorldPos = Center + LocalPos;
 
 				// Apply jitter
-				if (SpawnSettings.bUseJitter && JitterRange > 0.0f)
+				if (bUseJitter && JitterRange > 0.0f)
 				{
 					WorldPos += FVector(
 						FMath::FRandRange(-JitterRange, JitterRange),
@@ -419,7 +315,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 				}
 
 				Positions.Add(WorldPos);
-				Velocities.Add(InitialVelocity);
+				Velocities.Add(InInitialVelocity);
 			}
 		}
 	}
@@ -428,7 +324,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 	return Positions.Num();
 }
 
-int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, FVector Extent, float Spacing, FVector InitialVelocity)
+int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, FVector Extent, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f) return 0;
@@ -443,7 +339,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 	// Hexagonal Close Packing constants
 	const float RowSpacingY = AdjustedSpacing * 0.866025f;   // sqrt(3)/2
 	const float LayerSpacingZ = AdjustedSpacing * 0.816497f; // sqrt(2/3)
-	const float JitterRange = AdjustedSpacing * SpawnSettings.JitterAmount;
+	const float JitterRange = AdjustedSpacing * JitterAmount;
 
 	// Calculate grid counts (matches SimulationModule)
 	const int32 CountX = FMath::Max(1, FMath::CeilToInt(Extent.X * 2.0f / AdjustedSpacing));
@@ -487,7 +383,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 				FVector WorldPos = Center + LocalPos;
 
 				// Apply jitter
-				if (SpawnSettings.bUseJitter && JitterRange > 0.0f)
+				if (bUseJitter && JitterRange > 0.0f)
 				{
 					WorldPos += FVector(
 						FMath::FRandRange(-JitterRange, JitterRange),
@@ -497,7 +393,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 				}
 
 				Positions.Add(WorldPos);
-				Velocities.Add(InitialVelocity);
+				Velocities.Add(InInitialVelocity);
 			}
 		}
 	}
@@ -506,7 +402,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 	return Positions.Num();
 }
 
-int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Center, float Radius, float HalfHeight, float Spacing, FVector InitialVelocity)
+int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Center, float Radius, float HalfHeight, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f || Radius <= 0.0f || HalfHeight <= 0.0f) return 0;
@@ -521,7 +417,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 	// Hexagonal Close Packing constants
 	const float RowSpacingY = AdjustedSpacing * 0.866025f;   // sqrt(3)/2
 	const float LayerSpacingZ = AdjustedSpacing * 0.816497f; // sqrt(2/3)
-	const float JitterRange = AdjustedSpacing * SpawnSettings.JitterAmount;
+	const float JitterRange = AdjustedSpacing * JitterAmount;
 	const float RadiusSq = Radius * Radius;
 
 	// Integer-based grid (matches SimulationModule)
@@ -562,7 +458,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 				FVector WorldPos = Center + LocalPos;
 
 				// Apply jitter
-				if (SpawnSettings.bUseJitter && JitterRange > 0.0f)
+				if (bUseJitter && JitterRange > 0.0f)
 				{
 					WorldPos += FVector(
 						FMath::FRandRange(-JitterRange, JitterRange),
@@ -572,7 +468,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 				}
 
 				Positions.Add(WorldPos);
-				Velocities.Add(InitialVelocity);
+				Velocities.Add(InInitialVelocity);
 			}
 		}
 	}
@@ -581,135 +477,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 	return Positions.Num();
 }
 
-void UKawaiiFluidEmitterComponent::SpawnParticlesSphereRandom(FVector Center, float Radius, int32 Count, FVector InitialVelocity)
-{
-	TArray<FVector> Positions;
-	TArray<FVector> Velocities;
-	Positions.Reserve(Count);
-	Velocities.Reserve(Count);
-
-	for (int32 i = 0; i < Count; ++i)
-	{
-		FVector RandomPoint;
-		do
-		{
-			RandomPoint = FVector(
-				FMath::FRandRange(-1.0f, 1.0f),
-				FMath::FRandRange(-1.0f, 1.0f),
-				FMath::FRandRange(-1.0f, 1.0f)
-			);
-		} while (RandomPoint.SizeSquared() > 1.0f);
-
-		Positions.Add(Center + RandomPoint * Radius);
-		Velocities.Add(InitialVelocity);
-	}
-
-	QueueSpawnRequest(Positions, Velocities);
-}
-
-void UKawaiiFluidEmitterComponent::SpawnParticlesBoxRandom(FVector Center, FVector HalfExtent, int32 Count, FVector InitialVelocity)
-{
-	TArray<FVector> Positions;
-	TArray<FVector> Velocities;
-	Positions.Reserve(Count);
-	Velocities.Reserve(Count);
-
-	for (int32 i = 0; i < Count; ++i)
-	{
-		FVector RandomPoint(
-			FMath::FRandRange(-HalfExtent.X, HalfExtent.X),
-			FMath::FRandRange(-HalfExtent.Y, HalfExtent.Y),
-			FMath::FRandRange(-HalfExtent.Z, HalfExtent.Z)
-		);
-		Positions.Add(Center + RandomPoint);
-		Velocities.Add(InitialVelocity);
-	}
-
-	QueueSpawnRequest(Positions, Velocities);
-}
-
-void UKawaiiFluidEmitterComponent::SpawnParticlesCylinderRandom(FVector Center, float Radius, float HalfHeight, int32 Count, FVector InitialVelocity)
-{
-	TArray<FVector> Positions;
-	TArray<FVector> Velocities;
-	Positions.Reserve(Count);
-	Velocities.Reserve(Count);
-
-	for (int32 i = 0; i < Count; ++i)
-	{
-		const float Angle = FMath::FRandRange(0.0f, 2.0f * PI);
-		const float R = Radius * FMath::Sqrt(FMath::FRand());
-		const float Z = FMath::FRandRange(-HalfHeight, HalfHeight);
-
-		FVector RandomPoint(R * FMath::Cos(Angle), R * FMath::Sin(Angle), Z);
-		Positions.Add(Center + RandomPoint);
-		Velocities.Add(InitialVelocity);
-	}
-
-	QueueSpawnRequest(Positions, Velocities);
-}
-
-void UKawaiiFluidEmitterComponent::SpawnParticleDirectional(FVector Position, FVector Direction, float Speed, int32 Count, float ConeAngle)
-{
-	AKawaiiFluidVolume* Volume = GetTargetVolume();
-	if (!Volume) return;
-
-	TArray<FVector> Positions;
-	TArray<FVector> Velocities;
-	Positions.Reserve(Count);
-	Velocities.Reserve(Count);
-
-	// Normalize direction
-	FVector Dir = Direction.GetSafeNormal();
-	if (Dir.IsNearlyZero())
-	{
-		Dir = FVector(0, 0, -1);  // Default: downward
-	}
-
-	const FVector BaseVelocity = Dir * Speed;
-	const float SpreadRadians = FMath::DegreesToRadians(ConeAngle);
-	const float StreamRadius = SpawnSettings.StreamRadius;
-
-	// Build orthonormal basis perpendicular to direction (same as KawaiiFluidComponent)
-	FVector Right, Up;
-	Dir.FindBestAxisVectors(Right, Up);
-
-	for (int32 i = 0; i < Count; ++i)
-	{
-		// Circular distribution within stream radius (perpendicular to direction)
-		// This matches KawaiiFluidComponent's SimulationModule::SpawnParticleDirectional
-		FVector SpawnPos = Position;
-		if (StreamRadius > 0.0f)
-		{
-			const float RandomAngle = FMath::FRandRange(0.0f, 2.0f * PI);
-			const float RandomRadius = FMath::FRandRange(0.0f, StreamRadius);
-			SpawnPos += Right * FMath::Cos(RandomAngle) * RandomRadius;
-			SpawnPos += Up * FMath::Sin(RandomAngle) * RandomRadius;
-		}
-
-		FVector Velocity = BaseVelocity;
-		if (ConeAngle > 0.0f)
-		{
-			// Random cone direction for spray (same algorithm as SimulationModule)
-			const float RandomPhi = FMath::FRandRange(0.0f, 2.0f * PI);
-			const float RandomTheta = FMath::FRandRange(0.0f, SpreadRadians);
-
-			const float SinTheta = FMath::Sin(RandomTheta);
-			FVector RandomDir = Dir * FMath::Cos(RandomTheta)
-				+ Right * SinTheta * FMath::Cos(RandomPhi)
-				+ Up * SinTheta * FMath::Sin(RandomPhi);
-
-			Velocity = RandomDir.GetSafeNormal() * Speed;
-		}
-
-		Positions.Add(SpawnPos);
-		Velocities.Add(Velocity);
-	}
-
-	QueueSpawnRequest(Positions, Velocities);
-}
-
-void UKawaiiFluidEmitterComponent::SpawnHexagonalLayer(FVector Position, FVector Direction, float Speed, float Radius, float Spacing)
+void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector Direction, float Speed, float Radius, float Spacing)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f || Radius <= 0.0f) return;
@@ -734,7 +502,7 @@ void UKawaiiFluidEmitterComponent::SpawnHexagonalLayer(FVector Position, FVector
 	const float RadiusSq = Radius * Radius;
 
 	// Jitter setup (matches SimulationModule)
-	const float Jitter = FMath::Clamp(SpawnSettings.StreamJitter, 0.0f, 0.5f);
+	const float Jitter = FMath::Clamp(StreamJitter, 0.0f, 0.5f);
 	const float MaxJitterOffset = Spacing * Jitter;
 	const bool bApplyJitter = Jitter > KINDA_SMALL_NUMBER;
 
@@ -826,7 +594,7 @@ UKawaiiFluidSimulationModule* UKawaiiFluidEmitterComponent::GetSimulationModule(
 
 void UKawaiiFluidEmitterComponent::RecycleOldestParticlesIfNeeded(int32 NewParticleCount)
 {
-	if (!bRecycleOldestParticles || SpawnSettings.MaxParticleCount <= 0)
+	if (!bRecycleOldestParticles || MaxParticleCount <= 0)
 	{
 		return;
 	}
@@ -838,22 +606,12 @@ void UKawaiiFluidEmitterComponent::RecycleOldestParticlesIfNeeded(int32 NewParti
 	}
 
 	const int32 CurrentCount = Module->GetParticleCount();
-	const int32 ExcessCount = (CurrentCount + NewParticleCount) - SpawnSettings.MaxParticleCount;
+	const int32 ExcessCount = (CurrentCount + NewParticleCount) - MaxParticleCount;
 
 	if (ExcessCount > 0)
 	{
 		Module->RemoveOldestParticles(ExcessCount);
 	}
-}
-
-FVector UKawaiiFluidEmitterComponent::ApplyJitter(FVector Position, float Spacing) const
-{
-	const float JitterRange = Spacing * SpawnSettings.JitterAmount;
-	return Position + FVector(
-		FMath::FRandRange(-JitterRange, JitterRange),
-		FMath::FRandRange(-JitterRange, JitterRange),
-		FMath::FRandRange(-JitterRange, JitterRange)
-	);
 }
 
 //========================================
@@ -944,32 +702,32 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 		return;
 	}
 
-	const FVector Location = GetComponentLocation() + SpawnSettings.SpawnOffset;
+	const FVector Location = GetComponentLocation() + SpawnOffset;
 	const FQuat Rotation = GetComponentRotation().Quaternion();
 	const FColor SpawnColor = SpawnVolumeWireframeColor;
 	const float Duration = -1.0f;  // Redraw each frame
 	const uint8 DepthPriority = 0;
 	const float Thickness = WireframeThickness;
 
-	if (IsShapeVolumeMode())
+	if (IsShapeMode())
 	{
 		// Shape Volume visualization
-		switch (SpawnSettings.ShapeType)
+		switch (ShapeType)
 		{
-		case EFluidShapeType::Sphere:
+		case EKawaiiFluidEmitterShapeType::Sphere:
 			// Sphere is rotation-independent
-			DrawDebugSphere(World, Location, SpawnSettings.SphereRadius, 24, SpawnColor, false, Duration, DepthPriority, Thickness);
+			DrawDebugSphere(World, Location, SphereRadius, 24, SpawnColor, false, Duration, DepthPriority, Thickness);
 			break;
 
-		case EFluidShapeType::Box:
+		case EKawaiiFluidEmitterShapeType::Box:
 			// Box with rotation
-			DrawDebugBox(World, Location, SpawnSettings.BoxExtent, Rotation, SpawnColor, false, Duration, DepthPriority, Thickness);
+			DrawDebugBox(World, Location, BoxExtent, Rotation, SpawnColor, false, Duration, DepthPriority, Thickness);
 			break;
 
-		case EFluidShapeType::Cylinder:
+		case EKawaiiFluidEmitterShapeType::Cylinder:
 			{
-				const float Radius = SpawnSettings.CylinderRadius;
-				const float HalfHeight = SpawnSettings.CylinderHalfHeight;
+				const float Radius = CylinderRadius;
+				const float HalfHeight = CylinderHalfHeight;
 
 				// Local coordinate cylinder vertices, then apply rotation
 				const FVector LocalTopCenter = FVector(0, 0, HalfHeight);
@@ -1012,17 +770,17 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 			break;
 		}
 	}
-	else // Emitter mode
+	else // Stream mode
 	{
 		// Direction arrow (apply component rotation)
-		const FVector WorldDir = Rotation.RotateVector(SpawnSettings.SpawnDirection.GetSafeNormal());
+		const FVector WorldDir = Rotation.RotateVector(SpawnDirection.GetSafeNormal());
 		const float ArrowLength = 100.0f;
 		const FVector EndPoint = Location + WorldDir * ArrowLength;
 
 		DrawDebugDirectionalArrow(World, Location, EndPoint, 20.0f, SpawnColor, false, Duration, DepthPriority, Thickness);
 
 		// Stream radius circle
-		if (SpawnSettings.StreamRadius > 0.0f)
+		if (StreamRadius > 0.0f)
 		{
 			FVector Right, Up;
 			WorldDir.FindBestAxisVectors(Right, Up);
@@ -1033,44 +791,10 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 				const float Angle1 = (float)i / NumSegments * 2.0f * PI;
 				const float Angle2 = (float)(i + 1) / NumSegments * 2.0f * PI;
 
-				const FVector P1 = Location + (Right * FMath::Cos(Angle1) + Up * FMath::Sin(Angle1)) * SpawnSettings.StreamRadius;
-				const FVector P2 = Location + (Right * FMath::Cos(Angle2) + Up * FMath::Sin(Angle2)) * SpawnSettings.StreamRadius;
+				const FVector P1 = Location + (Right * FMath::Cos(Angle1) + Up * FMath::Sin(Angle1)) * StreamRadius;
+				const FVector P2 = Location + (Right * FMath::Cos(Angle2) + Up * FMath::Sin(Angle2)) * StreamRadius;
 
 				DrawDebugLine(World, P1, P2, SpawnColor, false, Duration, DepthPriority, Thickness);
-			}
-		}
-
-		// Spray emitter: show cone
-		if (SpawnSettings.EmitterType == EFluidEmitterType::Spray && SpawnSettings.ConeAngle > 0.0f)
-		{
-			const float ConeLength = 80.0f;
-			const float HalfAngleRad = FMath::DegreesToRadians(SpawnSettings.ConeAngle * 0.5f);
-			const float ConeRadius = ConeLength * FMath::Tan(HalfAngleRad);
-
-			FVector ConeRight, ConeUp;
-			WorldDir.FindBestAxisVectors(ConeRight, ConeUp);
-
-			// Cone lines from apex to base
-			const int32 NumLines = 8;
-			const FVector ConeCenter = Location + WorldDir * ConeLength;
-
-			for (int32 i = 0; i < NumLines; ++i)
-			{
-				const float Angle = (float)i / NumLines * 2.0f * PI;
-				const FVector ConePoint = ConeCenter + (ConeRight * FMath::Cos(Angle) + ConeUp * FMath::Sin(Angle)) * ConeRadius;
-				DrawDebugLine(World, Location, ConePoint, FColor::Orange, false, Duration, DepthPriority, Thickness * 0.5f);
-			}
-
-			// Cone base circle
-			for (int32 i = 0; i < NumLines; ++i)
-			{
-				const float Angle1 = (float)i / NumLines * 2.0f * PI;
-				const float Angle2 = (float)(i + 1) / NumLines * 2.0f * PI;
-
-				const FVector P1 = ConeCenter + (ConeRight * FMath::Cos(Angle1) + ConeUp * FMath::Sin(Angle1)) * ConeRadius;
-				const FVector P2 = ConeCenter + (ConeRight * FMath::Cos(Angle2) + ConeUp * FMath::Sin(Angle2)) * ConeRadius;
-
-				DrawDebugLine(World, P1, P2, FColor::Orange, false, Duration, DepthPriority, Thickness * 0.5f);
 			}
 		}
 	}

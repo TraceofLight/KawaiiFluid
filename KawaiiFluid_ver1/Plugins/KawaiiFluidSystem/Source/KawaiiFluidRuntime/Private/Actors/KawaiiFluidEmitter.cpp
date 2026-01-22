@@ -12,12 +12,9 @@ AKawaiiFluidEmitter::AKawaiiFluidEmitter()
 	EmitterComponent = CreateDefaultSubobject<UKawaiiFluidEmitterComponent>(TEXT("EmitterComponent"));
 	RootComponent = EmitterComponent;
 
-	// Set default spawn settings for continuous emission
-	EmitterComponent->SpawnSettings.SpawnType = EFluidSpawnType::Emitter;
-	EmitterComponent->SpawnSettings.EmitterType = EFluidEmitterType::Stream;
-	EmitterComponent->SpawnSettings.ParticlesPerSecond = 100.0f;
-	EmitterComponent->SpawnSettings.SpawnSpeed = 100.0f;
-	EmitterComponent->SpawnSettings.SpawnDirection = FVector(0, 0, -1);
+	// Set default settings for continuous stream emission
+	EmitterComponent->EmitterType = EKawaiiFluidEmitterType::Stream;
+	EmitterComponent->SpawnSpeed = 100.0f;
 }
 
 void AKawaiiFluidEmitter::BeginPlay()

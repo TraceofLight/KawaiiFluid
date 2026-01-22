@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
-#include "Components/KawaiiFluidComponent.h"
 #include "KawaiiFluidEmitterComponent.generated.h"
 
 class AKawaiiFluidEmitter;
@@ -12,19 +11,48 @@ class AKawaiiFluidVolume;
 class UKawaiiFluidSimulationModule;
 
 /**
+ * Emitter type for KawaiiFluidEmitterComponent
+ */
+UENUM(BlueprintType)
+enum class EKawaiiFluidEmitterType : uint8
+{
+	/** One-time fill of a shape volume with particles (hexagonal pattern) */
+	Shape UMETA(DisplayName = "Shape"),
+	
+	/** Continuous hexagonal stream emission (like a faucet) */
+	Stream UMETA(DisplayName = "Stream")
+};
+
+/**
+ * Shape type for Shape emitter mode
+ */
+UENUM(BlueprintType)
+enum class EKawaiiFluidEmitterShapeType : uint8
+{
+	/** Spherical volume */
+	Sphere UMETA(DisplayName = "Sphere"),
+	
+	/** Box volume */
+	Box UMETA(DisplayName = "Box"),
+	
+	/** Cylindrical volume */
+	Cylinder UMETA(DisplayName = "Cylinder")
+};
+
+/**
  * Kawaii Fluid Emitter Component
  *
  * Component that handles particle spawning logic for AKawaiiFluidEmitter.
- * Uses FFluidSpawnSettings for compatibility with existing spawn logic.
+ * Supports two modes: Shape (one-time hexagonal fill) and Stream (continuous hexagonal stream).
  *
  * All configuration properties are stored in this component.
  * The AKawaiiFluidEmitter actor provides the world presence.
  *
  * Responsibilities:
  * - Manage target volume reference and registration
- * - Execute spawn logic based on SpawnSettings
- * - Spawn particles in various shapes (sphere, box, cylinder)
- * - Handle continuous/burst spawning (Stream, HexagonalStream, Spray)
+ * - Execute spawn logic based on EmitterType
+ * - Spawn particles in various shapes (sphere, box, cylinder) with hexagonal packing
+ * - Handle continuous stream spawning with hexagonal layers
  * - Track spawn state and accumulated time
  */
 UCLASS(ClassGroup = (KawaiiFluid), meta = (BlueprintSpawnableComponent, DisplayName = "Kawaii Fluid Emitter"))
@@ -48,54 +76,74 @@ public:
 #endif
 
 	//========================================
-	// Target Volume Configuration
+	// Emitter
 	//========================================
 
 	/** The target volume to emit particles into */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter")
 	TObjectPtr<AKawaiiFluidVolume> TargetVolume;
 
 	/** Whether to automatically find the nearest volume if TargetVolume is not set */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter")
 	bool bAutoFindVolume = true;
 
-	//========================================
-	// Wireframe Visualization Settings
-	//========================================
+	/** Emitter type: Shape (one-time fill) or Stream (continuous emission) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter")
+	EKawaiiFluidEmitterType EmitterType = EKawaiiFluidEmitterType::Shape;
 
-	/** Show spawn volume/emitter wireframe in editor */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Wireframe")
-	bool bShowSpawnVolumeWireframe = true;
+	/** Shape type for Shape mode */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Shape", EditConditionHides))
+	EKawaiiFluidEmitterShapeType ShapeType = EKawaiiFluidEmitterShapeType::Sphere;
 
-	/** Wireframe color for spawn volume visualization */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Wireframe",
-		meta = (EditCondition = "bShowSpawnVolumeWireframe"))
-	FColor SpawnVolumeWireframeColor = FColor::Cyan;
+	/** Sphere radius */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Shape && ShapeType == EKawaiiFluidEmitterShapeType::Sphere", EditConditionHides, ClampMin = "1.0"))
+	float SphereRadius = 50.0f;
 
-	/** Wireframe line thickness */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Wireframe",
-		meta = (EditCondition = "bShowSpawnVolumeWireframe", ClampMin = "0.5", ClampMax = "10.0"))
-	float WireframeThickness = 2.0f;
+	/** Box half-extent (size / 2) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Shape && ShapeType == EKawaiiFluidEmitterShapeType::Box", EditConditionHides))
+	FVector BoxExtent = FVector(50.0f, 50.0f, 50.0f);
 
-	//========================================
-	// Spawn Settings (using FFluidSpawnSettings for compatibility)
-	//========================================
+	/** Cylinder radius */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Shape && ShapeType == EKawaiiFluidEmitterShapeType::Cylinder", EditConditionHides, ClampMin = "1.0"))
+	float CylinderRadius = 30.0f;
 
-	/** All spawn configuration settings */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Spawn Settings")
-	FFluidSpawnSettings SpawnSettings;
+	/** Cylinder half-height */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Shape && ShapeType == EKawaiiFluidEmitterShapeType::Cylinder", EditConditionHides, ClampMin = "1.0"))
+	float CylinderHalfHeight = 50.0f;
 
-	//========================================
-	// Runtime Settings
-	//========================================
+	/** Initial velocity for spawned particles (Shape mode) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Shape", EditConditionHides))
+	FVector InitialVelocity = FVector::ZeroVector;
 
-	/** Whether to auto-spawn on BeginPlay (ShapeVolume mode) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime")
+	/** Particle emission speed (cm/s) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Stream", EditConditionHides, ClampMin = "0.0"))
+	float SpawnSpeed = 100.0f;
+
+	/** Stream cross-sectional radius */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Stream", EditConditionHides, ClampMin = "1.0"))
+	float StreamRadius = 5.0f;
+
+	/** Maximum particles this emitter can spawn (0 = unlimited) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (ClampMin = "0"))
+	int32 MaxParticleCount = 0;
+
+	/** Whether to auto-spawn on BeginPlay (Shape mode) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Shape", EditConditionHides))
 	bool bAutoSpawnOnBeginPlay = true;
 
-	/** Recycle oldest particles when MaxParticleCount is reached */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Runtime",
-		meta = (EditCondition = "SpawnSettings.SpawnType == EFluidSpawnType::Emitter && SpawnSettings.MaxParticleCount > 0"))
+	/** Recycle oldest particles when MaxParticleCount is reached (Stream mode) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
+		meta = (EditCondition = "EmitterType == EKawaiiFluidEmitterType::Stream && MaxParticleCount > 0", EditConditionHides))
 	bool bRecycleOldestParticles = false;
 
 	//========================================
@@ -124,7 +172,7 @@ public:
 
 	/** Execute auto spawn (ShapeVolume mode) */
 	UFUNCTION(BlueprintCallable, Category = "Emitter")
-	void ExecuteAutoSpawn();
+	void SpawnShape();
 
 	/** Spawn a burst of particles */
 	UFUNCTION(BlueprintCallable, Category = "Emitter")
@@ -138,13 +186,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Emitter")
 	bool HasReachedParticleLimit() const;
 
-	/** Check if ShapeVolume mode */
+	/** Check if Shape mode */
 	UFUNCTION(BlueprintPure, Category = "Emitter")
-	bool IsShapeVolumeMode() const { return SpawnSettings.SpawnType == EFluidSpawnType::ShapeVolume; }
+	bool IsShapeMode() const { return EmitterType == EKawaiiFluidEmitterType::Shape; }
 
-	/** Check if Emitter mode */
+	/** Check if Stream mode */
 	UFUNCTION(BlueprintPure, Category = "Emitter")
-	bool IsEmitterMode() const { return SpawnSettings.SpawnType == EFluidSpawnType::Emitter; }
+	bool IsStreamMode() const { return EmitterType == EKawaiiFluidEmitterType::Stream; }
 
 protected:
 	//========================================
@@ -167,49 +215,31 @@ protected:
 	// Internal Spawn Methods
 	//========================================
 
-	/** Process continuous spawning for Emitter mode */
+	/** Process continuous spawning for Stream mode */
 	void ProcessContinuousSpawn(float DeltaTime);
 
 	/** Process Stream emitter mode */
 	void ProcessStreamEmitter(float DeltaTime);
 
-	/** Process HexagonalStream emitter mode */
-	void ProcessHexagonalStreamEmitter(float DeltaTime);
-
-	/** Process Spray emitter mode */
-	void ProcessSprayEmitter(float DeltaTime);
-
 	//========================================
-	// Shape Spawning (ShapeVolume mode)
+	// Shape Spawning (Shape mode)
 	//========================================
 
 	/** Spawn particles in a sphere shape (hexagonal pattern) */
-	int32 SpawnParticlesSphereHexagonal(FVector Center, float Radius, float Spacing, FVector InitialVelocity);
+	int32 SpawnParticlesSphereHexagonal(FVector Center, float Radius, float Spacing, FVector InInitialVelocity);
 
 	/** Spawn particles in a box shape (hexagonal pattern) */
-	int32 SpawnParticlesBoxHexagonal(FVector Center, FVector Extent, float Spacing, FVector InitialVelocity);
+	int32 SpawnParticlesBoxHexagonal(FVector Center, FVector Extent, float Spacing, FVector InInitialVelocity);
 
 	/** Spawn particles in a cylinder shape (hexagonal pattern) */
-	int32 SpawnParticlesCylinderHexagonal(FVector Center, float Radius, float HalfHeight, float Spacing, FVector InitialVelocity);
-
-	/** Spawn particles in a sphere shape (random) */
-	void SpawnParticlesSphereRandom(FVector Center, float Radius, int32 Count, FVector InitialVelocity);
-
-	/** Spawn particles in a box shape (random) */
-	void SpawnParticlesBoxRandom(FVector Center, FVector HalfExtent, int32 Count, FVector InitialVelocity);
-
-	/** Spawn particles in a cylinder shape (random) */
-	void SpawnParticlesCylinderRandom(FVector Center, float Radius, float HalfHeight, int32 Count, FVector InitialVelocity);
+	int32 SpawnParticlesCylinderHexagonal(FVector Center, float Radius, float HalfHeight, float Spacing, FVector InInitialVelocity);
 
 	//========================================
-	// Directional Spawning (Emitter mode)
+	// Stream Spawning (Stream mode)
 	//========================================
 
-	/** Spawn particles with directional velocity (stream/spray) */
-	void SpawnParticleDirectional(FVector Position, FVector Direction, float Speed, int32 Count, float ConeAngle = 0.0f);
-
-	/** Spawn a hexagonal layer of particles */
-	void SpawnHexagonalLayer(FVector Position, FVector Direction, float Speed, float Radius, float Spacing);
+	/** Spawn a hexagonal layer of particles for stream */
+	void SpawnStreamLayer(FVector Position, FVector Direction, float Speed, float Radius, float Spacing);
 
 	//========================================
 	// Internal Helpers
@@ -224,8 +254,27 @@ protected:
 	/** Remove oldest particles if recycling is enabled */
 	void RecycleOldestParticlesIfNeeded(int32 NewParticleCount);
 
-	/** Apply jitter to position */
-	FVector ApplyJitter(FVector Position, float Spacing) const;
+	//========================================
+	// Internal Constants & Configuration
+	//========================================
+
+	// Debug visualization settings (internal)
+	bool bShowSpawnVolumeWireframe = true;
+	FColor SpawnVolumeWireframeColor = FColor::Cyan;
+	float WireframeThickness = 2.0f;
+
+	// Advanced spawn settings (internal)
+	bool bAutoCalculateParticleCount = true;
+	int32 ParticleCount = 500;
+	bool bUseJitter = true;
+	float JitterAmount = 0.2f;
+	
+	// Stream advanced settings (internal)
+	FVector SpawnOffset = FVector::ZeroVector;
+	FVector SpawnDirection = FVector(0, 0, -1);
+	float StreamParticleSpacing = 0.0f;
+	float StreamJitter = 0.15f;
+	float StreamLayerSpacingRatio = 0.816f;
 
 	//========================================
 	// Volume Registration (Internal)
