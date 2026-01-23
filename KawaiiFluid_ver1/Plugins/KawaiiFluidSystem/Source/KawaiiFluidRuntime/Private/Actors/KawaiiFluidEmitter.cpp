@@ -13,8 +13,8 @@ AKawaiiFluidEmitter::AKawaiiFluidEmitter()
 	RootComponent = EmitterComponent;
 
 	// Set default settings for continuous stream emission
-	EmitterComponent->EmitterType = EKawaiiFluidEmitterType::Stream;
-	EmitterComponent->SpawnSpeed = 100.0f;
+	EmitterComponent->EmitterMode = EKawaiiFluidEmitterMode::Stream;
+	EmitterComponent->InitialSpeed = 100.0f;
 }
 
 void AKawaiiFluidEmitter::BeginPlay()

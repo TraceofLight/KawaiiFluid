@@ -6,14 +6,26 @@
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
-#include "GPU/GPUFluidParticle.h"
 #include "DrawDebugHelpers.h"
+#include "Components/ArrowComponent.h"
 
 UKawaiiFluidEmitterComponent::UKawaiiFluidEmitterComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
 	bTickInEditor = true;  // Enable tick in editor for wireframe visualization
+
+#if WITH_EDITORONLY_DATA
+	// Create velocity arrow for editor visualization (like DirectionalLight or Decal)
+	VelocityArrow = CreateEditorOnlyDefaultSubobject<UArrowComponent>(TEXT("VelocityArrow"));
+	if (VelocityArrow)
+	{
+		VelocityArrow->SetupAttachment(this);
+		VelocityArrow->SetArrowColor(FLinearColor(0.0f, 0.5f, 1.0f)); // Cyan blue
+		VelocityArrow->bIsScreenSizeScaled = true;
+		VelocityArrow->SetVisibility(false); // Initially hidden, will be updated based on mode
+	}
+#endif
 }
 
 void UKawaiiFluidEmitterComponent::BeginPlay()
@@ -31,10 +43,17 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: BeginPlay - TargetVolume=%s"),
 		*GetName(), TargetVolume ? *TargetVolume->GetName() : TEXT("None"));
 
-	// Auto spawn for Shape mode
-	if (IsShapeMode() && bAutoSpawnOnBeginPlay && !bAutoSpawnExecuted)
+	// Auto start spawning
+	if (bEnabled && bAutoStartSpawning)
 	{
-		SpawnShape();
+		if (IsFillMode() && !bAutoSpawnExecuted)
+		{
+			SpawnFill();
+		}
+		else if (IsStreamMode())
+		{
+			StartStreamSpawn();
+		}
 	}
 }
 
@@ -56,16 +75,23 @@ void UKawaiiFluidEmitterComponent::TickComponent(float DeltaTime, ELevelTick Tic
 
 	const bool bIsGameWorld = World->IsGameWorld();
 
-	// Wireframe visualization (editor only, or runtime if explicitly enabled)
+	// Wireframe visualization (editor only, when selected)
 #if WITH_EDITOR
-	if (bShowSpawnVolumeWireframe && !bIsGameWorld)
+	const bool bIsSelected = IsOwnerSelected();
+	if (bShowSpawnVolumeWireframe && !bIsGameWorld && bIsSelected)
 	{
 		DrawSpawnVolumeVisualization();
+	}
+
+	// Update velocity arrow visualization (editor only, always visible)
+	if (!bIsGameWorld)
+	{
+		UpdateVelocityArrowVisualization();
 	}
 #endif
 
 	// Process continuous spawning for Stream mode (game world only)
-	if (bIsGameWorld && IsStreamMode())
+	if (bEnabled && bIsGameWorld && IsStreamMode() && bStreamSpawning)
 	{
 		ProcessContinuousSpawn(DeltaTime);
 	}
@@ -95,8 +121,29 @@ float UKawaiiFluidEmitterComponent::GetParticleSpacing() const
 	return 10.0f; // Default fallback
 }
 
-void UKawaiiFluidEmitterComponent::SpawnShape()
+void UKawaiiFluidEmitterComponent::StartStreamSpawn()
 {
+	if (!IsStreamMode())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent::StartStreamSpawn - Not in Stream mode"));
+		return;
+	}
+
+	bStreamSpawning = true;
+}
+
+void UKawaiiFluidEmitterComponent::StopStreamSpawn()
+{
+	bStreamSpawning = false;
+}
+
+void UKawaiiFluidEmitterComponent::SpawnFill()
+{
+	if (!bEnabled)
+	{
+		return;
+	}
+
 	if (bAutoSpawnExecuted)
 	{
 		return;
@@ -105,14 +152,24 @@ void UKawaiiFluidEmitterComponent::SpawnShape()
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent::SpawnShape - No target Volume available"));
+		UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent::SpawnFill - No target Volume available"));
 		return;
 	}
 
 	bAutoSpawnExecuted = true;
 
 	const FVector SpawnCenter = GetComponentLocation() + SpawnOffset;
+	const FQuat SpawnRotation = GetComponentQuat();
 	const float Spacing = GetParticleSpacing();
+
+	// Calculate velocity based on space mode
+	FVector VelocityDirection = InitialVelocityDirection.GetSafeNormal();
+	if (!bUseWorldSpaceVelocity)
+	{
+		// Local space: rotate velocity direction with component
+		VelocityDirection = SpawnRotation.RotateVector(VelocityDirection);
+	}
+	const FVector CalculatedVelocity = VelocityDirection * InitialSpeed;
 
 	int32 SpawnedCount = 0;
 
@@ -120,24 +177,29 @@ void UKawaiiFluidEmitterComponent::SpawnShape()
 	switch (ShapeType)
 	{
 	case EKawaiiFluidEmitterShapeType::Sphere:
-		SpawnedCount = SpawnParticlesSphereHexagonal(SpawnCenter, SphereRadius, Spacing, InitialVelocity);
+		SpawnedCount = SpawnParticlesSphereHexagonal(SpawnCenter, SpawnRotation, SphereRadius, Spacing, CalculatedVelocity);
 		break;
 
-	case EKawaiiFluidEmitterShapeType::Box:
-		SpawnedCount = SpawnParticlesBoxHexagonal(SpawnCenter, BoxExtent, Spacing, InitialVelocity);
+	case EKawaiiFluidEmitterShapeType::Cube:
+		SpawnedCount = SpawnParticlesCubeHexagonal(SpawnCenter, SpawnRotation, CubeHalfSize, Spacing, CalculatedVelocity);
 		break;
 
 	case EKawaiiFluidEmitterShapeType::Cylinder:
-		SpawnedCount = SpawnParticlesCylinderHexagonal(SpawnCenter, CylinderRadius,
-			CylinderHalfHeight, Spacing, InitialVelocity);
+		SpawnedCount = SpawnParticlesCylinderHexagonal(SpawnCenter, SpawnRotation, CylinderRadius,
+			CylinderHalfHeight, Spacing, CalculatedVelocity);
 		break;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::SpawnShape - Spawned %d particles"), SpawnedCount);
+	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::SpawnFill - Spawned %d particles"), SpawnedCount);
 }
 
 void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
 {
+	if (!bEnabled)
+	{
+		return;
+	}
+
 	if (Count <= 0 || HasReachedParticleLimit())
 	{
 		return;
@@ -167,12 +229,23 @@ void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
 	}
 
 	const FVector SpawnPos = GetComponentLocation() + SpawnOffset;
-	const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnDirection.GetSafeNormal());
+	
+	// Layer direction always follows component's local orientation
+	FVector LayerDir = InitialVelocityDirection.GetSafeNormal();
+	FVector LocalLayerDir = GetComponentQuat().RotateVector(LayerDir);
+	
+	// Calculate velocity direction based on space mode
+	FVector VelocityDir = InitialVelocityDirection.GetSafeNormal();
+	if (!bUseWorldSpaceVelocity)
+	{
+		// Local space: rotate velocity direction with component
+		VelocityDir = GetComponentQuat().RotateVector(VelocityDir);
+	}
 
 	// Spawn layers instead of random particles
 	for (int32 i = 0; i < Count; ++i)
 	{
-		SpawnStreamLayer(SpawnPos, WorldDirection, SpawnSpeed, StreamRadius, EffectiveSpacing);
+		SpawnStreamLayer(SpawnPos, LocalLayerDir, VelocityDir, InitialSpeed, StreamRadius, EffectiveSpacing);
 	}
 }
 
@@ -220,7 +293,7 @@ void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 	float LayersToSpawn = 0.0f;
 
 	// Velocity-based layer spawning (only mode supported)
-	const float DistanceThisFrame = SpawnSpeed * DeltaTime;
+	const float DistanceThisFrame = InitialSpeed * DeltaTime;
 	LayerDistanceAccumulator += DistanceThisFrame;
 
 	if (LayerDistanceAccumulator >= LayerSpacing)
@@ -236,7 +309,18 @@ void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 	}
 
 	const FVector SpawnPos = GetComponentLocation() + SpawnOffset;
-	const FVector WorldDirection = GetComponentRotation().RotateVector(SpawnDirection.GetSafeNormal());
+	
+	// Layer direction always follows component's local orientation
+	FVector LayerDir = InitialVelocityDirection.GetSafeNormal();
+	FVector LocalLayerDir = GetComponentQuat().RotateVector(LayerDir);
+	
+	// Calculate velocity direction based on space mode
+	FVector VelocityDir = InitialVelocityDirection.GetSafeNormal();
+	if (!bUseWorldSpaceVelocity)
+	{
+		// Local space: rotate velocity direction with component
+		VelocityDir = GetComponentQuat().RotateVector(VelocityDir);
+	}
 
 	for (int32 i = 0; i < LayerCount; ++i)
 	{
@@ -245,12 +329,12 @@ void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 			PI * FMath::Square(StreamRadius / EffectiveSpacing)));
 		RecycleOldestParticlesIfNeeded(EstimatedParticlesPerLayer);
 
-		SpawnStreamLayer(SpawnPos, WorldDirection, SpawnSpeed,
+		SpawnStreamLayer(SpawnPos, LocalLayerDir, VelocityDir, InitialSpeed,
 			StreamRadius, EffectiveSpacing);
 	}
 }
 
-int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center, float Radius, float Spacing, FVector InInitialVelocity)
+int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center, FQuat Rotation, float Radius, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f || Radius <= 0.0f) return 0;
@@ -290,6 +374,12 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 
 			for (int32 x = -GridSize; x <= GridSize; ++x)
 			{
+				// Check MaxParticleCount limit (Fill mode)
+				if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+				{
+					break;
+				}
+
 				FVector LocalPos(
 					x * AdjustedSpacing + RowOffsetX + ZLayerOffsetX,
 					y * RowSpacingY + ZLayerOffsetY,
@@ -302,7 +392,9 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 					continue;
 				}
 
-				FVector WorldPos = Center + LocalPos;
+				// Apply rotation to local position, then translate to world
+				FVector RotatedPos = Rotation.RotateVector(LocalPos);
+				FVector WorldPos = Center + RotatedPos;
 
 				// Apply jitter
 				if (bUseJitter && JitterRange > 0.0f)
@@ -317,6 +409,17 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 				Positions.Add(WorldPos);
 				Velocities.Add(InInitialVelocity);
 			}
+			
+			// Break outer loops if limit reached
+			if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+			{
+				break;
+			}
+		}
+		
+		if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+		{
+			break;
 		}
 	}
 
@@ -324,7 +427,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 	return Positions.Num();
 }
 
-int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, FVector Extent, float Spacing, FVector InInitialVelocity)
+int32 UKawaiiFluidEmitterComponent::SpawnParticlesCubeHexagonal(FVector Center, FQuat Rotation, FVector HalfSize, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f) return 0;
@@ -342,16 +445,16 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 	const float JitterRange = AdjustedSpacing * JitterAmount;
 
 	// Calculate grid counts (matches SimulationModule)
-	const int32 CountX = FMath::Max(1, FMath::CeilToInt(Extent.X * 2.0f / AdjustedSpacing));
-	const int32 CountY = FMath::Max(1, FMath::CeilToInt(Extent.Y * 2.0f / RowSpacingY));
-	const int32 CountZ = FMath::Max(1, FMath::CeilToInt(Extent.Z * 2.0f / LayerSpacingZ));
+	const int32 CountX = FMath::Max(1, FMath::CeilToInt(HalfSize.X * 2.0f / AdjustedSpacing));
+	const int32 CountY = FMath::Max(1, FMath::CeilToInt(HalfSize.Y * 2.0f / RowSpacingY));
+	const int32 CountZ = FMath::Max(1, FMath::CeilToInt(HalfSize.Z * 2.0f / LayerSpacingZ));
 
 	const int32 EstimatedTotal = CountX * CountY * CountZ;
 	Positions.Reserve(EstimatedTotal);
 	Velocities.Reserve(EstimatedTotal);
 
 	// Start position (bottom-left-back corner with half-spacing offset)
-	const FVector LocalStart(-Extent.X + AdjustedSpacing * 0.5f, -Extent.Y + RowSpacingY * 0.5f, -Extent.Z + LayerSpacingZ * 0.5f);
+	const FVector LocalStart(-HalfSize.X + AdjustedSpacing * 0.5f, -HalfSize.Y + RowSpacingY * 0.5f, -HalfSize.Z + LayerSpacingZ * 0.5f);
 
 	for (int32 z = 0; z < CountZ; ++z)
 	{
@@ -366,6 +469,12 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 
 			for (int32 x = 0; x < CountX; ++x)
 			{
+				// Check MaxParticleCount limit (Fill mode)
+				if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+				{
+					break;
+				}
+
 				FVector LocalPos(
 					LocalStart.X + x * AdjustedSpacing + RowOffsetX + ZLayerOffsetX,
 					LocalStart.Y + y * RowSpacingY + ZLayerOffsetY,
@@ -373,14 +482,16 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 				);
 
 				// Check bounds
-				if (FMath::Abs(LocalPos.X) > Extent.X ||
-				    FMath::Abs(LocalPos.Y) > Extent.Y ||
-				    FMath::Abs(LocalPos.Z) > Extent.Z)
+				if (FMath::Abs(LocalPos.X) > HalfSize.X ||
+				    FMath::Abs(LocalPos.Y) > HalfSize.Y ||
+				    FMath::Abs(LocalPos.Z) > HalfSize.Z)
 				{
 					continue;
 				}
 
-				FVector WorldPos = Center + LocalPos;
+				// Apply rotation to local position, then translate to world
+				FVector RotatedPos = Rotation.RotateVector(LocalPos);
+				FVector WorldPos = Center + RotatedPos;
 
 				// Apply jitter
 				if (bUseJitter && JitterRange > 0.0f)
@@ -395,6 +506,17 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 				Positions.Add(WorldPos);
 				Velocities.Add(InInitialVelocity);
 			}
+			
+			// Break outer loop if limit reached
+			if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+			{
+				break;
+			}
+		}
+		
+		if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+		{
+			break;
 		}
 	}
 
@@ -402,7 +524,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesBoxHexagonal(FVector Center, F
 	return Positions.Num();
 }
 
-int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Center, float Radius, float HalfHeight, float Spacing, FVector InInitialVelocity)
+int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Center, FQuat Rotation, float Radius, float HalfHeight, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f || Radius <= 0.0f || HalfHeight <= 0.0f) return 0;
@@ -442,6 +564,12 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 
 			for (int32 x = -GridSizeXY; x <= GridSizeXY; ++x)
 			{
+				// Check MaxParticleCount limit (Fill mode)
+				if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+				{
+					break;
+				}
+
 				FVector LocalPos(
 					x * AdjustedSpacing + RowOffsetX + ZLayerOffsetX,
 					y * RowSpacingY + ZLayerOffsetY,
@@ -455,7 +583,9 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 					continue;
 				}
 
-				FVector WorldPos = Center + LocalPos;
+				// Apply rotation to local position, then translate to world
+				FVector RotatedPos = Rotation.RotateVector(LocalPos);
+				FVector WorldPos = Center + RotatedPos;
 
 				// Apply jitter
 				if (bUseJitter && JitterRange > 0.0f)
@@ -470,6 +600,17 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 				Positions.Add(WorldPos);
 				Velocities.Add(InInitialVelocity);
 			}
+			
+			// Break outer loop if limit reached
+			if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+			{
+				break;
+			}
+		}
+		
+		if (MaxParticleCount > 0 && Positions.Num() >= MaxParticleCount)
+		{
+			break;
 		}
 	}
 
@@ -477,7 +618,7 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 	return Positions.Num();
 }
 
-void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector Direction, float Speed, float Radius, float Spacing)
+void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector LayerDirection, FVector VelocityDirection, float Speed, float Radius, float Spacing)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Spacing <= 0.0f || Radius <= 0.0f) return;
@@ -485,16 +626,19 @@ void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector Di
 	TArray<FVector> Positions;
 	TArray<FVector> Velocities;
 
-	// Normalize direction (matches SimulationModule::SpawnParticleDirectionalHexLayerBatch)
-	FVector Dir = Direction.GetSafeNormal();
+	// Use LayerDirection for particle placement (follows component rotation)
+	FVector Dir = LayerDirection.GetSafeNormal();
 	if (Dir.IsNearlyZero())
 	{
 		Dir = FVector(0, 0, -1);  // Default: downward
 	}
 
-	// Create local coordinate system (same method as SimulationModule)
+	// Create local coordinate system for particle placement
 	FVector Right, Up;
 	Dir.FindBestAxisVectors(Right, Up);
+
+	// Calculate velocity (independent of layer direction in world space mode)
+	const FVector SpawnVel = VelocityDirection.GetSafeNormal() * Speed;
 
 	// NO HCP compensation for 2D hexagonal layer!
 	// This matches SimulationModule::SpawnParticleDirectionalHexLayerBatch exactly
@@ -505,8 +649,6 @@ void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector Di
 	const float Jitter = FMath::Clamp(StreamJitter, 0.0f, 0.5f);
 	const float MaxJitterOffset = Spacing * Jitter;
 	const bool bApplyJitter = Jitter > KINDA_SMALL_NUMBER;
-
-	const FVector SpawnVel = Dir * Speed;
 
 	// Row count calculation (matches SimulationModule)
 	const int32 NumRows = FMath::CeilToInt(Radius / RowSpacing) * 2 + 1;
@@ -564,6 +706,11 @@ void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector Di
 
 void UKawaiiFluidEmitterComponent::QueueSpawnRequest(const TArray<FVector>& Positions, const TArray<FVector>& Velocities)
 {
+	if (!bEnabled)
+	{
+		return;
+	}
+
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume || Positions.Num() == 0)
 	{
@@ -692,6 +839,15 @@ void UKawaiiFluidEmitterComponent::PostEditChangeProperty(FPropertyChangedEvent&
 			RegisterToVolume();
 		}
 	}
+
+	// Update velocity arrow when relevant properties change
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidEmitterComponent, EmitterMode) ||
+		PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidEmitterComponent, bUseWorldSpaceVelocity) ||
+		PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidEmitterComponent, InitialVelocityDirection) ||
+		PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidEmitterComponent, InitialSpeed))
+	{
+		UpdateVelocityArrowVisualization();
+	}
 }
 
 void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
@@ -709,9 +865,9 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 	const uint8 DepthPriority = 0;
 	const float Thickness = WireframeThickness;
 
-	if (IsShapeMode())
+	if (IsFillMode())
 	{
-		// Shape Volume visualization
+		// Fill Volume visualization
 		switch (ShapeType)
 		{
 		case EKawaiiFluidEmitterShapeType::Sphere:
@@ -719,9 +875,9 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 			DrawDebugSphere(World, Location, SphereRadius, 24, SpawnColor, false, Duration, DepthPriority, Thickness);
 			break;
 
-		case EKawaiiFluidEmitterShapeType::Box:
-			// Box with rotation
-			DrawDebugBox(World, Location, BoxExtent, Rotation, SpawnColor, false, Duration, DepthPriority, Thickness);
+		case EKawaiiFluidEmitterShapeType::Cube:
+			// Cube with rotation
+			DrawDebugBox(World, Location, CubeHalfSize, Rotation, SpawnColor, false, Duration, DepthPriority, Thickness);
 			break;
 
 		case EKawaiiFluidEmitterShapeType::Cylinder:
@@ -772,16 +928,13 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 	}
 	else // Stream mode
 	{
-		// Direction arrow (apply component rotation)
-		const FVector WorldDir = Rotation.RotateVector(SpawnDirection.GetSafeNormal());
-		const float ArrowLength = 100.0f;
-		const FVector EndPoint = Location + WorldDir * ArrowLength;
-
-		DrawDebugDirectionalArrow(World, Location, EndPoint, 20.0f, SpawnColor, false, Duration, DepthPriority, Thickness);
-
-		// Stream radius circle
+		// Stream radius circle (always follows component orientation, independent of velocity space mode)
 		if (StreamRadius > 0.0f)
 		{
+			// Use local direction to draw circle (always rotates with component)
+			FVector LocalDir = InitialVelocityDirection.GetSafeNormal();
+			FVector WorldDir = Rotation.RotateVector(LocalDir);
+			
 			FVector Right, Up;
 			WorldDir.FindBestAxisVectors(Right, Up);
 
@@ -798,5 +951,34 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 			}
 		}
 	}
+}
+
+void UKawaiiFluidEmitterComponent::UpdateVelocityArrowVisualization()
+{
+#if WITH_EDITORONLY_DATA
+	if (!VelocityArrow)
+	{
+		return;
+	}
+
+	VelocityArrow->SetVisibility(true);
+
+	// Calculate velocity direction based on space mode (same for both Fill and Stream)
+	FVector VelocityDir = InitialVelocityDirection.GetSafeNormal();
+	if (!bUseWorldSpaceVelocity)
+	{
+		// Local space: arrow is in local space, no need to rotate
+		VelocityArrow->SetRelativeRotation(VelocityDir.Rotation());
+	}
+	else
+	{
+		// World space: set world rotation directly
+		VelocityArrow->SetWorldRotation(VelocityDir.Rotation());
+	}
+
+	// Set arrow length (fixed length, independent of speed)
+	const float ArrowLength = 1.2f;
+	VelocityArrow->SetRelativeScale3D(FVector(ArrowLength, 1.0f, 1.0f));
+#endif
 }
 #endif
