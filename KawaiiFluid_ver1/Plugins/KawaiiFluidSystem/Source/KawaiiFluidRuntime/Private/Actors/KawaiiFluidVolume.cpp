@@ -389,7 +389,7 @@ void AKawaiiFluidVolume::QueueSpawnRequests(const TArray<FVector>& Positions, co
 		Request.Position = FVector3f(Positions[i]);
 		Request.Velocity = FVector3f(Velocities[i]);
 		Request.SourceID = SourceID;
-		Request.Mass = 1.0f;
+		Request.Mass = 0.0f;
 		Request.Radius = 0.0f;
 
 		PendingSpawnRequests.Add(Request);
