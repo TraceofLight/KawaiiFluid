@@ -267,12 +267,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 
 			const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FComputeBoundaryMortonCodesCS::ThreadGroupSize);
 
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
+			GraphBuilder.AddPass(
 				RDG_EVENT_NAME("GPUFluid::StaticComputeMortonCodes(%d)", ParticleCount),
-				ComputeShader,
 				PassParams,
-				FIntVector(NumGroups, 1, 1));
+				ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+				[PassParams, ComputeShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+				{
+					FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParams, FIntVector(NumGroups, 1, 1));
+				});
 		}
 
 		// Pass 2: Radix sort (using multi-pass histogram-based radix sort)
@@ -315,7 +317,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 					HistogramParams->BitOffset = BitOffset;
 					HistogramParams->NumGroups = NumBlocks;
 
-					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("StaticBoundaryRadix::Histogram"), HistogramShader, HistogramParams, FIntVector(NumBlocks, 1, 1));
+					GraphBuilder.AddPass(
+						RDG_EVENT_NAME("StaticBoundaryRadix::Histogram"),
+						HistogramParams,
+						ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+						[HistogramParams, HistogramShader, NumBlocks](FRHIComputeCommandList& RHICmdList)
+						{
+							FComputeShaderUtils::Dispatch(RHICmdList, HistogramShader, *HistogramParams, FIntVector(NumBlocks, 1, 1));
+						});
 				}
 
 				// Global Prefix Sum
@@ -326,7 +335,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 					GlobalPrefixParams->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
 					GlobalPrefixParams->NumGroups = NumBlocks;
 
-					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("StaticBoundaryRadix::GlobalPrefixSum"), PrefixSumShader, GlobalPrefixParams, FIntVector(1, 1, 1));
+					GraphBuilder.AddPass(
+						RDG_EVENT_NAME("StaticBoundaryRadix::GlobalPrefixSum"),
+						GlobalPrefixParams,
+						ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+						[GlobalPrefixParams, PrefixSumShader](FRHIComputeCommandList& RHICmdList)
+						{
+							FComputeShaderUtils::Dispatch(RHICmdList, PrefixSumShader, *GlobalPrefixParams, FIntVector(1, 1, 1));
+						});
 				}
 
 				// Bucket Prefix Sum
@@ -335,7 +351,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 					FRadixSortBucketPrefixSumCS::FParameters* BucketPrefixParams = GraphBuilder.AllocParameters<FRadixSortBucketPrefixSumCS::FParameters>();
 					BucketPrefixParams->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
 
-					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("StaticBoundaryRadix::BucketPrefixSum"), BucketSumShader, BucketPrefixParams, FIntVector(1, 1, 1));
+					GraphBuilder.AddPass(
+						RDG_EVENT_NAME("StaticBoundaryRadix::BucketPrefixSum"),
+						BucketPrefixParams,
+						ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+						[BucketPrefixParams, BucketSumShader](FRHIComputeCommandList& RHICmdList)
+						{
+							FComputeShaderUtils::Dispatch(RHICmdList, BucketSumShader, *BucketPrefixParams, FIntVector(1, 1, 1));
+						});
 				}
 
 				// Scatter
@@ -351,7 +374,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 					ScatterParams->ElementCount = ParticleCount;
 					ScatterParams->BitOffset = BitOffset;
 
-					FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("StaticBoundaryRadix::Scatter"), ScatterShader, ScatterParams, FIntVector(NumBlocks, 1, 1));
+					GraphBuilder.AddPass(
+						RDG_EVENT_NAME("StaticBoundaryRadix::Scatter"),
+						ScatterParams,
+						ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+						[ScatterParams, ScatterShader, NumBlocks](FRHIComputeCommandList& RHICmdList)
+						{
+							FComputeShaderUtils::Dispatch(RHICmdList, ScatterShader, *ScatterParams, FIntVector(NumBlocks, 1, 1));
+						});
 				}
 
 				BufferIndex ^= 1;
@@ -378,12 +408,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 
 			const int32 NumGroups = FMath::DivideAndRoundUp(CellCount, FClearBoundaryCellIndicesCS::ThreadGroupSize);
 
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
+			GraphBuilder.AddPass(
 				RDG_EVENT_NAME("GPUFluid::StaticClearCellIndices"),
-				ClearShader,
 				ClearParams,
-				FIntVector(NumGroups, 1, 1));
+				ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+				[ClearParams, ClearShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+				{
+					FComputeShaderUtils::Dispatch(RHICmdList, ClearShader, *ClearParams, FIntVector(NumGroups, 1, 1));
+				});
 		}
 
 		// Pass 4: Reorder particles
@@ -399,12 +431,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 
 			const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FReorderBoundaryParticlesCS::ThreadGroupSize);
 
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
+			GraphBuilder.AddPass(
 				RDG_EVENT_NAME("GPUFluid::StaticReorderParticles(%d)", ParticleCount),
-				ReorderShader,
 				ReorderParams,
-				FIntVector(NumGroups, 1, 1));
+				ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+				[ReorderParams, ReorderShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+				{
+					FComputeShaderUtils::Dispatch(RHICmdList, ReorderShader, *ReorderParams, FIntVector(NumGroups, 1, 1));
+				});
 		}
 
 		// Pass 5: Compute cell start/end
@@ -424,12 +458,14 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 
 			const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FComputeBoundaryCellStartEndCS::ThreadGroupSize);
 
-			FComputeShaderUtils::AddPass(
-				GraphBuilder,
+			GraphBuilder.AddPass(
 				RDG_EVENT_NAME("GPUFluid::StaticComputeCellStartEnd(%d)", ParticleCount),
-				CellShader,
 				CellParams,
-				FIntVector(NumGroups, 1, 1));
+				ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+				[CellParams, CellShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+				{
+					FComputeShaderUtils::Dispatch(RHICmdList, CellShader, *CellParams, FIntVector(NumGroups, 1, 1));
+				});
 		}
 
 		// Extract persistent buffers
@@ -811,14 +847,17 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 		PassParams->DeltaTime = DeltaTime;
 
 		const uint32 NumGroups = FMath::DivideAndRoundUp(LocalParticleCount, FBoundarySkinningCS::ThreadGroupSize);
+		const FIntVector GroupCount(NumGroups, 1, 1);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
+		// Use AsyncCompute to overlap with fluid Z-Order sorting on Graphics queue
+		GraphBuilder.AddPass(
 			RDG_EVENT_NAME("GPUFluid::BoundarySkinning(Owner=%d, Count=%d)", OwnerID, LocalParticleCount),
-			SkinningShader,
 			PassParams,
-			FIntVector(NumGroups, 1, 1)
-		);
+			ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+			[PassParams, SkinningShader, GroupCount](FRHIComputeCommandList& RHICmdList)
+			{
+				FComputeShaderUtils::Dispatch(RHICmdList, SkinningShader, *PassParams, GroupCount);
+			});
 
 		OutputOffset += LocalParticleCount;
 	}
@@ -1215,13 +1254,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 
 		const int32 NumGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FComputeBoundaryMortonCodesCS::ThreadGroupSize);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
+		GraphBuilder.AddPass(
 			RDG_EVENT_NAME("GPUFluid::ComputeBoundaryMortonCodes(%d)", BoundaryParticleCount),
-			ComputeShader,
 			PassParams,
-			FIntVector(NumGroups, 1, 1)
-		);
+			ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+			[PassParams, ComputeShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+			{
+				FComputeShaderUtils::Dispatch(RHICmdList, ComputeShader, *PassParams, FIntVector(NumGroups, 1, 1));
+			});
 	}
 
 	//=========================================================================
@@ -1266,7 +1306,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 				HistogramParams->BitOffset = BitOffset;
 				HistogramParams->NumGroups = NumBlocks;
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Histogram"), HistogramShader, HistogramParams, FIntVector(NumBlocks, 1, 1));
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("BoundaryRadix::Histogram"),
+					HistogramParams,
+					ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+					[HistogramParams, HistogramShader, NumBlocks](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, HistogramShader, *HistogramParams, FIntVector(NumBlocks, 1, 1));
+					});
 			}
 
 			// Global Prefix Sum
@@ -1277,7 +1324,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 				GlobalPrefixParams->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
 				GlobalPrefixParams->NumGroups = NumBlocks;
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::GlobalPrefixSum"), PrefixSumShader, GlobalPrefixParams, FIntVector(1, 1, 1));
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("BoundaryRadix::GlobalPrefixSum"),
+					GlobalPrefixParams,
+					ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+					[GlobalPrefixParams, PrefixSumShader](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, PrefixSumShader, *GlobalPrefixParams, FIntVector(1, 1, 1));
+					});
 			}
 
 			// Bucket Prefix Sum
@@ -1286,7 +1340,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 				FRadixSortBucketPrefixSumCS::FParameters* BucketPrefixParams = GraphBuilder.AllocParameters<FRadixSortBucketPrefixSumCS::FParameters>();
 				BucketPrefixParams->GlobalOffsets = GraphBuilder.CreateUAV(BucketOffsets);
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::BucketPrefixSum"), BucketSumShader, BucketPrefixParams, FIntVector(1, 1, 1));
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("BoundaryRadix::BucketPrefixSum"),
+					BucketPrefixParams,
+					ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+					[BucketPrefixParams, BucketSumShader](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, BucketSumShader, *BucketPrefixParams, FIntVector(1, 1, 1));
+					});
 			}
 
 			// Scatter
@@ -1302,7 +1363,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 				ScatterParams->ElementCount = BoundaryParticleCount;
 				ScatterParams->BitOffset = BitOffset;
 
-				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("BoundaryRadix::Scatter"), ScatterShader, ScatterParams, FIntVector(NumBlocks, 1, 1));
+				GraphBuilder.AddPass(
+					RDG_EVENT_NAME("BoundaryRadix::Scatter"),
+					ScatterParams,
+					ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+					[ScatterParams, ScatterShader, NumBlocks](FRHIComputeCommandList& RHICmdList)
+					{
+						FComputeShaderUtils::Dispatch(RHICmdList, ScatterShader, *ScatterParams, FIntVector(NumBlocks, 1, 1));
+					});
 			}
 
 			BufferIndex ^= 1;
@@ -1327,13 +1395,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 
 		const int32 NumGroups = FMath::DivideAndRoundUp(CellCount, FClearBoundaryCellIndicesCS::ThreadGroupSize);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
+		GraphBuilder.AddPass(
 			RDG_EVENT_NAME("GPUFluid::ClearBoundaryCellIndices"),
-			ClearShader,
 			ClearParams,
-			FIntVector(NumGroups, 1, 1)
-		);
+			ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+			[ClearParams, ClearShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+			{
+				FComputeShaderUtils::Dispatch(RHICmdList, ClearShader, *ClearParams, FIntVector(NumGroups, 1, 1));
+			});
 	}
 
 	//=========================================================================
@@ -1351,13 +1420,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 
 		const int32 NumGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FReorderBoundaryParticlesCS::ThreadGroupSize);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
+		GraphBuilder.AddPass(
 			RDG_EVENT_NAME("GPUFluid::ReorderBoundaryParticles(%d)", BoundaryParticleCount),
-			ReorderShader,
 			ReorderParams,
-			FIntVector(NumGroups, 1, 1)
-		);
+			ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+			[ReorderParams, ReorderShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+			{
+				FComputeShaderUtils::Dispatch(RHICmdList, ReorderShader, *ReorderParams, FIntVector(NumGroups, 1, 1));
+			});
 	}
 
 	//=========================================================================
@@ -1377,13 +1447,14 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 
 		const int32 NumGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FComputeBoundaryCellStartEndCS::ThreadGroupSize);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
+		GraphBuilder.AddPass(
 			RDG_EVENT_NAME("GPUFluid::ComputeBoundaryCellStartEnd(%d)", BoundaryParticleCount),
-			CellStartEndShader,
 			CellParams,
-			FIntVector(NumGroups, 1, 1)
-		);
+			ERDGPassFlags::AsyncCompute | ERDGPassFlags::NeverCull,
+			[CellParams, CellStartEndShader, NumGroups](FRHIComputeCommandList& RHICmdList)
+			{
+				FComputeShaderUtils::Dispatch(RHICmdList, CellStartEndShader, *CellParams, FIntVector(NumGroups, 1, 1));
+			});
 	}
 
 	// Extract persistent buffers (for next frame fallback)
