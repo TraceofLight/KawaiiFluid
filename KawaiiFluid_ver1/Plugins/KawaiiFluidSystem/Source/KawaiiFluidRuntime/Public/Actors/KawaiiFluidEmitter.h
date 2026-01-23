@@ -8,6 +8,7 @@
 
 class AKawaiiFluidVolume;
 class UKawaiiFluidEmitterComponent;
+class UBillboardComponent;
 
 /**
  * Kawaii Fluid Emitter
@@ -83,4 +84,10 @@ protected:
 	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UKawaiiFluidEmitterComponent> EmitterComponent;
+
+#if WITH_EDITORONLY_DATA
+	/** Billboard component for editor visualization */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UBillboardComponent> BillboardComponent;
+#endif
 };
