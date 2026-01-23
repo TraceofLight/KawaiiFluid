@@ -574,7 +574,7 @@ void FKawaiiRayMarchingPipeline::ExecuteRayMarching(
 		SDFParams->FluidColor = RenderParams.FluidColor;
 		SDFParams->FresnelStrength = RenderParams.FresnelStrength;
 		SDFParams->RefractiveIndex = RenderParams.RefractiveIndex;
-		SDFParams->AbsorptionCoefficient = RenderParams.AbsorptionCoefficient;
+		SDFParams->Opacity = RenderParams.Opacity;
 		SDFParams->AbsorptionColorCoefficients = RenderParams.AbsorptionColorCoefficients;
 		SDFParams->SpecularStrength = RenderParams.SpecularStrength;
 		SDFParams->SpecularRoughness = RenderParams.SpecularRoughness;
@@ -756,7 +756,7 @@ void FKawaiiRayMarchingPipeline::ExecuteRayMarching(
 	PassParams->FluidColor = RenderParams.FluidColor;
 	PassParams->FresnelStrength = RenderParams.FresnelStrength;
 	PassParams->RefractiveIndex = RenderParams.RefractiveIndex;
-	PassParams->AbsorptionCoefficient = RenderParams.AbsorptionCoefficient;
+	PassParams->Opacity = RenderParams.Opacity;
 	PassParams->AbsorptionColorCoefficients = RenderParams.AbsorptionColorCoefficients;
 	PassParams->SpecularStrength = RenderParams.SpecularStrength;
 	PassParams->SpecularRoughness = RenderParams.SpecularRoughness;

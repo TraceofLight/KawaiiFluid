@@ -141,7 +141,7 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	PassParameters->F0Override = RenderParams.F0Override;
 	PassParameters->FresnelStrength = RenderParams.FresnelStrength;
 	PassParameters->RefractiveIndex = RenderParams.RefractiveIndex;
-	PassParameters->AbsorptionCoefficient = RenderParams.AbsorptionCoefficient;
+	PassParameters->Opacity = RenderParams.Opacity;
 	PassParameters->AbsorptionColorCoefficients = RenderParams.AbsorptionColorCoefficients;
 	PassParameters->SpecularStrength = RenderParams.SpecularStrength;
 	PassParameters->SpecularRoughness = RenderParams.SpecularRoughness;
@@ -149,8 +149,7 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 
 	// Lighting scale parameters
 	PassParameters->AmbientScale = RenderParams.AmbientScale;
-	PassParameters->TransmittanceScale = RenderParams.TransmittanceScale;
-	PassParameters->AlphaThicknessScale = RenderParams.AlphaThicknessScale;
+	PassParameters->ThicknessSensitivity = RenderParams.ThicknessSensitivity;
 	PassParameters->RefractionScale = RenderParams.RefractionScale;
 	PassParameters->FresnelReflectionBlend = RenderParams.FresnelReflectionBlend;
 

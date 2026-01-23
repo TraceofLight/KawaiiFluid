@@ -64,7 +64,7 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	//========================================
 
 	/** Fluid color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (EditCondition = "bEnabled"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (EditCondition = "bEnabled", HideAlphaChannel))
 	FLinearColor FluidColor = FLinearColor(0.2f, 0.4f, 0.8f, 1.0f);
 
 	/** Fresnel strength */
@@ -75,9 +75,13 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (EditCondition = "bEnabled", ClampMin = "1.0", ClampMax = "2.5"))
 	float RefractiveIndex = 1.33f;
 
-	/** Absorption coefficient */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (EditCondition = "bEnabled", ClampMin = "0.0", ClampMax = "10.0"))
-	float AbsorptionCoefficient = 2.0f;
+	/**
+	 * Fluid opacity (0 = fully transparent, 1 = fully opaque).
+	 * Controls overall light absorption strength through the fluid.
+	 * 0 = see-through like clear water, 1 = opaque like thick paint.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (EditCondition = "bEnabled", ClampMin = "0.0", ClampMax = "1.0"))
+	float Opacity = 0.5f;
 
 	/** Specular strength */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance", meta = (EditCondition = "bEnabled", ClampMin = "0.0", ClampMax = "2.0"))

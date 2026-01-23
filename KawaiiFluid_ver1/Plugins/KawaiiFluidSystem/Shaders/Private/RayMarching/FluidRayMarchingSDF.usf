@@ -110,7 +110,7 @@ float TemporalBlendFactor;
 float4 FluidColor;
 float FresnelStrength;
 float RefractiveIndex;
-float AbsorptionCoefficient;
+float Opacity;  // Fluid opacity (0 = transparent, 1 = opaque)
 float4 AbsorptionColorCoefficients;
 float SpecularStrength;
 float SpecularRoughness;
@@ -752,7 +752,9 @@ void MainPS(
 	float Thickness = max(EstimatedThickness, ParticleRadius);
 
 	// Beer-Lambert absorption based on thickness
-	float3 Transmittance = exp(-AbsorptionColorCoefficients.rgb * AbsorptionCoefficient * Thickness);
+	// Convert Opacity (0~1) to absorption coefficient (1.0 ~ 5.0)
+	float AbsorptionCoefficient = 1.0 + Opacity * 4.0;
+	float3 Transmittance = exp(-AbsorptionColorCoefficients.rgb * AbsorptionCoefficient * Thickness * 0.1f);
 
 	// Base fluid color with absorption
 	float3 AbsorbedColor = FluidColor.rgb * Transmittance;

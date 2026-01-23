@@ -133,7 +133,8 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float NarrowRangeGrazingBoost = 1.0f;
 
 	/** Fluid color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
+		meta = (HideAlphaChannel))
 	FLinearColor FluidColor = FLinearColor(0.2f, 0.5f, 0.8f, 1.0f);
 
 	/**
@@ -160,10 +161,14 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 		meta = (ClampMin = "1.0", ClampMax = "2.0"))
 	float RefractiveIndex = 1.33f;
 
-	/** Absorption coefficient (thickness-based color attenuation) - overall scale */
+	/**
+	 * Fluid opacity (0 = fully transparent, 1 = fully opaque).
+	 * Controls overall light absorption strength through the fluid.
+	 * 0 = see-through like clear water, 1 = opaque like thick paint.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
-		meta = (ClampMin = "0.0", ClampMax = "10.0"))
-	float AbsorptionCoefficient = 2.0f;
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Opacity = 0.5f;
 
 	/**
 	 * Per-channel absorption coefficients (Beer's Law).
@@ -171,7 +176,8 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	 * Slime: R=0.1, G=0.3, B=0.4 (absorbs blue, appears green/yellow).
 	 * Higher value = that color is absorbed faster (invisible in thick areas).
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
+		meta = (HideAlphaChannel))
 	FLinearColor AbsorptionColorCoefficients = FLinearColor(0.4f, 0.1f, 0.05f, 1.0f);
 
 	/** Specular strength */
@@ -185,7 +191,8 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float SpecularRoughness = 0.2f;
 
 	/** Environment light color (fallback when no Cubemap, base ambient color) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
+		meta = (HideAlphaChannel))
 	FLinearColor EnvironmentLightColor = FLinearColor(0.8f, 0.9f, 1.0f, 1.0f);
 
 	//========================================
@@ -202,22 +209,13 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float AmbientScale = 0.15f;
 
 	/**
-	 * Beer's Law transmittance scale.
-	 * Controls light absorption rate based on thickness.
-	 * Lower = more transparent, higher = thick areas become opaque.
+	 * Thickness sensitivity (0 = uniform opacity, 1 = thickness-dependent).
+	 * Controls how much fluid thickness affects transparency.
+	 * 0 = same opacity everywhere, 1 = thin areas transparent, thick areas opaque.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
-		meta = (ClampMin = "0.001", ClampMax = "0.5"))
-	float TransmittanceScale = 0.05f;
-
-	/**
-	 * Alpha thickness scale.
-	 * How much thickness affects alpha.
-	 * Lower = more transparent, higher = more opaque.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
-		meta = (ClampMin = "0.001", ClampMax = "0.2"))
-	float AlphaThicknessScale = 0.02f;
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ThicknessSensitivity = 0.5f;
 
 	/**
 	 * Refraction offset scale.
@@ -353,8 +351,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 		meta = (ClampMin = "0.0", ClampMax = "2.0"))
 	float SSSIntensity = 1.0f;
 
-	/** Subsurface scattering color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance")
+	/** Subsurface scattering color (RGB only, alpha channel not used) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
+		meta = (HideAlphaChannel))
 	FLinearColor SSSColor = FLinearColor(1.0f, 0.5f, 0.3f, 1.0f);
 
 	// Removed: G-Buffer Mode Parameters (GBuffer/Opaque/Translucent modes removed)
@@ -529,10 +528,10 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float SDFSubsurfaceScatterStrength = 0.5f;
 
 	/**
-	 * SDF subsurface scattering color.
+	 * SDF subsurface scattering color (RGB only, alpha channel not used).
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|RayMarching|SDF",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching && bUseSDF"))
+		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching && bUseSDF", HideAlphaChannel))
 	FLinearColor SDFSubsurfaceColor = FLinearColor(0.8f, 0.6f, 0.4f, 1.0f);
 
 	/**
@@ -630,15 +629,14 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.F0Override));
 	Hash = HashCombine(Hash, GetTypeHash(Params.FresnelStrength));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RefractiveIndex));
-	Hash = HashCombine(Hash, GetTypeHash(Params.AbsorptionCoefficient));
+	Hash = HashCombine(Hash, GetTypeHash(Params.Opacity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.AbsorptionColorCoefficients.ToString()));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SpecularStrength));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SpecularRoughness));
 	Hash = HashCombine(Hash, GetTypeHash(Params.EnvironmentLightColor.ToString()));
 	// Lighting scale parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.AmbientScale));
-	Hash = HashCombine(Hash, GetTypeHash(Params.TransmittanceScale));
-	Hash = HashCombine(Hash, GetTypeHash(Params.AlphaThicknessScale));
+	Hash = HashCombine(Hash, GetTypeHash(Params.ThicknessSensitivity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RefractionScale));
 	Hash = HashCombine(Hash, GetTypeHash(Params.FresnelReflectionBlend));
 	Hash = HashCombine(Hash, GetTypeHash(Params.AbsorptionBias));
@@ -707,15 +705,14 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 		FMath::IsNearlyEqual(A.F0Override, B.F0Override, 0.001f) &&
 		FMath::IsNearlyEqual(A.FresnelStrength, B.FresnelStrength, 0.001f) &&
 		FMath::IsNearlyEqual(A.RefractiveIndex, B.RefractiveIndex, 0.001f) &&
-		FMath::IsNearlyEqual(A.AbsorptionCoefficient, B.AbsorptionCoefficient, 0.001f) &&
+		FMath::IsNearlyEqual(A.Opacity, B.Opacity, 0.001f) &&
 		A.AbsorptionColorCoefficients.Equals(B.AbsorptionColorCoefficients, 0.001f) &&
 		FMath::IsNearlyEqual(A.SpecularStrength, B.SpecularStrength, 0.001f) &&
 		FMath::IsNearlyEqual(A.SpecularRoughness, B.SpecularRoughness, 0.001f) &&
 		A.EnvironmentLightColor.Equals(B.EnvironmentLightColor, 0.001f) &&
 		// Lighting scale parameters
 		FMath::IsNearlyEqual(A.AmbientScale, B.AmbientScale, 0.001f) &&
-		FMath::IsNearlyEqual(A.TransmittanceScale, B.TransmittanceScale, 0.0001f) &&
-		FMath::IsNearlyEqual(A.AlphaThicknessScale, B.AlphaThicknessScale, 0.0001f) &&
+		FMath::IsNearlyEqual(A.ThicknessSensitivity, B.ThicknessSensitivity, 0.001f) &&
 		FMath::IsNearlyEqual(A.RefractionScale, B.RefractionScale, 0.001f) &&
 		FMath::IsNearlyEqual(A.FresnelReflectionBlend, B.FresnelReflectionBlend, 0.001f) &&
 		FMath::IsNearlyEqual(A.AbsorptionBias, B.AbsorptionBias, 0.001f) &&

@@ -27,7 +27,7 @@ float4 FluidColor;
 float F0Override;
 float FresnelStrength;
 float RefractiveIndex;
-float AbsorptionCoefficient;
+float Opacity;                       // Fluid opacity (0 = transparent, 1 = opaque)
 float4 AbsorptionColorCoefficients;  // Per-channel absorption coefficients (Beer's Law)
 float SpecularStrength;
 float SpecularRoughness;
@@ -47,8 +47,7 @@ float4 LightColors[FLUID_MAX_LIGHTS];
 
 // Lighting Scale Parameters
 float AmbientScale;
-float TransmittanceScale;
-float AlphaThicknessScale;
+float ThicknessSensitivity;          // How much thickness affects transparency (0 = uniform, 1 = thickness-dependent)
 float RefractionScale;
 float FresnelReflectionBlend;
 
@@ -642,8 +641,10 @@ void MainPS(
 	// Each color channel has different absorption coefficient
 	// Water: absorbs more R -> appears blue
 	// Slime: absorbs more B -> appears green/yellow
+	// Convert Opacity (0~1) to absorption coefficient (1.0 ~ 5.0)
+	float AbsorptionCoefficient = 1.0 + Opacity * 4.0;
 	float3 AbsorptionRGB = AbsorptionColorCoefficients.rgb * AbsorptionCoefficient;
-	float3 Transmittance = exp(-AbsorptionRGB * Thickness * TransmittanceScale);
+	float3 Transmittance = exp(-AbsorptionRGB * Thickness * 0.1f);  // 0.1 = constant scale factor
 
 	// Calculate transmitted background color
 	float3 TransmittedBackground = RefractedBackground * Transmittance;
@@ -911,8 +912,14 @@ void MainPS(
 	FinalColor = BaseColor + Specular + SSSContribution;
 
 	// 8. Alpha calculation
-	// Opaque when thick, slightly more opaque when reflection is strong (at grazing angles)
-	float Alpha = saturate(1.0 - exp(-Thickness * AlphaThicknessScale));
+	// Opacity: base opacity (minimum alpha)
+	// ThicknessSensitivity: how steeply thickness adds opacity on top
+	//   0 = thickness has no effect (use base Opacity only)
+	//   1 = thickness strongly adds opacity (thick areas become opaque regardless of base Opacity)
+	float BaseAlpha = Opacity;
+	float ThicknessAlpha = saturate(1.0 - exp(-Thickness * ThicknessSensitivity * 5.0f));
+	// Take the maximum: base opacity OR thickness-based opacity
+	float Alpha = max(BaseAlpha, ThicknessAlpha);
 	// Only boost alpha at grazing angles (high Fresnel), not everywhere
 	// Use a softer contribution from Fresnel to avoid making thin fluid opaque
 	float FresnelAlphaBoost = Fresnel * FresnelReflectionBlend * 0.3;  // Reduced from 1.0 to 0.3

@@ -51,7 +51,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     SHADER_PARAMETER(float, F0Override)           // F0 override (0 = use IOR-based, >0 = use this value)
     SHADER_PARAMETER(float, FresnelStrength)
     SHADER_PARAMETER(float, RefractiveIndex)
-    SHADER_PARAMETER(float, AbsorptionCoefficient)
+    SHADER_PARAMETER(float, Opacity)              // Fluid opacity (0 = transparent, 1 = opaque)
     SHADER_PARAMETER(FLinearColor, AbsorptionColorCoefficients)  // Per-channel absorption (Beer's Law)
     SHADER_PARAMETER(float, SpecularStrength)
     SHADER_PARAMETER(float, SpecularRoughness)
@@ -71,8 +71,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     // Lighting Scale Parameters
     // ------------------------------------------------------
     SHADER_PARAMETER(float, AmbientScale)
-    SHADER_PARAMETER(float, TransmittanceScale)
-    SHADER_PARAMETER(float, AlphaThicknessScale)
+    SHADER_PARAMETER(float, ThicknessSensitivity)  // How much thickness affects transparency (0 = uniform, 1 = thickness-dependent)
     SHADER_PARAMETER(float, RefractionScale)
     SHADER_PARAMETER(float, FresnelReflectionBlend)
 
