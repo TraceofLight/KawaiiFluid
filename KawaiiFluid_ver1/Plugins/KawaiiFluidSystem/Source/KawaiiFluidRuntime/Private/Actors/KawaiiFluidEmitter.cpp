@@ -36,10 +36,6 @@ AKawaiiFluidEmitter::AKawaiiFluidEmitter()
 		BillboardComponent->SetRelativeScale3D(FVector(0.3f));
 	}
 #endif
-
-	// Set default settings for continuous stream emission
-	EmitterComponent->EmitterMode = EKawaiiFluidEmitterMode::Stream;
-	EmitterComponent->InitialSpeed = 100.0f;
 }
 
 void AKawaiiFluidEmitter::BeginPlay()

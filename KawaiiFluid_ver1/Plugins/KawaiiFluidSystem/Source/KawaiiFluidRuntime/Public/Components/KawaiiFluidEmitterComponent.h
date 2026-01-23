@@ -93,7 +93,7 @@ public:
 
 	/** Emitter mode: Fill (one-time fill) or Stream (continuous emission) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter")
-	EKawaiiFluidEmitterMode EmitterMode = EKawaiiFluidEmitterMode::Fill;
+	EKawaiiFluidEmitterMode EmitterMode = EKawaiiFluidEmitterMode::Stream;
 
 	/** Shape type for Fill mode */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
@@ -123,7 +123,7 @@ public:
 	/** Stream cross-sectional radius */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
 		meta = (EditCondition = "EmitterMode == EKawaiiFluidEmitterMode::Stream", EditConditionHides, ClampMin = "1.0"))
-	float StreamRadius = 5.0f;
+	float StreamRadius = 25.0f;
 
 	/** Use world space for velocity direction (if false, uses local space) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter")
@@ -136,18 +136,18 @@ public:
 	/** Initial speed for spawned particles (cm/s) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
 		meta = (ClampMin = "0.0"))
-	float InitialSpeed = 100.0f;
+	float InitialSpeed = 250.0f;
 
 	/** Maximum particles this emitter can spawn (0 = unlimited) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
 		meta = (ClampMin = "0"))
-	int32 MaxParticleCount = 0;
+	int32 MaxParticleCount = 100000;
 
 	/** Recycle oldest particles when MaxParticleCount is exceeded (instead of stopping spawn)
 	 *  Only applicable to Stream mode - Fill mode spawns once and doesn't need recycling */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter",
 		meta = (EditCondition = "MaxParticleCount > 0 && EmitterMode == EKawaiiFluidEmitterMode::Stream", EditConditionHides))
-	bool bRecycleOldestParticles = false;
+	bool bRecycleOldestParticles = true;
 
 	/** Whether to automatically start spawning on BeginPlay */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Emitter")

@@ -24,6 +24,14 @@ UKawaiiFluidVolumeComponent::UKawaiiFluidVolumeComponent()
 	ShapeColor = FColor::Green;
 	bHiddenInGame = true;  // Hide wireframe at runtime by default
 
+	// Load default Preset (DA_KF_Water)
+	static ConstructorHelpers::FObjectFinder<UKawaiiFluidPresetDataAsset> DefaultPresetFinder(
+		TEXT("/KawaiiFluidSystem/Preset/DA_KF_Water.DA_KF_Water"));
+	if (DefaultPresetFinder.Succeeded())
+	{
+		Preset = DefaultPresetFinder.Object;
+	}
+
 	// Initialize default volume size based on Medium Z-Order preset and default CellSize (20.0f)
 	// Formula: GridResolution(Medium) * CellSize = 128 * 20 = 2560
 	// CellSize will be automatically derived from Preset->SmoothingRadius when Preset is set
