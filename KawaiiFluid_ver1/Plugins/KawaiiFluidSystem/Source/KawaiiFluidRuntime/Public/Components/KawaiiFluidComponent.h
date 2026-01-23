@@ -31,7 +31,6 @@ public:
 
 	// Particle data to preserve
 	TArray<FFluidParticle> SavedParticles;
-	int32 SavedNextParticleID = 0;
 };
 
 /**

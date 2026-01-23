@@ -2090,11 +2090,10 @@ FKawaiiFluidComponentInstanceData::FKawaiiFluidComponentInstanceData(const UKawa
 {
 	if (SourceComponent && SourceComponent->GetSimulationModule())
 	{
-		// GPU 모드 시 CPU 배열로 동기화 후 저장 (const_cast: 저장 전 동기화 필수)
+		// GPU 모드 시 CPU 배열로 동기화 후 저장
 		SourceComponent->GetSimulationModule()->SyncGPUParticlesToCPU();
 
 		SavedParticles = SourceComponent->GetSimulationModule()->GetParticles();
-		SavedNextParticleID = SourceComponent->GetSimulationModule()->GetNextParticleID();
 
 		UE_LOG(LogTemp, Log, TEXT("InstanceData: Saved %d particles from %s"),
 			SavedParticles.Num(), *SourceComponent->GetName());
@@ -2112,10 +2111,8 @@ void FKawaiiFluidComponentInstanceData::ApplyToComponent(UActorComponent* Compon
 			if (FluidComponent->GetSimulationModule() && SavedParticles.Num() > 0)
 			{
 				FluidComponent->GetSimulationModule()->GetParticlesMutable() = SavedParticles;
-				FluidComponent->GetSimulationModule()->SetNextParticleID(SavedNextParticleID);
 
 				// GPU 활성 시 복원된 파티클을 GPU로 업로드
-				// (OnRegister에서 RegisterModule 호출 시점에는 아직 복원 안 됨)
 				FluidComponent->GetSimulationModule()->UploadCPUParticlesToGPU();
 
 				UE_LOG(LogTemp, Log, TEXT("InstanceData: Restored %d particles to %s"),

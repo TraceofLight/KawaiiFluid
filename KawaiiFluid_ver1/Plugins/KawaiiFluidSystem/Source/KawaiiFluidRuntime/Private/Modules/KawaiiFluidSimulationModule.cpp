@@ -132,7 +132,6 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 	}
 
 	TArray<FFluidParticle> MyParticles;
-	bool bSyncSuccess = false;
 
 	if (CachedGPUSimulator->IsReady())
 	{
@@ -140,25 +139,7 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 		if (CachedGPUSimulator->GetParticlesBySourceID(CachedSourceID, MyParticles))
 		{
 			Particles = MoveTemp(MyParticles);
-			bSyncSuccess = true;
 		}
-	}
-
-	// GPU의 NextParticleID도 CPU로 동기화 (PIE 전환 시 ID 충돌 방지)
-	if (bSyncSuccess)
-	{
-		// 내 파티클 중 최대 ID 찾기
-		int32 MaxParticleID = -1;
-		for (const FFluidParticle& P : Particles)
-		{
-			MaxParticleID = FMath::Max(MaxParticleID, P.ParticleID);
-		}
-		if (MaxParticleID >= 0)
-		{
-			NextParticleID = MaxParticleID + 1;
-		}
-		UE_LOG(LogTemp, Log, TEXT("SyncGPUParticlesToCPU: SourceID=%d, Synced %d particles, NextParticleID = %d"),
-			CachedSourceID, Particles.Num(), NextParticleID);
 	}
 }
 
@@ -192,17 +173,14 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 	// 모든 append 후 GPU 버퍼 생성/갱신
 	CachedGPUSimulator->FinalizeUpload();
 
-	// GPU와 CPU의 NextParticleID를 동기화 (PIE 전환 시 ID 충돌 방지)
+	// SpawnManager의 NextParticleID 갱신 (여러 컴포넌트가 업로드할 때 가장 큰 ID 기준)
 	if (MaxParticleID >= 0)
 	{
 		const int32 NewNextID = MaxParticleID + 1;
 		const int32 CurrentNextID = CachedGPUSimulator->GetNextParticleID();
-		// 여러 컴포넌트가 업로드할 때 가장 큰 ID 기준으로만 업데이트
 		if (NewNextID > CurrentNextID)
 		{
 			CachedGPUSimulator->SetNextParticleID(NewNextID);
-			NextParticleID = NewNextID;
-			UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Set NextParticleID to %d (GPU & CPU synced)"), NewNextID);
 		}
 	}
 

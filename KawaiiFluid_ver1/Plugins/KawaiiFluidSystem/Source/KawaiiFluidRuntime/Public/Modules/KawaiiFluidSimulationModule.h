@@ -280,12 +280,6 @@ public:
 	/** 파티클 배열 (수정 가능 - Subsystem/Context 용) */
 	TArray<FFluidParticle>& GetParticlesMutable() { return Particles; }
 
-	/** 다음 파티클 ID 가져오기 */
-	int32 GetNextParticleID() const { return NextParticleID; }
-
-	/** 다음 파티클 ID 설정 (InstanceData 복원용) */
-	void SetNextParticleID(int32 InNextParticleID) { NextParticleID = InNextParticleID; }
-
 	/** 파티클 수 - IKawaiiFluidDataProvider::GetParticleCount() */
 	/** GPU mode: returns GPU particle count, CPU mode: returns Particles.Num() */
 	UFUNCTION(BlueprintPure, Category = "Fluid")
@@ -748,10 +742,6 @@ private:
 
 	/** 누적 외력 */
 	FVector AccumulatedExternalForce = FVector::ZeroVector;
-
-	/** 다음 파티클 ID - 에디터 직렬화 지원 */
-	UPROPERTY()
-	int32 NextParticleID = 0;
 
 	/** 서브스텝 시간 누적 */
 	float AccumulatedTime = 0.0f;
