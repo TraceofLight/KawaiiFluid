@@ -5,6 +5,7 @@
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "DrawDebugHelpers.h"
+#include "Engine/World.h"
 
 UKawaiiFluidVolumeComponent::UKawaiiFluidVolumeComponent()
 {

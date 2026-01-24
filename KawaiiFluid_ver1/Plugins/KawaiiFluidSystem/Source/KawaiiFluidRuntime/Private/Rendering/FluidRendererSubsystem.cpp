@@ -12,6 +12,7 @@
 #include "EngineUtils.h"
 #include "UObject/ConstructorHelpers.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Async/ParallelFor.h"
 
 bool UFluidRendererSubsystem::ShouldCreateSubsystem(UObject* Outer) const
 {
@@ -260,7 +261,7 @@ void UFluidRendererSubsystem::UpdateShadowInstances(const FVector* ParticlePosit
 		ShadowProxyActor = World->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
 		if (ShadowProxyActor)
 		{
-			ShadowProxyActor->SetActorLabel(TEXT("FluidShadowProxy"));
+			// SetActorLabel removed in UE 5.7
 		}
 		else
 		{
@@ -471,7 +472,7 @@ void UFluidRendererSubsystem::UpdateShadowInstancesWithAnisotropy(
 		ShadowProxyActor = World->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
 		if (ShadowProxyActor)
 		{
-			ShadowProxyActor->SetActorLabel(TEXT("FluidShadowProxy"));
+			// SetActorLabel removed in UE 5.7
 		}
 		else
 		{

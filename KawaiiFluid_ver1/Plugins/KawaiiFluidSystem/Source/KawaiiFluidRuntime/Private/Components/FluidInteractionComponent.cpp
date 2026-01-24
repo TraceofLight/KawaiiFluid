@@ -14,6 +14,7 @@
 #include "GPU/GPUFluidParticle.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
 #include "Rendering/SkeletalMeshRenderData.h"
 #include "Rendering/PositionVertexBuffer.h"
 #include "PhysicsEngine/PhysicsAsset.h"

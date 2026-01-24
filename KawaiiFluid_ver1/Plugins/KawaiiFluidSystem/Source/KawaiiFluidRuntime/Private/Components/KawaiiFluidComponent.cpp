@@ -213,7 +213,9 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	// Debug Draw, ISM Debug View, 브러시 모드, Recycle 모드에서 readback 필요
 	bool bNeedReadback = (DebugDrawMode == EFluidDebugDrawMode::DebugDraw) ||
 	                     (DebugDrawMode == EFluidDebugDrawMode::ISM) ||
+#if WITH_EDITORONLY_DATA
 	                     bBrushModeActive ||
+#endif
 	                     SpawnSettings.bRecycleOldestParticles;
 	GetFluidStatsCollector().SetReadbackRequested(bNeedReadback);
 

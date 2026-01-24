@@ -2,6 +2,7 @@
 
 #include "Physics/ViscositySolver.h"
 #include "Physics/SPHKernels.h"
+#include "Async/ParallelFor.h"
 
 namespace ViscosityConstants
 {

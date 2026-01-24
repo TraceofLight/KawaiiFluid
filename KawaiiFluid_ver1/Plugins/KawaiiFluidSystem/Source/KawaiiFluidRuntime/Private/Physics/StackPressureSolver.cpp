@@ -2,6 +2,7 @@
 
 #include "Physics/StackPressureSolver.h"
 #include "Physics/SPHKernels.h"
+#include "Async/ParallelFor.h"
 
 FStackPressureSolver::FStackPressureSolver()
 {

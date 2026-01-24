@@ -160,9 +160,6 @@ protected:
 #if WITH_EDITORONLY_DATA
 	/** 함수 시그니처 등록 (에디터 전용) */
 	virtual void GetFunctionsInternal(TArray<FNiagaraFunctionSignature>& OutFunctions) const override;
-
-	/** 함수 유효성 검사 (컴파일 타임) */
-	virtual void ValidateFunction(const FNiagaraFunctionSignature& Function, TArray<FText>& OutValidationErrors) override;
 #endif
 
 	//========================================

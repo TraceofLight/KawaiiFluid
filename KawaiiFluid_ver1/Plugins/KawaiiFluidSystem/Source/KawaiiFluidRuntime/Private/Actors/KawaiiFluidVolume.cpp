@@ -14,6 +14,8 @@
 #include "GPU/GPUFluidSimulator.h"
 #include "DrawDebugHelpers.h"
 #include "NiagaraFunctionLibrary.h"
+#include "Engine/World.h"
+#include "Async/ParallelFor.h"
 
 AKawaiiFluidVolume::AKawaiiFluidVolume()
 {
@@ -316,7 +318,7 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 							if (bShouldSpawn)
 							{
 								UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-									World,
+									this,
 									SplashVFX,
 									Positions[i],
 									VelocityDir.Rotation()

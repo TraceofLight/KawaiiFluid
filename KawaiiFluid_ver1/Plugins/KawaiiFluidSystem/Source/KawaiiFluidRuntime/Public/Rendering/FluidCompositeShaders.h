@@ -7,6 +7,7 @@
 #include "ShaderParameterStruct.h"
 #include "RenderGraphResources.h"
 #include "SceneTextureParameters.h"
+#include "SceneView.h"
 
 /** Maximum number of lights supported for fluid composite shading. */
 static constexpr int32 FLUID_MAX_LIGHTS = 8;

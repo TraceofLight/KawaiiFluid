@@ -6,6 +6,7 @@
 #include "RenderGraphUtils.h"
 #include "GlobalShader.h"
 #include "ShaderParameterStruct.h"
+#include "RenderUtils.h"
 
 //=============================================================================
 // Shader Implementations

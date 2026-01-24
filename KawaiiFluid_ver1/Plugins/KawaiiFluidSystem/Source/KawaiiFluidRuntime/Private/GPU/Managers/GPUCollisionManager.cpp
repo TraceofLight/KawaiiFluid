@@ -6,6 +6,7 @@
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "RHIGPUReadback.h"
+#include "RenderUtils.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGPUCollisionManager, Log, All);
 DEFINE_LOG_CATEGORY(LogGPUCollisionManager);

@@ -8,6 +8,7 @@
 #include "ShaderParameterStruct.h"
 #include "Engine/Texture2D.h"
 #include "RHIStaticStates.h"
+#include "TextureResource.h"
 
 //=============================================================================
 // Console Variables

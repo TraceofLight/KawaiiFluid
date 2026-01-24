@@ -29,10 +29,6 @@ void FKawaiiFluidNiagaraModule::StartupModule()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("  [OK] UNiagaraDataInterfaceKawaiiFluid class loaded"));
 		UE_LOG(LogTemp, Warning, TEXT("       - Class Name: %s"), *DIClass->GetName());
-		UE_LOG(LogTemp, Warning, TEXT("       - Display Name: %s"), 
-			*DIClass->GetMetaData(TEXT("DisplayName")));
-		UE_LOG(LogTemp, Warning, TEXT("       - Category: %s"), 
-			*DIClass->GetMetaData(TEXT("Category")));
 		UE_LOG(LogTemp, Warning, TEXT("       - Package: %s"), *DIClass->GetPackage()->GetName());
 		UE_LOG(LogTemp, Warning, TEXT("       - Outer: %s"), DIClass->GetOuter() ? *DIClass->GetOuter()->GetName() : TEXT("None"));
 		

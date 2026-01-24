@@ -3,6 +3,7 @@
 #include "Physics/AdhesionSolver.h"
 #include "Physics/SPHKernels.h"
 #include "Collision/FluidCollider.h"
+#include "Async/ParallelFor.h"
 
 FAdhesionSolver::FAdhesionSolver()
 {

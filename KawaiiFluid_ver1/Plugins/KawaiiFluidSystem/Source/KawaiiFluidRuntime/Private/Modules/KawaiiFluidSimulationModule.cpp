@@ -13,6 +13,7 @@
 #include "GPU/GPUFluidParticle.h"  // For FGPUSpawnRequest
 #include "UObject/UObjectGlobals.h"  // For FCoreUObjectDelegates
 #include "UObject/ObjectSaveContext.h"  // For FObjectPreSaveContext
+#include "Engine/World.h"
 
 #if WITH_EDITOR
 #include "Editor.h"  // For FEditorDelegates

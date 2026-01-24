@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "RenderGraphResources.h"
 #include "RenderGraphBuilder.h"
+#include "GlobalShader.h"
 
 class FRDGBuilder;
 struct FGPUFluidSimulationParams;

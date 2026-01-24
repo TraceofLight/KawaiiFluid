@@ -7,6 +7,8 @@
 #include "Rendering/SkeletalMeshLODRenderData.h"
 #include "Rendering/SkinWeightVertexBuffer.h"
 #include "Algo/Sort.h"
+#include "Engine/SkeletalMesh.h"
+#include "Async/ParallelFor.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogSkeletalMeshBVH, Log, All);
 DEFINE_LOG_CATEGORY(LogSkeletalMeshBVH);

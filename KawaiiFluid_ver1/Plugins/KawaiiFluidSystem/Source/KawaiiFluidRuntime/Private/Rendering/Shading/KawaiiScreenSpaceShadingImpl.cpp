@@ -10,6 +10,7 @@
 #include "ScenePrivate.h"
 #include "GlobalShader.h"
 #include "RHIStaticStates.h"
+#include "TextureResource.h"
 
 static TAutoConsoleVariable<int32> CVarFluidSSRDebugMode(
 	TEXT("r.Fluid.SSRDebugMode"),

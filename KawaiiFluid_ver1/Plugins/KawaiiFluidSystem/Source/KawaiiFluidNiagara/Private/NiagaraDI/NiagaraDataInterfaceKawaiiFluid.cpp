@@ -10,6 +10,7 @@
 #include "NiagaraTypes.h"
 #include "ShaderParameterUtils.h"
 #include "RHICommandList.h"
+#include "Engine/World.h"
 
 //========================================
 // 함수 이름 정의
@@ -131,25 +132,6 @@ void UNiagaraDataInterfaceKawaiiFluid::GetFunctionsInternal(TArray<FNiagaraFunct
 	}
 }
 #endif
-
-//========================================
-// 함수 유효성 검사 (컴파일 타임)
-//========================================
-
-void UNiagaraDataInterfaceKawaiiFluid::ValidateFunction(const FNiagaraFunctionSignature& Function, TArray<FText>& OutValidationErrors)
-{
-	// 부모 클래스 검증 먼저 수행
-	Super::ValidateFunction(Function, OutValidationErrors);
-
-	// ⚠️ ValidateFunction은 컴파일 타임에 실행되므로
-	// Runtime 값 (SourceDummyActor)을 확인할 수 없음!
-	// 
-	// 대신 런타임 에러는 InitPerInstanceData()에서 처리됨
-	// 여기서는 함수 시그니처만 검증
-
-	// 추가 검증이 필요하다면 함수 파라미터 타입 등만 확인
-	// 예: GetParticlePosition의 Index가 Int인지 확인
-}
 
 //========================================
 // VM 함수 바인딩
