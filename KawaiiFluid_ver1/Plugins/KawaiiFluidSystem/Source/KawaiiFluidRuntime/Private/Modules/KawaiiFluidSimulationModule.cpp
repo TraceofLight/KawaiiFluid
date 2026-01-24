@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Core/SpatialHash.h"
@@ -80,7 +80,7 @@ void UKawaiiFluidSimulationModule::PostDuplicate(bool bDuplicateForPIE)
 	// PIE로 복제될 때 EditorWorld의 객체를 가리키는 stale pointer 초기화
 	// 이 포인터들은 새 World의 BeginPlay에서 올바른 객체로 다시 설정됨
 	CachedSimulationContext = nullptr;
-	CachedGPUSimulator = nullptr;
+	WeakGPUSimulator.Reset();
 	bGPUSimulationActive = false;
 
 	// ⚠️ Particles 배열은 유지! (PreBeginPIE에서 캐시한 GPU 데이터
@@ -118,13 +118,14 @@ void UKawaiiFluidSimulationModule::PreSave(FObjectPreSaveContext SaveContext)
 
 void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 {
-	if (!CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (!GPUSim)
 	{
 		// GPU 시뮬레이터 없으면 기존 CPU Particles 유지
 		return;
 	}
 
-	const int32 GPUCount = CachedGPUSimulator->GetParticleCount();
+	const int32 GPUCount = GPUSim->GetParticleCount();
 	if (GPUCount <= 0)
 	{
 		// GPU에 파티클 없으면 기존 유지
@@ -133,10 +134,10 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 
 	TArray<FFluidParticle> MyParticles;
 
-	if (CachedGPUSimulator->IsReady())
+	if (GPUSim->IsReady())
 	{
 		// 내 SourceID 파티클만 필터링해서 가져오기 (배칭 환경 대응)
-		if (CachedGPUSimulator->GetParticlesBySourceID(CachedSourceID, MyParticles))
+		if (GPUSim->GetParticlesBySourceID(CachedSourceID, MyParticles))
 		{
 			Particles = MoveTemp(MyParticles);
 		}
@@ -150,7 +151,8 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 		return;
 	}
 
-	if (!CachedGPUSimulator || !CachedGPUSimulator->IsReady())
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (!GPUSim || !GPUSim->IsReady())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("UploadCPUParticlesToGPU: GPUSimulator not ready, %d particles waiting"), Particles.Num());
 		return;
@@ -159,7 +161,7 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 	const int32 UploadCount = Particles.Num();
 
 	// Atomic ID 할당: 저장된 ID 무시하고 새로 할당 (멀티모듈 충돌 방지 + overflow 리셋)
-	const int32 StartID = CachedGPUSimulator->AllocateParticleIDs(UploadCount);
+	const int32 StartID = GPUSim->AllocateParticleIDs(UploadCount);
 	for (int32 i = 0; i < UploadCount; ++i)
 	{
 		Particles[i].ParticleID = StartID + i;
@@ -167,10 +169,10 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 	}
 
 	// CPU에서 GPU로 업로드 (bAppend=true: 배칭 환경에서 다른 컴포넌트 파티클 보존)
-	CachedGPUSimulator->UploadParticles(Particles, /*bAppend=*/true);
+	GPUSim->UploadParticles(Particles, /*bAppend=*/true);
 
 	// 모든 append 후 GPU 버퍼 생성/갱신 + SpawnManager 상태 리셋
-	CachedGPUSimulator->FinalizeUpload();
+	GPUSim->FinalizeUpload();
 
 	// GPU에 올렸으니 CPU 배열 정리 (중복 업로드 방지 + 메모리 절약)
 	Particles.Empty();
@@ -613,11 +615,12 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 	//========================================
 	// GPU 피드백 처리
 	//========================================
-	if (bGPUSimulationActive && CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (bGPUSimulationActive && GPUSim)
 	{
 		TArray<FGPUCollisionFeedback> GPUFeedbacks;
 		int32 GPUFeedbackCount = 0;
-		CachedGPUSimulator->GetAllCollisionFeedback(GPUFeedbacks, GPUFeedbackCount);
+		GPUSim->GetAllCollisionFeedback(GPUFeedbacks, GPUFeedbackCount);
 
 		for (int32 i = 0; i < GPUFeedbackCount && EventCount < MaxEventsPerFrame; ++i)
 		{
@@ -723,7 +726,8 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 
 int32 UKawaiiFluidSimulationModule::SpawnParticle(FVector Position, FVector Velocity)
 {
-	if (!CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (!GPUSim)
 	{
 		return -1;
 	}
@@ -740,14 +744,15 @@ int32 UKawaiiFluidSimulationModule::SpawnParticle(FVector Position, FVector Velo
 
 	TArray<FGPUSpawnRequest> Requests;
 	Requests.Add(Request);
-	CachedGPUSimulator->AddSpawnRequests(Requests);
+	GPUSim->AddSpawnRequests(Requests);
 
 	return -1;  // GPU assigns ID asynchronously
 }
 
 void UKawaiiFluidSimulationModule::SpawnParticles(FVector Location, int32 Count, float SpawnRadius)
 {
-	if (!CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (!GPUSim)
 	{
 		return;
 	}
@@ -772,7 +777,7 @@ void UKawaiiFluidSimulationModule::SpawnParticles(FVector Location, int32 Count,
 		SpawnRequests.Add(Request);
 	}
 
-	CachedGPUSimulator->AddSpawnRequests(SpawnRequests);
+	GPUSim->AddSpawnRequests(SpawnRequests);
 }
 
 int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float Radius, float Spacing,
@@ -802,7 +807,8 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float R
 	const float EstimatedCount = (4.0f / 3.0f * PI * Radius * Radius * Radius) / (Spacing * Spacing * Spacing);
 
 	// GPU mode: batch spawn requests for efficiency
-	if (bGPUSimulationActive && CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (bGPUSimulationActive && GPUSim)
 	{
 		const float Mass = Preset ? Preset->ParticleMass : 1.0f;
 		const float ParticleRadius = Preset ? Preset->ParticleRadius : 5.0f;
@@ -846,7 +852,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float R
 
 		if (SpawnRequests.Num() > 0)
 		{
-			CachedGPUSimulator->AddSpawnRequests(SpawnRequests);
+			GPUSim->AddSpawnRequests(SpawnRequests);
 		}
 		return SpawnedCount;
 	}
@@ -1273,9 +1279,10 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Pos
 	int32 SpawnedCount = SpawnParticleDirectionalHexLayerBatch(Position, Direction, Speed, Radius, Spacing, Jitter, BatchRequests);
 
 	// Send batch requests
-	if (BatchRequests.Num() > 0 && CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (BatchRequests.Num() > 0 && GPUSim)
 	{
-		CachedGPUSimulator->AddSpawnRequests(BatchRequests);
+		GPUSim->AddSpawnRequests(BatchRequests);
 	}
 
 	return SpawnedCount;
@@ -1380,14 +1387,16 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 	Particles.Empty();
 
 	// GPU 파티클 클리어 (이 Module의 SourceID 파티클만)
-	if (bGPUSimulationActive && CachedGPUSimulator)
+	// TWeakPtr::Pin()으로 안전하게 접근 - GPUSimulator가 이미 파괴되었으면 nullptr 반환
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (bGPUSimulationActive && GPUSim)
 	{
 		// 캐시된 SourceID별 ParticleIDs 참조 (복사 없음, O(1) lookup)
-		const TArray<int32>* MyParticleIDsPtr = CachedGPUSimulator->GetParticleIDsBySourceID(CachedSourceID);
+		const TArray<int32>* MyParticleIDsPtr = GPUSim->GetParticleIDsBySourceID(CachedSourceID);
 		if (MyParticleIDsPtr && MyParticleIDsPtr->Num() > 0)
 		{
 			// 내 파티클들 Despawn 요청 (CleanupCompletedRequests는 Readback 시 호출됨)
-			CachedGPUSimulator->AddDespawnByIDRequests(*MyParticleIDsPtr);
+			GPUSim->AddDespawnByIDRequests(*MyParticleIDsPtr);
 			UE_LOG(LogTemp, Log, TEXT("ClearAllParticles: SourceID=%d, Clearing %d particles"),
 				CachedSourceID, MyParticleIDsPtr->Num());
 		}
@@ -1402,10 +1411,11 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticles(int32 Count)
 	}
 
 	// GPU 모드
-	if (bGPUSimulationActive && CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (bGPUSimulationActive && GPUSim)
 	{
 		// 캐시된 SourceID별 ParticleIDs 참조 (이미 ParticleID로 정렬됨)
-		const TArray<int32>* MyParticleIDsPtr = CachedGPUSimulator->GetParticleIDsBySourceID(CachedSourceID);
+		const TArray<int32>* MyParticleIDsPtr = GPUSim->GetParticleIDsBySourceID(CachedSourceID);
 		if (!MyParticleIDsPtr || MyParticleIDsPtr->Num() == 0)
 		{
 			return 0;
@@ -1419,7 +1429,7 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticles(int32 Count)
 		IDsToRemove.SetNumUninitialized(RemoveCount);
 		FMemory::Memcpy(IDsToRemove.GetData(), MyParticleIDsPtr->GetData(), RemoveCount * sizeof(int32));
 
-		CachedGPUSimulator->AddDespawnByIDRequests(IDsToRemove);
+		GPUSim->AddDespawnByIDRequests(IDsToRemove);
 
 		UE_LOG(LogTemp, Log, TEXT("RemoveOldestParticles: SourceID=%d, Removing %d (IDs: %d~%d), Total=%d"),
 			CachedSourceID, RemoveCount, IDsToRemove[0], IDsToRemove.Last(), MyCount);
@@ -1438,10 +1448,11 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticlesForSource(int32 SourceI
 	}
 
 	// GPU 모드
-	if (bGPUSimulationActive && CachedGPUSimulator)
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (bGPUSimulationActive && GPUSim)
 	{
 		// 지정된 SourceID의 ParticleIDs 참조 (이미 ParticleID로 정렬됨)
-		const TArray<int32>* ParticleIDsPtr = CachedGPUSimulator->GetParticleIDsBySourceID(SourceID);
+		const TArray<int32>* ParticleIDsPtr = GPUSim->GetParticleIDsBySourceID(SourceID);
 		if (!ParticleIDsPtr || ParticleIDsPtr->Num() == 0)
 		{
 			return 0;
@@ -1455,7 +1466,7 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticlesForSource(int32 SourceI
 		IDsToRemove.SetNumUninitialized(RemoveCount);
 		FMemory::Memcpy(IDsToRemove.GetData(), ParticleIDsPtr->GetData(), RemoveCount * sizeof(int32));
 
-		CachedGPUSimulator->AddDespawnByIDRequests(IDsToRemove);
+		GPUSim->AddDespawnByIDRequests(IDsToRemove);
 
 		UE_LOG(LogTemp, Log, TEXT("RemoveOldestParticlesForSource: SourceID=%d, Removing %d (IDs: %d~%d), Total=%d"),
 			SourceID, RemoveCount, IDsToRemove[0], IDsToRemove.Last(), SourceCount);
@@ -1593,23 +1604,25 @@ FString UKawaiiFluidSimulationModule::GetDebugName() const
 
 bool UKawaiiFluidSimulationModule::IsGPUSimulationActive() const
 {
-	return bGPUSimulationActive && CachedGPUSimulator != nullptr;
+	return bGPUSimulationActive && WeakGPUSimulator.IsValid();
 }
 
 int32 UKawaiiFluidSimulationModule::GetGPUParticleCount() const
 {
-	if (CachedGPUSimulator && CachedGPUSimulator->IsReady())
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (GPUSim && GPUSim->IsReady())
 	{
-		return CachedGPUSimulator->GetParticleCount();
+		return GPUSim->GetParticleCount();
 	}
 	return 0;
 }
 
 int32 UKawaiiFluidSimulationModule::GetParticleCountForSource(int32 SourceID) const
 {
-	if (CachedGPUSimulator && CachedGPUSimulator->IsReady())
+	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	if (GPUSim && GPUSim->IsReady())
 	{
-		FGPUSpawnManager* SpawnManager = CachedGPUSimulator->GetSpawnManager();
+		FGPUSpawnManager* SpawnManager = GPUSim->GetSpawnManager();
 		if (SpawnManager)
 		{
 			return SpawnManager->GetParticleCountForSource(SourceID);

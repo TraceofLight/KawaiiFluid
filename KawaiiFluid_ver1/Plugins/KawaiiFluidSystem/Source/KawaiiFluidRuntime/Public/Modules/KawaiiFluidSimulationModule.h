@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -285,10 +285,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Fluid")
 	virtual int32 GetParticleCount() const override
 	{
-		if (bGPUSimulationActive && CachedGPUSimulator)
+		if (bGPUSimulationActive)
 		{
-			// Include both existing GPU particles AND pending spawn requests
-			return CachedGPUSimulator->GetParticleCount() + CachedGPUSimulator->GetPendingSpawnCount();
+			if (TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin())
+			{
+				// Include both existing GPU particles AND pending spawn requests
+				return GPUSim->GetParticleCount() + GPUSim->GetPendingSpawnCount();
+			}
 		}
 		return Particles.Num();
 	}
@@ -788,9 +791,12 @@ public:
 	/** GPU mode: checks GPU particle count, CPU mode: checks Particles.Num() */
 	virtual bool IsDataValid() const override
 	{
-		if (bGPUSimulationActive && CachedGPUSimulator)
+		if (bGPUSimulationActive)
 		{
-			return CachedGPUSimulator->GetParticleCount() > 0 || CachedGPUSimulator->GetPendingSpawnCount() > 0;
+			if (TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin())
+			{
+				return GPUSim->GetParticleCount() > 0 || GPUSim->GetPendingSpawnCount() > 0;
+			}
 		}
 		return Particles.Num() > 0;
 	}
@@ -809,10 +815,10 @@ public:
 	virtual int32 GetGPUParticleCount() const override;
 
 	/** Get GPU simulator instance */
-	virtual FGPUFluidSimulator* GetGPUSimulator() const override { return CachedGPUSimulator; }
+	virtual FGPUFluidSimulator* GetGPUSimulator() const override { return WeakGPUSimulator.Pin().Get(); }
 
 	/** Set GPU simulator reference (called by Context when GPU mode is active) */
-	void SetGPUSimulator(FGPUFluidSimulator* InSimulator) { CachedGPUSimulator = InSimulator; }
+	void SetGPUSimulator(const TSharedPtr<FGPUFluidSimulator>& InSimulator) { WeakGPUSimulator = InSimulator; }
 
 	/** Set GPU simulation active flag */
 	void SetGPUSimulationActive(bool bActive) { bGPUSimulationActive = bActive; }
@@ -882,8 +888,8 @@ public:
 	int32 GetSourceID() const { return CachedSourceID; }
 
 private:
-	/** Cached GPU simulator pointer (owned by SimulationContext) */
-	FGPUFluidSimulator* CachedGPUSimulator = nullptr;
+	/** Weak reference to GPU simulator (owned by SimulationContext via TSharedPtr) */
+	TWeakPtr<FGPUFluidSimulator> WeakGPUSimulator;
 
 	/** GPU simulation active flag */
 	bool bGPUSimulationActive = false;

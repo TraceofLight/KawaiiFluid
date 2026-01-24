@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -70,6 +70,11 @@ public:
 	 * Get GPU simulator pointer (for Phase 2 GPU→GPU rendering)
 	 */
 	FGPUFluidSimulator* GetGPUSimulator() const { return GPUSimulator.Get(); }
+
+	/**
+	 * Get GPU simulator as TSharedPtr (for TWeakPtr assignment in modules)
+	 */
+	TSharedPtr<FGPUFluidSimulator> GetGPUSimulatorShared() const { return GPUSimulator; }
 
 	/**
 	 * Get the cached preset associated with this context

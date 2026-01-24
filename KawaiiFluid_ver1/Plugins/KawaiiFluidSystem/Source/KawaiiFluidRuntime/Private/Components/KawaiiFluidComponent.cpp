@@ -234,9 +234,9 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 				{
 					Context->InitializeGPUSimulator(Preset->MaxParticles);
 				}
-				if (Context->IsGPUSimulatorReady())
+			if (Context->IsGPUSimulatorReady())
 				{
-					SimulationModule->SetGPUSimulator(Context->GetGPUSimulator());
+					SimulationModule->SetGPUSimulator(Context->GetGPUSimulatorShared());
 					SimulationModule->SetGPUSimulationActive(true);
 				}
 

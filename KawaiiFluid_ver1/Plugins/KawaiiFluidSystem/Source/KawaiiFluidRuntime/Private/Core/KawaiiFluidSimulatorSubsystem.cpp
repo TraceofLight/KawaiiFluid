@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Core/KawaiiFluidSimulationContext.h"
@@ -183,9 +183,9 @@ void UKawaiiFluidSimulatorSubsystem::RegisterModule(UKawaiiFluidSimulationModule
 					Context->InitializeGPUSimulator(Preset->MaxParticles);
 				}
 
-				if (Context->IsGPUSimulatorReady())
+			if (Context->IsGPUSimulatorReady())
 				{
-					Module->SetGPUSimulator(Context->GetGPUSimulator());
+					Module->SetGPUSimulator(Context->GetGPUSimulatorShared());
 					Module->SetGPUSimulationActive(true);
 
 					// PIE/로드 후 캐시된 CPU 파티클을 GPU로 업로드
@@ -591,7 +591,7 @@ void UKawaiiFluidSimulatorSubsystem::SimulateIndependentFluidComponents(float De
 
 		if (Context->IsGPUSimulatorReady())
 		{
-			Module->SetGPUSimulator(Context->GetGPUSimulator());
+			Module->SetGPUSimulator(Context->GetGPUSimulatorShared());
 			Module->SetGPUSimulationActive(true);
 		}
 
@@ -665,7 +665,7 @@ void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaT
 
 		if (Context->IsGPUSimulatorReady())
 		{
-			FGPUFluidSimulator* BatchGPUSimulator = Context->GetGPUSimulator();
+			TSharedPtr<FGPUFluidSimulator> BatchGPUSimulator = Context->GetGPUSimulatorShared();
 			for (UKawaiiFluidSimulationModule* Module : Modules)
 			{
 				if (Module)
