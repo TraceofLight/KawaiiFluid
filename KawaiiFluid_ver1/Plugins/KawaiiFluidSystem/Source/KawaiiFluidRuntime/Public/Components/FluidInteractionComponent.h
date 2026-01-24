@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Core/KawaiiFluidSimulationTypes.h"
 #include "FluidInteractionComponent.generated.h"
 
 class UKawaiiFluidSimulatorSubsystem;
@@ -11,25 +12,7 @@ class UFluidCollider;
 class UMeshFluidCollider;
 class UKawaiiFluidPresetDataAsset;
 
-/**
- * Fluid type enum (BP dropdown).
- * Used to distinguish which fluid was involved in collision events.
- */
-UENUM(BlueprintType)
-enum class EFluidType : uint8
-{
-	None		UMETA(DisplayName = "None"),
-	Water		UMETA(DisplayName = "Water"),
-	Lava		UMETA(DisplayName = "Lava"),
-	Slime		UMETA(DisplayName = "Slime"),
-	Oil			UMETA(DisplayName = "Oil"),
-	Acid		UMETA(DisplayName = "Acid"),
-	Blood		UMETA(DisplayName = "Blood"),
-	Honey		UMETA(DisplayName = "Honey"),
-	Custom1		UMETA(DisplayName = "Custom1"),
-	Custom2		UMETA(DisplayName = "Custom2"),
-	Custom3		UMETA(DisplayName = "Custom3"),
-};
+// EFluidType is now defined in KawaiiFluidSimulationTypes.h
 
 //========================================
 // GPU Collision Feedback Delegates (Particle -> Player Interaction)

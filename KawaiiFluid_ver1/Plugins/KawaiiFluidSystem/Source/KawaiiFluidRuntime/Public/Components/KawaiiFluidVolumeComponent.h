@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/BoxComponent.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
-#include "Components/KawaiiFluidComponent.h"  // For enums (EFluidType, EFluidDebugVisualization, etc.)
+#include "Core/KawaiiFluidRenderingTypes.h"
 #include "KawaiiFluidVolumeComponent.generated.h"
 
 class UKawaiiFluidSimulationModule;
@@ -54,7 +54,7 @@ public:
 	 * Use uniform (cube) size for simulation volume
 	 * When checked, enter a single size value. When unchecked, enter separate X/Y/Z values.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume", meta = (DisplayName = "Uniform Size"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Volume", meta = (DisplayName = "Uniform Size"))
 	bool bUniformSize = true;
 
 	/**
@@ -64,7 +64,7 @@ public:
 	 *
 	 * Example: 400 cm means a 400x400x400 cm cube.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Volume",
 		meta = (EditCondition = "bUniformSize", EditConditionHides, DisplayName = "Size", ClampMin = "10.0"))
 	float UniformVolumeSize = 2560.0f;
 
@@ -75,7 +75,7 @@ public:
 	 *
 	 * Example: (400, 300, 200) means a 400x300x200 cm box.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Volume",
 		meta = (EditCondition = "bUniformSize == false", EditConditionHides, DisplayName = "Size"))
 	FVector VolumeSize = FVector(2560.0f, 2560.0f, 2560.0f);
 
@@ -83,7 +83,7 @@ public:
 	 * Wall bounce (0 = no bounce, 1 = full bounce)
 	 * How much particles bounce when hitting the volume walls.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Volume",
 		meta = (DisplayName = "Wall Bounce", ClampMin = "0.0", ClampMax = "1.0"))
 	float WallBounce = 0.3f;
 
@@ -91,9 +91,17 @@ public:
 	 * Wall friction (0 = slippery, 1 = sticky)
 	 * How much particles slow down when sliding along walls.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Volume",
 		meta = (DisplayName = "Wall Friction", ClampMin = "0.0", ClampMax = "1.0"))
 	float WallFriction = 0.1f;
+
+	//========================================
+	// Preset Configuration
+	//========================================
+
+	/** The fluid preset that defines physics and rendering parameters */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Preset")
+	TObjectPtr<UKawaiiFluidPresetDataAsset> Preset;
 
 	//========================================
 	// Static Boundary Particles (Akinci 2012)
@@ -106,7 +114,7 @@ public:
 	 * WARNING: Currently this feature may cause particles to fly around chaotically.
 	 * Keep disabled until the underlying issue is resolved.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume|Boundary",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Boundary",
 		meta = (DisplayName = "Enable Static Boundary Particles"))
 	bool bEnableStaticBoundaryParticles = false;
 
@@ -115,18 +123,10 @@ public:
 	 * Lower values = denser boundary particles = better density coverage but more particles
 	 * Higher values = sparser boundary particles = fewer particles but may have gaps
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Volume|Boundary",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Boundary",
 		meta = (EditCondition = "bEnableStaticBoundaryParticles", ClampMin = "1.0", ClampMax = "50.0",
 		        DisplayName = "Boundary Particle Spacing"))
 	float StaticBoundaryParticleSpacing = 5.0f;
-
-	//========================================
-	// Preset Configuration
-	//========================================
-
-	/** The fluid preset that defines physics and rendering parameters */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Preset")
-	TObjectPtr<UKawaiiFluidPresetDataAsset> Preset;
 
 	//========================================
 	// Simulation Settings
@@ -137,12 +137,12 @@ public:
 	 * Used to identify which fluid in collision events.
 	 * FluidInteractionComponent's OnBoneParticleCollision receives this type.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision",
 	          meta = (ToolTip = "Fluid type for collision event identification."))
 	EFluidType FluidType = EFluidType::None;
 
 	/** Use world collision (floor, walls, static meshes) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision")
 	bool bUseWorldCollision = true;
 
 	//========================================
@@ -150,26 +150,26 @@ public:
 	//========================================
 
 	/** Enable collision events (FluidInteractionComponent callbacks) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision|Events")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision|Events")
 	bool bEnableCollisionEvents = false;
 
 	/** Minimum velocity for event triggering (cm/s) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision|Events",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision|Events",
 	          meta = (ClampMin = "0.0", EditCondition = "bEnableCollisionEvents"))
 	float MinVelocityForEvent = 50.0f;
 
 	/** Maximum events per frame (0 = unlimited) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision|Events",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision|Events",
 	          meta = (ClampMin = "0", EditCondition = "bEnableCollisionEvents"))
 	int32 MaxEventsPerFrame = 10;
 
 	/** Per-particle event cooldown (seconds) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Collision|Events",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision|Events",
 	          meta = (ClampMin = "0.0", EditCondition = "bEnableCollisionEvents"))
 	float EventCooldownPerParticle = 0.1f;
 
 	/** Particle hit event (Blueprint bindable) */
-	UPROPERTY(BlueprintAssignable, Category = "Collision|Events")
+	UPROPERTY(BlueprintAssignable, Category = "Fluid Volume|Collision|Events")
 	FOnFluidParticleHitComponent OnParticleHit;
 
 	//========================================
@@ -177,11 +177,11 @@ public:
 	//========================================
 
 	/** Enable rendering for this volume */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Rendering")
 	bool bEnableRendering = true;
 
 	/** Enable shadow casting via instanced spheres */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Rendering")
 	bool bEnableShadow = false;
 
 	//========================================
@@ -189,26 +189,26 @@ public:
 	//========================================
 
 	/** Niagara system to spawn for splash/spray effects on fast-moving particles */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|VFX")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|VFX")
 	TObjectPtr<UNiagaraSystem> SplashVFX;
 
 	/** Velocity threshold to trigger splash VFX (world units/sec) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|VFX",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|VFX",
 	          meta = (ClampMin = "0", EditCondition = "SplashVFX != nullptr"))
 	float SplashVelocityThreshold = 200.0f;
 
 	/** Maximum splash VFX spawns per frame (performance limit) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|VFX",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|VFX",
 	          meta = (ClampMin = "1", ClampMax = "50", EditCondition = "SplashVFX != nullptr"))
 	int32 MaxSplashVFXPerFrame = 10;
 
 	/** Condition mode for splash VFX triggering */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|VFX",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|VFX",
 	          meta = (EditCondition = "SplashVFX != nullptr"))
 	ESplashConditionMode SplashConditionMode = ESplashConditionMode::VelocityAndIsolation;
 
 	/** Neighbor count threshold for isolation (particles with this many or fewer neighbors are considered isolated) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|VFX",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|VFX",
 	          meta = (ClampMin = "0", ClampMax = "10", EditCondition = "SplashVFX != nullptr && SplashConditionMode != ESplashConditionMode::VelocityOnly"))
 	int32 IsolationNeighborThreshold = 2;
 
@@ -216,18 +216,30 @@ public:
 	// Debug Particle Visualization
 	//========================================
 
-	/** Enable debug drawing using DrawDebugPoint (works with GPU simulation) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Particles")
-	bool bEnableDebugDraw = false;
+	/** Debug visualization mode (None, ISM Sphere, or Debug Point) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Particles")
+	EKawaiiFluidDebugDrawMode DebugDrawMode = EKawaiiFluidDebugDrawMode::None;
 
-	/** Debug draw visualization mode */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Particles",
-	          meta = (EditCondition = "bEnableDebugDraw"))
-	EFluidDebugVisualization DebugDrawMode = EFluidDebugVisualization::ZOrderArrayIndex;
+	/** Debug particle color (ISM mode only) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Particles",
+	          meta = (EditCondition = "DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM", EditConditionHides))
+	FLinearColor ISMDebugColor = FLinearColor(0.2f, 0.5f, 1.0f, 0.8f);
 
-	/** Debug point size */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Particles",
-	          meta = (EditCondition = "bEnableDebugDraw", ClampMin = "1.0", ClampMax = "50.0"))
+	/** Maximum particles to render in ISM mode (performance limit) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Particles",
+	          meta = (EditCondition = "DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM", EditConditionHides,
+	                  ClampMin = "1000", ClampMax = "500000"))
+	int32 ISMMaxRenderParticles = 100000;
+
+	/** Debug visualization type (DebugDraw mode only) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Particles",
+	          meta = (EditCondition = "DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw", EditConditionHides))
+	EFluidDebugVisualization DebugVisualizationType = EFluidDebugVisualization::ZOrderArrayIndex;
+
+	/** Debug point size (DebugDraw mode only) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Particles",
+	          meta = (EditCondition = "DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw", EditConditionHides,
+	                  ClampMin = "1.0", ClampMax = "50.0"))
 	float DebugPointSize = 8.0f;
 
 	//========================================
@@ -235,26 +247,26 @@ public:
 	//========================================
 
 	/** Show static boundary particles (walls, floors) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Boundary")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Boundary")
 	bool bShowStaticBoundaryParticles = false;
 
 	/** Static boundary particle debug point size */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Boundary",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Boundary",
 	          meta = (EditCondition = "bShowStaticBoundaryParticles", ClampMin = "1.0", ClampMax = "50.0"))
 	float StaticBoundaryPointSize = 4.0f;
 
 	/** Static boundary particle debug color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Boundary",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Boundary",
 	          meta = (EditCondition = "bShowStaticBoundaryParticles"))
 	FColor StaticBoundaryColor = FColor::Cyan;
 
 	/** Show surface normals for static boundary particles */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Boundary",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Boundary",
 	          meta = (EditCondition = "bShowStaticBoundaryParticles"))
 	bool bShowStaticBoundaryNormals = false;
 
 	/** Length of normal debug lines */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Boundary",
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Boundary",
 	          meta = (EditCondition = "bShowStaticBoundaryParticles && bShowStaticBoundaryNormals", ClampMin = "1.0", ClampMax = "100.0"))
 	float StaticBoundaryNormalLength = 10.0f;
 
@@ -264,12 +276,37 @@ public:
 
 #if WITH_EDITORONLY_DATA
 	/** Brush settings */
-	UPROPERTY(EditAnywhere, Category = "Brush")
+	UPROPERTY(EditAnywhere, Category = "Fluid Volume|Brush")
 	FFluidBrushSettings BrushSettings;
 
 	/** Brush mode active state (set in editor mode) */
 	bool bBrushModeActive = false;
 #endif
+
+	//========================================
+	// Debug Visualization (Internal)
+	//========================================
+
+	/** Show bounds wireframe in editor (internal fixed value) */
+	bool bShowBoundsInEditor = true;
+
+	/** Show bounds wireframe at runtime (internal fixed value) */
+	bool bShowBoundsAtRuntime = false;
+
+	/** Wireframe color (internal fixed value) */
+	FColor BoundsColor = FColor::Cyan;
+
+	/** Wireframe line thickness (internal fixed value) */
+	float BoundsLineThickness = 2.0f;
+
+	/** Show Z-Order space wireframe (for debugging spatial partitioning) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Z-Order Space", meta = (DisplayName = "Show Z-Order Space Wireframe"))
+	bool bShowZOrderSpaceWireframe = false;
+
+	/** Z-Order space wireframe color */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Z-Order Space",
+		meta = (EditCondition = "bShowZOrderSpaceWireframe", EditConditionHides, DisplayName = "Z-Order Space Wireframe Color"))
+	FColor ZOrderSpaceWireframeColor = FColor::Red;
 
 	//========================================
 	// Z-Order Space Configuration (Advanced)
@@ -280,14 +317,14 @@ public:
 	 * Determines the grid cell size for neighbor search.
 	 * This value is automatically set from the fluid preset's SmoothingRadius.
 	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced", meta = (DisplayName = "Cell Size (from Preset)"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced", meta = (DisplayName = "Cell Size (from Preset)"))
 	float CellSize = 20.0f;
 
 	/**
 	 * Grid resolution preset for Z-Order sorting (auto-selected based on volume size)
 	 * Read-only - the system automatically selects the optimal preset.
 	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced", meta = (DisplayName = "Internal Grid Preset (Auto)"))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced", meta = (DisplayName = "Internal Grid Preset (Auto)"))
 	EGridResolutionPreset GridResolutionPreset = EGridResolutionPreset::Medium;
 
 	//========================================
@@ -295,84 +332,55 @@ public:
 	//========================================
 
 	/** Grid resolution bits per axis (derived from GridResolutionPreset) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced")
 	int32 GridAxisBits = 7;
 
 	/** Grid resolution per axis (2^GridAxisBits) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced")
 	int32 GridResolution = 128;
 
 	/** Total number of cells (GridResolution^3) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced")
 	int32 MaxCells = 2097152;
 
 	/** Actual simulation bounds extent (may differ from requested VolumeSize due to grid constraints) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced")
 	float BoundsExtent = 2560.0f;
 
 	/** World-space minimum bounds (Component location - Extent/2) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced")
 	FVector WorldBoundsMin = FVector(-1280.0f, -1280.0f, -1280.0f);
 
 	/** World-space maximum bounds (Component location + Extent/2) */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Volume|Advanced")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Fluid Volume|Volume|Advanced")
 	FVector WorldBoundsMax = FVector(1280.0f, 1280.0f, 1280.0f);
-
-	//========================================
-	// Debug Visualization
-	//========================================
-
-	/** Show bounds wireframe in editor */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-	bool bShowBoundsInEditor = true;
-
-	/** Show bounds wireframe at runtime */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-	bool bShowBoundsAtRuntime = false;
-
-	/** Wireframe color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
-	FColor BoundsColor = FColor::Cyan;
-
-	/** Wireframe line thickness */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug", meta = (ClampMin = "0.5", ClampMax = "10.0"))
-	float BoundsLineThickness = 2.0f;
-
-	/** Show internal Z-Order grid space wireframe (for debugging spatial partitioning) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Advanced", meta = (DisplayName = "Show Internal Grid Wireframe"))
-	bool bShowZOrderSpaceWireframe = false;
-
-	/** Internal grid wireframe color */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug|Advanced",
-		meta = (EditCondition = "bShowZOrderSpaceWireframe", EditConditionHides, DisplayName = "Grid Wireframe Color"))
-	FColor ZOrderSpaceWireframeColor = FColor::Red;
 
 	//========================================
 	// Public Methods
 	//========================================
 
 	/** Recalculate bounds based on VolumeSize and component location */
-	UFUNCTION(BlueprintCallable, Category = "Volume")
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume")
 	void RecalculateBounds();
 
 	/** Check if a world position is within this Volume's bounds */
-	UFUNCTION(BlueprintCallable, Category = "Volume")
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume")
 	bool IsPositionInBounds(const FVector& WorldPosition) const;
 
 	/** Get simulation bounds (world-space) */
-	UFUNCTION(BlueprintCallable, Category = "Volume")
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume")
 	void GetSimulationBounds(FVector& OutMin, FVector& OutMax) const;
 
 	/** Get simulation bounds min (world-space) */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	FVector GetWorldBoundsMin() const { return WorldBoundsMin; }
 
 	/** Get simulation bounds max (world-space) */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	FVector GetWorldBoundsMax() const { return WorldBoundsMax; }
 
 	/** Get the effective volume size (full size, cm) */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	FVector GetEffectiveVolumeSize() const
 	{
 		return bUniformSize ? FVector(UniformVolumeSize) : VolumeSize;
@@ -385,35 +393,35 @@ public:
 	}
 
 	/** Get wall bounce coefficient */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	float GetWallBounce() const { return WallBounce; }
 
 	/** Get wall friction coefficient */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	float GetWallFriction() const { return WallFriction; }
 
 	/** Get cell size */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	float GetCellSize() const { return CellSize; }
 
 	/** Get bounds extent */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	float GetBoundsExtent() const { return BoundsExtent; }
 
 	/** Get grid resolution preset */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	EGridResolutionPreset GetGridResolutionPreset() const { return GridResolutionPreset; }
 
 	/** Get grid axis bits */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	int32 GetGridAxisBits() const { return GridAxisBits; }
 
 	/** Is static boundary particles enabled */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	bool IsStaticBoundaryParticlesEnabled() const { return bEnableStaticBoundaryParticles; }
 
 	/** Get static boundary particle spacing */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	float GetStaticBoundaryParticleSpacing() const { return StaticBoundaryParticleSpacing; }
 
 	//========================================
@@ -421,39 +429,47 @@ public:
 	//========================================
 
 	/** Get the preset */
-	UFUNCTION(BlueprintPure, Category = "Preset")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume|Preset")
 	UKawaiiFluidPresetDataAsset* GetPreset() const { return Preset; }
 
 	/** Get fluid type */
-	UFUNCTION(BlueprintPure, Category = "Collision")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume|Collision")
 	EFluidType GetFluidType() const { return FluidType; }
 
 	/** Set fluid type */
-	UFUNCTION(BlueprintCallable, Category = "Collision")
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume|Collision")
 	void SetFluidType(EFluidType InFluidType);
 
 	/** Get particle spacing from preset */
-	UFUNCTION(BlueprintPure, Category = "Preset")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume|Preset")
 	float GetParticleSpacing() const;
 
 	//========================================
 	// Debug Methods
 	//========================================
 
-	/** Set debug visualization mode */
-	UFUNCTION(BlueprintCallable, Category = "Debug")
+	/** Set debug draw mode (None, ISM, DebugDraw) */
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume|Debug")
+	void SetDebugDrawMode(EKawaiiFluidDebugDrawMode Mode);
+
+	/** Get current debug draw mode */
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume|Debug")
+	EKawaiiFluidDebugDrawMode GetDebugDrawMode() const { return DebugDrawMode; }
+
+	/** Set debug visualization type (for DebugDraw mode) */
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume|Debug")
 	void SetDebugVisualization(EFluidDebugVisualization Mode);
 
-	/** Get current debug visualization mode */
-	UFUNCTION(BlueprintPure, Category = "Debug")
-	EFluidDebugVisualization GetDebugVisualization() const { return DebugDrawMode; }
+	/** Get current debug visualization type */
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume|Debug")
+	EFluidDebugVisualization GetDebugVisualization() const { return DebugVisualizationType; }
 
-	/** Enable debug drawing with specified mode */
-	UFUNCTION(BlueprintCallable, Category = "Debug")
+	/** Enable debug drawing with specified visualization type */
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume|Debug")
 	void EnableDebugDraw(EFluidDebugVisualization Mode, float PointSize = 8.0f);
 
 	/** Disable debug drawing */
-	UFUNCTION(BlueprintCallable, Category = "Debug")
+	UFUNCTION(BlueprintCallable, Category = "Fluid Volume|Debug")
 	void DisableDebugDraw();
 
 	//========================================
@@ -470,7 +486,7 @@ public:
 	void UnregisterModule(UKawaiiFluidSimulationModule* Module);
 
 	/** Get the number of registered modules */
-	UFUNCTION(BlueprintPure, Category = "Volume")
+	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	int32 GetRegisteredModuleCount() const { return RegisteredModules.Num(); }
 
 private:

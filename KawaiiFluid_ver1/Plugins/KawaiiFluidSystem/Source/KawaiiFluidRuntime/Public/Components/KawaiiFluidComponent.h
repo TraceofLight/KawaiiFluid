@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/SceneComponent.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
+#include "Core/KawaiiFluidRenderingTypes.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "KawaiiFluidComponent.generated.h"
 
@@ -33,15 +34,7 @@ public:
 	TArray<FFluidParticle> SavedParticles;
 };
 
-/**
- * Brush mode type
- */
-UENUM(BlueprintType)
-enum class EFluidBrushMode : uint8
-{
-	Add       UMETA(DisplayName = "Add Particles"),
-	Remove    UMETA(DisplayName = "Remove Particles")
-};
+// EFluidBrushMode and FFluidBrushSettings are now defined in KawaiiFluidSimulationTypes.h
 
 /**
  * Top-level spawn type
@@ -96,28 +89,7 @@ enum class EStreamLayerMode : uint8
 };
 
 
-/**
- * Splash VFX condition mode
- */
-UENUM(BlueprintType)
-enum class ESplashConditionMode : uint8
-{
-	VelocityAndIsolation UMETA(DisplayName = "Velocity AND Isolation", ToolTip = "Fast-moving AND isolated particles (most accurate, like FleX diffuse)"),
-	VelocityOrIsolation  UMETA(DisplayName = "Velocity OR Isolation", ToolTip = "Fast-moving OR isolated particles (more VFX spawns)"),
-	VelocityOnly         UMETA(DisplayName = "Velocity Only", ToolTip = "Only fast-moving particles"),
-	IsolationOnly        UMETA(DisplayName = "Isolation Only", ToolTip = "Only isolated particles"),
-};
-
-/**
- * Debug draw mode for particle visualization
- */
-UENUM(BlueprintType)
-enum class EFluidDebugDrawMode : uint8
-{
-	None        UMETA(DisplayName = "None", ToolTip = "No debug visualization"),
-	ISM         UMETA(DisplayName = "ISM Sphere", ToolTip = "Render particles as instanced spheres (disables Metaball)"),
-	DebugDraw   UMETA(DisplayName = "Debug Point", ToolTip = "Draw particles as debug points (no GPU cost)"),
-};
+// ESplashConditionMode and EKawaiiFluidDebugDrawMode are now defined in KawaiiFluidRenderingTypes.h
 
 /**
  * Fluid spawn settings
@@ -289,41 +261,7 @@ struct FFluidSpawnSettings
 	}
 };
 
-/**
- * Brush settings struct
- */
-USTRUCT(BlueprintType)
-struct FFluidBrushSettings
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, Category = "Brush")
-	EFluidBrushMode Mode = EFluidBrushMode::Add;
-
-	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "10.0", ClampMax = "500.0"))
-	float Radius = 50.0f;
-
-	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "1", ClampMax = "100"))
-	int32 ParticlesPerStroke = 15;
-
-	UPROPERTY(EditAnywhere, Category = "Brush")
-	FVector InitialVelocity = FVector(0, 0, 0);
-
-	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float Randomness = 0.8f;
-
-	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "0.01", ClampMax = "0.5"))
-	float StrokeInterval = 0.03f;
-};
-
-/**
- * Particle hit event delegate
- * Called when a particle collides with an actor
- */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
-	FOnFluidParticleHitComponent,
-	const FKawaiiFluidCollisionEvent&, CollisionEvent
-);
+// FFluidBrushSettings and FOnFluidParticleHitComponent are now defined in KawaiiFluidSimulationTypes.h
 
 /**
  * Kawaii Fluid Component (Unified Component)
@@ -446,14 +384,20 @@ public:
 
 	/** Debug visualization mode (None, ISM Sphere, or Debug Point) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug")
-	EFluidDebugDrawMode DebugDrawMode = EFluidDebugDrawMode::None;
+	EKawaiiFluidDebugDrawMode DebugDrawMode = EKawaiiFluidDebugDrawMode::None;
 
 	/** Debug particle color (ISM mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug", meta = (EditCondition = "DebugDrawMode == EFluidDebugDrawMode::ISM", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug", meta = (EditCondition = "DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM", EditConditionHides))
 	FLinearColor ISMDebugColor = FLinearColor(0.2f, 0.5f, 1.0f, 0.8f);
 
+	/** Maximum particles to render in ISM mode (performance limit) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug",
+		meta = (EditCondition = "DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM", EditConditionHides,
+		        ClampMin = "1000", ClampMax = "500000"))
+	int32 ISMMaxRenderParticles = 100000;
+
 	/** Debug visualization type (DebugDraw mode only) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug", meta = (EditCondition = "DebugDrawMode == EFluidDebugDrawMode::DebugDraw", EditConditionHides))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Debug", meta = (EditCondition = "DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw", EditConditionHides))
 	EFluidDebugVisualization DebugVisualizationType = EFluidDebugVisualization::ZOrderArrayIndex;
 
 	//========================================
@@ -512,11 +456,11 @@ public:
 	 * @param Mode Debug draw mode to use
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Debug")
-	void SetDebugDrawMode(EFluidDebugDrawMode Mode);
+	void SetDebugDrawMode(EKawaiiFluidDebugDrawMode Mode);
 
 	/** Get current debug draw mode */
 	UFUNCTION(BlueprintPure, Category = "Fluid|Debug")
-	EFluidDebugDrawMode GetDebugDrawMode() const { return DebugDrawMode; }
+	EKawaiiFluidDebugDrawMode GetDebugDrawMode() const { return DebugDrawMode; }
 
 	/**
 	 * Set debug visualization type (for DebugDraw mode)
@@ -600,7 +544,7 @@ private:
 	//========================================
 
 	/** Cached debug draw mode (for change detection) */
-	EFluidDebugDrawMode CachedDebugDrawMode = EFluidDebugDrawMode::None;
+	EKawaiiFluidDebugDrawMode CachedDebugDrawMode = EKawaiiFluidDebugDrawMode::None;
 
 	/** Cached ISM debug color (for change detection) */
 	FLinearColor CachedISMDebugColor = FLinearColor(0.2f, 0.5f, 1.0f, 0.8f);

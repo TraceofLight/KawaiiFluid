@@ -73,7 +73,13 @@ public:
 	//========================================
 
 	/** Maximum particles to render (memory/performance limit) */
-	int32 MaxRenderParticles = 10000;
+	int32 MaxRenderParticles = 100000;
+
+	/** Set maximum render particles */
+	void SetMaxRenderParticles(int32 InMax) { MaxRenderParticles = FMath::Max(1, InMax); }
+
+	/** Get maximum render particles */
+	int32 GetMaxRenderParticles() const { return MaxRenderParticles; }
 
 	/** Cull distance (cm) */
 	float CullDistance = 10000.0f;

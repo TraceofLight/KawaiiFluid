@@ -457,20 +457,28 @@ float UKawaiiFluidVolumeComponent::GetParticleSpacing() const
 // Debug Methods
 //========================================
 
-void UKawaiiFluidVolumeComponent::SetDebugVisualization(EFluidDebugVisualization Mode)
+void UKawaiiFluidVolumeComponent::SetDebugDrawMode(EKawaiiFluidDebugDrawMode Mode)
 {
 	DebugDrawMode = Mode;
-	bEnableDebugDraw = (Mode != EFluidDebugVisualization::None);
+}
+
+void UKawaiiFluidVolumeComponent::SetDebugVisualization(EFluidDebugVisualization Mode)
+{
+	DebugVisualizationType = Mode;
+	if (Mode != EFluidDebugVisualization::None)
+	{
+		DebugDrawMode = EKawaiiFluidDebugDrawMode::DebugDraw;
+	}
 }
 
 void UKawaiiFluidVolumeComponent::EnableDebugDraw(EFluidDebugVisualization Mode, float PointSize)
 {
-	bEnableDebugDraw = true;
-	DebugDrawMode = Mode;
+	DebugDrawMode = EKawaiiFluidDebugDrawMode::DebugDraw;
+	DebugVisualizationType = Mode;
 	DebugPointSize = PointSize;
 }
 
 void UKawaiiFluidVolumeComponent::DisableDebugDraw()
 {
-	bEnableDebugDraw = false;
+	DebugDrawMode = EKawaiiFluidDebugDrawMode::None;
 }

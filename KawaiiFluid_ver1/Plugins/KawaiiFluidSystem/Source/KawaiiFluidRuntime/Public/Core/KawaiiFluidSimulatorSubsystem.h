@@ -20,7 +20,7 @@ class UFluidCollider;
 class UFluidInteractionComponent;
 class AActor;
 class ULevel;
-enum class EFluidType : uint8;
+// EFluidType is now defined in KawaiiFluidSimulationTypes.h (included above)
 class FSpatialHash;
 struct FFluidParticle;
 

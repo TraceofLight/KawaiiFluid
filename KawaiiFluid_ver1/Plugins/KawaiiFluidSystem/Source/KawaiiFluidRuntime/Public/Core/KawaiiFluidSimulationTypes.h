@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include <atomic>
+#include "Core/KawaiiFluidRenderingTypes.h"
 #include "KawaiiFluidSimulationTypes.generated.h"
 
 class UFluidCollider;
@@ -155,38 +156,62 @@ namespace GridResolutionPresetHelper
 	}
 }
 
+// EFluidDebugVisualization is now defined in KawaiiFluidRenderingTypes.h
+
 /**
- * Debug visualization modes for fluid particles
+ * Fluid type for identifying different fluids in collision events
  */
 UENUM(BlueprintType)
-enum class EFluidDebugVisualization : uint8
+enum class EFluidType : uint8
 {
-	/** Normal rendering (no debug) */
-	None			UMETA(DisplayName = "None"),
+	None		UMETA(DisplayName = "None"),
+	Water		UMETA(DisplayName = "Water"),
+	Lava		UMETA(DisplayName = "Lava"),
+	Slime		UMETA(DisplayName = "Slime"),
+	Oil			UMETA(DisplayName = "Oil"),
+	Acid		UMETA(DisplayName = "Acid"),
+	Blood		UMETA(DisplayName = "Blood"),
+	Honey		UMETA(DisplayName = "Honey"),
+	Custom1		UMETA(DisplayName = "Custom1"),
+	Custom2		UMETA(DisplayName = "Custom2"),
+	Custom3		UMETA(DisplayName = "Custom3"),
+};
 
-	//--- Z-Order Sorting Verification ---
-	// Use these modes to verify Z-Order (Morton code) sorting is working correctly.
-	// If sorting works, spatially close particles will have similar array indices.
+/**
+ * Brush mode for adding or removing particles
+ */
+UENUM(BlueprintType)
+enum class EFluidBrushMode : uint8
+{
+	Add		UMETA(DisplayName = "Add", ToolTip = "Add particles to simulation"),
+	Remove	UMETA(DisplayName = "Remove", ToolTip = "Remove particles from simulation"),
+};
 
-	/** [Z-Order] Color by array index - spatially close particles should have similar colors if sorted */
-	ZOrderArrayIndex	UMETA(DisplayName = "Z-Order: Array Index"),
-	/** [Z-Order] Color by Morton code computed from position */
-	ZOrderMortonCode	UMETA(DisplayName = "Z-Order: Morton Code"),
+/**
+ * Brush settings struct for editor brush tool
+ */
+USTRUCT(BlueprintType)
+struct KAWAIIFLUIDRUNTIME_API FFluidBrushSettings
+{
+	GENERATED_BODY()
 
-	//--- General Debug Visualization ---
+	UPROPERTY(EditAnywhere, Category = "Brush")
+	EFluidBrushMode Mode = EFluidBrushMode::Add;
 
-	/** Color by X position (Red gradient) */
-	PositionX		UMETA(DisplayName = "Position X"),
-	/** Color by Y position (Green gradient) */
-	PositionY		UMETA(DisplayName = "Position Y"),
-	/** Color by Z position (Blue gradient) */
-	PositionZ		UMETA(DisplayName = "Position Z"),
-	/** Color by density value */
-	Density			UMETA(DisplayName = "Density"),
+	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "10.0", ClampMax = "500.0"))
+	float Radius = 50.0f;
 
-	//--- Legacy (deprecated, use ZOrderArrayIndex/ZOrderMortonCode instead) ---
-	ArrayIndex		UMETA(DisplayName = "Array Index (Legacy)", Hidden),
-	MortonCode		UMETA(DisplayName = "Morton Code (Legacy)", Hidden),
+	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "1", ClampMax = "100"))
+	int32 ParticlesPerStroke = 15;
+
+	UPROPERTY(EditAnywhere, Category = "Brush")
+	FVector InitialVelocity = FVector(0, 0, 0);
+
+	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float Randomness = 0.8f;
+
+	UPROPERTY(EditAnywhere, Category = "Brush", meta = (ClampMin = "0.01", ClampMax = "0.5"))
+	float StrokeInterval = 0.03f;
 };
 
 /**
@@ -233,6 +258,15 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidCollisionEvent
 
 /** Collision event callback signature */
 DECLARE_DELEGATE_OneParam(FOnFluidCollisionEvent, const FKawaiiFluidCollisionEvent&);
+
+/**
+ * Particle hit event delegate (Blueprint bindable)
+ * Called when a particle collides with an actor
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FOnFluidParticleHitComponent,
+	const FKawaiiFluidCollisionEvent&, CollisionEvent
+);
 
 /**
  * Simulation parameters passed to Context

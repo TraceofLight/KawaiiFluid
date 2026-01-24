@@ -108,8 +108,9 @@ void UKawaiiFluidComponent::OnRegister()
 		// Apply debug draw settings from Component properties
 		if (UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
 		{
-			ISMRenderer->bEnabled = (DebugDrawMode == EFluidDebugDrawMode::ISM);
+			ISMRenderer->bEnabled = (DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM);
 			ISMRenderer->SetFluidColor(ISMDebugColor);
+			ISMRenderer->SetMaxRenderParticles(ISMMaxRenderParticles);
 		}
 	}
 
@@ -169,7 +170,7 @@ void UKawaiiFluidComponent::BeginPlay()
 		RenderingModule->Initialize(World, this, SimulationModule, Preset);
 
 		// Apply debug draw settings
-		bool bISMMode = (DebugDrawMode == EFluidDebugDrawMode::ISM);
+		bool bISMMode = (DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM);
 		if (UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
 		{
 			ISMRenderer->bEnabled = bISMMode;
@@ -211,8 +212,8 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 	// Readback 요청 설정 (GPU 시뮬레이션 전에 호출 필요)
 	// Debug Draw, ISM Debug View, 브러시 모드, Recycle 모드에서 readback 필요
-	bool bNeedReadback = (DebugDrawMode == EFluidDebugDrawMode::DebugDraw) ||
-	                     (DebugDrawMode == EFluidDebugDrawMode::ISM) ||
+	bool bNeedReadback = (DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw) ||
+	                     (DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM) ||
 #if WITH_EDITORONLY_DATA
 	                     bBrushModeActive ||
 #endif
@@ -376,8 +377,8 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer();
 		UKawaiiFluidMetaballRenderer* MetaballRenderer = RenderingModule->GetMetaballRenderer();
 
-		bool bISMMode = (DebugDrawMode == EFluidDebugDrawMode::ISM);
-		bool bDebugDrawMode = (DebugDrawMode == EFluidDebugDrawMode::DebugDraw);
+		bool bISMMode = (DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM);
+		bool bDebugDrawMode = (DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw);
 
 		// Sync debug draw settings from Component properties
 		if (ISMRenderer)
@@ -397,6 +398,12 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			{
 				ISMRenderer->SetFluidColor(ISMDebugColor);
 				CachedISMDebugColor = ISMDebugColor;
+			}
+
+			// Update MaxRenderParticles if changed at runtime
+			if (ISMRenderer->GetMaxRenderParticles() != ISMMaxRenderParticles)
+			{
+				ISMRenderer->SetMaxRenderParticles(ISMMaxRenderParticles);
 			}
 		}
 
@@ -432,7 +439,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 
 	// Debug Draw: DrawDebugPoint 기반 Z-Order 시각화
-	if (DebugDrawMode == EFluidDebugDrawMode::DebugDraw)
+	if (DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw)
 	{
 		DrawDebugParticles();
 	}
@@ -1481,12 +1488,12 @@ void UKawaiiFluidComponent::ClearAllParticles()
 // Debug Visualization API
 //========================================
 
-void UKawaiiFluidComponent::SetDebugDrawMode(EFluidDebugDrawMode Mode)
+void UKawaiiFluidComponent::SetDebugDrawMode(EKawaiiFluidDebugDrawMode Mode)
 {
 	DebugDrawMode = Mode;
 
 	// Reset bounds for recomputation when enabling DebugDraw mode
-	if (Mode == EFluidDebugDrawMode::DebugDraw)
+	if (Mode == EKawaiiFluidDebugDrawMode::DebugDraw)
 	{
 		DebugDrawBoundsMin = FVector::ZeroVector;
 		DebugDrawBoundsMax = FVector::ZeroVector;
@@ -1508,7 +1515,7 @@ void UKawaiiFluidComponent::SetDebugVisualizationType(EFluidDebugVisualization T
 
 void UKawaiiFluidComponent::DrawDebugParticles()
 {
-	if (DebugDrawMode != EFluidDebugDrawMode::DebugDraw || !SimulationModule)
+	if (DebugDrawMode != EKawaiiFluidDebugDrawMode::DebugDraw || !SimulationModule)
 	{
 		return;
 	}

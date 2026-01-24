@@ -6,7 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "GPU/GPUFluidParticle.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
-#include "Components/KawaiiFluidComponent.h"  // For enums and structs
+#include "Core/KawaiiFluidRenderingTypes.h"
 #include "KawaiiFluidVolume.generated.h"
 
 class UKawaiiFluidVolumeComponent;
@@ -95,15 +95,23 @@ public:
 	// Debug Methods (Delegate to VolumeComponent)
 	//========================================
 
-	/** Set debug visualization mode */
+	/** Set debug draw mode (None, ISM, DebugDraw) */
+	UFUNCTION(BlueprintCallable, Category = "Debug")
+	void SetDebugDrawMode(EKawaiiFluidDebugDrawMode Mode);
+
+	/** Get current debug draw mode */
+	UFUNCTION(BlueprintPure, Category = "Debug")
+	EKawaiiFluidDebugDrawMode GetDebugDrawMode() const;
+
+	/** Set debug visualization type (for DebugDraw mode) */
 	UFUNCTION(BlueprintCallable, Category = "Debug")
 	void SetDebugVisualization(EFluidDebugVisualization Mode);
 
-	/** Get current debug visualization mode */
+	/** Get current debug visualization type */
 	UFUNCTION(BlueprintPure, Category = "Debug")
 	EFluidDebugVisualization GetDebugVisualization() const;
 
-	/** Enable debug drawing with specified mode */
+	/** Enable debug drawing with specified visualization type */
 	UFUNCTION(BlueprintCallable, Category = "Debug")
 	void EnableDebugDraw(EFluidDebugVisualization Mode, float PointSize = 8.0f);
 
@@ -273,6 +281,15 @@ private:
 
 	/** Draw static boundary particles for debug visualization */
 	void DrawDebugStaticBoundaryParticles();
+
+	/** Cached debug draw mode (for change detection) */
+	EKawaiiFluidDebugDrawMode CachedDebugDrawMode = EKawaiiFluidDebugDrawMode::None;
+
+	/** Cached ISM debug color (for change detection) */
+	FLinearColor CachedISMDebugColor = FLinearColor(0.2f, 0.5f, 1.0f, 0.8f);
+
+	/** Cached ISM max render particles (for change detection) */
+	int32 CachedISMMaxRenderParticles = 100000;
 
 #if WITH_EDITOR
 	/** Generate boundary particles for editor preview (without GPU simulation) */
