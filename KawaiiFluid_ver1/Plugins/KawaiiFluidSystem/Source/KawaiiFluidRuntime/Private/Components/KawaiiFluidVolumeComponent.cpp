@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
@@ -6,6 +6,7 @@
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "UObject/ConstructorHelpers.h"
 
 UKawaiiFluidVolumeComponent::UKawaiiFluidVolumeComponent()
 {

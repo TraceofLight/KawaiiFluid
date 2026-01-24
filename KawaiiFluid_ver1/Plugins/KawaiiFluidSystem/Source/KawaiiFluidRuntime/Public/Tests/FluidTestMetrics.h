@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Fluid Simulation Test Metrics Collection
 // Used for automated testing and validation of PBF/XPBD implementation
 

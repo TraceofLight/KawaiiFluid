@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUStaticBoundaryManager - Static Mesh Boundary Particle Generator
 // Generates boundary particles on static colliders for density contribution (Akinci 2012)
 

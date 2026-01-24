@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
 #include "Interfaces/IKawaiiFluidDataProvider.h"
@@ -9,6 +9,7 @@
 #include "RenderGraphResources.h"
 #include "RenderingThread.h"
 #include "GPU/GPUFluidSimulator.h"
+#include "Engine/World.h"
 
 // Pipeline architecture (Pipeline handles ShadingMode internally)
 #include "Rendering/Pipeline/IKawaiiMetaballRenderingPipeline.h"

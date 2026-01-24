@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // SPH Kernel Function Unit Tests
 // Based on Position Based Fluids (Macklin & Müller, 2013)
 

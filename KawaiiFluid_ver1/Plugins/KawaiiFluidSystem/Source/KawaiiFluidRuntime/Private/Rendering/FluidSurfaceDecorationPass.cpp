@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/FluidSurfaceDecorationPass.h"
 #include "RenderGraphBuilder.h"
@@ -9,6 +9,7 @@
 #include "Engine/Texture2D.h"
 #include "RHIStaticStates.h"
 #include "TextureResource.h"
+#include "Engine/Engine.h"
 
 //=============================================================================
 // Console Variables

@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUSpawnManager - Thread-safe particle spawn queue manager
 
 #include "GPU/Managers/GPUSpawnManager.h"

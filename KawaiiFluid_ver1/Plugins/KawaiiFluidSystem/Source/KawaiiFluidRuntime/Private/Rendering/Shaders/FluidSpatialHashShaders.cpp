@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // LEGACY: Traditional Spatial Hash Shader Implementations
 // See FluidSpatialHashShaders.h for details on legacy vs. Z-Order approach.
 

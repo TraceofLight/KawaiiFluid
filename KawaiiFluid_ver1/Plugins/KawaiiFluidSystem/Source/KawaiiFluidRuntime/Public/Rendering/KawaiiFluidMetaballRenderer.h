@@ -1,9 +1,10 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
+#include "Components/SceneComponent.h"
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiRenderParticle.h"
 #include "Rendering/FluidRenderingParameters.h"

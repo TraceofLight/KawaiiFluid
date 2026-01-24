@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUCollisionFeedbackManager - Collision feedback system with async GPU readback
 
 #include "GPU/Managers/GPUCollisionFeedbackManager.h"

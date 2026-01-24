@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // DEPRECATED: This header is deprecated. Use "Components/KawaiiFluidVolumeComponent.h" instead.
 
 #pragma once

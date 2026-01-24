@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "GPU/FluidAnisotropyComputeShader.h"
 #include "GPU/GPUFluidParticle.h"  // Contains FGPUBoundaryParticle

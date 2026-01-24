@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Density Calculation Unit Tests
 // Based on Position Based Fluids (Macklin & Müller, 2013)
 // Formula: ρᵢ = Σⱼ mⱼW(pᵢ-pⱼ, h)  [PBF Equation 2]

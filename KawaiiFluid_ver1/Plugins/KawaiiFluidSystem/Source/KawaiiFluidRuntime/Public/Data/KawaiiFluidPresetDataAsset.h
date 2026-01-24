@@ -1,9 +1,10 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Engine/EngineTypes.h"
 #include "Rendering/FluidRenderingParameters.h"
 #include "KawaiiFluidPresetDataAsset.generated.h"
 

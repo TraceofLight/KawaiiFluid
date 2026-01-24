@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/RayMarching/FluidVolumeBuilder.h"
 #include "Rendering/RayMarching/FluidRayMarchingShaders.h"
@@ -7,6 +7,7 @@
 #include "GlobalShader.h"
 #include "ShaderParameterStruct.h"
 #include "RenderUtils.h"
+#include "RHIStaticStates.h"
 
 //=============================================================================
 // Shader Implementations

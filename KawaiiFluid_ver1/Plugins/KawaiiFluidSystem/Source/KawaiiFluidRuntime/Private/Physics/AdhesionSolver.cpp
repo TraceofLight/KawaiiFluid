@@ -1,9 +1,10 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Physics/AdhesionSolver.h"
 #include "Physics/SPHKernels.h"
 #include "Collision/FluidCollider.h"
 #include "Async/ParallelFor.h"
+#include "GameFramework/Actor.h"
 
 FAdhesionSolver::FAdhesionSolver()
 {
@@ -301,9 +302,9 @@ void FAdhesionSolver::UpdateAttachmentState(
 	{
 		if (!Particle.bIsAttached)
 		{
-			// 새로 접착
+		// 새로 접착
 			Particle.bIsAttached = true;
-			Particle.AttachedActor = ColliderActor;
+			Particle.AttachedActor = TWeakObjectPtr<AActor>(ColliderActor);
 			Particle.AttachedBoneName = BoneName;
 			// 본 로컬 좌표로 변환하여 저장
 			Particle.AttachedLocalOffset = BoneTransform.InverseTransformPosition(ParticlePosition);
@@ -311,8 +312,8 @@ void FAdhesionSolver::UpdateAttachmentState(
 		}
 		else if (Particle.AttachedActor.Get() != ColliderActor || Particle.AttachedBoneName != BoneName)
 		{
-			// 다른 오브젝트 또는 다른 본으로 이동
-			Particle.AttachedActor = ColliderActor;
+		// 다른 오브젝트 또는 다른 본으로 이동
+			Particle.AttachedActor = TWeakObjectPtr<AActor>(ColliderActor);
 			Particle.AttachedBoneName = BoneName;
 			Particle.AttachedLocalOffset = BoneTransform.InverseTransformPosition(ParticlePosition);
 			Particle.AttachedSurfaceNormal = SurfaceNormal;

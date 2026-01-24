@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUCollisionManager Implementation
 
 #include "GPU/Managers/GPUCollisionManager.h"
@@ -7,6 +7,7 @@
 #include "RenderGraphUtils.h"
 #include "RHIGPUReadback.h"
 #include "RenderUtils.h"
+#include "RHIStaticStates.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGPUCollisionManager, Log, All);
 DEFINE_LOG_CATEGORY(LogGPUCollisionManager);

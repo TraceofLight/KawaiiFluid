@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/KawaiiFluidISMRenderer.h"
 #include "Interfaces/IKawaiiFluidDataProvider.h"
@@ -6,6 +6,7 @@
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "GPU/GPUFluidSimulator.h"
+#include "Engine/StaticMesh.h"
 
 UKawaiiFluidISMRenderer::UKawaiiFluidISMRenderer()
 {

@@ -1,4 +1,4 @@
-﻿// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "NiagaraDI/NiagaraDataInterfaceKawaiiFluid.h"
 #include "Core/KawaiiRenderParticle.h"

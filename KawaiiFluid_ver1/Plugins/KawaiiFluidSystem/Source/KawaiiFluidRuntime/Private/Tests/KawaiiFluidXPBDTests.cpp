@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // XPBD Lambda Calculation Unit Tests
 // Based on XPBD: Position-Based Simulation of Compliant Constrained Dynamics
 // (Macklin, Müller, Chentanez, 2016)

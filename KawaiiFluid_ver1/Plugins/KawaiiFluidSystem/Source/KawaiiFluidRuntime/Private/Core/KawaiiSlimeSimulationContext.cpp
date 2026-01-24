@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Core/KawaiiSlimeSimulationContext.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"

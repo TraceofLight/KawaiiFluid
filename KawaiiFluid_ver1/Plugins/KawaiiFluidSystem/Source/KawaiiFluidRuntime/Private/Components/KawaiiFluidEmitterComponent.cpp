@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Components/KawaiiFluidEmitterComponent.h"
 #include "Actors/KawaiiFluidEmitter.h"
@@ -9,6 +9,7 @@
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "DrawDebugHelpers.h"
 #include "Components/ArrowComponent.h"
+#include "Engine/World.h"
 
 UKawaiiFluidEmitterComponent::UKawaiiFluidEmitterComponent()
 {

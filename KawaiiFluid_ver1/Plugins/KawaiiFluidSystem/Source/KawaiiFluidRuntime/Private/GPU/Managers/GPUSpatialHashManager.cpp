@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 //
 // DEPRECATED: This file is kept for backward compatibility only.
 // The implementation has been moved to GPUZOrderSortManager.cpp.

@@ -1,9 +1,11 @@
-﻿// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "KawaiiFluidNiagara.h"
 #include "NiagaraDI/NiagaraDataInterfaceKawaiiFluid.h"
 #include "Interfaces/IPluginManager.h"
 #include "Modules/ModuleManager.h"
+#include "UObject/Package.h"
+#include "UObject/UObjectGlobals.h"
 
 #define LOCTEXT_NAMESPACE "FKawaiiFluidNiagaraModule"
 

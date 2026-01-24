@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
@@ -19,6 +19,7 @@
 #include "PipelineStateCache.h"
 #include "HAL/IConsoleManager.h"  // For console command execution
 #include "Async/Async.h"  // For AsyncTask
+#include "Async/ParallelFor.h"
 
 DEFINE_LOG_CATEGORY(LogGPUFluidSimulator);
 

@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Editor/KawaiiFluidPresetAssetEditor.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"

@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Fluid Metrics Collector Utility
 // Gathers simulation metrics for testing and validation
 
