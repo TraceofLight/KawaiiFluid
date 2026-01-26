@@ -26,7 +26,6 @@ float4x4 ProjectionMatrix;
 float4x4 ViewMatrix;
 
 float4 FluidColor;
-float F0Override;
 float FresnelStrength;
 float RefractiveIndex;
 float Opacity;                       // Fluid opacity (0 = transparent, 1 = opaque)
@@ -661,22 +660,13 @@ void MainPS(
 	// A. PBR Setup
 	// ========================================================================
 	// F0 (base reflectivity at normal incidence):
-	// - F0Override > 0: Use artist-defined value directly
-	// - F0Override = 0: Auto-calculate from IOR: F0 = ((1-n)/(1+n))^2 * FresnelStrength
+	// Auto-calculate from IOR: F0 = ((1-n)/(1+n))^2 * FresnelStrength
 	// Water (IOR=1.33): F0 ~ 0.02, Glass (IOR=1.5): F0 ~ 0.04
 	// Fluids are dielectric (non-metallic), so F0 is uniform across RGB
 	// ========================================================================
 	float NoV = saturate(dot(LightingNormal, ViewDir));
-	float FinalF0;
-	if (F0Override > 0.0)
-	{
-		FinalF0 = F0Override;
-	}
-	else
-	{
-		float IOR_Ratio = (1.0 - RefractiveIndex) / (1.0 + RefractiveIndex);
-		FinalF0 = IOR_Ratio * IOR_Ratio * FresnelStrength;
-	}
+	float IOR_Ratio = (1.0 - RefractiveIndex) / (1.0 + RefractiveIndex);
+	float FinalF0 = IOR_Ratio * IOR_Ratio * FresnelStrength;
 	float3 F0 = float3(FinalF0, FinalF0, FinalF0);
 
 	// B. PBR Lighting (Cook-Torrance BRDF) - Multi-Light Support
@@ -935,6 +925,9 @@ void MainPS(
 	float3 ViewSpaceReflect = reflect(-ViewDir, ReflectionNormal);
 	float3 ReflectedColor = float3(0, 0, 0);
 	float SSRHitStrength = 0.0;
+	float SSRHitRatio = 0.0;  // For Mode 3: stores SSR hit amount for blend interpolation
+	float3 CubemapColorForBlend = float3(0, 0, 0);  // For Mode 3: Cubemap color before mixing
+	float3 SSRColorForBlend = float3(0, 0, 0);      // For Mode 3: SSR color before mixing
 
 	// Mode 2: Screen Space Reflection (SSR)
 	if (ReflectionMode == 2)
@@ -1134,9 +1127,11 @@ void MainPS(
 		}
 
 		// SSR result: use hit color if hit, otherwise no reflection (no fallback)
+		// Note: ScreenSpaceReflectionIntensity is applied to blend factor, not color brightness
+		// This allows SSR to have independent intensity control from FresnelReflectionBlend
 		if (SSRHitStrength > 0.0)
 		{
-			ReflectedColor = SSRHitColor * ScreenSpaceReflectionIntensity * SSRHitStrength;
+			ReflectedColor = SSRHitColor * SSRHitStrength;
 		}
 		// else: ReflectedColor stays at 0 (no Cubemap fallback)
 	}
@@ -1172,9 +1167,12 @@ void MainPS(
 			CubemapColor = FallbackEnvColor * 0.3;
 		}
 
-		// Blend SSR with Cubemap based on hit strength
-		float3 SSRColor = SSRHitColor * ScreenSpaceReflectionIntensity;
-		ReflectedColor = lerp(CubemapColor, SSRColor, SSRHit);
+		// Store colors for separate blending (each with its own intensity)
+		CubemapColorForBlend = CubemapColor;
+		SSRColorForBlend = SSRHitColor;
+		SSRHitRatio = SSRHit;
+
+		// ReflectedColor not used for Mode 3 (handled separately in blend section)
 		SSRHitStrength = 1.0;  // Always have reflection (either SSR or Cubemap)
 	}
 	// Mode 1: Cubemap Reflection
@@ -1215,12 +1213,11 @@ void MainPS(
 
 	// 6. Blend reflection with transmission
 	// Fresnel determines how much reflection vs transmission (physically-based)
-	// FresnelReflectionBlend is artist control multiplier
 	// IMPORTANT: Only blend if we actually have reflection data
 	// - Mode 0 (None): No blending
-	// - Mode 1 (Cubemap): Always blend (Cubemap always has data)
-	// - Mode 2 (SSR): Only blend if SSR hit (SSRHitStrength > 0)
-	// - Mode 3 (SSR+Cubemap): Always blend (fallback to Cubemap on miss)
+	// - Mode 1 (Cubemap): FresnelReflectionBlend controls blend
+	// - Mode 2 (SSR): ScreenSpaceReflectionIntensity controls blend
+	// - Mode 3 (SSR+Cubemap): Each uses its own intensity, then results are combined
 	float ReflectionBlendFactor = Fresnel * FresnelReflectionBlend;
 	if (ReflectionMode == 0)
 	{
@@ -1228,11 +1225,25 @@ void MainPS(
 	}
 	else if (ReflectionMode == 2)
 	{
-		ReflectionBlendFactor *= SSRHitStrength;  // SSR only: blend where we hit
+		// SSR-only mode: use ScreenSpaceReflectionIntensity for independent control
+		ReflectionBlendFactor = Fresnel * ScreenSpaceReflectionIntensity * SSRHitStrength;
 	}
-	// Mode 1 (Cubemap) and Mode 3 (SSR+Cubemap): use full ReflectionBlendFactor
+	// Mode 1 (Cubemap): use FresnelReflectionBlend (default)
 
-	BaseColor = lerp(BaseColor, ReflectedColor, ReflectionBlendFactor);
+	// Mode 3 special handling: blend each reflection type with its own intensity, then combine
+	if (ReflectionMode == 3)
+	{
+		// Cubemap blended with its intensity (FresnelReflectionBlend)
+		float3 CubemapResult = lerp(BaseColor, CubemapColorForBlend, Fresnel * FresnelReflectionBlend);
+		// SSR blended with its intensity (ScreenSpaceReflectionIntensity)
+		float3 SSRResult = lerp(BaseColor, SSRColorForBlend, Fresnel * ScreenSpaceReflectionIntensity);
+		// Combine based on SSR hit ratio
+		BaseColor = lerp(CubemapResult, SSRResult, SSRHitRatio);
+	}
+	else
+	{
+		BaseColor = lerp(BaseColor, ReflectedColor, ReflectionBlendFactor);
+	}
 
 	// 7. Add Specular + SSS
 	FinalColor = BaseColor + Specular + VolumeScatterContribution;

@@ -49,7 +49,6 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     // Fluid Settings
     // ------------------------------------------------------
     SHADER_PARAMETER(FLinearColor, FluidColor)
-    SHADER_PARAMETER(float, F0Override)           // F0 override (0 = use IOR-based, >0 = use this value)
     SHADER_PARAMETER(float, FresnelStrength)
     SHADER_PARAMETER(float, RefractiveIndex)
     SHADER_PARAMETER(float, Opacity)              // Fluid opacity (0 = transparent, 1 = opaque)

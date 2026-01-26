@@ -147,16 +147,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float AmbientIntensity = 0.15f;
 
 	/**
-	 * F0 Override (base reflectivity at normal incidence).
-	 * 0 = auto-calculate from IOR, >0 = use this value directly.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float F0Override = 0.0f;
-
-	/**
-	 * Fresnel strength multiplier (applied after F0 is auto-calculated from IOR).
-	 * Ignored when F0Override > 0.
+	 * Fresnel strength multiplier.
+	 * Scales the F0 value calculated from IOR: F0 = ((1-n)/(1+n))^2 * FresnelStrength
+	 * Water (IOR=1.33): base F0 ~ 0.02
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "5.0"))
@@ -185,11 +178,26 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float RefractionScale = 0.05f;
 
 	/**
-	 * Fresnel reflection blend ratio. 0 = no reflection, 1 = strong reflection.
+	 * Fresnel reflection blend ratio. Controls how much reflection is mixed into the final color.
+	 * This parameter multiplies the physical Fresnel term to determine the blend factor.
+	 *
+	 * At grazing angles (edge of fluid), Fresnel approaches 1.0, so:
+	 * - FresnelReflectionBlend = 0.5 means 50% reflection at edges
+	 * - FresnelReflectionBlend = 1.0 means 100% reflection at edges (physically correct but often too intense)
+	 *
+	 * Relationship with other parameters:
+	 * - ScreenSpaceReflectionIntensity: scales the SSR color brightness BEFORE blending
+	 * - FresnelReflectionBlend: controls HOW MUCH of that reflection is blended in
+	 * - Both affect final visibility: low FresnelReflectionBlend = less visible reflection regardless of SSR intensity
+	 *
+	 * Recommended values:
+	 * - 0.3~0.5: Natural water look with subtle reflections
+	 * - 0.5~0.7: More reflective surfaces
+	 * - 0.8~1.0: Mirror-like surfaces (may cause edge artifacts)
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Appearance",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float FresnelReflectionBlend = 0.8f;
+	float FresnelReflectionBlend = 0.5f;
 
 	/**
 	 * Absorption bias (for Ray Marching). Higher = FluidColor appears stronger.
@@ -290,7 +298,18 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.5", ClampMax = "5.0"))
 	float ScreenSpaceReflectionThickness = 2.0f;
 
-	/** SSR intensity */
+	/**
+	 * SSR reflection intensity.
+	 * Controls the blend amount for Screen Space Reflection, independent from FresnelReflectionBlend.
+	 *
+	 * In SSR-only mode (ReflectionMode = ScreenSpaceReflection):
+	 * - BlendFactor = Fresnel * ScreenSpaceReflectionIntensity
+	 *
+	 * In SSR+Cubemap mode (ReflectionMode = ScreenSpaceReflectionWithCubemap):
+	 * - SSR hit areas: BlendFactor = Fresnel * ScreenSpaceReflectionIntensity
+	 * - SSR miss areas (Cubemap fallback): BlendFactor = Fresnel * FresnelReflectionBlend
+	 * - Partial hits interpolate between the two
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
 		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.0", ClampMax = "1.0"))
 	float ScreenSpaceReflectionIntensity = 0.8f;
@@ -506,7 +525,6 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	uint32 Hash = GetTypeHash(Params.bEnableRendering);
 	Hash = HashCombine(Hash, GetTypeHash(static_cast<uint8>(Params.PipelineType)));
 	Hash = HashCombine(Hash, GetTypeHash(Params.FluidColor.ToString()));
-	Hash = HashCombine(Hash, GetTypeHash(Params.F0Override));
 	Hash = HashCombine(Hash, GetTypeHash(Params.FresnelStrength));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RefractiveIndex));
 	Hash = HashCombine(Hash, GetTypeHash(Params.Opacity));
@@ -576,7 +594,6 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 	return A.bEnableRendering == B.bEnableRendering &&
 		A.PipelineType == B.PipelineType &&
 		A.FluidColor.Equals(B.FluidColor, 0.001f) &&
-		FMath::IsNearlyEqual(A.F0Override, B.F0Override, 0.001f) &&
 		FMath::IsNearlyEqual(A.FresnelStrength, B.FresnelStrength, 0.001f) &&
 		FMath::IsNearlyEqual(A.RefractiveIndex, B.RefractiveIndex, 0.001f) &&
 		FMath::IsNearlyEqual(A.Opacity, B.Opacity, 0.001f) &&

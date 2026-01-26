@@ -139,7 +139,6 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 
 	// Rendering parameters
 	PassParameters->FluidColor = RenderParams.FluidColor;
-	PassParameters->F0Override = RenderParams.F0Override;
 	PassParameters->FresnelStrength = RenderParams.FresnelStrength;
 	PassParameters->RefractiveIndex = RenderParams.RefractiveIndex;
 	PassParameters->Opacity = RenderParams.Opacity;
