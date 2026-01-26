@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Collision/MeshFluidCollider.h"
 #include "Components/StaticMeshComponent.h"
@@ -349,6 +349,34 @@ void UMeshFluidCollider::CacheSkeletalMeshCollision(USkeletalMeshComponent* Skel
 				}
 			}
 
+			// IndexData가 없거나 planes가 부족하면 ChaosConvex에서 직접 가져오기
+			if (CachedCvx.Planes.Num() < 4)
+			{
+				TArray<FPlane> ChaosPlanes;
+				ConvexElem.GetPlanes(ChaosPlanes);
+				
+				if (ChaosPlanes.Num() >= 4)
+				{
+					CachedCvx.Planes.Reset();
+					
+					for (const FPlane& ChaosPlane : ChaosPlanes)
+					{
+						// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+						const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
+						const FVector WorldNormal = BoneTransform.TransformVectorNoScale(LocalNormal);
+						
+						// 플레인 위의 한 점을 월드 좌표로 변환
+						const FVector LocalPoint = LocalNormal * ChaosPlane.W;
+						const FVector WorldPoint = BoneTransform.TransformPosition(LocalPoint);
+						
+						FCachedConvexPlane Plane;
+						Plane.Normal = WorldNormal;
+						Plane.Distance = FVector::DotProduct(WorldPoint, WorldNormal);
+						CachedCvx.Planes.Add(Plane);
+					}
+				}
+			}
+
 			if (CachedCvx.Planes.Num() >= 4)
 			{
 				CachedConvexes.Add(MoveTemp(CachedCvx));
@@ -555,6 +583,34 @@ void UMeshFluidCollider::CacheStaticMeshCollision(UStaticMeshComponent* StaticMe
 							CachedCvx.Planes.Add(Plane);
 						}
 					}
+				}
+			}
+		}
+
+		// IndexData가 없거나 planes가 부족하면 ChaosConvex에서 직접 가져오기
+		if (CachedCvx.Planes.Num() < 4)
+		{
+			TArray<FPlane> ChaosPlanes;
+			ConvexElem.GetPlanes(ChaosPlanes);
+			
+			if (ChaosPlanes.Num() >= 4)
+			{
+				CachedCvx.Planes.Reset();
+				
+				for (const FPlane& ChaosPlane : ChaosPlanes)
+				{
+					// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+					const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
+					const FVector WorldNormal = ComponentTransform.TransformVectorNoScale(LocalNormal);
+					
+					// 플레인 위의 한 점을 월드 좌표로 변환
+					const FVector LocalPoint = LocalNormal * ChaosPlane.W;
+					const FVector WorldPoint = ComponentTransform.TransformPosition(LocalPoint);
+					
+					FCachedConvexPlane Plane;
+					Plane.Normal = WorldNormal;
+					Plane.Distance = FVector::DotProduct(WorldPoint, WorldNormal);
+					CachedCvx.Planes.Add(Plane);
 				}
 			}
 		}

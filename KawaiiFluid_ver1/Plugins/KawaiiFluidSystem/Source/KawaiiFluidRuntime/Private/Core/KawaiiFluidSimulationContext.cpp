@@ -166,9 +166,44 @@ namespace
 			}
 		}
 
+		// IndexData가 없거나 planes가 부족하면 ChaosConvex에서 직접 가져오기
 		if (Planes.Num() < 4)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[Convex] SKIP: Verts=%d, Indices=%d, Planes=%d (need >= 4)"),
+			TArray<FPlane> ChaosPlanes;
+			ConvexElem.GetPlanes(ChaosPlanes);
+			
+			if (ChaosPlanes.Num() >= 4)
+			{
+				Planes.Reset();  // IndexData에서 생성된 부분적인 planes 제거
+				
+				for (const FPlane& ChaosPlane : ChaosPlanes)
+				{
+					// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+					const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
+					const FVector WorldNormal = ComponentTransform.TransformVectorNoScale(LocalNormal);
+					
+					// 플레인 위의 한 점을 월드 좌표로 변환
+					const FVector LocalPoint = LocalNormal * ChaosPlane.W;
+					const FVector WorldPoint = ComponentTransform.TransformPosition(LocalPoint);
+					
+					FGPUConvexPlane GPUPlane;
+					GPUPlane.Normal = FVector3f(WorldNormal);
+					GPUPlane.Distance = FVector::DotProduct(WorldPoint, WorldNormal);
+					Planes.Add(GPUPlane);
+				}
+				
+				static int32 FallbackLogCounter = 0;
+				if (++FallbackLogCounter % 60 == 1)
+				{
+					UE_LOG(LogTemp, Log, TEXT("[Convex] Fallback to ChaosConvex: Verts=%d, IndexData=%d, ChaosPlanes=%d"),
+						VertexData.Num(), IndexData.Num(), ChaosPlanes.Num());
+				}
+			}
+		}
+
+		if (Planes.Num() < 4)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Convex] SKIP: Verts=%d, Indices=%d, Planes=%d (need >= 4, no ChaosConvex fallback)"),
 				VertexData.Num(), IndexData.Num(), Planes.Num());
 			return;
 		}
@@ -1305,12 +1340,11 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 		return;
 	}
 
-	if (!Params.World || Params.CollisionChannel != ECC_WorldStatic)
+	if (!Params.World)
 	{
 		if (bShouldLog)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: World=%s, CollisionChannel=%d (expected ECC_WorldStatic=%d)"),
-				Params.World ? TEXT("Valid") : TEXT("nullptr"), (int32)Params.CollisionChannel, (int32)ECC_WorldStatic);
+			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: World is nullptr"));
 		}
 		bGPUWorldCollisionCacheDirty = true;
 		return;
@@ -1326,15 +1360,13 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 	}
 
 	const bool bWorldChanged = CachedGPUWorldCollisionWorld.Get() != Params.World;
-	const bool bChannelChanged = CachedGPUWorldCollisionChannel != Params.CollisionChannel;
 	const bool bBoundsChanged = !AreBoundsEqual(CachedGPUWorldCollisionBounds, QueryBounds);
 
-	if (bGPUWorldCollisionCacheDirty || bWorldChanged || bChannelChanged || bBoundsChanged)
+	if (bGPUWorldCollisionCacheDirty || bWorldChanged || bBoundsChanged)
 	{
 		CachedGPUWorldCollisionPrimitives.Reset();
 		CachedGPUWorldCollisionBounds = QueryBounds;
 		CachedGPUWorldCollisionWorld = Params.World;
-		CachedGPUWorldCollisionChannel = Params.CollisionChannel;
 		bGPUWorldCollisionCacheDirty = false;
 		bStaticBoundaryParticlesDirty = true;  // Regenerate static boundary particles
 
@@ -1349,11 +1381,17 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 		TArray<FOverlapResult> Overlaps;
 		const FVector QueryCenter = QueryBounds.GetCenter();
 		const FVector QueryExtent = QueryBounds.GetExtent();
-		Params.World->OverlapMultiByChannel(
+		
+		// WorldStatic과 WorldDynamic 모두 쿼리
+		FCollisionObjectQueryParams ObjectQueryParams;
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+		
+		Params.World->OverlapMultiByObjectType(
 			Overlaps,
 			QueryCenter,
 			FQuat::Identity,
-			Params.CollisionChannel,
+			ObjectQueryParams,
 			FCollisionShape::MakeBox(QueryExtent),
 			QueryParams
 		);
@@ -1376,12 +1414,9 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 				continue;
 			}
 
-			if (PrimComp->GetCollisionObjectType() != ECC_WorldStatic)
-			{
-				continue;
-			}
-
-			if (PrimComp->GetCollisionResponseToChannel(Params.CollisionChannel) != ECR_Block)
+			// WorldStatic과 WorldDynamic 모두 World Collision 대상으로 허용
+			const ECollisionChannel ObjectType = PrimComp->GetCollisionObjectType();
+			if (ObjectType != ECC_WorldStatic && ObjectType != ECC_WorldDynamic)
 			{
 				continue;
 			}
@@ -1603,7 +1638,7 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_Sweep(
 	{
 		const FCellQueryData& CellData = CellQueries[CellIdx];
 		if (World->OverlapBlockingTestByChannel(
-			CellData.CellCenter, FQuat::Identity, Params.CollisionChannel,
+			CellData.CellCenter, FQuat::Identity, ECC_WorldStatic,
 			FCollisionShape::MakeBox(CellData.CellExtent), QueryParams))
 		{
 			CellCollisionResults[CellIdx] = 1;
@@ -1656,7 +1691,7 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_Sweep(
 				Particle.Position,
 				Particle.PredictedPosition,
 				FQuat::Identity,
-				Params.CollisionChannel,
+				ECC_WorldStatic,
 				FCollisionShape::MakeSphere(ParticleRadius),
 				LocalParams
 			);
@@ -1751,7 +1786,7 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_Sweep(
 					FloorHit,
 					Particle.Position,
 					Particle.Position - FVector(0, 0, FloorCheckDistance),
-					Params.CollisionChannel,
+					ECC_WorldStatic,
 					LocalParams
 				);
 
@@ -1795,7 +1830,7 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_Sweep(
 			FloorHit,
 			Particle.Position,
 			Particle.Position - FVector(0, 0, FloorNearDistance),
-			Params.CollisionChannel,
+			ECC_WorldStatic,
 			FloorQueryParams
 		);
 
@@ -1871,7 +1906,7 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_SDF(
 	{
 		const FCellQueryData& CellData = CellQueries[CellIdx];
 		if (World->OverlapBlockingTestByChannel(
-			CellData.CellCenter, FQuat::Identity, Params.CollisionChannel,
+			CellData.CellCenter, FQuat::Identity, ECC_WorldStatic,
 			FCollisionShape::MakeBox(CellData.CellExtent), QueryParams))
 		{
 			CellCollisionResults[CellIdx] = 1;
@@ -1926,7 +1961,7 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_SDF(
 				Overlaps,
 				Particle.PredictedPosition,
 				FQuat::Identity,
-				Params.CollisionChannel,
+				ECC_WorldStatic,
 				FCollisionShape::MakeSphere(CollisionMargin),
 				LocalParams
 			);
@@ -2107,7 +2142,7 @@ void UKawaiiFluidSimulationContext::HandleWorldCollision_SDF(
 			FloorHit,
 			Particle.Position,
 			Particle.Position - FVector(0, 0, FloorNearDistance),
-			Params.CollisionChannel,
+			ECC_WorldStatic,
 			FloorQueryParams
 		);
 

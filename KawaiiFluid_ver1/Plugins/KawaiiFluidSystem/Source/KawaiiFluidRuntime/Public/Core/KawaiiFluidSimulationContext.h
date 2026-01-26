@@ -404,9 +404,6 @@ protected:
 	/** Cached world pointer for world collision */
 	TWeakObjectPtr<UWorld> CachedGPUWorldCollisionWorld;
 
-	/** Cached collision channel */
-	TEnumAsByte<ECollisionChannel> CachedGPUWorldCollisionChannel = ECC_MAX;
-
 	/** Cached world collision primitives dirty flag */
 	bool bGPUWorldCollisionCacheDirty = true;
 

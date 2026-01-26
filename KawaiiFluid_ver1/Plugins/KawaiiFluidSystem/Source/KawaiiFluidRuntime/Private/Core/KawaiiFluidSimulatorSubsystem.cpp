@@ -803,7 +803,6 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulatorSubsystem::BuildMergedModuleSi
 
 	FVector TotalForce = FVector::ZeroVector;
 	bool bAnyUseWorldCollision = false;
-	ECollisionChannel MergedChannel = ECC_GameTraceChannel1;
 
 	for (const UKawaiiFluidSimulationModule* Module : Modules)
 	{
@@ -821,17 +820,12 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulatorSubsystem::BuildMergedModuleSi
 		if (Module->bUseWorldCollision)
 		{
 			bAnyUseWorldCollision = true;
-			if (Module->GetPreset())
-			{
-				MergedChannel = Module->GetPreset()->CollisionChannel;
-			}
 		}
 	}
 
 	Params.ExternalForce = TotalForce;
 	Params.InteractionComponents.Append(GlobalInteractionComponents);
 	Params.bUseWorldCollision = bAnyUseWorldCollision;
-	Params.CollisionChannel = MergedChannel;
 
 	// Use first module's particle radius
 	if (Modules.Num() > 0 && Modules[0])

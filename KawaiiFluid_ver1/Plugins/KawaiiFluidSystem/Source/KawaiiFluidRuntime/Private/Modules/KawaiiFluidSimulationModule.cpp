@@ -443,10 +443,9 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 	// 콜라이더 / 상호작용 컴포넌트
 	Params.Colliders = Colliders;
 
-	// Preset에서 콜리전 설정 가져오기
+	// Preset에서 파티클 반경 가져오기
 	if (Preset)
 	{
-		Params.CollisionChannel = Preset->CollisionChannel;
 		Params.ParticleRadius = GetParticleRadius();  // Use getter to respect override
 	}
 

@@ -256,7 +256,6 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 					// @TODO 이거 풀면 날라가는거 고쳐야함
 					Params.bEnableStaticBoundaryParticles = false;
-					Params.CollisionChannel = Preset->CollisionChannel;
 
 					float AccumulatedTime = SimulationModule->GetAccumulatedTime();
 					Context->Simulate(
@@ -1889,11 +1888,16 @@ void UKawaiiFluidComponent::GenerateEditorBoundaryParticlesPreview()
 	QueryParams.bReturnPhysicalMaterial = false;
 	QueryParams.AddIgnoredActor(GetOwner());
 
+	// WorldStatic과 WorldDynamic 모두 World Collision 대상으로 허용
+	FCollisionObjectQueryParams ObjectQueryParams;
+	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
+	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	
 	World->OverlapMultiByObjectType(
 		OverlapResults,
 		VolumeCenter,
 		FQuat::Identity,
-		FCollisionObjectQueryParams(ECollisionChannel::ECC_WorldStatic),
+		ObjectQueryParams,
 		FCollisionShape::MakeBox(HalfExtent),
 		QueryParams
 	);
@@ -2087,6 +2091,27 @@ void UKawaiiFluidComponent::GenerateEditorBoundaryParticlesPreview()
 					EditorPreviewBoundaryNormals.Add(Normal);
 					EditorPreviewBoundaryPositions.Add((V2 + V0) * 0.5f);
 					EditorPreviewBoundaryNormals.Add(Normal);
+				}
+			}
+			else
+			{
+				// IndexData가 없으면 ChaosConvex에서 planes 가져오기
+				TArray<FPlane> ChaosPlanes;
+				ConvexElem.GetPlanes(ChaosPlanes);
+				
+				for (const FPlane& ChaosPlane : ChaosPlanes)
+				{
+					// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+					const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
+					const FVector WorldNormal = ComponentTransform.TransformVectorNoScale(LocalNormal);
+					
+					// 플레인 위의 한 점을 월드 좌표로 변환
+					const FVector LocalPoint = LocalNormal * ChaosPlane.W;
+					const FVector WorldPoint = ComponentTransform.TransformPosition(LocalPoint);
+					
+					// Add plane center as boundary point
+					EditorPreviewBoundaryPositions.Add(WorldPoint);
+					EditorPreviewBoundaryNormals.Add(WorldNormal);
 				}
 			}
 		}

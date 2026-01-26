@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -300,10 +300,6 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 	/** World collision detection method */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
 	EWorldCollisionMethod WorldCollisionMethod = EWorldCollisionMethod::SDF;
-
-	/** Collision channel for world collision */
-	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
-	TEnumAsByte<ECollisionChannel> CollisionChannel = ECC_GameTraceChannel1;
 
 	/** Particle render radius (for collision detection) */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")

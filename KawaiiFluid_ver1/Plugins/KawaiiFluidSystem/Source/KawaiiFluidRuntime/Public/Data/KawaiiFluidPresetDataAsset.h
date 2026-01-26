@@ -177,10 +177,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Physics|Simulation|Collision")
 	FName GetFluidName() const { return FluidName; }
 
-	/** Collision channel */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Collision")
-	TEnumAsByte<ECollisionChannel> CollisionChannel = ECC_GameTraceChannel1;
-
 	/**
 	 * Collision threshold (cm)
 	 * Particle center within (ParticleRadius + this value) from collider surface triggers collision
