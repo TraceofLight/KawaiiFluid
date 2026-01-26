@@ -431,14 +431,15 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		Params);
 
 	// =====================================================
-	// Phase 3: Physics Solver (Density, Pressure)
+	// Phase 3: Constraint Solver Loop (Density/Pressure + Collision per iteration)
+	// XPBD Principle: Collision is solved inside solver loop to prevent jittering
 	// =====================================================
-	ExecutePhysicsSolver(GraphBuilder, ParticlesUAVLocal, SpatialData, Params);
+	ExecuteConstraintSolverLoop(GraphBuilder, ParticlesUAVLocal, SpatialData, Params);
 
 	// =====================================================
-	// Phase 4: Collision & Adhesion
+	// Phase 4: Adhesion (Bone attachment - runs after constraint solving)
 	// =====================================================
-	ExecuteCollisionAndAdhesion(GraphBuilder, ParticlesUAVLocal, SpatialData, Params);
+	ExecuteAdhesion(GraphBuilder, ParticlesUAVLocal, SpatialData, Params);
 
 	// =====================================================
 	// Phase 5: Post-Simulation (Viscosity, Finalize, Anisotropy)
@@ -1021,15 +1022,15 @@ FGPUFluidSimulator::FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStruc
 	return SpatialData;
 }
 
-void FGPUFluidSimulator::ExecutePhysicsSolver(
+void FGPUFluidSimulator::ExecuteConstraintSolverLoop(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	FSimulationSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
-	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_PhysicsSolver");
+	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_ConstraintSolverLoop");
 
-	// Skip physics solver when no particles (avoid 0-size buffer creation)
+	// Skip constraint solver when no particles (avoid 0-size buffer creation)
 	if (CurrentParticleCount == 0)
 	{
 		return;
@@ -1053,13 +1054,30 @@ void FGPUFluidSimulator::ExecutePhysicsSolver(
 	FRDGBufferUAVRef NeighborListUAVLocal = GraphBuilder.CreateUAV(SpatialData.NeighborListBuffer);
 	FRDGBufferUAVRef NeighborCountsUAVLocal = GraphBuilder.CreateUAV(SpatialData.NeighborCountsBuffer);
 
+	// =====================================================
+	// XPBD Constraint Solver Loop
+	// Principle 2: "Collision is the strongest constraint"
+	// Density and Collision constraints are solved together per iteration
+	// to ensure proper convergence and prevent jittering.
+	// =====================================================
 	for (int32 i = 0; i < Params.SolverIterations; ++i)
 	{
+		RDG_EVENT_SCOPE(GraphBuilder, "SolverIteration_%d", i);
+
+		// Step 1: Density/Pressure Constraint (PBF)
+		// Pushes particles apart when density > rest density
 		AddSolveDensityPressurePass(
 			GraphBuilder, ParticlesUAV,
 			SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV,
 			SpatialData.CellStartSRV, SpatialData.CellEndSRV,
 			NeighborListUAVLocal, NeighborCountsUAVLocal, i, Params, SpatialData);
+
+		// Step 2: Collision Constraints (MUST be inside solver loop!)
+		// If density pushes a particle through a wall, collision pushes it back.
+		// Solving both constraints together allows convergence to a valid state.
+		AddBoundsCollisionPass(GraphBuilder, ParticlesUAV, Params);
+		AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAV, Params);
+		AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAV, Params);
 	}
 
 	// Create SRVs for use in subsequent passes
@@ -1071,13 +1089,13 @@ void FGPUFluidSimulator::ExecutePhysicsSolver(
 	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborCountsBuffer, &NeighborCountsBuffer, ERHIAccess::UAVCompute);
 }
 
-void FGPUFluidSimulator::ExecuteCollisionAndAdhesion(
+void FGPUFluidSimulator::ExecuteAdhesion(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	const FSimulationSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
-	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_CollisionAndAdhesion");
+	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_Adhesion");
 
 	// Skip when no particles
 	if (CurrentParticleCount == 0)
@@ -1085,9 +1103,11 @@ void FGPUFluidSimulator::ExecuteCollisionAndAdhesion(
 		return;
 	}
 
-	AddBoundsCollisionPass(GraphBuilder, ParticlesUAV, Params);
-	AddDistanceFieldCollisionPass(GraphBuilder, ParticlesUAV, Params);
-	AddPrimitiveCollisionPass(GraphBuilder, ParticlesUAV, Params);
+	// =====================================================
+	// XPBD Pipeline Change: Collision passes moved to ExecuteConstraintSolverLoop
+	// This function now only handles Bone-based Adhesion (attachment tracking)
+	// Collision passes are now inside the solver loop for proper constraint convergence.
+	// =====================================================
 
 	if (AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled() && CollisionManager.IsValid() && CollisionManager->AreBoneTransformsValid())
 	{

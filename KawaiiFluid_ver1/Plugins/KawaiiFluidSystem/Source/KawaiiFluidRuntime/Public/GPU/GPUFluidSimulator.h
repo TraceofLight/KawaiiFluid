@@ -739,15 +739,20 @@ private:
 		FRDGBufferUAVRef& OutPositionsUAV,
 		const FGPUFluidSimulationParams& Params);
 
-	/** Phase 3: Execute physics solver (Predict, Density/Pressure Loop) */
-	void ExecutePhysicsSolver(
+	/** Phase 3: Execute constraint solver loop (Density/Pressure + Collision per iteration)
+	 *  XPBD Principle: Collision constraints are solved inside the solver loop
+	 *  to ensure proper convergence between density and collision constraints.
+	 *  This prevents jittering caused by density pushing particles through walls. */
+	void ExecuteConstraintSolverLoop(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
 		FSimulationSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
-	/** Phase 4: Execute collision and adhesion passes */
-	void ExecuteCollisionAndAdhesion(
+	/** Phase 4: Execute adhesion passes (Bone attachment only)
+	 *  Collision passes have been moved into ExecuteConstraintSolverLoop.
+	 *  This phase now only handles bone-based adhesion which runs after constraint solving. */
+	void ExecuteAdhesion(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
 		const FSimulationSpatialData& SpatialData,
