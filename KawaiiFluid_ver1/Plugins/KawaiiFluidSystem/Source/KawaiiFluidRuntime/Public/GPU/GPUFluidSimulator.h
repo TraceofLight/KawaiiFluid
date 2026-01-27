@@ -788,11 +788,12 @@ private:
 	/** Create RDG buffer from RHI buffer */
 	FRDGBufferRef RegisterExternalBuffer(FRDGBuilder& GraphBuilder, const TCHAR* Name);
 
-	/** Add predict positions pass */
+	/** Add predict positions pass (with Cohesion force - XPBD: Forces First) */
 	void AddPredictPositionsPass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		const FSimulationSpatialData& SpatialData);
 
 	/** Add spatial hash build pass (uses existing FluidSpatialHashBuild) */
 	void AddSpatialHashBuildPass(
