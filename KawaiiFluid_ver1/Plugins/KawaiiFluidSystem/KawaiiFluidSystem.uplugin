@@ -14,21 +14,21 @@
 	"IsBetaVersion": false,
 	"IsExperimentalVersion": false,
 	"Installed": false,
+
+ 	"EngineVersion": "5.7.0",
+
 	"Modules": [
       {
         "Name": "KawaiiFluidRuntime",
         "Type": "Runtime",
-        "LoadingPhase": "PostConfigInit"
-      },
-      {
-        "Name": "KawaiiFluidNiagara",
-        "Type": "Runtime",
-        "LoadingPhase": "Default"
+        "LoadingPhase": "PostConfigInit",
+	"PlatformAllowList": [ "Win64" ]
       },
       {
         "Name": "KawaiiFluidEditor",
         "Type": "Editor",
-        "LoadingPhase": "Default"
+        "LoadingPhase": "Default",
+	"PlatformAllowList": [ "Win64" ]
       }
 	],
 	"Plugins": [
