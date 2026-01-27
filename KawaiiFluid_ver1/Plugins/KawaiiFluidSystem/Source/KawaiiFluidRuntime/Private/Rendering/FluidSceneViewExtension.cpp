@@ -23,7 +23,7 @@
 #include "Core/KawaiiFluidSimulatorSubsystem.h"  // For FContextCacheKey
 #include "Data/KawaiiFluidPresetDataAsset.h"
 
-// 통합 인터페이스
+// Unified interface
 #include "Rendering/KawaiiFluidRenderResource.h"
 #include "Core/KawaiiRenderParticle.h"
 #include "GPU/GPUFluidSimulator.h"

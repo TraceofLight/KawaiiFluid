@@ -1512,7 +1512,7 @@ bool UFluidInteractionComponent::GetMostContactedBone(int32& OutBoneIndex, int32
 void UFluidInteractionComponent::SampleTriangleSurface(const FVector& V0, const FVector& V1, const FVector& V2,
                                                         float Spacing, TArray<FVector>& OutPoints)
 {
-	// 삼각형 변 길이
+	// Triangle edge lengths
 	FVector Edge1 = V1 - V0;
 	FVector Edge2 = V2 - V0;
 
@@ -1524,18 +1524,18 @@ void UFluidInteractionComponent::SampleTriangleSurface(const FVector& V0, const 
 		return;
 	}
 
-	// 삼각형 면적 기반으로 샘플링 개수 결정
+	// Determine sampling count based on triangle area
 	FVector Cross = FVector::CrossProduct(Edge1, Edge2);
 	float Area = Cross.Size() * 0.5f;
 
 	if (Area < Spacing * Spacing * 0.1f)
 	{
-		// 너무 작은 삼각형은 중심점만
+		// For very small triangles, use center point only
 		OutPoints.Add((V0 + V1 + V2) / 3.0f);
 		return;
 	}
 
-	// Barycentric 좌표로 균일 샘플링
+	// Uniform sampling with Barycentric coordinates
 	int32 NumSamplesU = FMath::Max(1, FMath::CeilToInt(Len1 / Spacing));
 	int32 NumSamplesV = FMath::Max(1, FMath::CeilToInt(Len2 / Spacing));
 
@@ -1547,13 +1547,13 @@ void UFluidInteractionComponent::SampleTriangleSurface(const FVector& V0, const 
 		{
 			float v = (float)j / (float)NumSamplesV;
 
-			// u + v <= 1 조건 (삼각형 내부)
+			// Constraint: u + v <= 1 (inside triangle)
 			if (u + v > 1.0f)
 			{
 				continue;
 			}
 
-			// Barycentric 좌표로 점 계산
+			// Calculate point using Barycentric coordinates
 			FVector Point = V0 + Edge1 * u + Edge2 * v;
 			OutPoints.Add(Point);
 		}
@@ -1568,7 +1568,7 @@ void UFluidInteractionComponent::GenerateBoundaryParticles()
 		return;
 	}
 
-	// 배열 초기화
+	// Initialize arrays
 	BoundaryParticleLocalPositions.Empty();
 	BoundaryParticleBoneIndices.Empty();
 	BoundaryParticlePositions.Empty();
@@ -1576,14 +1576,14 @@ void UFluidInteractionComponent::GenerateBoundaryParticles()
 	BoundaryParticleLocalNormals.Empty();
 	bIsSkeletalMesh = false;
 
-	// 1. 스켈레탈 메시 + Physics Asset 확인
+	// 1. Check SkeletalMesh + Physics Asset
 	USkeletalMeshComponent* SkelMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
 	if (SkelMesh && SkelMesh->GetSkeletalMeshAsset())
 	{
 		bIsSkeletalMesh = true;
 		USkeletalMesh* SkeletalMesh = SkelMesh->GetSkeletalMeshAsset();
 
-		// Physics Asset 가져오기
+		// Get Physics Asset
 		UPhysicsAsset* PhysAsset = SkeletalMesh->GetPhysicsAsset();
 		if (!PhysAsset)
 		{
@@ -1592,15 +1592,15 @@ void UFluidInteractionComponent::GenerateBoundaryParticles()
 			return;
 		}
 
-		// RefSkeleton (본 인덱스 조회용)
+		// RefSkeleton (for bone index lookup)
 		const FReferenceSkeleton& RefSkeleton = SkeletalMesh->GetRefSkeleton();
 
-		// 각 BodySetup 순회
+		// Iterate through each BodySetup
 		for (USkeletalBodySetup* BodySetup : PhysAsset->SkeletalBodySetups)
 		{
 			if (!BodySetup) continue;
 
-			// 본 인덱스 찾기
+			// Find bone index
 			int32 BoneIndex = RefSkeleton.FindBoneIndex(BodySetup->BoneName);
 			if (BoneIndex == INDEX_NONE)
 			{
@@ -1609,10 +1609,10 @@ void UFluidInteractionComponent::GenerateBoundaryParticles()
 				continue;
 			}
 
-			// [디버깅] BodySetup의 BoneName과 BoneIndex 출력
+			// [Debug] Print BodySetup BoneName and BoneIndex
 			int32 ParticlesBeforeSampling = BoundaryParticleLocalPositions.Num();
 
-			// AggGeom에서 모든 프리미티브 샘플링
+			// Sample all primitives from AggGeom
 			SampleAggGeomSurfaces(BodySetup->AggGeom, BoneIndex);
 
 			int32 ParticlesAfterSampling = BoundaryParticleLocalPositions.Num();
@@ -1630,7 +1630,7 @@ void UFluidInteractionComponent::GenerateBoundaryParticles()
 	}
 	else
 	{
-		// 2. 스태틱 메시 + Simple Collision 확인
+		// 2. Check StaticMesh + Simple Collision
 		UStaticMeshComponent* StaticMeshComp = Owner->FindComponentByClass<UStaticMeshComponent>();
 		if (StaticMeshComp && StaticMeshComp->GetStaticMesh())
 		{
@@ -1646,7 +1646,7 @@ void UFluidInteractionComponent::GenerateBoundaryParticles()
 				return;
 			}
 
-			// 스태틱 메시는 본 없음 (BoneIndex = -1)
+			// StaticMesh has no bones (BoneIndex = -1)
 			SampleAggGeomSurfaces(BodySetup->AggGeom, -1);
 
 			UE_LOG(LogTemp, Log, TEXT("FluidInteraction: Generated %d boundary particles from StaticMesh Simple Collision '%s'"),
@@ -1659,12 +1659,12 @@ void UFluidInteractionComponent::GenerateBoundaryParticles()
 		}
 	}
 
-	// 월드 위치/노멀 배열 초기화
+	// Initialize world position/normal arrays
 	BoundaryParticlePositions.SetNum(BoundaryParticleLocalPositions.Num());
 	BoundaryParticleNormals.SetNum(BoundaryParticleLocalNormals.Num());
 	bBoundaryParticlesInitialized = BoundaryParticleLocalPositions.Num() > 0;
 
-	// 첫 프레임 위치 업데이트
+	// Update positions for first frame
 	if (bBoundaryParticlesInitialized)
 	{
 		UpdateBoundaryParticlePositions();
@@ -1682,7 +1682,7 @@ void UFluidInteractionComponent::UpdateBoundaryParticlePositions()
 	const int32 NumParticles = BoundaryParticlePositions.Num();
 	const bool bHasNormals = (BoundaryParticleLocalNormals.Num() == NumParticles);
 
-	// 스켈레탈 메시인 경우 본 트랜스폼 적용
+	// Apply bone transforms for skeletal mesh
 	if (bIsSkeletalMesh)
 	{
 		USkeletalMeshComponent* SkelMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
@@ -1693,10 +1693,10 @@ void UFluidInteractionComponent::UpdateBoundaryParticlePositions()
 				int32 BoneIdx = BoundaryParticleBoneIndices[i];
 				if (BoneIdx >= 0)
 				{
-					// 현재 본의 월드 트랜스폼으로 본 로컬 좌표를 월드로 변환
+					// Transform bone-local position to world using current bone world transform
 					FTransform BoneWorldTransform = SkelMesh->GetBoneTransform(BoneIdx);
 					BoundaryParticlePositions[i] = BoneWorldTransform.TransformPosition(BoundaryParticleLocalPositions[i]);
-					// 노멀도 변환
+					// Transform normal as well
 					if (bHasNormals)
 					{
 						BoundaryParticleNormals[i] = BoneWorldTransform.TransformVectorNoScale(BoundaryParticleLocalNormals[i]);
@@ -1716,7 +1716,7 @@ void UFluidInteractionComponent::UpdateBoundaryParticlePositions()
 	}
 	else
 	{
-		// 스태틱 메시 또는 다른 컴포넌트 - 로컬 → 월드 변환
+		// StaticMesh or other component - local to world transformation
 		USceneComponent* RootComp = Owner->GetRootComponent();
 		if (RootComp && BoundaryParticleLocalPositions.Num() == NumParticles)
 		{
@@ -1749,7 +1749,7 @@ void UFluidInteractionComponent::DrawDebugBoundaryParticles()
 	{
 		const FVector& Pos = BoundaryParticlePositions[i];
 
-		// 점 그리기
+		// Draw point
 		DrawDebugPoint(
 			World,
 			Pos,
@@ -1757,10 +1757,10 @@ void UFluidInteractionComponent::DrawDebugBoundaryParticles()
 			BoundaryParticleDebugColor,
 			false,  // bPersistentLines
 			-1.0f,  // LifeTime
-			SDPG_Foreground  // DepthPriority - 메쉬 앞에 항상 표시
+			SDPG_Foreground  // DepthPriority - always render in front of mesh
 		);
 
-		// 노말 화살표 그리기
+		// Draw normal arrow
 		if (bShowBoundaryNormals && bHasNormals)
 		{
 			const FVector& Normal = BoundaryParticleNormals[i];
@@ -1808,7 +1808,7 @@ void UFluidInteractionComponent::CollectGPUBoundaryParticles(FGPUBoundaryParticl
 	const int32 NumParticles = BoundaryParticlePositions.Num();
 	OutBoundaryParticles.Particles.Reserve(OutBoundaryParticles.Particles.Num() + NumParticles);
 
-	// Component의 고유 ID 생성
+	// Generate unique ID for component
 	const int32 OwnerID = GetUniqueID();
 
 	for (int32 i = 0; i < NumParticles; ++i)
@@ -1818,8 +1818,8 @@ void UFluidInteractionComponent::CollectGPUBoundaryParticles(FGPUBoundaryParticl
 			? FVector3f(BoundaryParticleNormals[i])
 			: FVector3f(0.0f, 0.0f, 1.0f);
 
-		// Psi는 경계 입자의 볼륨 기여도
-		// 낮을수록 밀려나는 힘 감소, 높을수록 강하게 밀려남
+		// Psi is the volume contribution of boundary particle
+		// Lower value = weaker repulsion force, higher value = stronger repulsion
 		float Psi = 0.1f;
 
 		OutBoundaryParticles.Add(Position, Normal, OwnerID, Psi, BoundaryFrictionCoefficient);
@@ -1862,7 +1862,7 @@ void UFluidInteractionComponent::CollectBoneTransformsForBoundary(TArray<FMatrix
 		USkeletalMeshComponent* SkelMesh = Owner->FindComponentByClass<USkeletalMeshComponent>();
 		if (SkelMesh)
 		{
-			// 모든 본의 월드 트랜스폼 수집
+			// Collect world transforms for all bones
 			const int32 NumBones = SkelMesh->GetNumBones();
 			OutBoneTransforms.SetNum(NumBones);
 
@@ -1881,7 +1881,7 @@ void UFluidInteractionComponent::CollectBoneTransformsForBoundary(TArray<FMatrix
 	}
 	else
 	{
-		// 스태틱 메시 또는 다른 컴포넌트
+		// StaticMesh or other component
 		USceneComponent* RootComp = Owner->GetRootComponent();
 		if (RootComp)
 		{
@@ -1896,7 +1896,7 @@ void UFluidInteractionComponent::CollectBoneTransformsForBoundary(TArray<FMatrix
 }
 
 //=============================================================================
-// Physics Asset / Simple Collision 기반 표면 샘플링
+// Surface Sampling based on Physics Asset / Simple Collision
 //=============================================================================
 
 void UFluidInteractionComponent::SampleSphereSurface(const FKSphereElem& Sphere, int32 BoneIndex, const FTransform& LocalTransform)
@@ -1904,13 +1904,13 @@ void UFluidInteractionComponent::SampleSphereSurface(const FKSphereElem& Sphere,
 	float Radius = Sphere.Radius;
 	FVector Center = Sphere.Center;
 
-	// 샘플 수 결정: 표면적 기반 (4πr²)
+	// Determine sample count: based on surface area (4πr²)
 	float SurfaceArea = 4.0f * PI * Radius * Radius;
 	float SpacingSq = BoundaryParticleSpacing * BoundaryParticleSpacing;
 	int32 NumSamples = FMath::Max(8, FMath::CeilToInt(SurfaceArea / SpacingSq));
-	NumSamples = FMath::Min(NumSamples, 200);  // 최대 제한
+	NumSamples = FMath::Min(NumSamples, 200);  // Maximum limit
 
-	// 피보나치 구 샘플링 (균일 분포)
+	// Fibonacci sphere sampling (uniform distribution)
 	float GoldenRatio = (1.0f + FMath::Sqrt(5.0f)) / 2.0f;
 	float AngleIncrement = 2.0f * PI * GoldenRatio;
 
@@ -1920,17 +1920,17 @@ void UFluidInteractionComponent::SampleSphereSurface(const FKSphereElem& Sphere,
 		float Phi = FMath::Acos(1.0f - 2.0f * t);
 		float Theta = AngleIncrement * i;
 
-		// 구면 좌표 → 카르테시안
+		// Spherical coordinates → Cartesian
 		FVector LocalPoint(
 			Radius * FMath::Sin(Phi) * FMath::Cos(Theta),
 			Radius * FMath::Sin(Phi) * FMath::Sin(Theta),
 			Radius * FMath::Cos(Phi)
 		);
 
-		// 프리미티브 로컬 → 본 로컬
+		// Primitive local → Bone local
 		FVector BoneLocalPos = LocalTransform.TransformPosition(LocalPoint + Center);
 
-		// 노멀은 중심에서 외부로
+		// Normal points outward from center
 		FVector LocalNormal = LocalPoint.GetSafeNormal();
 		FVector BoneLocalNormal = LocalTransform.TransformVectorNoScale(LocalNormal);
 
@@ -1950,11 +1950,11 @@ void UFluidInteractionComponent::SampleHemisphere(const FTransform& Transform, f
 
 	for (int32 i = 0; i < NumSamples; ++i)
 	{
-		// 반구만 샘플링
+		// Sample hemisphere only
 		float t = (float)i / (float)(NumSamples * 2);
 		if (ZDirection < 0) t = 1.0f - t;
 
-		// t가 반구 범위를 벗어나면 스킵
+		// Skip if t is outside hemisphere range
 		if ((ZDirection > 0 && t > 0.5f) || (ZDirection < 0 && t < 0.5f))
 			continue;
 
@@ -1988,11 +1988,11 @@ void UFluidInteractionComponent::SampleCapsuleSurface(const FKSphylElem& Capsule
 	float HalfLength = Capsule.Length * 0.5f;
 	FTransform CapsuleTransform = Capsule.GetTransform();
 
-	// 원통 부분
+	// Cylinder portion
 	float CylinderHeight = Capsule.Length;
 	float CylinderArea = 2.0f * PI * Radius * CylinderHeight;
 
-	// 반구 2개 = 완전한 구
+	// Two hemispheres = complete sphere
 	float SphereArea = 4.0f * PI * Radius * Radius;
 
 	float TotalArea = CylinderArea + SphereArea;
@@ -2000,12 +2000,12 @@ void UFluidInteractionComponent::SampleCapsuleSurface(const FKSphylElem& Capsule
 	int32 TotalSamples = FMath::Max(12, FMath::CeilToInt(TotalArea / SpacingSq));
 	TotalSamples = FMath::Min(TotalSamples, 500);
 
-	// 면적 비율로 샘플 분배
+	// Distribute samples by area ratio
 	float CylinderRatio = CylinderArea / TotalArea;
 	int32 CylinderSamples = FMath::CeilToInt(TotalSamples * CylinderRatio);
 	int32 SphereSamples = TotalSamples - CylinderSamples;
 
-	// 원통 부분 샘플링
+	// Sample cylinder portion
 	int32 NumRings = FMath::Max(2, FMath::CeilToInt(CylinderHeight / BoundaryParticleSpacing));
 	int32 NumSegments = FMath::Max(6, CylinderSamples / FMath::Max(1, NumRings));
 
@@ -2034,7 +2034,7 @@ void UFluidInteractionComponent::SampleCapsuleSurface(const FKSphylElem& Capsule
 		}
 	}
 
-	// 반구 부분 (상단/하단)
+	// Hemisphere portions (top/bottom)
 	int32 HalfSphereSamples = SphereSamples / 2;
 	SampleHemisphere(CapsuleTransform, Radius, +HalfLength, +1, BoneIndex, HalfSphereSamples);
 	SampleHemisphere(CapsuleTransform, Radius, -HalfLength, -1, BoneIndex, HalfSphereSamples);
@@ -2045,7 +2045,7 @@ void UFluidInteractionComponent::SampleBoxSurface(const FKBoxElem& Box, int32 Bo
 	FVector HalfExtent(Box.X * 0.5f, Box.Y * 0.5f, Box.Z * 0.5f);
 	FTransform BoxTransform = Box.GetTransform();
 
-	// 6개 면 정의: 노멀, 거리, 축1, 축2, 크기1, 크기2
+	// Define 6 faces: normal, distance, axis1, axis2, size1, size2
 	struct FBoxFace
 	{
 		FVector Normal;
@@ -2094,19 +2094,19 @@ void UFluidInteractionComponent::SampleBoxSurface(const FKBoxElem& Box, int32 Bo
 
 void UFluidInteractionComponent::SampleAggGeomSurfaces(const FKAggregateGeom& AggGeom, int32 BoneIndex)
 {
-	// Sphere 콜라이더
+	// Sphere colliders
 	for (const FKSphereElem& Sphere : AggGeom.SphereElems)
 	{
 		SampleSphereSurface(Sphere, BoneIndex, Sphere.GetTransform());
 	}
 
-	// Capsule(Sphyl) 콜라이더
+	// Capsule(Sphyl) colliders
 	for (const FKSphylElem& Capsule : AggGeom.SphylElems)
 	{
 		SampleCapsuleSurface(Capsule, BoneIndex);
 	}
 
-	// Box 콜라이더
+	// Box colliders
 	for (const FKBoxElem& Box : AggGeom.BoxElems)
 	{
 		SampleBoxSurface(Box, BoneIndex);

@@ -414,10 +414,10 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 	// CPU Collision Feedback Buffer (for deferred processing)
 	//========================================
 
-	/** CPU 충돌 피드백 버퍼 포인터 (Subsystem이 소유, Context가 추가) */
+	/** CPU collision feedback buffer pointer (owned by Subsystem, written by Context) */
 	TArray<FKawaiiFluidCollisionEvent>* CPUCollisionFeedbackBufferPtr = nullptr;
 
-	/** CPU 충돌 피드백 버퍼 락 (ParallelFor 안전) */
+	/** CPU collision feedback buffer lock (ParallelFor safe) */
 	FCriticalSection* CPUCollisionFeedbackLockPtr = nullptr;
 
 	FKawaiiFluidSimulationParams() = default;

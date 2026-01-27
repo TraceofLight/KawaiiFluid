@@ -37,9 +37,9 @@ void UKawaiiFluidSimulationModule::PostInitProperties()
 	Super::PostInitProperties();
 
 #if WITH_EDITOR
-	// CDO가 아닌 경우에만 델리게이트 바인딩
-	// PostLoad는 디스크에서 로드할 때만 호출되므로,
-	// CreateDefaultSubobject로 생성된 경우를 위해 여기서도 바인딩
+	// Bind delegate only if not CDO
+	// PostLoad is called only when loading from disk,
+	// so bind here for cases created with CreateDefaultSubobject
 	if (!HasAnyFlags(RF_ClassDefaultObject) && !PreBeginPIEHandle.IsValid())
 	{
 		PreBeginPIEHandle = FEditorDelegates::PreBeginPIE.AddUObject(this, &UKawaiiFluidSimulationModule::OnPreBeginPIE);
@@ -77,24 +77,24 @@ void UKawaiiFluidSimulationModule::PostDuplicate(bool bDuplicateForPIE)
 {
 	Super::PostDuplicate(bDuplicateForPIE);
 
-	// PIE로 복제될 때 EditorWorld의 객체를 가리키는 stale pointer 초기화
-	// 이 포인터들은 새 World의 BeginPlay에서 올바른 객체로 다시 설정됨
+	// Initialize stale pointers to EditorWorld objects when duplicated for PIE
+	// These pointers are reset to correct objects in new World's BeginPlay
 	CachedSimulationContext = nullptr;
 	WeakGPUSimulator.Reset();
 	bGPUSimulationActive = false;
 
-	// ⚠️ Particles 배열은 유지! (PreBeginPIE에서 캐시한 GPU 데이터
-	// UPROPERTY TArray라서 자동으로 딥카피됨
+	// ⚠️ Particles array is preserved! (GPU data cached in PreBeginPIE)
+	// UPROPERTY TArray so automatically deep-copied
 	const int32 PreservedParticleCount = Particles.Num();
 
-	// SpatialHash는 Initialize에서 다시 생성됨
+	// SpatialHash recreated in Initialize
 	SpatialHash.Reset();
 
-	// OwnedVolumeComponent도 다른 World의 객체이므로 리셋
+	// OwnedVolumeComponent also reset as it's from different World
 	OwnedVolumeComponent = nullptr;
 	PreviousRegisteredVolume.Reset();
 
-	bIsInitialized = false;  // BeginPlay에서 다시 초기화
+	bIsInitialized = false;  // Re-initialize in BeginPlay
 
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidSimulationModule::PostDuplicate - Preserved %d particles, cleared stale pointers (PIE=%d)"),
 		PreservedParticleCount, bDuplicateForPIE ? 1 : 0);
@@ -108,7 +108,7 @@ void UKawaiiFluidSimulationModule::PreSave(FObjectPreSaveContext SaveContext)
 {
 	Super::PreSave(SaveContext);
 
-	// 저장 전 GPU 데이터를 CPU Particles 배열로 동기화
+	// Sync GPU data to CPU Particles array before saving
 	SyncGPUParticlesToCPU();
 }
 
@@ -121,14 +121,14 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (!GPUSim)
 	{
-		// GPU 시뮬레이터 없으면 기존 CPU Particles 유지
+		// If no GPU simulator, keep existing CPU Particles
 		return;
 	}
 
 	const int32 GPUCount = GPUSim->GetParticleCount();
 	if (GPUCount <= 0)
 	{
-		// GPU에 파티클 없으면 기존 유지
+		// If no particles in GPU, keep existing
 		return;
 	}
 
@@ -136,7 +136,7 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 
 	if (GPUSim->IsReady())
 	{
-		// 내 SourceID 파티클만 필터링해서 가져오기 (배칭 환경 대응)
+		// Get only my SourceID particles filtered (handle batching environment)
 		if (GPUSim->GetParticlesBySourceID(CachedSourceID, MyParticles))
 		{
 			Particles = MoveTemp(MyParticles);
@@ -160,7 +160,7 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 
 	const int32 UploadCount = Particles.Num();
 
-	// Atomic ID 할당: 저장된 ID 무시하고 새로 할당 (멀티모듈 충돌 방지 + overflow 리셋)
+	// Atomic ID assignment: ignore stored IDs and assign new ones (prevent multi-module collision + overflow reset)
 	const int32 StartID = GPUSim->AllocateParticleIDs(UploadCount);
 	for (int32 i = 0; i < UploadCount; ++i)
 	{
@@ -168,13 +168,13 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 		Particles[i].SourceID = CachedSourceID;
 	}
 
-	// CPU에서 GPU로 업로드 (bAppend=true: 배칭 환경에서 다른 컴포넌트 파티클 보존)
+	// Upload from CPU to GPU (bAppend=true: preserve particles from other components in batching environment)
 	GPUSim->UploadParticles(Particles, /*bAppend=*/true);
 
-	// 모든 append 후 GPU 버퍼 생성/갱신 + SpawnManager 상태 리셋
+	// After all appends, create/update GPU buffer + reset SpawnManager state
 	GPUSim->FinalizeUpload();
 
-	// GPU에 올렸으니 CPU 배열 정리 (중복 업로드 방지 + 메모리 절약)
+	// Clear CPU array after uploading to GPU (prevent duplicate uploads + save memory)
 	Particles.Empty();
 
 	UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Uploaded %d particles (SourceID=%d, IDs=%d~%d) to GPU"),
@@ -207,8 +207,8 @@ void UKawaiiFluidSimulationModule::BeginDestroy()
 #if WITH_EDITOR
 void UKawaiiFluidSimulationModule::OnPreBeginPIE(bool bIsSimulating)
 {
-	// PIE 시작 전 GPU 파티클을 CPU로 동기화
-	// 이 데이터는 PostDuplicate에서 자동으로 딥카피되어 PIE World로 전달됨
+	// Sync GPU particles to CPU before PIE starts
+	// This data is automatically deep-copied in PostDuplicate and transferred to PIE World
 	SyncGPUParticlesToCPU();
 
 
@@ -223,7 +223,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 
 	const FName PropertyName = PropertyChangedEvent.GetPropertyName();
 
-	// Preset 변경 시
+	// When Preset changes
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, Preset))
 	{
 		// Unbind from old preset's delegate, bind to new preset
@@ -231,7 +231,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 
 			if (Preset)
 		{
-			// SpatialHash 재구성
+			// Reconstruct SpatialHash
 			if (SpatialHash.IsValid())
 			{
 				SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
@@ -242,7 +242,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 		// Update CellSize and bounds (handles both internal and external volume cases)
 		UpdateVolumeInfoDisplay();
 	}
-	// TargetSimulationVolume 변경 시 정보 업데이트
+	// Update information when TargetSimulationVolume changes
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, TargetSimulationVolume))
 	{
 		// Unbind from previous volume's OnDestroyed event
@@ -272,7 +272,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 
 		UpdateVolumeInfoDisplay();
 	}
-	// GridResolutionPreset 변경 시 (Internal Volume용)
+	// When GridResolutionPreset changes (for Internal Volume)
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, GridResolutionPreset))
 	{
 		// Only update if not using external volume
@@ -281,7 +281,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 			UpdateVolumeInfoDisplay();
 		}
 	}
-	// bUniformSize 체크박스 변경 시 - Sync values between uniform and non-uniform
+	// When bUniformSize checkbox changes - Sync values between uniform and non-uniform
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, bUniformSize))
 	{
 		if (!TargetSimulationVolume)
@@ -299,7 +299,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 			RecalculateVolumeBounds();
 		}
 	}
-	// UniformVolumeSize 변경 시 - Clamp and recalculate
+	// When UniformVolumeSize changes - Clamp and recalculate
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, UniformVolumeSize))
 	{
 		if (!TargetSimulationVolume)
@@ -311,7 +311,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 			RecalculateVolumeBounds();
 		}
 	}
-	// VolumeSize 변경 시 - Clamp and recalculate
+	// When VolumeSize changes - Clamp and recalculate
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, VolumeSize))
 	{
 		if (!TargetSimulationVolume)
@@ -325,7 +325,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 			RecalculateVolumeBounds();
 		}
 	}
-	// VolumeRotation 변경 시 - Recalculate bounds (OBB → AABB expansion)
+	// When VolumeRotation changes - Recalculate bounds (OBB → AABB expansion)
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, VolumeRotation))
 	{
 		if (!TargetSimulationVolume)
@@ -333,7 +333,7 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 			RecalculateVolumeBounds();
 		}
 	}
-	// CellSize 변경 시 - Recalculate volume size to maintain Medium preset
+	// When CellSize changes - Recalculate volume size to maintain Medium preset
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, CellSize))
 	{
 		if (!TargetSimulationVolume)
@@ -358,7 +358,7 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 
 	Preset = InPreset;
 
-	// SpatialHash 초기화 (Independent 모드용)
+	// Initialize SpatialHash (for Independent mode)
 	float SpatialHashCellSize = 20.0f;
 	if (Preset)
 	{
@@ -412,7 +412,7 @@ void UKawaiiFluidSimulationModule::SetPreset(UKawaiiFluidPresetDataAsset* InPres
 {
 	Preset = InPreset;
 
-	// SpatialHash 재구성
+	// Reconstruct SpatialHash
 	if (Preset && SpatialHash.IsValid())
 	{
 		SpatialHash = MakeShared<FSpatialHash>(Preset->SmoothingRadius);
@@ -437,19 +437,19 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 {
 	FKawaiiFluidSimulationParams Params;
 
-	// 외력
+	// External forces
 	Params.ExternalForce = AccumulatedExternalForce;
 
-	// 콜라이더 / 상호작용 컴포넌트
+	// Colliders / Interaction components
 	Params.Colliders = Colliders;
 
-	// Preset에서 파티클 반경 가져오기
+	// Get particle radius from Preset
 	if (Preset)
 	{
 		Params.ParticleRadius = GetParticleRadius();  // Use getter to respect override
 	}
 
-	// Context - Module에서 직접 접근 (Outer 체인 활용)
+	// Context - Direct access from Module (utilizing Outer chain)
 	Params.World = GetWorld();
 	Params.IgnoreActor = GetOwnerActor();
 	Params.bUseWorldCollision = bUseWorldCollision;
@@ -574,22 +574,22 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 
 	if (bEnableCollisionEvents)
 	{
-		// 쿨다운 추적용 맵 연결 (const_cast 필요 - mutable 대안)
+		// Connect map for cooldown tracking (const_cast needed - alternative to mutable)
 		Params.ParticleLastEventTimePtr = const_cast<TMap<int32, float>*>(&ParticleLastEventTime);
 
-		// 현재 게임 시간
+		// Current game time
 		if (UWorld* World = GetWorld())
 		{
 			Params.CurrentGameTime = World->GetTimeSeconds();
 		}
 
-		// 콜백 바인딩
+		// Callback binding
 		if (OnCollisionEventCallback.IsBound())
 		{
 			Params.OnCollisionEvent = OnCollisionEventCallback;
 		}
 
-		// SourceID 필터링용 (자기 Component에서 스폰한 파티클만 콜백)
+		// For SourceID filtering (callback only for particles spawned by this Component)
 		Params.SourceID = CachedSourceID;
 	}
 
@@ -600,19 +600,19 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 	const TMap<int32, UFluidInteractionComponent*>& OwnerIDToIC,
 	const TArray<FKawaiiFluidCollisionEvent>& CPUFeedbackBuffer)
 {
-	// 콜백이 없거나 충돌 이벤트 비활성화면 스킵
+	// Skip if no callback or collision events disabled
 	if (!OnCollisionEventCallback.IsBound() || !bEnableCollisionEvents)
 	{
 		return;
 	}
 
-	// SourceComponent 캐시
+	// Cache SourceComponent
 	UKawaiiFluidComponent* OwnerComponent = GetTypedOuter<UKawaiiFluidComponent>();
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	int32 EventCount = 0;
 
 	//========================================
-	// GPU 피드백 처리
+	// GPU feedback processing
 	//========================================
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
@@ -625,20 +625,20 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 		{
 			const FGPUCollisionFeedback& Feedback = GPUFeedbacks[i];
 
-			// SourceID 필터링
+			// SourceID filtering
 			if (CachedSourceID >= 0 && Feedback.ParticleSourceID != CachedSourceID)
 			{
 				continue;
 			}
 
-			// 속도 체크
+			// Velocity check
 			const float HitSpeed = FVector3f(Feedback.ParticleVelocity).Length();
 			if (HitSpeed < MinVelocityForEvent)
 			{
 				continue;
 			}
 
-			// 쿨다운 체크
+			// Cooldown check
 			if (const float* LastTime = ParticleLastEventTime.Find(Feedback.ParticleIndex))
 			{
 				if (CurrentTime - *LastTime < EventCooldownPerParticle)
@@ -647,10 +647,10 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 				}
 			}
 
-			// 쿨다운 업데이트
+			// Update cooldown
 			ParticleLastEventTime.Add(Feedback.ParticleIndex, CurrentTime);
 
-			// 이벤트 생성
+			// Create event
 			FKawaiiFluidCollisionEvent Event;
 			Event.ParticleIndex = Feedback.ParticleIndex;
 			Event.SourceID = Feedback.ParticleSourceID;
@@ -661,7 +661,7 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 			Event.HitSpeed = HitSpeed;
 			Event.SourceComponent = OwnerComponent;
 
-			// IC 조회 (O(1))
+			// IC lookup (O(1))
 			if (const UFluidInteractionComponent* const* FoundIC = OwnerIDToIC.Find(Feedback.ColliderOwnerID))
 			{
 				Event.HitInteractionComponent = const_cast<UFluidInteractionComponent*>(*FoundIC);
@@ -674,7 +674,7 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 	}
 
 	//========================================
-	// CPU 피드백 처리 (Subsystem 버퍼에서 SourceID로 필터링)
+	// CPU feedback processing (filter by SourceID from Subsystem buffer)
 	//========================================
 	for (const FKawaiiFluidCollisionEvent& BufferEvent : CPUFeedbackBuffer)
 	{
@@ -683,13 +683,13 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 			break;
 		}
 
-		// SourceID 필터링 - 이 Module의 파티클만 처리
+		// SourceID filtering - process only this Module's particles
 		if (CachedSourceID >= 0 && BufferEvent.SourceID != CachedSourceID)
 		{
 			continue;
 		}
 
-		// 쿨다운 체크
+		// Cooldown check
 		if (const float* LastTime = ParticleLastEventTime.Find(BufferEvent.ParticleIndex))
 		{
 			if (CurrentTime - *LastTime < EventCooldownPerParticle)
@@ -698,14 +698,14 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 			}
 		}
 
-		// 쿨다운 업데이트
+		// Update cooldown
 		ParticleLastEventTime.Add(BufferEvent.ParticleIndex, CurrentTime);
 
-		// 이벤트 복사 및 추가 정보 설정
+		// Copy event and set additional information
 		FKawaiiFluidCollisionEvent Event = BufferEvent;
 		Event.SourceComponent = OwnerComponent;
 
-		// IC 조회 (O(1)) - CPU 버퍼에는 IC가 없을 수 있음
+		// IC lookup (O(1)) - CPU buffer may not have IC
 		if (!Event.HitInteractionComponent && Event.ColliderOwnerID >= 0)
 		{
 			if (const UFluidInteractionComponent* const* FoundIC = OwnerIDToIC.Find(Event.ColliderOwnerID))
@@ -788,21 +788,21 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float R
 		return 0;
 	}
 
-	// 구체를 포함하는 박스 범위 계산
+	// Calculate bounding box range for sphere
 	const int32 GridSize = FMath::CeilToInt(Radius / Spacing);
 	const float RadiusSq = Radius * Radius;
 	const float HalfSpacing = Spacing * 0.5f;
 	const float JitterRange = Spacing * JitterAmount;
 
-	// FRotator -> FQuat 변환
+	// FRotator -> FQuat conversion
 	const FQuat RotationQuat = Rotation.Quaternion();
 
-	// 속도에 회전 적용 (구형은 위치 회전 불필요)
+	// Apply rotation to velocity (sphere doesn't need position rotation)
 	const FVector WorldVelocity = RotationQuat.RotateVector(Velocity);
 
 	int32 SpawnedCount = 0;
 
-	// 예상 파티클 수 계산 (구 부피 / 파티클 부피)
+	// Calculate estimated particle count (sphere volume / particle volume)
 	const float EstimatedCount = (4.0f / 3.0f * PI * Radius * Radius * Radius) / (Spacing * Spacing * Spacing);
 
 	// GPU mode: batch spawn requests for efficiency
@@ -868,7 +868,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBox(FVector Center, FVector Ex
 		return 0;
 	}
 
-	// 각 축별 격자 개수 계산
+	// Calculate grid count for each axis
 	const int32 CountX = FMath::Max(1, FMath::CeilToInt(Extent.X * 2.0f / Spacing));
 	const int32 CountY = FMath::Max(1, FMath::CeilToInt(Extent.Y * 2.0f / Spacing));
 	const int32 CountZ = FMath::Max(1, FMath::CeilToInt(Extent.Z * 2.0f / Spacing));
@@ -876,10 +876,10 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBox(FVector Center, FVector Ex
 	const float JitterRange = Spacing * JitterAmount;
 	const FVector LocalStartOffset = -Extent + FVector(Spacing * 0.5f);
 
-	// FRotator -> FQuat 변환
+	// FRotator -> FQuat conversion
 	const FQuat RotationQuat = Rotation.Quaternion();
 
-	// 속도에 회전 적용
+	// Apply rotation to velocity
 	const FVector WorldVelocity = RotationQuat.RotateVector(Velocity);
 
 	int32 SpawnedCount = 0;
@@ -892,10 +892,10 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBox(FVector Center, FVector Ex
 		{
 			for (int32 z = 0; z < CountZ; ++z)
 			{
-				// 로컬 위치 계산
+				// Calculate local position
 				FVector LocalPos = LocalStartOffset + FVector(x * Spacing, y * Spacing, z * Spacing);
 
-				// Jitter 적용 (로컬 공간에서)
+				// Apply jitter (in local space)
 				if (bJitter && JitterRange > 0.0f)
 				{
 					LocalPos += FVector(
@@ -905,7 +905,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBox(FVector Center, FVector Ex
 					);
 				}
 
-				// 회전 적용 후 월드 위치 계산
+				// Calculate world position after applying rotation
 				const FVector WorldPos = Center + RotationQuat.RotateVector(LocalPos);
 
 				SpawnParticle(WorldPos, WorldVelocity);
@@ -926,30 +926,30 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinder(FVector Center, float
 		return 0;
 	}
 
-	// 원기둥을 포함하는 박스 범위 계산
+	// Calculate bounding box range for cylinder
 	const int32 GridSizeXY = FMath::CeilToInt(Radius / Spacing);
 	const int32 GridSizeZ = FMath::CeilToInt(HalfHeight / Spacing);
 	const float RadiusSq = Radius * Radius;
 	const float JitterRange = Spacing * JitterAmount;
 
-	// FRotator -> FQuat 변환
+	// FRotator -> FQuat conversion
 	const FQuat RotationQuat = Rotation.Quaternion();
 
-	// 속도에 회전 적용
+	// Apply rotation to velocity
 	const FVector WorldVelocity = RotationQuat.RotateVector(Velocity);
 
 	int32 SpawnedCount = 0;
 
-	// 예상 파티클 수 계산 (원기둥 부피 / 파티클 부피)
+	// Calculate estimated particle count (cylinder volume / particle volume)
 	const float EstimatedCount = (PI * Radius * Radius * HalfHeight * 2.0f) / (Spacing * Spacing * Spacing);
 	Particles.Reserve(Particles.Num() + FMath::CeilToInt(EstimatedCount));
 
-	// 격자 순회
+	// Iterate through grid
 	for (int32 x = -GridSizeXY; x <= GridSizeXY; ++x)
 	{
 		for (int32 y = -GridSizeXY; y <= GridSizeXY; ++y)
 		{
-			// XY 평면에서 원 내부인지 확인
+			// Check if inside circle in XY plane
 			const float DistSqXY = x * x * Spacing * Spacing + y * y * Spacing * Spacing;
 			if (DistSqXY > RadiusSq)
 			{
@@ -960,7 +960,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinder(FVector Center, float
 			{
 				FVector LocalPos(x * Spacing, y * Spacing, z * Spacing);
 
-				// Jitter 적용 (로컬 공간에서)
+				// Apply jitter (in local space)
 				if (bJitter && JitterRange > 0.0f)
 				{
 					LocalPos += FVector(
@@ -970,7 +970,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinder(FVector Center, float
 					);
 				}
 
-				// 회전 적용 후 월드 위치 계산
+				// Calculate world position after applying rotation
 				const FVector WorldPos = Center + RotationQuat.RotateVector(LocalPos);
 
 				SpawnParticle(WorldPos, WorldVelocity);
@@ -1224,20 +1224,20 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinderHexagonal(FVector Cent
 int32 UKawaiiFluidSimulationModule::SpawnParticleDirectional(FVector Position, FVector Direction, float Speed,
                                                              float Radius, float ConeAngle)
 {
-	// 방향 정규화
+	// Normalize direction
 	FVector Dir = Direction.GetSafeNormal();
 	if (Dir.IsNearlyZero())
 	{
-		Dir = FVector(0, 0, -1);  // 기본: 아래 방향
+		Dir = FVector(0, 0, -1);  // Default: downward direction
 	}
 
 	FVector SpawnPos = Position;
 	FVector SpawnVel = Dir * Speed;
 
-	// 스트림 반경 적용 (위치 분산)
+	// Apply stream radius (position dispersion)
 	if (Radius > 0.0f)
 	{
-		// 방향에 수직인 평면에서 랜덤 오프셋
+		// Random offset in plane perpendicular to direction
 		FVector Right, Up;
 		Dir.FindBestAxisVectors(Right, Up);
 
@@ -1248,15 +1248,15 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectional(FVector Position, F
 		SpawnPos += Up * FMath::Sin(RandomAngle) * RandomRadius;
 	}
 
-	// 원뿔 분사각 적용 (속도 방향 분산)
+	// Apply cone spray angle (velocity direction dispersion)
 	if (ConeAngle > 0.0f)
 	{
-		// 분사각 범위 내에서 랜덤 방향
+		// Random direction within spray angle range
 		const float HalfAngleRad = FMath::DegreesToRadians(ConeAngle * 0.5f);
 		const float RandomPhi = FMath::FRandRange(0.0f, 2.0f * PI);
 		const float RandomTheta = FMath::FRandRange(0.0f, HalfAngleRad);
 
-		// 로컬 좌표계에서 랜덤 방향 생성
+		// Generate random direction in local coordinate system
 		FVector Right, Up;
 		Dir.FindBestAxisVectors(Right, Up);
 
@@ -1291,33 +1291,33 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayerBatch(FVecto
                                                                           float Radius, float Spacing, float Jitter,
                                                                           TArray<FGPUSpawnRequest>& OutBatch)
 {
-	// 방향 정규화
+	// Normalize direction
 	FVector Dir = Direction.GetSafeNormal();
 	if (Dir.IsNearlyZero())
 	{
-		Dir = FVector(0, 0, -1);  // 기본: 아래 방향
+		Dir = FVector(0, 0, -1);  // Default: downward direction
 	}
 
-	// 자동 간격 계산 (SmoothingRadius * 0.5)
+	// Auto-calculate spacing (SmoothingRadius * 0.5)
 	if (Spacing <= 0.0f)
 	{
 		Spacing = Preset ? Preset->SmoothingRadius * 0.5f : 10.0f;
 	}
 
-	// Jitter 범위 제한 (0 ~ 0.5)
+	// Limit jitter range (0 ~ 0.5)
 	Jitter = FMath::Clamp(Jitter, 0.0f, 0.5f);
 	const float MaxJitterOffset = Spacing * Jitter;
 	const bool bApplyJitter = Jitter > KINDA_SMALL_NUMBER;
 
-	// 방향에 수직인 로컬 좌표계 생성
+	// Create local coordinate system perpendicular to direction
 	FVector Right, Up;
 	Dir.FindBestAxisVectors(Right, Up);
 
-	// Hexagonal Packing 상수
+	// Hexagonal packing constants
 	const float RowSpacing = Spacing * FMath::Sqrt(3.0f) * 0.5f;  // ~0.866 * Spacing
 	const float RadiusSq = Radius * Radius;
 
-	// 행 개수 계산
+	// Calculate number of rows
 	const int32 NumRows = FMath::CeilToInt(Radius / RowSpacing) * 2 + 1;
 	const int32 HalfRows = NumRows / 2;
 
@@ -1327,24 +1327,24 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayerBatch(FVecto
 	const float ParticleMass = Preset ? Preset->ParticleMass : 1.0f;
 	const float ParticleRadius = Preset ? Preset->ParticleRadius : 5.0f;
 
-	// Hexagonal grid 순회
+	// Iterate through hexagonal grid
 	for (int32 RowIdx = -HalfRows; RowIdx <= HalfRows; ++RowIdx)
 	{
 		const float LocalY = RowIdx * RowSpacing;
 		const float LocalYSq = LocalY * LocalY;
 
-		// 이 행에서 원 내부의 최대 X 범위 계산
+		// Calculate maximum X range inside circle for this row
 		if (LocalYSq > RadiusSq)
 		{
-			continue;  // 원 밖의 행
+			continue;  // Row outside circle
 		}
 
 		const float MaxX = FMath::Sqrt(RadiusSq - LocalYSq);
 
-		// 홀수 행은 X 오프셋 적용 (Hexagonal Packing)
+		// Apply X offset for odd rows (Hexagonal Packing)
 		const float XOffset = (FMath::Abs(RowIdx) % 2 != 0) ? Spacing * 0.5f : 0.0f;
 
-		// X 시작점 계산 (중심 기준 대칭)
+		// Calculate X start point (symmetric around center)
 		const int32 NumCols = FMath::FloorToInt(MaxX / Spacing);
 
 		for (int32 ColIdx = -NumCols; ColIdx <= NumCols; ++ColIdx)
@@ -1352,14 +1352,14 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayerBatch(FVecto
 			float LocalX = ColIdx * Spacing + XOffset;
 			float LocalYFinal = LocalY;
 
-			// Jitter 적용: 랜덤 오프셋 추가
+			// Apply jitter: add random offset
 			if (bApplyJitter)
 			{
 				LocalX += FMath::FRandRange(-MaxJitterOffset, MaxJitterOffset);
 				LocalYFinal += FMath::FRandRange(-MaxJitterOffset, MaxJitterOffset);
 			}
 
-			// 원 내부 체크 (jitter 후에도 원 내부에 있는지 확인)
+			// Check if inside circle (verify still inside after jitter)
 			if (LocalX * LocalX + LocalYFinal * LocalYFinal <= RadiusSq)
 			{
 				FVector SpawnPos = Position + Right * LocalX + Up * LocalYFinal;
@@ -1385,16 +1385,16 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 {
 	Particles.Empty();
 
-	// GPU 파티클 클리어 (이 Module의 SourceID 파티클만)
-	// TWeakPtr::Pin()으로 안전하게 접근 - GPUSimulator가 이미 파괴되었으면 nullptr 반환
+	// Clear GPU particles (only particles with this Module's SourceID)
+	// Safe access via TWeakPtr::Pin() - returns nullptr if GPUSimulator already destroyed
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
-		// 캐시된 SourceID별 ParticleIDs 참조 (복사 없음, O(1) lookup)
+		// Reference cached ParticleIDs by SourceID (no copy, O(1) lookup)
 		const TArray<int32>* MyParticleIDsPtr = GPUSim->GetParticleIDsBySourceID(CachedSourceID);
 		if (MyParticleIDsPtr && MyParticleIDsPtr->Num() > 0)
 		{
-			// 내 파티클들 Despawn 요청 (CleanupCompletedRequests는 Readback 시 호출됨)
+			// Request despawn of my particles (CleanupCompletedRequests called during Readback)
 			GPUSim->AddDespawnByIDRequests(*MyParticleIDsPtr);
 			UE_LOG(LogTemp, Log, TEXT("ClearAllParticles: SourceID=%d, Clearing %d particles"),
 				CachedSourceID, MyParticleIDsPtr->Num());
@@ -1409,11 +1409,11 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticles(int32 Count)
 		return 0;
 	}
 
-	// GPU 모드
+	// GPU mode
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
-		// 캐시된 SourceID별 ParticleIDs 참조 (이미 ParticleID로 정렬됨)
+		// Reference cached ParticleIDs by SourceID (already sorted by ParticleID)
 		const TArray<int32>* MyParticleIDsPtr = GPUSim->GetParticleIDsBySourceID(CachedSourceID);
 		if (!MyParticleIDsPtr || MyParticleIDsPtr->Num() == 0)
 		{
@@ -1423,7 +1423,7 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticles(int32 Count)
 		const int32 MyCount = MyParticleIDsPtr->Num();
 		const int32 RemoveCount = FMath::Min(Count, MyCount);
 
-		// GPU에서 ParticleID로 정렬된 상태로 readback됨 - 앞쪽 N개가 가장 오래된 파티클 O(1)
+		// Read back sorted by ParticleID from GPU - first N entries are oldest particles O(1)
 		TArray<int32> IDsToRemove;
 		IDsToRemove.SetNumUninitialized(RemoveCount);
 		FMemory::Memcpy(IDsToRemove.GetData(), MyParticleIDsPtr->GetData(), RemoveCount * sizeof(int32));
@@ -1446,11 +1446,11 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticlesForSource(int32 SourceI
 		return 0;
 	}
 
-	// GPU 모드
+	// GPU mode
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
-		// 지정된 SourceID의 ParticleIDs 참조 (이미 ParticleID로 정렬됨)
+		// Reference ParticleIDs of specified SourceID (already sorted by ParticleID)
 		const TArray<int32>* ParticleIDsPtr = GPUSim->GetParticleIDsBySourceID(SourceID);
 		if (!ParticleIDsPtr || ParticleIDsPtr->Num() == 0)
 		{
@@ -1460,7 +1460,7 @@ int32 UKawaiiFluidSimulationModule::RemoveOldestParticlesForSource(int32 SourceI
 		const int32 SourceCount = ParticleIDsPtr->Num();
 		const int32 RemoveCount = FMath::Min(Count, SourceCount);
 
-		// GPU에서 ParticleID로 정렬된 상태로 readback됨 - 앞쪽 N개가 가장 오래된 파티클 O(1)
+		// Read back sorted by ParticleID from GPU - first N entries are oldest particles O(1)
 		TArray<int32> IDsToRemove;
 		IDsToRemove.SetNumUninitialized(RemoveCount);
 		FMemory::Memcpy(IDsToRemove.GetData(), ParticleIDsPtr->GetData(), RemoveCount * sizeof(int32));
@@ -1587,7 +1587,7 @@ float UKawaiiFluidSimulationModule::GetParticleRadius() const
 		return Preset->ParticleRadius;
 	}
 
-	return 10.0f; // 기본값
+	return 10.0f; // Default value
 }
 
 FString UKawaiiFluidSimulationModule::GetDebugName() const
@@ -1631,7 +1631,7 @@ int32 UKawaiiFluidSimulationModule::GetParticleCountForSource(int32 SourceID) co
 }
 
 //========================================
-// 명시적 개수 지정 스폰 함수
+// Spawn functions with explicit count
 //========================================
 
 int32 UKawaiiFluidSimulationModule::SpawnParticlesSphereByCount(FVector Center, float Radius, int32 Count,
@@ -1643,26 +1643,26 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphereByCount(FVector Center, 
 		return 0;
 	}
 
-	// 개수에서 간격 역계산: 구 부피 = (4/3)πr³, 파티클당 부피 = spacing³
+	// Calculate spacing from count: sphere volume = (4/3)πr³, volume per particle = spacing³
 	// Count = Volume / spacing³ → spacing = (Volume / Count)^(1/3)
 	const float Volume = (4.0f / 3.0f) * PI * Radius * Radius * Radius;
 	const float Spacing = FMath::Pow(Volume / Count, 1.0f / 3.0f);
 
-	// 실제 격자 기반으로 스폰 (Spacing 기반 함수와 동일한 결과를 위해)
+	// Spawn based on actual grid (to match results of spacing-based function)
 	const int32 GridSize = FMath::CeilToInt(Radius / Spacing);
 	const float RadiusSq = Radius * Radius;
 	const float JitterRange = Spacing * JitterAmount;
 
-	// FRotator -> FQuat 변환
+	// FRotator -> FQuat conversion
 	const FQuat RotationQuat = Rotation.Quaternion();
 
-	// 속도에 회전 적용 (구형은 위치 회전 불필요)
+	// Apply rotation to velocity (sphere doesn't need position rotation)
 	const FVector WorldVelocity = RotationQuat.RotateVector(Velocity);
 
 	int32 SpawnedCount = 0;
 	Particles.Reserve(Particles.Num() + Count);
 
-	// 격자 순회
+	// Iterate through grid
 	for (int32 x = -GridSize; x <= GridSize && SpawnedCount < Count; ++x)
 	{
 		for (int32 y = -GridSize; y <= GridSize && SpawnedCount < Count; ++y)
@@ -1671,12 +1671,12 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphereByCount(FVector Center, 
 			{
 				FVector LocalPos(x * Spacing, y * Spacing, z * Spacing);
 
-				// 구 내부인지 확인
+				// Check if inside sphere
 				if (LocalPos.SizeSquared() <= RadiusSq)
 				{
 					FVector SpawnPos = Center + LocalPos;
 
-					// Jitter 적용
+					// Apply jitter
 					if (bJitter && JitterRange > 0.0f)
 					{
 						SpawnPos += FVector(
@@ -1705,7 +1705,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBoxByCount(FVector Center, FVe
 		return 0;
 	}
 
-	// 개수에서 간격 역계산: 박스 부피 = 8 * Extent.X * Extent.Y * Extent.Z
+	// Calculate spacing from count: box volume = 8 * Extent.X * Extent.Y * Extent.Z
 	const float Volume = 8.0f * Extent.X * Extent.Y * Extent.Z;
 
 	if (Volume <= 0.0f)
@@ -1713,8 +1713,8 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBoxByCount(FVector Center, FVe
 		return 0;
 	}
 
-	// 균등 분포를 위해 각 축의 비율 유지
-	// n = nx * ny * nz, 비율 유지하면 nx:ny:nz = Ex:Ey:Ez
+	// Maintain ratio of each axis for uniform distribution
+	// n = nx * ny * nz, maintaining ratio gives nx:ny:nz = Ex:Ey:Ez
 	// spacing = (Volume / Count)^(1/3)
 	const float Spacing = FMath::Pow(Volume / Count, 1.0f / 3.0f);
 
@@ -1725,10 +1725,10 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBoxByCount(FVector Center, FVe
 	const float JitterRange = Spacing * JitterAmount;
 	const FVector LocalStartOffset = -Extent + FVector(Spacing * 0.5f);
 
-	// FRotator -> FQuat 변환
+	// FRotator -> FQuat conversion
 	const FQuat RotationQuat = Rotation.Quaternion();
 
-	// 속도에 회전 적용
+	// Apply rotation to velocity
 	const FVector WorldVelocity = RotationQuat.RotateVector(Velocity);
 
 	int32 SpawnedCount = 0;
@@ -1740,10 +1740,10 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBoxByCount(FVector Center, FVe
 		{
 			for (int32 z = 0; z < CountZ && SpawnedCount < Count; ++z)
 			{
-				// 로컬 위치 계산
+				// Calculate local position
 				FVector LocalPos = LocalStartOffset + FVector(x * Spacing, y * Spacing, z * Spacing);
 
-				// Jitter 적용 (로컬 공간에서)
+				// Apply jitter (in local space)
 				if (bJitter && JitterRange > 0.0f)
 				{
 					LocalPos += FVector(
@@ -1753,7 +1753,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesBoxByCount(FVector Center, FVe
 					);
 				}
 
-				// 회전 적용 후 월드 위치 계산
+				// Calculate world position after applying rotation
 				const FVector WorldPos = Center + RotationQuat.RotateVector(LocalPos);
 
 				SpawnParticle(WorldPos, WorldVelocity);
@@ -1774,7 +1774,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinderByCount(FVector Center
 		return 0;
 	}
 
-	// 개수에서 간격 역계산: 원기둥 부피 = π * r² * 2h
+	// Calculate spacing from count: cylinder volume = π * r² * 2h
 	const float Volume = PI * Radius * Radius * HalfHeight * 2.0f;
 	const float Spacing = FMath::Pow(Volume / Count, 1.0f / 3.0f);
 
@@ -1783,21 +1783,21 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinderByCount(FVector Center
 	const float RadiusSq = Radius * Radius;
 	const float JitterRange = Spacing * JitterAmount;
 
-	// FRotator -> FQuat 변환
+	// FRotator -> FQuat conversion
 	const FQuat RotationQuat = Rotation.Quaternion();
 
-	// 속도에 회전 적용
+	// Apply rotation to velocity
 	const FVector WorldVelocity = RotationQuat.RotateVector(Velocity);
 
 	int32 SpawnedCount = 0;
 	Particles.Reserve(Particles.Num() + Count);
 
-	// 격자 순회
+	// Iterate through grid
 	for (int32 x = -GridSizeXY; x <= GridSizeXY && SpawnedCount < Count; ++x)
 	{
 		for (int32 y = -GridSizeXY; y <= GridSizeXY && SpawnedCount < Count; ++y)
 		{
-			// XY 평면에서 원 내부인지 확인
+			// Check if inside circle in XY plane
 			const float DistSqXY = x * x * Spacing * Spacing + y * y * Spacing * Spacing;
 			if (DistSqXY > RadiusSq)
 			{
@@ -1808,7 +1808,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinderByCount(FVector Center
 			{
 				FVector LocalPos(x * Spacing, y * Spacing, z * Spacing);
 
-				// Jitter 적용 (로컬 공간에서)
+				// Apply jitter (in local space)
 				if (bJitter && JitterRange > 0.0f)
 				{
 					LocalPos += FVector(
@@ -1818,7 +1818,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesCylinderByCount(FVector Center
 					);
 				}
 
-				// 회전 적용 후 월드 위치 계산
+				// Calculate world position after applying rotation
 				const FVector WorldPos = Center + RotationQuat.RotateVector(LocalPos);
 
 				SpawnParticle(WorldPos, WorldVelocity);
@@ -1933,21 +1933,21 @@ void UKawaiiFluidSimulationModule::ResolveVolumeBoundaryCollisions()
 		EffectiveFriction = PresetFriction;
 	}
 
-	// OBB (Oriented Bounding Box) 충돌 처리
-	// 파티클을 로컬 공간으로 변환하여 AABB 충돌 체크 후 다시 월드로 변환
+	// OBB (Oriented Bounding Box) collision handling
+	// Transform particles to local space, check AABB collision, then transform back to world
 	const FQuat InverseRotation = EffectiveRotation.Inverse();
 	const FVector LocalBoxMin = -EffectiveHalfExtent;
 	const FVector LocalBoxMax = EffectiveHalfExtent;
 
 	for (FFluidParticle& P : Particles)
 	{
-		// 월드 -> 로컬 변환
+		// World -> Local transformation
 		FVector LocalPos = InverseRotation.RotateVector(P.PredictedPosition - EffectiveCenter);
 		FVector LocalVel = InverseRotation.RotateVector(P.Velocity);
 		bool bCollided = false;
 
-		// 로컬 공간에서 AABB 충돌 체크
-		// X축 체크
+		// Check AABB collision in local space
+		// Check X axis
 		if (LocalPos.X < LocalBoxMin.X)
 		{
 			LocalPos.X = LocalBoxMin.X;
@@ -1971,7 +1971,7 @@ void UKawaiiFluidSimulationModule::ResolveVolumeBoundaryCollisions()
 			bCollided = true;
 		}
 
-		// Y축 체크
+		// Check Y axis
 		if (LocalPos.Y < LocalBoxMin.Y)
 		{
 			LocalPos.Y = LocalBoxMin.Y;
@@ -1995,7 +1995,7 @@ void UKawaiiFluidSimulationModule::ResolveVolumeBoundaryCollisions()
 			bCollided = true;
 		}
 
-		// Z축 체크
+		// Check Z axis
 		if (LocalPos.Z < LocalBoxMin.Z)
 		{
 			LocalPos.Z = LocalBoxMin.Z;
@@ -2019,7 +2019,7 @@ void UKawaiiFluidSimulationModule::ResolveVolumeBoundaryCollisions()
 			bCollided = true;
 		}
 
-		// 로컬 -> 월드 변환하여 Position/Velocity 업데이트
+		// Update Position/Velocity by transforming Local -> World
 		if (bCollided)
 		{
 			P.PredictedPosition = EffectiveCenter + EffectiveRotation.RotateVector(LocalPos);

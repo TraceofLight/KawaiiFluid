@@ -262,9 +262,9 @@ float3 CalculateNormalAnalyticWithSpatialHash(
 }
 
 //=============================================================================
-// SoA (Structure of Arrays) 버전 - 메모리 대역폭 최적화
+// SoA (Structure of Arrays) version - Memory bandwidth optimization
 // - 32B/particle (AoS) → 12B/particle (SoA Position only)
-// - 캐시 적중률 향상: 128B 캐시라인당 4 → 10 파티클
+// - Cache hit rate improvement: 4 → 10 particles per 128B cache line
 //=============================================================================
 
 // Evaluate metaball SDF from SoA Position buffer

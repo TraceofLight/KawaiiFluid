@@ -27,13 +27,13 @@
 UKawaiiFluidComponent::UKawaiiFluidComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
-	PrimaryComponentTick.TickGroup = TG_PostPhysics;  // Subsystem 시뮬레이션 이후 렌더링
-	bTickInEditor = true;  // 에디터에서도 Tick 실행 (브러시 렌더링용)
+	PrimaryComponentTick.TickGroup = TG_PostPhysics;  // Render after Subsystem simulation
+	bTickInEditor = true;  // Execute Tick in editor as well (for brush rendering)
 
-	// 시뮬레이션 모듈 생성
+	// Create simulation module
 	SimulationModule = CreateDefaultSubobject<UKawaiiFluidSimulationModule>(TEXT("SimulationModule"));
 
-	// 렌더링 모듈 생성`
+	// Create rendering module`
 	RenderingModule = CreateDefaultSubobject<UKawaiiFluidRenderingModule>(TEXT("RenderingModule"));
 }
 
@@ -74,34 +74,34 @@ void UKawaiiFluidComponent::OnRegister()
 		return;
 	}
 
-	// 이미 초기화된 경우 스킵 (property 변경으로 인한 re-register 대응)
+	// Skip if already initialized (handles re-register due to property changes)
 	if (SimulationModule->IsInitialized())
 	{
 		return;
 	}
 
-	// Component->Preset 사용 (없으면 기본 생성)
+	// Use Component->Preset (create default if none assigned)
 	if (!Preset)
 	{
 		Preset = NewObject<UKawaiiFluidPresetDataAsset>(this, NAME_None, RF_Transient);
 		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidComponent [%s]: No Preset assigned, using default values"), *GetName());
 	}
 
-	// 시뮬레이션 모듈 초기화
+	// Initialize simulation module
 	SimulationModule->Initialize(Preset);
 
-	// 이벤트 콜백 연결
+	// Connect event callbacks
 	SimulationModule->SetCollisionEventCallback(
 		FOnModuleCollisionEvent::CreateUObject(this, &UKawaiiFluidComponent::HandleCollisionEvent)
 	);
 
-	// Volume 등록
+	// Register to Volume
 	if (UKawaiiFluidVolumeComponent* Volume = GetTargetVolumeComponent())
 	{
 		Volume->RegisterModule(SimulationModule);
 	}
 
-	// 렌더링 모듈 초기화
+	// Initialize rendering module
 	if (bEnableRendering && RenderingModule)
 	{
 		RenderingModule->Initialize(World, this, SimulationModule, Preset);
@@ -115,7 +115,7 @@ void UKawaiiFluidComponent::OnRegister()
 		}
 	}
 
-	// Subsystem에 등록
+	// Register to Subsystem
 	RegisterToSubsystem();
 
 	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidComponent [%s]: OnRegister completed"), *GetName());
@@ -123,7 +123,7 @@ void UKawaiiFluidComponent::OnRegister()
 
 void UKawaiiFluidComponent::OnComponentDestroyed(bool bDestroyingOK)
 {
-	// Volume에서 등록 해제
+	// Unregister from Volume
 	if (UKawaiiFluidVolumeComponent* Volume = GetTargetVolumeComponent())
 	{
 		if (SimulationModule)
@@ -132,20 +132,20 @@ void UKawaiiFluidComponent::OnComponentDestroyed(bool bDestroyingOK)
 		}
 	}
 
-	// Subsystem에서 등록 해제
+	// Unregister from Subsystem
 	UnregisterFromSubsystem();
 
-	// 이벤트 클리어
+	// Clear events
 	OnParticleHit.Clear();
 
-	// 렌더링 모듈 정리
+	// Clean up rendering module
 	if (RenderingModule)
 	{
 		RenderingModule->Cleanup();
 		RenderingModule = nullptr;
 	}
 
-	// 시뮬레이션 모듈 정리
+	// Clean up simulation module
 	if (SimulationModule)
 	{
 		SimulationModule->Shutdown();
@@ -161,7 +161,7 @@ void UKawaiiFluidComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 스폰 타이머 초기화
+	// Initialize spawn timer
 	SpawnAccumulatedTime = 0.0f;
 
 	// Re-initialize rendering in PIE (PostDuplicate cleared everything)
@@ -199,7 +199,7 @@ void UKawaiiFluidComponent::BeginPlay()
 
 void UKawaiiFluidComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// 정리는 OnUnregister에서 처리됨 (IsBeingDestroyed 체크 후)
+	// Cleanup is handled in OnUnregister (after IsBeingDestroyed check)
 	Super::EndPlay(EndPlayReason);
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidComponent EndPlay: %s"), *GetName());
 }
@@ -211,8 +211,8 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	UWorld* World = GetWorld();
 	const bool bIsGameWorld = World && World->IsGameWorld();
 
-	// Readback 요청 설정 (GPU 시뮬레이션 전에 호출 필요)
-	// Debug Draw, ISM Debug View, 브러시 모드, Recycle 모드에서 readback 필요
+	// Set readback request (must be called before GPU simulation)
+	// Readback is needed in Debug Draw, ISM Debug View, brush mode, and Recycle mode
 	bool bNeedReadback = (DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw) ||
 	                     (DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM) ||
 #if WITH_EDITORONLY_DATA
@@ -224,12 +224,12 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 #if WITH_EDITOR
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(TICKCOMPONENT_SIMULATION)
-		// 에디터에서 시뮬레이션 또는 pending ops 처리
+		// Handle simulation or pending ops in editor
 		if (!bIsGameWorld && SimulationModule && SimulationModule->GetSpatialHash())
 		{
 			if (UKawaiiFluidSimulationContext* Context = SimulationModule->GetSimulationContext())
 			{
-				// GPU 시뮬레이션 설정 (항상 GPU 사용)
+				// Set up GPU simulation (always use GPU)
 				if (!Context->IsGPUSimulatorReady())
 				{
 					if (UKawaiiFluidVolumeComponent* Volume = GetTargetVolumeComponent())
@@ -245,7 +245,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 
 				if (bBrushModeActive)
 				{
-					// 브러시 모드: 전체 시뮬레이션 실행
+					// Brush mode: run full simulation
 					FKawaiiFluidSimulationParams Params = SimulationModule->BuildSimulationParams();
 					Params.ExternalForce += SimulationModule->GetAccumulatedExternalForce();
 					if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
@@ -254,7 +254,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 						Params.InteractionComponents.Append(Subsystem->GetGlobalInteractionComponents());
 					}
 
-					// @TODO 이거 풀면 날라가는거 고쳐야함
+					// @TODO Fix the issue when enabling this
 					Params.bEnableStaticBoundaryParticles = false;
 
 					float AccumulatedTime = SimulationModule->GetAccumulatedTime();
@@ -271,7 +271,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 				}
 				else
 				{
-					// 브러시 모드 아님: pending spawn/despawn만 처리 (물리 시뮬 없이)
+					// Not brush mode: handle only pending spawn/despawn (without physics simulation)
 					FGPUFluidSimulator* GPUSim = Context->GetGPUSimulator();
 					if (GPUSim && GPUSim->IsReady())
 					{
@@ -284,8 +284,8 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 	}
 #endif
 
-	// Unified Simulation Bounds - 동적 파라미터 설정 및 CPU 충돌 처리
-	// Volume bounds 설정은 SimulationModule에 있으며, Center/Rotation은 Component에서 동적으로 전달
+	// Unified Simulation Bounds - set dynamic parameters and handle CPU collision
+	// Volume bounds settings are in SimulationModule, Center/Rotation are dynamically passed from Component
 	if (SimulationModule)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(SimulationVolume_Setting_Collision)
@@ -304,7 +304,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		SimulationModule->ResolveVolumeBoundaryCollisions();
 	}
 
-	// Simulation Bounds Wireframe 시각화 (Containment bounds)
+	// Visualize Simulation Bounds Wireframe (Containment bounds)
 	// Always shown in editor mode (not PIE), always uses configured color
 	// Selection is indicated by Spawn Shape wireframe turning yellow, not this
 #if WITH_EDITOR
@@ -321,7 +321,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 			Rotation,
 			SimulationModule->VolumeWireframeColor,  // Always use configured color (Green by default)
 			false,  // bPersistentLines
-			-1.0f,  // LifeTime (매 프레임 다시 그림)
+			-1.0f,  // LifeTime (redraw each frame)
 			0,      // DepthPriority
 			2.0f    // Fixed thickness
 		);
@@ -377,8 +377,8 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		ProcessContinuousSpawn(DeltaTime);
 	}
 
-	// 렌더링 업데이트 (에디터 + 게임 모두)
-	// ISM/Debug Draw 활성화 시 Metaball 비활성화 (디버그 시각화 우선)
+	// Update rendering (both editor and game)
+	// Disable Metaball when ISM/Debug Draw is enabled (debug visualization takes priority)
 	if (RenderingModule)
 	{
 		UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer();
@@ -445,14 +445,14 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 		RenderingModule->UpdateRenderers();
 	}
 
-	// Debug Draw: DrawDebugPoint 기반 Z-Order 시각화
+	// Debug Draw: Z-Order visualization based on DrawDebugPoint
 	// Only render if bEnableRendering is true
 	if (bEnableRendering && DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw)
 	{
 		DrawDebugParticles();
 	}
 
-	// Static Boundary Debug Draw: 벽/바닥의 boundary particle 시각화
+	// Static Boundary Debug Draw: visualize boundary particles of walls/floors
 	if (bShowStaticBoundaryParticles)
 	{
 		DrawDebugStaticBoundaryParticles();
@@ -475,7 +475,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 				FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 				const bool bGPUActive = SimulationModule->IsGPUSimulationActive() && GPUSimulator != nullptr;
 		
-				// 파티클 수가 0이면 ISM 클리어하고 스킵
+				// Clear ISM and skip if particle count is 0
 				const int32 ActualParticleCount = bGPUActive ? GPUSimulator->GetParticleCount() : SimulationModule->GetParticleCount();
 				if (ActualParticleCount <= 0)
 				{
@@ -590,7 +590,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 							ChunkBounds[ChunkIndex] = LocalBox;
 						});
 
-						// 각 청크의 결과를 메인 Bounds에 병합
+						// Merge each chunk's result into main Bounds
 						for (const FBox& Box : ChunkBounds)
 						{
 							FluidBounds += Box;
@@ -598,7 +598,7 @@ void UKawaiiFluidComponent::TickComponent(float DeltaTime, ELevelTick TickType, 
 					}
 					else
 					{
-						// 파티클 수가 적으면 단일 스레드에서 처리 (오버헤드 방지)
+						// Process in single thread if particle count is low (avoid overhead)
 						for (int32 i = 0; i < NumParticles; ++i)
 						{
 							FluidBounds += Positions[i];
@@ -738,7 +738,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		return;
 	}
 	
-	// Hexagonal Stream 모드: Hexagonal Packing 레이어 기반 스폰
+	// Hexagonal Stream mode: spawn based on Hexagonal Packing layers
 	if (SpawnSettings.EmitterType == EFluidEmitterType::HexagonalStream)
 	{
 		float Spacing = SpawnSettings.StreamParticleSpacing;
@@ -766,7 +766,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 
 		SpawnAccumulatedTime += DeltaTime;
 
-		// 스폰할 레이어 수 계산
+		// Calculate number of layers to spawn
 		int32 LayersToSpawn = 0;
 		float TempAccumulatedTime = SpawnAccumulatedTime;
 		while (TempAccumulatedTime >= LayerInterval)
@@ -788,7 +788,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		}
 
 		//========================================
-		// 1. 스폰 (실제 개수 반환됨)
+		// 1. Spawn (returns actual count)
 		//========================================
 		const FQuat Rotation = GetComponentQuat();
 		const FVector BaseLocation = GetComponentLocation() + Rotation.RotateVector(SpawnSettings.SpawnOffset);
@@ -831,13 +831,13 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		}
 
 		//========================================
-		// 2. Recycle: 스폰 후 초과분 Despawn 요청
-		//    (GPU 순서: Despawn → Spawn 이므로 정상 작동)
+		// 2. Recycle: request despawn for excess after spawn
+		//    (GPU order: Despawn → Spawn, so works correctly)
 		//========================================
 		if (SpawnSettings.bContinuousSpawn && SpawnSettings.MaxParticleCount > 0 && TotalSpawned > 0)
 		{
 			const int32 CurrentCount = SimulationModule->GetParticleCountForSource(SimulationModule->GetSourceID());
-			// -1 = 데이터 미준비 → Recycle 스킵
+			// -1 = data not ready → skip Recycle
 			if (CurrentCount >= 0 && CurrentCount > SpawnSettings.MaxParticleCount)
 			{
 				const int32 ToRemove = CurrentCount - SpawnSettings.MaxParticleCount;
@@ -845,7 +845,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 			}
 		}
 	}
-	// Stream / Spray 모드: ParticlesPerSecond 기반 개별 스폰
+	// Stream / Spray mode: individual spawn based on ParticlesPerSecond
 	else
 	{
 		if (SpawnSettings.ParticlesPerSecond <= 0.0f)
@@ -856,7 +856,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		SpawnAccumulatedTime += DeltaTime;
 		const float SpawnInterval = 1.0f / SpawnSettings.ParticlesPerSecond;
 
-		// 스폰할 파티클 수 계산
+		// Calculate number of particles to spawn
 		int32 SpawnCount = 0;
 		float TempAccumulatedTime = SpawnAccumulatedTime;
 		while (TempAccumulatedTime >= SpawnInterval)
@@ -870,8 +870,8 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 			return;
 		}
 
-		// 비-Recycle 모드: max 도달 시 스폰 중단 (per-source count 사용)
-		// -1 = 데이터 미준비 → 스폰 허용
+		// Non-Recycle mode: stop spawning when max is reached (use per-source count)
+		// -1 = data not ready → allow spawning
 		const int32 SourceCountForSpray = SimulationModule->GetParticleCountForSource(SimulationModule->GetSourceID());
 		if (!SpawnSettings.bContinuousSpawn && SpawnSettings.MaxParticleCount > 0 &&
 			SourceCountForSpray >= 0 && SourceCountForSpray >= SpawnSettings.MaxParticleCount)
@@ -880,7 +880,7 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		}
 
 		//========================================
-		// 1. 스폰
+		// 1. Spawn
 		//========================================
 		for (int32 i = 0; i < SpawnCount; ++i)
 		{
@@ -889,12 +889,12 @@ void UKawaiiFluidComponent::ProcessContinuousSpawn(float DeltaTime)
 		}
 
 		//========================================
-		// 2. Recycle: 스폰 후 초과분 Despawn 요청
+		// 2. Recycle: request despawn for excess after spawn
 		//========================================
 		if (SpawnSettings.bContinuousSpawn && SpawnSettings.MaxParticleCount > 0)
 		{
 			const int32 CurrentCount = SimulationModule->GetParticleCountForSource(SimulationModule->GetSourceID());
-			// -1 = 데이터 미준비 → Recycle 스킵
+			// -1 = data not ready → skip Recycle
 			if (CurrentCount >= 0 && CurrentCount > SpawnSettings.MaxParticleCount)
 			{
 				const int32 ToRemove = CurrentCount - SpawnSettings.MaxParticleCount;
@@ -1105,13 +1105,13 @@ void UKawaiiFluidComponent::DrawSpawnAreaVisualization()
 		return;
 	}
 
-	// 선택 여부에 따라 색상 및 두께 변경
+	// Change color and thickness based on selection state
 	const bool bIsSelected = Owner->IsSelected();
 
 	const FQuat Rotation = GetComponentQuat();
 	const FVector Location = GetComponentLocation() + Rotation.RotateVector(SpawnSettings.SpawnOffset);
 	const FColor SpawnColor = bIsSelected ? FColor::Yellow : FColor::Cyan;
-	const float Duration = -1.0f;  // 영구
+	const float Duration = -1.0f;  // Persistent
 	const uint8 DepthPriority = 0;
 	const float Thickness = bIsSelected ? 3.0f : 2.0f;
 
@@ -1121,12 +1121,12 @@ void UKawaiiFluidComponent::DrawSpawnAreaVisualization()
 		switch (SpawnSettings.ShapeType)
 		{
 		case EFluidShapeType::Sphere:
-			// Sphere는 회전에 영향받지 않음
+			// Sphere is not affected by rotation
 			DrawDebugSphere(World, Location, SpawnSettings.SphereRadius, 24, SpawnColor, false, Duration, DepthPriority, Thickness);
 			break;
 
 		case EFluidShapeType::Box:
-			// Box는 회전 적용
+			// Apply rotation to Box
 			DrawDebugBox(World, Location, SpawnSettings.BoxExtent, Rotation, SpawnColor, false, Duration, DepthPriority, Thickness);
 			break;
 
@@ -1135,7 +1135,7 @@ void UKawaiiFluidComponent::DrawSpawnAreaVisualization()
 				const float Radius = SpawnSettings.CylinderRadius;
 				const float HalfHeight = SpawnSettings.CylinderHalfHeight;
 
-				// 로컬 좌표로 원기둥 꼭짓점 계산 후 회전 적용
+				// Calculate cylinder vertices in local coordinates then apply rotation
 				const FVector LocalTopCenter = FVector(0, 0, HalfHeight);
 				const FVector LocalBottomCenter = FVector(0, 0, -HalfHeight);
 
@@ -1145,13 +1145,13 @@ void UKawaiiFluidComponent::DrawSpawnAreaVisualization()
 					const float Angle1 = (float)i / NumSegments * 2.0f * PI;
 					const float Angle2 = (float)(i + 1) / NumSegments * 2.0f * PI;
 
-					// 로컬 위치 계산
+					// Calculate local positions
 					const FVector LocalTopP1 = LocalTopCenter + FVector(FMath::Cos(Angle1), FMath::Sin(Angle1), 0) * Radius;
 					const FVector LocalTopP2 = LocalTopCenter + FVector(FMath::Cos(Angle2), FMath::Sin(Angle2), 0) * Radius;
 					const FVector LocalBottomP1 = LocalBottomCenter + FVector(FMath::Cos(Angle1), FMath::Sin(Angle1), 0) * Radius;
 					const FVector LocalBottomP2 = LocalBottomCenter + FVector(FMath::Cos(Angle2), FMath::Sin(Angle2), 0) * Radius;
 
-					// 회전 적용 후 월드 위치로 변환
+					// Apply rotation and convert to world positions
 					const FVector TopP1 = Location + Rotation.RotateVector(LocalTopP1);
 					const FVector TopP2 = Location + Rotation.RotateVector(LocalTopP2);
 					const FVector BottomP1 = Location + Rotation.RotateVector(LocalBottomP1);
@@ -1246,7 +1246,7 @@ void UKawaiiFluidComponent::DrawSpawnAreaVisualization()
 
 void UKawaiiFluidComponent::HandleCollisionEvent(const FKawaiiFluidCollisionEvent& Event)
 {
-	// 테스트 로그
+	// Test log
 	UE_LOG(LogTemp, Warning, TEXT("[ParticleHit] Particle=%d, HitActor=%s, SourceComp=%s, HitIC=%s, Bone=%d, Speed=%.1f, ColliderOwnerID=%d"),
 		Event.ParticleIndex,
 		Event.HitActor ? *Event.HitActor->GetName() : TEXT("NULL"),
@@ -1256,7 +1256,7 @@ void UKawaiiFluidComponent::HandleCollisionEvent(const FKawaiiFluidCollisionEven
 		Event.HitSpeed,
 		Event.ColliderOwnerID);
 
-	// Module에서 필터링 완료 후 호출됨 - 바로 브로드캐스트
+	// Called after filtering in Module - broadcast immediately
 	if (OnParticleHit.IsBound())
 	{
 		OnParticleHit.Broadcast(Event);
@@ -1298,7 +1298,7 @@ void UKawaiiFluidComponent::UnregisterFromSubsystem()
 	{
 		if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
 		{
-			// Module 등록 해제
+			// Unregister Module
 			Subsystem->UnregisterModule(SimulationModule);
 		}
 		if (UFluidRendererSubsystem* RendererSubsystem = World->GetSubsystem<UFluidRendererSubsystem>())
@@ -1344,42 +1344,42 @@ void UKawaiiFluidComponent::AddParticlesInRadius(const FVector& WorldCenter, flo
 	}
 
 #if WITH_EDITOR
-	// 에디터에서 데이터 수정 시 Modify() 호출 - 인스턴스 직렬화에 반영
-	// 컴포넌트와 서브오브젝트 모두 마킹해야 Re-instancing 시 데이터 보존됨
+	// Call Modify() when modifying data in editor - reflected in instance serialization
+	// Must mark both component and subobjects to preserve data during Re-instancing
 	Modify();
 	SimulationModule->Modify();
 #endif
 
-	// MaxParticleCount 체크 (브러시는 단순하게 - 공간 있으면 스폰, per-source count 사용)
-	// -1 = 데이터 미준비 → 제한 없이 스폰 허용
+	// Check MaxParticleCount (brush is simple - spawn if space available, use per-source count)
+	// -1 = data not ready → allow spawning without limit
 	int32 ActualCount = Count;
 	if (SpawnSettings.MaxParticleCount > 0)
 	{
 		const int32 CurrentCount = SimulationModule->GetParticleCountForSource(SimulationModule->GetSourceID());
-		if (CurrentCount >= 0)  // 데이터 준비됨
+		if (CurrentCount >= 0)  // Data is ready
 		{
 			const int32 Available = SpawnSettings.MaxParticleCount - CurrentCount;
 
 			if (Available <= 0)
 			{
-				return;  // 공간 없음 - 스폰 안함
+				return;  // No space - do not spawn
 			}
 			else if (Available < Count)
 			{
-				ActualCount = Available;  // 남은 공간만큼만
+				ActualCount = Available;  // Only as much as remaining space
 			}
 		}
 	}
 
-	// 노말 정규화 (안전)
+	// Normalize normal (safe)
 	const FVector Normal = SurfaceNormal.GetSafeNormal();
 
 	for (int32 i = 0; i < ActualCount; ++i)
 	{
-		// 랜덤 방향 생성
+		// Generate random direction
 		FVector RandomDir = FMath::VRand();
 
-		// 반구 분포: 노말과 반대 방향이면 반전 (표면 위로만 생성)
+		// Hemisphere distribution: flip if opposite to normal (spawn only above surface)
 		if (FVector::DotProduct(RandomDir, Normal) < 0.0f)
 		{
 			RandomDir = -RandomDir;
@@ -1401,13 +1401,13 @@ int32 UKawaiiFluidComponent::RemoveParticlesInRadius(const FVector& WorldCenter,
 	}
 
 #if WITH_EDITOR
-	// 에디터에서 데이터 수정 시 Modify() 호출 - 인스턴스 직렬화에 반영
-	// 컴포넌트와 서브오브젝트 모두 마킹해야 Re-instancing 시 데이터 보존됨
+	// Call Modify() when modifying data in editor - reflected in instance serialization
+	// Must mark both component and subobjects to preserve data during Re-instancing
 	Modify();
 	SimulationModule->Modify();
 #endif
 
-	// ID-based despawn: CPU에서 리드백 데이터로 영역 내 ParticleID 수집 후 GPU에서 제거
+	// ID-based despawn: collect ParticleIDs in area from readback data on CPU, then remove on GPU
 	FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 	if (!GPUSimulator)
 	{
@@ -1435,7 +1435,7 @@ int32 UKawaiiFluidComponent::RemoveParticlesInRadius(const FVector& WorldCenter,
 	{
 		AllReadbackIDs.Add(Particle.ParticleID);
 
-		// 내 SourceID의 파티클만 제거 대상으로
+		// Only target particles with my SourceID for removal
 		if (Particle.SourceID != MySourceID)
 		{
 			continue;
@@ -1448,7 +1448,7 @@ int32 UKawaiiFluidComponent::RemoveParticlesInRadius(const FVector& WorldCenter,
 		}
 	}
 
-	// Submit ID-based despawn request (CleanupCompletedRequests는 Readback 시 호출됨)
+	// Submit ID-based despawn request (CleanupCompletedRequests is called during Readback)
 	if (ParticleIDsToRemove.Num() > 0)
 	{
 		GPUSimulator->AddDespawnByIDRequests(ParticleIDsToRemove);
@@ -1465,7 +1465,7 @@ void UKawaiiFluidComponent::ClearAllParticles()
 		SimulationModule->ClearAllParticles();
 	}
 
-	// 캐시된 Shadow 데이터 클리어 (다음 Tick에서 다시 안 그려지게)
+	// Clear cached Shadow data (prevent redrawing in next Tick)
 	CachedShadowPositions.Empty();
 	CachedShadowVelocities.Empty();
 	CachedNeighborCounts.Empty();
@@ -1474,13 +1474,13 @@ void UKawaiiFluidComponent::ClearAllParticles()
 	CachedAnisotropyAxis3.Empty();
 	PrevNeighborCounts.Empty();
 
-	// 렌더링도 즉시 클리어
+	// Clear rendering immediately as well
 	if (RenderingModule)
 	{
 		RenderingModule->UpdateRenderers();
 	}
 
-	// Shadow ISM 클리어
+	// Clear Shadow ISM
 	if (UWorld* World = GetWorld())
 	{
 		if (UFluidRendererSubsystem* RendererSubsystem = World->GetSubsystem<UFluidRendererSubsystem>())
@@ -1773,7 +1773,7 @@ void UKawaiiFluidComponent::DrawDebugStaticBoundaryParticles()
 
 	const bool bIsGameWorld = World->IsGameWorld();
 
-	// Game mode: GPU 시뮬레이션에서 데이터 사용
+	// Game mode: use data from GPU simulation
 	if (bIsGameWorld)
 	{
 		if (!SimulationModule)
@@ -1812,10 +1812,10 @@ void UKawaiiFluidComponent::DrawDebugStaticBoundaryParticles()
 		}
 	}
 #if WITH_EDITOR
-	// Editor mode: 에디터 미리보기 데이터 사용
+	// Editor mode: use editor preview data
 	else
 	{
-		// 주기적으로 boundary particle 재생성 (30프레임마다)
+		// Regenerate boundary particles periodically (every 30 frames)
 		if (GFrameCounter - LastEditorPreviewFrame > 30)
 		{
 			GenerateEditorBoundaryParticlesPreview();
@@ -1888,7 +1888,7 @@ void UKawaiiFluidComponent::GenerateEditorBoundaryParticlesPreview()
 	QueryParams.bReturnPhysicalMaterial = false;
 	QueryParams.AddIgnoredActor(GetOwner());
 
-	// WorldStatic과 WorldDynamic 모두 World Collision 대상으로 허용
+	// Allow both WorldStatic and WorldDynamic as World Collision targets
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
@@ -2095,17 +2095,17 @@ void UKawaiiFluidComponent::GenerateEditorBoundaryParticlesPreview()
 			}
 			else
 			{
-				// IndexData가 없으면 ChaosConvex에서 planes 가져오기
+				// If no IndexData, get planes from ChaosConvex
 				TArray<FPlane> ChaosPlanes;
 				ConvexElem.GetPlanes(ChaosPlanes);
 				
 				for (const FPlane& ChaosPlane : ChaosPlanes)
 				{
-					// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+					// ChaosPlane is in local coordinates, convert to world coordinates
 					const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
 					const FVector WorldNormal = ComponentTransform.TransformVectorNoScale(LocalNormal);
 					
-					// 플레인 위의 한 점을 월드 좌표로 변환
+					// Convert a point on the plane to world coordinates
 					const FVector LocalPoint = LocalNormal * ChaosPlane.W;
 					const FVector WorldPoint = ComponentTransform.TransformPosition(LocalPoint);
 					
@@ -2123,7 +2123,7 @@ void UKawaiiFluidComponent::GenerateEditorBoundaryParticlesPreview()
 #endif
 
 //========================================
-// InstanceData (Re-instancing 시 파티클 데이터 보존)
+// InstanceData (preserve particle data during Re-instancing)
 //========================================
 
 FKawaiiFluidComponentInstanceData::FKawaiiFluidComponentInstanceData(const UKawaiiFluidComponent* SourceComponent)
@@ -2131,7 +2131,7 @@ FKawaiiFluidComponentInstanceData::FKawaiiFluidComponentInstanceData(const UKawa
 {
 	if (SourceComponent && SourceComponent->GetSimulationModule())
 	{
-		// GPU 모드 시 CPU 배열로 동기화 후 저장
+		// In GPU mode, sync to CPU array before saving
 		SourceComponent->GetSimulationModule()->SyncGPUParticlesToCPU();
 
 		SavedParticles = SourceComponent->GetSimulationModule()->GetParticles();
@@ -2153,7 +2153,7 @@ void FKawaiiFluidComponentInstanceData::ApplyToComponent(UActorComponent* Compon
 			{
 				FluidComponent->GetSimulationModule()->GetParticlesMutable() = SavedParticles;
 
-				// GPU 활성 시 복원된 파티클을 GPU로 업로드
+				// Upload restored particles to GPU when GPU is active
 				FluidComponent->GetSimulationModule()->UploadCPUParticlesToGPU();
 
 				UE_LOG(LogTemp, Log, TEXT("InstanceData: Restored %d particles to %s"),
@@ -2165,7 +2165,7 @@ void FKawaiiFluidComponentInstanceData::ApplyToComponent(UActorComponent* Compon
 
 TStructOnScope<FActorComponentInstanceData> UKawaiiFluidComponent::GetComponentInstanceData() const
 {
-	// 에디터에서만 + 파티클이 있을 때만 저장
+	// Save only in editor and only when particles exist
 	if (GetSimulationModule() && GetSimulationModule()->GetParticleCount() > 0)
 	{
 		return MakeStructOnScope<FActorComponentInstanceData, FKawaiiFluidComponentInstanceData>(this);

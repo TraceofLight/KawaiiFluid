@@ -43,17 +43,17 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidTransparencyParameters, )
 	SHADER_PARAMETER(FVector2f, InverseViewportSize)
 
 	// UV mapping - Output coordinates (PostProcessing output resolution)
-	SHADER_PARAMETER(FVector2f, OutputViewRect)      // Output 렌더링 영역 크기
-	SHADER_PARAMETER(FVector2f, OutputViewRectMin)   // Output ViewRect 시작점
-	SHADER_PARAMETER(FVector2f, OutputTextureSize)   // Output 텍스처 크기
+	SHADER_PARAMETER(FVector2f, OutputViewRect)      // Output rendering area size
+	SHADER_PARAMETER(FVector2f, OutputViewRectMin)   // Output ViewRect start point
+	SHADER_PARAMETER(FVector2f, OutputTextureSize)   // Output texture size
 
 	// UV mapping - GBuffer coordinates (may be different resolution due to Screen Percentage)
-	SHADER_PARAMETER(FVector2f, GBufferViewRect)     // GBuffer 렌더링 영역 크기
-	SHADER_PARAMETER(FVector2f, GBufferViewRectMin)  // GBuffer ViewRect 시작점
-	SHADER_PARAMETER(FVector2f, GBufferTextureSize)  // GBuffer 텍스처 크기
+	SHADER_PARAMETER(FVector2f, GBufferViewRect)     // GBuffer rendering area size
+	SHADER_PARAMETER(FVector2f, GBufferViewRectMin)  // GBuffer ViewRect start point
+	SHADER_PARAMETER(FVector2f, GBufferTextureSize)  // GBuffer texture size
 
 	// UV mapping - SceneColor (same as Output in most cases)
-	SHADER_PARAMETER(FVector2f, SceneViewRect)      // SceneColor 렌더링 영역 크기
+	SHADER_PARAMETER(FVector2f, SceneViewRect)      // SceneColor rendering area size
 	SHADER_PARAMETER(FVector2f, SceneTextureSize)
 
 	// View uniforms

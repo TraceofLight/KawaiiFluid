@@ -194,7 +194,7 @@ void FGPUSpawnManager::CleanupCompletedRequests(const TArray<int32>& AlivePartic
 	// Both arrays are sorted → std::set_intersection O(n+m)
 	// AlreadyRequestedIDs ∩ AliveParticleIDs = IDs that are still alive
 	TArray<int32> StillPending;
-	StillPending.SetNumUninitialized(AlreadyRequestedIDs.Num());  // 최대 크기 할당
+	StillPending.SetNumUninitialized(AlreadyRequestedIDs.Num());  // Allocate maximum size
 
 	int32* OutEnd = std::set_intersection(
 		AlreadyRequestedIDs.GetData(), AlreadyRequestedIDs.GetData() + AlreadyRequestedIDs.Num(),
@@ -202,7 +202,7 @@ void FGPUSpawnManager::CleanupCompletedRequests(const TArray<int32>& AlivePartic
 		StillPending.GetData());
 
 	const int32 ResultCount = OutEnd - StillPending.GetData();
-	StillPending.SetNum(ResultCount);  // 실제 크기로 조정
+	StillPending.SetNum(ResultCount);  // Adjust to actual size
 
 	const int32 RemovedCount = AlreadyRequestedIDs.Num() - ResultCount;
 	AlreadyRequestedIDs = MoveTemp(StillPending);
@@ -227,7 +227,7 @@ void FGPUSpawnManager::AddDespawnByIDRequests(const TArray<int32>& ParticleIDs)
 	// ParticleIDs are already sorted (using sorted readback from RemoveOldestParticles)
 	// Extract only new IDs using std::set_difference O(n+m)
 	TArray<int32> NewIDs;
-	NewIDs.SetNumUninitialized(OriginalCount);  // 최대 크기 할당
+	NewIDs.SetNumUninitialized(OriginalCount);  // Allocate maximum size
 
 	int32* DiffEnd = std::set_difference(
 		ParticleIDs.GetData(), ParticleIDs.GetData() + ParticleIDs.Num(),

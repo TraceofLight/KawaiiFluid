@@ -253,16 +253,16 @@ public:
 	void OnPresetChangedExternal(UKawaiiFluidPresetDataAsset* NewPreset);
 
 	//========================================
-	// 파티클 데이터 접근 (IKawaiiFluidDataProvider 구현)
+	// Particle Data Access (IKawaiiFluidDataProvider implementation)
 	//========================================
 
-	/** 파티클 배열 (읽기 전용) - IKawaiiFluidDataProvider::GetParticles() */
+	/** Particle array (read-only) - IKawaiiFluidDataProvider::GetParticles() */
 	virtual const TArray<FFluidParticle>& GetParticles() const override { return Particles; }
 
-	/** 파티클 배열 (수정 가능 - Subsystem/Context 용) */
+	/** Particle array (mutable - for Subsystem/Context) */
 	TArray<FFluidParticle>& GetParticlesMutable() { return Particles; }
 
-	/** 파티클 수 - IKawaiiFluidDataProvider::GetParticleCount() */
+	/** Particle count - IKawaiiFluidDataProvider::GetParticleCount() */
 	/** GPU mode: returns GPU particle count, CPU mode: returns Particles.Num() */
 	UFUNCTION(BlueprintPure, Category = "Fluid")
 	virtual int32 GetParticleCount() const override
@@ -288,26 +288,26 @@ public:
 	int32 GetParticleCountForSource(int32 SourceID) const;
 
 	//========================================
-	// 파티클 생성/삭제
+	// Particle Spawn/Despawn
 	//========================================
 
-	/** 단일 파티클 스폰 */
+	/** Spawn single particle */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticle(FVector Position, FVector Velocity = FVector::ZeroVector);
 
-	/** 여러 파티클 랜덤 스폰 (Point 모드용, 기존 호환) */
+	/** Spawn multiple particles with random distribution (for Point mode, legacy compatibility) */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void SpawnParticles(FVector Location, int32 Count, float SpawnRadius);
 
-	/** 구형 격자 분포로 파티클 스폰 (Sphere 모드용)
-	 * @param Center 구체 중심
-	 * @param Radius 구체 반경
-	 * @param Spacing 파티클 간격
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전 (Shape는 구형이므로 Velocity에만 적용)
-	 * @return 스폰된 파티클 수
+	/** Spawn particles in sphere with grid distribution (for Sphere mode)
+	 * @param Center Sphere center
+	 * @param Radius Sphere radius
+	 * @param Spacing Particle spacing
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation (shape is spherical, so only applied to velocity)
+	 * @return Number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesSphere(FVector Center, float Radius, float Spacing,
@@ -315,15 +315,15 @@ public:
 	                           FVector Velocity = FVector::ZeroVector,
 	                           FRotator Rotation = FRotator::ZeroRotator);
 
-	/** 박스 격자 분포로 파티클 스폰 (Box 모드용)
-	 * @param Center 박스 중심
-	 * @param Extent 박스 Half Extent (X, Y, Z)
-	 * @param Spacing 파티클 간격
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전
-	 * @return 스폰된 파티클 수
+	/** Spawn particles in box with grid distribution (for Box mode)
+	 * @param Center Box center
+	 * @param Extent Box Half Extent (X, Y, Z)
+	 * @param Spacing Particle spacing
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation
+	 * @return Number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesBox(FVector Center, FVector Extent, float Spacing,
@@ -331,16 +331,16 @@ public:
 	                        FVector Velocity = FVector::ZeroVector,
 	                        FRotator Rotation = FRotator::ZeroRotator);
 
-	/** 원기둥 격자 분포로 파티클 스폰 (Cylinder 모드용)
-	 * @param Center 원기둥 중심
-	 * @param Radius 원기둥 반경
-	 * @param HalfHeight 원기둥 반높이 (Z축 기준)
-	 * @param Spacing 파티클 간격
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전
-	 * @return 스폰된 파티클 수
+	/** Spawn particles in cylinder with grid distribution (for Cylinder mode)
+	 * @param Center Cylinder center
+	 * @param Radius Cylinder radius
+	 * @param HalfHeight Cylinder half height (Z-axis)
+	 * @param Spacing Particle spacing
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation
+	 * @return Number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesCylinder(FVector Center, float Radius, float HalfHeight, float Spacing,
@@ -349,19 +349,19 @@ public:
 	                             FRotator Rotation = FRotator::ZeroRotator);
 
 	//========================================
-	// Hexagonal Grid 스폰 함수 (안정적인 초기 상태)
+	// Hexagonal Grid Spawn Functions (stable initial state)
 	//========================================
 
-	/** Hexagonal Close Packing으로 박스 내 파티클 스폰
-	 * Cubic grid보다 안정적인 초기 밀도 분포 제공
-	 * @param Center 박스 중심
-	 * @param Extent 박스 Half Extent (X, Y, Z)
-	 * @param Spacing 파티클 간격
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전
-	 * @return 스폰된 파티클 수
+	/** Spawn particles in box with Hexagonal Close Packing
+	 * Provides more stable initial density distribution than cubic grid
+	 * @param Center Box center
+	 * @param Extent Box Half Extent (X, Y, Z)
+	 * @param Spacing Particle spacing
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation
+	 * @return Number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesBoxHexagonal(FVector Center, FVector Extent, float Spacing,
@@ -369,15 +369,15 @@ public:
 	                                  FVector Velocity = FVector::ZeroVector,
 	                                  FRotator Rotation = FRotator::ZeroRotator);
 
-	/** Hexagonal Close Packing으로 구체 내 파티클 스폰
-	 * @param Center 구체 중심
-	 * @param Radius 구체 반경
-	 * @param Spacing 파티클 간격
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전
-	 * @return 스폰된 파티클 수
+	/** Spawn particles in sphere with Hexagonal Close Packing
+	 * @param Center Sphere center
+	 * @param Radius Sphere radius
+	 * @param Spacing Particle spacing
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation
+	 * @return Number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesSphereHexagonal(FVector Center, float Radius, float Spacing,
@@ -385,16 +385,16 @@ public:
 	                                     FVector Velocity = FVector::ZeroVector,
 	                                     FRotator Rotation = FRotator::ZeroRotator);
 
-	/** Hexagonal Close Packing으로 원기둥 내 파티클 스폰
-	 * @param Center 원기둥 중심
-	 * @param Radius 원기둥 반경
-	 * @param HalfHeight 원기둥 반높이
-	 * @param Spacing 파티클 간격
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전
-	 * @return 스폰된 파티클 수
+	/** Spawn particles in cylinder with Hexagonal Close Packing
+	 * @param Center Cylinder center
+	 * @param Radius Cylinder radius
+	 * @param HalfHeight Cylinder half height
+	 * @param Spacing Particle spacing
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation
+	 * @return Number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesCylinderHexagonal(FVector Center, float Radius, float HalfHeight, float Spacing,
@@ -403,18 +403,18 @@ public:
 	                                       FRotator Rotation = FRotator::ZeroRotator);
 
 	//========================================
-	// 명시적 개수 지정 스폰 함수
+	// Explicit Count Spawn Functions
 	//========================================
 
-	/** 구형에 명시적 개수로 파티클 스폰
-	 * @param Center 구체 중심
-	 * @param Radius 구체 반경
-	 * @param Count 스폰할 파티클 개수
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전 (Shape는 구형이므로 Velocity에만 적용)
-	 * @return 실제 스폰된 파티클 수
+	/** Spawn specified number of particles in sphere
+	 * @param Center Sphere center
+	 * @param Radius Sphere radius
+	 * @param Count Number of particles to spawn
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation (shape is spherical, so only applied to velocity)
+	 * @return Actual number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesSphereByCount(FVector Center, float Radius, int32 Count,
@@ -422,15 +422,15 @@ public:
 	                                  FVector Velocity = FVector::ZeroVector,
 	                                  FRotator Rotation = FRotator::ZeroRotator);
 
-	/** 박스에 명시적 개수로 파티클 스폰
-	 * @param Center 박스 중심
-	 * @param Extent 박스 Half Extent (X, Y, Z)
-	 * @param Count 스폰할 파티클 개수
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전
-	 * @return 실제 스폰된 파티클 수
+	/** Spawn specified number of particles in box
+	 * @param Center Box center
+	 * @param Extent Box Half Extent (X, Y, Z)
+	 * @param Count Number of particles to spawn
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation
+	 * @return Actual number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesBoxByCount(FVector Center, FVector Extent, int32 Count,
@@ -438,16 +438,16 @@ public:
 	                               FVector Velocity = FVector::ZeroVector,
 	                               FRotator Rotation = FRotator::ZeroRotator);
 
-	/** 원기둥에 명시적 개수로 파티클 스폰
-	 * @param Center 원기둥 중심
-	 * @param Radius 원기둥 반경
-	 * @param HalfHeight 원기둥 반높이 (Z축 기준)
-	 * @param Count 스폰할 파티클 개수
-	 * @param bJitter 랜덤 오프셋 적용 여부
-	 * @param JitterAmount 랜덤 오프셋 비율 (0~0.5)
-	 * @param Velocity 초기 속도
-	 * @param Rotation 로컬→월드 회전
-	 * @return 실제 스폰된 파티클 수
+	/** Spawn specified number of particles in cylinder
+	 * @param Center Cylinder center
+	 * @param Radius Cylinder radius
+	 * @param HalfHeight Cylinder half height (Z-axis)
+	 * @param Count Number of particles to spawn
+	 * @param bJitter Apply random offset
+	 * @param JitterAmount Random offset ratio (0~0.5)
+	 * @param Velocity Initial velocity
+	 * @param Rotation Local→World rotation
+	 * @return Actual number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticlesCylinderByCount(FVector Center, float Radius, float HalfHeight, int32 Count,
@@ -455,26 +455,26 @@ public:
 	                                    FVector Velocity = FVector::ZeroVector,
 	                                    FRotator Rotation = FRotator::ZeroRotator);
 
-	/** 방향성 파티클 스폰 (Spout/Spray 모드용)
-	 * @param Position 스폰 위치
-	 * @param Direction 방출 방향 (정규화됨)
-	 * @param Speed 초기 속도 크기
-	 * @param Radius 스트림 반경 (분산 범위)
-	 * @param ConeAngle 분사각 (도, 0이면 직선)
-	 * @return 스폰된 파티클 ID
+	/** Spawn directional particles (for Spout/Spray mode)
+	 * @param Position Spawn position
+	 * @param Direction Emission direction (normalized)
+	 * @param Speed Initial velocity magnitude
+	 * @param Radius Stream radius (dispersion range)
+	 * @param ConeAngle Spray angle (degrees, 0 = straight line)
+	 * @return Spawned particle ID
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticleDirectional(FVector Position, FVector Direction, float Speed,
 	                               float Radius = 0.0f, float ConeAngle = 0.0f);
 
-	/** Hexagonal Packing으로 원형 단면 레이어 스폰 (Stream 모드용)
-	 * @param Position 레이어 중심 위치
-	 * @param Direction 방출 방향 (정규화됨)
-	 * @param Speed 초기 속도 크기
-	 * @param Radius 스트림 반경
-	 * @param Spacing 파티클 간격 (0이면 SmoothingRadius * 0.5 자동 계산)
-	 * @param Jitter 위치 랜덤 오프셋 비율 (0~0.5, 0=완벽한 격자, 0.5=최대 자연스러움)
-	 * @return 스폰된 파티클 수
+	/** Spawn circular cross-section layer with Hexagonal Packing (for Stream mode)
+	 * @param Position Layer center position
+	 * @param Direction Emission direction (normalized)
+	 * @param Speed Initial velocity magnitude
+	 * @param Radius Stream radius
+	 * @param Spacing Particle spacing (0 = auto-calculate as SmoothingRadius * 0.5)
+	 * @param Jitter Position random offset ratio (0~0.5, 0=perfect grid, 0.5=max natural)
+	 * @return Number of spawned particles
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 SpawnParticleDirectionalHexLayer(FVector Position, FVector Direction, float Speed,
@@ -485,70 +485,70 @@ public:
 	                                             float Radius, float Spacing, float Jitter,
 	                                             TArray<FGPUSpawnRequest>& OutBatch);
 
-	/** 모든 파티클 제거 */
+	/** Remove all particles */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void ClearAllParticles();
 
-	/** 가장 오래된 파티클 N개 제거 (ParticleID가 낮은 순서)
-	 * MaxParticle에 도달했을 때 새 파티클을 위한 공간 확보용
-	 * GPU 모드: Readback 데이터 기반으로 가장 낮은 ID를 찾아 삭제 요청
-	 * @param Count 제거할 파티클 수
-	 * @return 실제 제거 요청된 파티클 수 (Readback 실패 시 0)
+	/** Remove N oldest particles (lowest ParticleID first)
+	 * Used to make room for new particles when MaxParticle limit is reached
+	 * GPU mode: Finds lowest ID from Readback data and requests deletion
+	 * @param Count Number of particles to remove
+	 * @return Actual number of particles requested for removal (0 if Readback fails)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 RemoveOldestParticles(int32 Count);
 
-	/** 특정 Source의 가장 오래된 파티클 N개 제거
-	 * Emitter 등 외부 컴포넌트가 자신의 파티클만 제거할 때 사용
-	 * @param SourceID 대상 Source ID (0~63)
-	 * @param Count 제거할 파티클 수
-	 * @return 실제 제거 요청된 파티클 수
+	/** Remove N oldest particles for specific Source
+	 * Used when external components like Emitter want to remove only their own particles
+	 * @param SourceID Target Source ID (0~63)
+	 * @param Count Number of particles to remove
+	 * @return Actual number of particles requested for removal
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	int32 RemoveOldestParticlesForSource(int32 SourceID, int32 Count);
 
-	/** 파티클 위치 배열 */
+	/** Get particle positions array */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	TArray<FVector> GetParticlePositions() const;
 
-	/** 파티클 속도 배열 */
+	/** Get particle velocities array */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	TArray<FVector> GetParticleVelocities() const;
 
 	//========================================
-	// 외력
+	// External Forces
 	//========================================
 
-	/** 모든 파티클에 외력 적용 (누적) */
+	/** Apply external force to all particles (accumulated) */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void ApplyExternalForce(FVector Force);
 
-	/** 특정 파티클에 힘 적용 */
+	/** Apply force to specific particle */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void ApplyForceToParticle(int32 ParticleIndex, FVector Force);
 
-	/** 누적 외력 가져오기 */
+	/** Get accumulated external force */
 	FVector GetAccumulatedExternalForce() const { return AccumulatedExternalForce; }
 
-	/** 누적 외력 리셋 */
+	/** Reset accumulated external force */
 	void ResetExternalForce() { AccumulatedExternalForce = FVector::ZeroVector; }
 
 	//========================================
-	// 콜라이더 관리
+	// Collider Management
 	//========================================
 
-	/** 콜라이더 등록 */
+	/** Register collider */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void RegisterCollider(UFluidCollider* Collider);
 
-	/** 콜라이더 해제 */
+	/** Unregister collider */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
 	void UnregisterCollider(UFluidCollider* Collider);
 
-	/** 모든 콜라이더 해제 */
+	/** Clear all colliders */
 	void ClearColliders() { Colliders.Empty(); }
 
-	/** 등록된 콜라이더 목록 */
+	/** Get registered collider list */
 	const TArray<TObjectPtr<UFluidCollider>>& GetColliders() const { return Colliders; }
 	
 	//========================================
@@ -562,41 +562,41 @@ public:
 	void InitializeSpatialHash(float InCellSize);
 
 	//========================================
-	// 시간 관리 (Substep용)
+	// Time Management (for Substep)
 	//========================================
 
-	/** 누적 시간 */
+	/** Accumulated time */
 	float GetAccumulatedTime() const { return AccumulatedTime; }
 	void SetAccumulatedTime(float Time) { AccumulatedTime = Time; }
 
 	//========================================
-	// 쿼리
+	// Query
 	//========================================
 
-	/** 반경 내 파티클 인덱스 찾기 */
+	/** Find particle indices within radius */
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Query")
 	TArray<int32> GetParticlesInRadius(FVector Location, float Radius) const;
 
-	/** 박스 내 파티클 인덱스 찾기 */
+	/** Find particle indices within box */
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Query")
 	TArray<int32> GetParticlesInBox(FVector Center, FVector Extent) const;
 
-	/** 파티클 정보 가져오기 */
+	/** Get particle information */
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Query")
 	bool GetParticleInfo(int32 ParticleIndex, FVector& OutPosition, FVector& OutVelocity, float& OutDensity) const;
 
 	//========================================
-	// 시뮬레이션 제어
+	// Simulation Control
 	//========================================
 
-	/** 시뮬레이션 활성화/비활성화 */
+	/** Enable/disable simulation */
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Module")
 	void SetSimulationEnabled(bool bEnabled) { bSimulationEnabled = bEnabled; }
 
 	UFUNCTION(BlueprintPure, Category = "Fluid|Module")
 	bool IsSimulationEnabled() const { return bSimulationEnabled; }
 
-	/** Independent 모드 (Subsystem 배치 처리 안함) */
+	/** Independent mode (not batch processed by Subsystem) */
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Module")
 	void SetIndependentSimulation(bool bIndependent) { bIndependentSimulation = bIndependent; }
 
@@ -604,10 +604,10 @@ public:
 	bool IsIndependentSimulation() const { return bIndependentSimulation; }
 
 	//========================================
-	// Context (Outer 체인 캐시)
+	// Context (Outer chain cache)
 	//========================================
 
-	/** Owner Actor 반환 (캐시됨) */
+	/** Get Owner Actor (cached) */
 	UFUNCTION(BlueprintPure, Category = "Fluid|Module")
 	AActor* GetOwnerActor() const;
 
@@ -670,39 +670,39 @@ public:
 	// Event Settings
 	//========================================
 
-	/** 충돌 이벤트 활성화 */
+	/** Enable collision events */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events")
 	bool bEnableCollisionEvents = false;
 
-	/** 이벤트 발생을 위한 최소 속도 (cm/s) */
+	/** Minimum velocity for event triggering (cm/s) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0.0", EditCondition = "bEnableCollisionEvents"))
 	float MinVelocityForEvent = 50.0f;
 
-	/** 프레임당 최대 이벤트 수 (0 = 무제한) */
+	/** Maximum events per frame (0 = unlimited) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0", EditCondition = "bEnableCollisionEvents"))
 	int32 MaxEventsPerFrame = 10;
 
-	/** 파티클별 이벤트 쿨다운 (초) */
+	/** Event cooldown per particle (seconds) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Events", meta = (ClampMin = "0.0", EditCondition = "bEnableCollisionEvents"))
 	float EventCooldownPerParticle = 0.1f;
 
-	/** 충돌 이벤트 콜백 설정 */
+	/** Set collision event callback */
 	void SetCollisionEventCallback(FOnModuleCollisionEvent InCallback) { OnCollisionEventCallback = InCallback; }
 
-	/** 충돌 이벤트 콜백 가져오기 */
+	/** Get collision event callback */
 	const FOnModuleCollisionEvent& GetCollisionEventCallback() const { return OnCollisionEventCallback; }
 
-	/** 충돌 피드백 처리 (GPU + CPU 통합)
-	 * Subsystem에서 시뮬레이션 후 호출. GPU 버퍼 + CPU 버퍼 모두 처리.
-	 * @param OwnerIDToIC - Subsystem에서 빌드한 OwnerID→IC 맵 (O(1) 조회용)
-	 * @param CPUFeedbackBuffer - Subsystem의 CPU 충돌 피드백 버퍼 (SourceID로 필터링)
+	/** Process collision feedback (GPU + CPU unified)
+	 * Called by Subsystem after simulation. Processes both GPU buffer + CPU buffer.
+	 * @param OwnerIDToIC - OwnerID→IC map built by Subsystem (for O(1) lookup)
+	 * @param CPUFeedbackBuffer - Subsystem's CPU collision feedback buffer (filtered by SourceID)
 	 */
 	void ProcessCollisionFeedback(
 		const TMap<int32, UFluidInteractionComponent*>& OwnerIDToIC,
 		const TArray<FKawaiiFluidCollisionEvent>& CPUFeedbackBuffer);
 
 	//========================================
-	// Preset (내부 캐시 - Component에서 설정)
+	// Preset (internal cache - set by Component)
 	//========================================
 
 	/** Cached preset reference (set by owning Component via Initialize/SetPreset)
@@ -716,28 +716,28 @@ private:
 	// Internal
 	//========================================
 
-	/** 충돌 이벤트 콜백 */
+	/** Collision event callback */
 	FOnModuleCollisionEvent OnCollisionEventCallback;
 
 	//========================================
-	// 데이터
+	// Data
 	//========================================
 
-	/** 파티클 배열 - 에디터 직렬화 + SaveGame 모두 지원 */
+	/** Particle array - supports both editor serialization + SaveGame */
 	UPROPERTY()
 	TArray<FFluidParticle> Particles;
 
-	/** 공간 해싱 (Independent 모드용) */
+	/** Spatial hashing (for Independent mode) */
 	TSharedPtr<FSpatialHash> SpatialHash;
 
-	/** 등록된 콜라이더 */
+	/** Registered colliders */
 	UPROPERTY()
 	TArray<TObjectPtr<UFluidCollider>> Colliders;
 
-	/** 누적 외력 */
+	/** Accumulated external force */
 	FVector AccumulatedExternalForce = FVector::ZeroVector;
 
-	/** 서브스텝 시간 누적 */
+	/** Substep time accumulation */
 	float AccumulatedTime = 0.0f;
 
 	/** Volume center (world space, set dynamically from Component location) */
@@ -746,16 +746,16 @@ private:
 	/** Volume rotation as quaternion (computed from VolumeRotation) */
 	FQuat VolumeRotationQuat = FQuat::Identity;
 
-	/** 시뮬레이션 활성화 */
+	/** Simulation enabled */
 	bool bSimulationEnabled = true;
 
-	/** Independent 모드 플래그 */
+	/** Independent mode flag */
 	bool bIndependentSimulation = true;
 
-	/** 초기화 여부 */
+	/** Initialization state */
 	bool bIsInitialized = false;
 
-	/** 파티클별 마지막 이벤트 시간 (쿨다운용) */
+	/** Last event time per particle (for cooldown tracking) */
 	TMap<int32, float> ParticleLastEventTime;
 
 public:
@@ -763,7 +763,7 @@ public:
 	TMap<int32, float>& GetParticleLastEventTimeMap() { return ParticleLastEventTime; }
 
 	//========================================
-	// IKawaiiFluidDataProvider Interface (나머지 메서드)
+	// IKawaiiFluidDataProvider Interface (remaining methods)
 	//========================================
 
 	/** Get particle radius (simulation actual radius) - IKawaiiFluidDataProvider */
@@ -810,15 +810,15 @@ public:
 	//========================================
 
 	/**
-	 * GPU 파티클을 CPU Particles 배열로 동기화
-	 * 저장(PreSave) 및 PIE 전환(PreBeginPIE) 시 호출됨
+	 * Sync GPU particles to CPU Particles array
+	 * Called on save (PreSave) and PIE transition (PreBeginPIE)
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Fluid|Module")
 	void SyncGPUParticlesToCPU();
 
 	/**
-	 * CPU Particles 배열을 GPU로 업로드
-	 * 로드(PostLoad) 및 PIE 시작(BeginPlay) 시 호출됨
+	 * Upload CPU Particles array to GPU
+	 * Called on load (PostLoad) and PIE start (BeginPlay)
 	 */
 	void UploadCPUParticlesToGPU();
 
@@ -924,7 +924,7 @@ private:
 	/** Delegate handle for objects replaced event */
 	FDelegateHandle ObjectsReplacedHandle;
 
-	/** PIE 시작 전 GPU 파티클을 CPU로 동기화 */
+	/** Sync GPU particles to CPU before PIE starts */
 	void OnPreBeginPIE(bool bIsSimulating);
 
 	/** Delegate handle for PreBeginPIE */

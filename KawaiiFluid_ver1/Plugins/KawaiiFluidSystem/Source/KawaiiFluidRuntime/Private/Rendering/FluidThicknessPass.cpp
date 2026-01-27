@@ -74,8 +74,8 @@ void RenderFluidThicknessPass(
 		int32 ParticleCount = 0;
 
 		// =====================================================
-		// 통합 경로: RenderResource에서 일원화된 데이터 접근
-		// GPU/CPU 모두 동일한 버퍼 사용
+		// Unified path: unified data access from RenderResource
+		// Both GPU/CPU use same buffer
 		// =====================================================
 		ParticleCount = RR->GetUnifiedParticleCount();
 		if (ParticleCount <= 0)

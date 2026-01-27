@@ -1260,7 +1260,7 @@ void AKawaiiFluidVolume::GenerateEditorBoundaryParticlesPreview()
 	QueryParams.bReturnPhysicalMaterial = false;
 	QueryParams.AddIgnoredActor(this);
 
-	// WorldStatic과 WorldDynamic 모두 World Collision 대상으로 허용
+	// Allow both WorldStatic and WorldDynamic as World Collision targets
 	FCollisionObjectQueryParams ObjectQueryParams;
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 	ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
@@ -1610,7 +1610,7 @@ int32 AKawaiiFluidVolume::RemoveParticlesInRadius(const FVector& WorldCenter, fl
 		return 0;
 	}
 
-	// ID-based despawn: CPU에서 리드백 데이터로 영역 내 ParticleID 수집 후 GPU에서 제거
+	// ID-based despawn: Collect ParticleIDs within radius from CPU readback data, then remove on GPU
 	FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 	if (!GPUSimulator)
 	{
@@ -1677,7 +1677,7 @@ void AKawaiiFluidVolume::ClearAllParticles()
 		RenderingModule->UpdateRenderers();
 	}
 
-	// Shadow ISM 클리어
+	// Clear shadow ISM
 	if (UWorld* World = GetWorld())
 	{
 		if (UFluidRendererSubsystem* RendererSubsystem = World->GetSubsystem<UFluidRendererSubsystem>())

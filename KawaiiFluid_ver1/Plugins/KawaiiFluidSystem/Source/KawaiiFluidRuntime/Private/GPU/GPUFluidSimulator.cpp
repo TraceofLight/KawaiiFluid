@@ -2525,7 +2525,7 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FFluidParticle>& OutParti
 				return;
 			}
 
-			// GPU 버퍼에서 직접 읽기
+			// Read directly from GPU buffer
 			void* MappedData = RHICmdList.LockBuffer(Buffer, 0, DataSize, RLM_ReadOnly);
 			if (MappedData)
 			{
@@ -2535,10 +2535,10 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FFluidParticle>& OutParti
 		}
 	);
 
-	// 렌더 명령 완료 대기
+	// Wait for render command completion
 	FlushRenderingCommands();
 
-	// GPU 파티클 -> CPU 파티클 변환
+	// Convert GPU particles to CPU particles
 	OutParticles.SetNum(Count);
 	for (int32 i = 0; i < Count; ++i)
 	{
@@ -2604,7 +2604,7 @@ bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FFluidPar
 		return false;
 	}
 
-	// SourceID로 필터링
+	// Filter by SourceID
 	for (const FGPUFluidParticle& GPUParticle : ReadbackGPUParticles)
 	{
 		if (GPUParticle.SourceID != SourceID)
@@ -3240,7 +3240,7 @@ void FGPUFluidSimulator::ProcessStatsReadback()
 
 	if (ParticleData && ParticleCount > 0)
 	{
-		// 병렬 캐시 빌드: 청크별 로컬 맵 → merge
+		// Parallel cache build: local map per chunk → merge
 		const int32 NumChunks = FMath::Clamp(FPlatformMisc::NumberOfCoresIncludingHyperthreads(), 1, ParticleCount);
 		const int32 ChunkSize = (ParticleCount + NumChunks - 1) / NumChunks;
 
@@ -3253,7 +3253,7 @@ void FGPUFluidSimulator::ProcessStatsReadback()
 		{
 			const int32 StartIdx = ChunkIndex * ChunkSize;
 			const int32 EndIdx = FMath::Min(StartIdx + ChunkSize, ParticleCount);
-			if (StartIdx >= EndIdx) return;  // 안전 체크
+			if (StartIdx >= EndIdx) return;  // Safety check
 
 			auto& LocalMap = ChunkMaps[ChunkIndex];
 			auto& LocalAllIDs = ChunkAllIDs[ChunkIndex];
@@ -3267,7 +3267,7 @@ void FGPUFluidSimulator::ProcessStatsReadback()
 			}
 		});
 
-		// Merge (단일 스레드)
+		// Merge (single thread)
 		TMap<int32, TArray<int32>> NewSourceIDMap;
 		TArray<int32> NewAllParticleIDs;
 		NewAllParticleIDs.Reserve(ParticleCount);
@@ -3281,7 +3281,7 @@ void FGPUFluidSimulator::ProcessStatsReadback()
 			}
 		}
 
-		// Lock 짧게 잡고 swap + ReadbackGPUParticles 복사
+		// Hold lock briefly and swap + copy ReadbackGPUParticles
 		{
 			FScopeLock Lock(&BufferLock);
 			ReadbackGPUParticles.SetNumUninitialized(ParticleCount);
@@ -3291,9 +3291,9 @@ void FGPUFluidSimulator::ProcessStatsReadback()
 			bHasValidGPUResults.store(true);
 		}
 
-		// BufferLock 밖에서 DespawnByIDLock 잡음 (Lock 중첩 방지)
-		// CleanupCompletedRequests에는 아까 빌드한 배열 재사용 불가 (MoveTemp됨)
-		// 그냥 CachedAllParticleIDs 참조해도 됨 - 렌더 스레드에서만 수정하므로 여기선 안전
+		// Grab DespawnByIDLock outside BufferLock (prevent lock nesting)
+		// Cannot reuse built array in CleanupCompletedRequests (MoveTemped)
+		// Can just reference CachedAllParticleIDs - safe here since only render thread modifies
 		if (SpawnManager.IsValid())
 		{
 			SpawnManager->CleanupCompletedRequests(CachedAllParticleIDs);

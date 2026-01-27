@@ -285,7 +285,7 @@ void UMeshFluidCollider::CacheSkeletalMeshCollision(USkeletalMeshComponent* Skel
 
 			CachedCvx.Center = CenterSum / static_cast<float>(WorldVerts.Num());
 
-			// Bounding radius 계산
+			// Calculate bounding radius
 			float MaxDistSq = 0.0f;
 			for (const FVector& V : WorldVerts)
 			{
@@ -349,23 +349,23 @@ void UMeshFluidCollider::CacheSkeletalMeshCollision(USkeletalMeshComponent* Skel
 				}
 			}
 
-			// IndexData가 없거나 planes가 부족하면 ChaosConvex에서 직접 가져오기
+			// If IndexData is missing or planes are insufficient, fetch directly from ChaosConvex
 			if (CachedCvx.Planes.Num() < 4)
 			{
 				TArray<FPlane> ChaosPlanes;
 				ConvexElem.GetPlanes(ChaosPlanes);
-				
+
 				if (ChaosPlanes.Num() >= 4)
 				{
 					CachedCvx.Planes.Reset();
-					
+
 					for (const FPlane& ChaosPlane : ChaosPlanes)
 					{
-						// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+						// ChaosPlane is in local space, so transform to world space
 						const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
 						const FVector WorldNormal = BoneTransform.TransformVectorNoScale(LocalNormal);
-						
-						// 플레인 위의 한 점을 월드 좌표로 변환
+
+						// Transform a point on the plane to world space
 						const FVector LocalPoint = LocalNormal * ChaosPlane.W;
 						const FVector WorldPoint = BoneTransform.TransformPosition(LocalPoint);
 						
@@ -567,7 +567,7 @@ void UMeshFluidCollider::CacheStaticMeshCollision(UStaticMeshComponent* StaticMe
 							Normal = -Normal;
 						}
 
-						// 해시로 중복 제거
+						// Remove duplicates using hash
 						int32 Nx = FMath::RoundToInt(Normal.X * 1000.0f);
 						int32 Ny = FMath::RoundToInt(Normal.Y * 1000.0f);
 						int32 Nz = FMath::RoundToInt(Normal.Z * 1000.0f);
@@ -587,23 +587,23 @@ void UMeshFluidCollider::CacheStaticMeshCollision(UStaticMeshComponent* StaticMe
 			}
 		}
 
-		// IndexData가 없거나 planes가 부족하면 ChaosConvex에서 직접 가져오기
+		// If IndexData is missing or planes are insufficient, fetch directly from ChaosConvex
 		if (CachedCvx.Planes.Num() < 4)
 		{
 			TArray<FPlane> ChaosPlanes;
 			ConvexElem.GetPlanes(ChaosPlanes);
-			
+
 			if (ChaosPlanes.Num() >= 4)
 			{
 				CachedCvx.Planes.Reset();
-				
+
 				for (const FPlane& ChaosPlane : ChaosPlanes)
 				{
-					// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+					// ChaosPlane is in local space, so transform to world space
 					const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
 					const FVector WorldNormal = ComponentTransform.TransformVectorNoScale(LocalNormal);
-					
-					// 플레인 위의 한 점을 월드 좌표로 변환
+
+					// Transform a point on the plane to world space
 					const FVector LocalPoint = LocalNormal * ChaosPlane.W;
 					const FVector WorldPoint = ComponentTransform.TransformPosition(LocalPoint);
 					

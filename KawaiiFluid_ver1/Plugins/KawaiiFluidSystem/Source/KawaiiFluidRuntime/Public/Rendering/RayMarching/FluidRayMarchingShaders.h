@@ -105,7 +105,7 @@ public:
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
 
-		// Tight AABB (GPU-only) - 시뮬레이션 bounds로 clamp됨
+		// Tight AABB (GPU-only) - clamped to simulation bounds
 		SHADER_PARAMETER(FVector3f, SimulationBoundsMin)
 		SHADER_PARAMETER(FVector3f, SimulationBoundsMax)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, FluidAABB)
@@ -502,7 +502,7 @@ public:
 		SHADER_PARAMETER(FVector3f, VolumeBoundsMin)
 		SHADER_PARAMETER(FVector3f, VolumeBoundsMax)
 
-		// Tight AABB (GPU-only) - 시뮬레이션 bounds로 clamp됨
+		// Tight AABB (GPU-only) - clamped to simulation bounds
 		SHADER_PARAMETER(FVector3f, SimulationBoundsMin)
 		SHADER_PARAMETER(FVector3f, SimulationBoundsMax)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, FluidAABB)

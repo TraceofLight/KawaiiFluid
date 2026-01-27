@@ -34,10 +34,10 @@ struct FSkinnedTriangle
 	void ComputeDerivedData()
 	{
 		Centroid = (V0 + V1 + V2) / 3.0f;
-		// UE5 스켈레탈 메쉬는 CW 와인딩 → Edge2 x Edge1로 바깥 방향 법선
+		// UE5 skeletal mesh uses CW winding → Edge2 x Edge1 for outward normal
 		FVector Edge1 = V1 - V0;
 		FVector Edge2 = V2 - V0;
-		Normal = FVector::CrossProduct(Edge2, Edge1).GetSafeNormal();  // 순서 뒤집음!
+		Normal = FVector::CrossProduct(Edge2, Edge1).GetSafeNormal();  // Order reversed!
 	}
 
 	/** Get AABB bounds of this triangle */

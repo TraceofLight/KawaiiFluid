@@ -168,23 +168,23 @@ namespace
 			}
 		}
 
-		// IndexData가 없거나 planes가 부족하면 ChaosConvex에서 직접 가져오기
+		// If IndexData is missing or planes are insufficient, fetch directly from ChaosConvex
 		if (Planes.Num() < 4)
 		{
 			TArray<FPlane> ChaosPlanes;
 			ConvexElem.GetPlanes(ChaosPlanes);
-			
+
 			if (ChaosPlanes.Num() >= 4)
 			{
-				Planes.Reset();  // IndexData에서 생성된 부분적인 planes 제거
-				
+				Planes.Reset();  // Remove partial planes generated from IndexData
+
 				for (const FPlane& ChaosPlane : ChaosPlanes)
 				{
-					// ChaosPlane은 로컬 좌표계이므로 월드 좌표계로 변환
+					// ChaosPlane is in local space, so transform to world space
 					const FVector LocalNormal = FVector(ChaosPlane.X, ChaosPlane.Y, ChaosPlane.Z);
 					const FVector WorldNormal = ComponentTransform.TransformVectorNoScale(LocalNormal);
-					
-					// 플레인 위의 한 점을 월드 좌표로 변환
+
+					// Transform a point on the plane to world space
 					const FVector LocalPoint = LocalNormal * ChaosPlane.W;
 					const FVector WorldPoint = ComponentTransform.TransformPosition(LocalPoint);
 					

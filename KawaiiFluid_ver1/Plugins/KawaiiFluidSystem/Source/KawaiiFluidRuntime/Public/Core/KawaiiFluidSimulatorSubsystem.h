@@ -311,10 +311,10 @@ private:
 	// CPU Collision Feedback Buffer
 	//========================================
 
-	/** CPU 충돌 피드백 버퍼 (Context에서 추가, 시뮬레이션 후 처리) */
+	/** CPU collision feedback buffer (written by Context, processed after simulation) */
 	TArray<FKawaiiFluidCollisionEvent> CPUCollisionFeedbackBuffer;
 
-	/** CPU 충돌 피드백 버퍼 락 (ParallelFor 안전) */
+	/** CPU collision feedback buffer lock (ParallelFor safe) */
 	FCriticalSection CPUCollisionFeedbackLock;
 
 	//========================================
