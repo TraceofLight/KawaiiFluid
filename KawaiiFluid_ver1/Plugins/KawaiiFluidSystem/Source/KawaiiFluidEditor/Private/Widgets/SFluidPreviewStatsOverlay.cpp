@@ -15,7 +15,6 @@ void SFluidPreviewStatsOverlay::Construct(const FArguments& InArgs, TSharedPtr<F
 	FPSAccumulator = 0.0f;
 	FrameCount = 0;
 	CachedParticleCount = 0;
-	CachedDensity = 0.0f;
 
 	ChildSlot
 	[
@@ -60,17 +59,6 @@ void SFluidPreviewStatsOverlay::Construct(const FArguments& InArgs, TSharedPtr<F
 				.ShadowColorAndOpacity(FLinearColor::Black)
 			]
 
-			// Average density
-			+ SVerticalBox::Slot()
-			.AutoHeight()
-			.Padding(0.0f, 2.0f)
-			[
-				SNew(STextBlock)
-				.Text(this, &SFluidPreviewStatsOverlay::GetAverageDensityText)
-				.ColorAndOpacity(FLinearColor::White)
-				.ShadowOffset(FVector2D(1.0f, 1.0f))
-				.ShadowColorAndOpacity(FLinearColor::Black)
-			]
 		]
 	];
 }
@@ -98,7 +86,6 @@ void SFluidPreviewStatsOverlay::Tick(const FGeometry& AllottedGeometry, const do
 	if (PreviewScene.IsValid())
 	{
 		CachedParticleCount = PreviewScene->GetParticleCount();
-		CachedDensity = PreviewScene->GetAverageDensity();
 	}
 }
 
@@ -119,13 +106,6 @@ FText SFluidPreviewStatsOverlay::GetSimulationTimeText() const
 FText SFluidPreviewStatsOverlay::GetFPSText() const
 {
 	return FText::Format(LOCTEXT("FPS", "FPS: {0}"), FText::AsNumber(FMath::RoundToInt(CachedFPS)));
-}
-
-FText SFluidPreviewStatsOverlay::GetAverageDensityText() const
-{
-	FNumberFormattingOptions Options;
-	Options.MaximumFractionalDigits = 1;
-	return FText::Format(LOCTEXT("AvgDensity", "Avg Density: {0}"), FText::AsNumber(CachedDensity, &Options));
 }
 
 #undef LOCTEXT_NAMESPACE

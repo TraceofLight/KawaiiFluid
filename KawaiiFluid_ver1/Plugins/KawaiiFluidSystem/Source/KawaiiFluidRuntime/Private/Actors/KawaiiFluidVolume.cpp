@@ -1068,56 +1068,76 @@ void AKawaiiFluidVolume::DrawDebugParticles()
 		return;
 	}
 
-	// Get particle data (GPU or CPU) - same pattern as KawaiiFluidComponent
-	const TArray<FFluidParticle>* ParticlesPtr = nullptr;
-	TArray<FFluidParticle> GPUParticlesCache;
+	// Get debug point size from VolumeComponent
+	const float DebugPointSize = VolumeComponent->DebugPointSize;
 
 	if (SimulationModule->IsGPUSimulationActive())
 	{
-		// GPU mode: Use readback data
+		// GPU mode: Use lightweight cached positions (no sync readback)
 		FGPUFluidSimulator* Simulator = SimulationModule->GetGPUSimulator();
-		if (Simulator && Simulator->GetAllGPUParticles(GPUParticlesCache))
+		if (!Simulator)
 		{
-			ParticlesPtr = &GPUParticlesCache;
-		}
-		else
-		{
-			// No readback data available
 			return;
+		}
+
+		TArray<FVector3f> Positions;
+		TArray<int32> ParticleIDs;
+		TArray<int32> SourceIDs;
+		if (!Simulator->GetParticlePositionsAndIDs(Positions, ParticleIDs, SourceIDs))
+		{
+			return;
+		}
+
+		const int32 TotalCount = Positions.Num();
+		if (TotalCount == 0)
+		{
+			return;
+		}
+
+		// Update bounds for position-based coloring
+		DebugDrawBoundsMin = FVector(Positions[0]);
+		DebugDrawBoundsMax = FVector(Positions[0]);
+		for (const FVector3f& Pos : Positions)
+		{
+			FVector P(Pos);
+			DebugDrawBoundsMin = DebugDrawBoundsMin.ComponentMin(P);
+			DebugDrawBoundsMax = DebugDrawBoundsMax.ComponentMax(P);
+		}
+
+		// Draw particles (position-based coloring only in GPU mode, no Density available)
+		for (int32 i = 0; i < TotalCount; ++i)
+		{
+			FVector Pos(Positions[i]);
+			FColor Color = ComputeDebugDrawColor(i, TotalCount, Pos, 0.0f);
+			DrawDebugPoint(World, Pos, DebugPointSize, Color, false, -1.0f, 0);
 		}
 	}
 	else
 	{
 		// CPU mode: Direct particle array
-		ParticlesPtr = &SimulationModule->GetParticles();
-	}
+		const TArray<FFluidParticle>& Particles = SimulationModule->GetParticles();
+		const int32 TotalCount = Particles.Num();
+		if (TotalCount == 0)
+		{
+			return;
+		}
 
-	if (!ParticlesPtr || ParticlesPtr->Num() == 0)
-	{
-		return;
-	}
+		// Update bounds for position-based coloring
+		DebugDrawBoundsMin = Particles[0].Position;
+		DebugDrawBoundsMax = Particles[0].Position;
+		for (const FFluidParticle& P : Particles)
+		{
+			DebugDrawBoundsMin = DebugDrawBoundsMin.ComponentMin(P.Position);
+			DebugDrawBoundsMax = DebugDrawBoundsMax.ComponentMax(P.Position);
+		}
 
-	const TArray<FFluidParticle>& Particles = *ParticlesPtr;
-	const int32 TotalCount = Particles.Num();
-
-	// Get debug point size from VolumeComponent
-	const float DebugPointSize = VolumeComponent->DebugPointSize;
-
-	// Update bounds for position-based coloring
-	DebugDrawBoundsMin = Particles[0].Position;
-	DebugDrawBoundsMax = Particles[0].Position;
-	for (const FFluidParticle& P : Particles)
-	{
-		DebugDrawBoundsMin = DebugDrawBoundsMin.ComponentMin(P.Position);
-		DebugDrawBoundsMax = DebugDrawBoundsMax.ComponentMax(P.Position);
-	}
-
-	// Draw particles
-	for (int32 i = 0; i < TotalCount; ++i)
-	{
-		const FFluidParticle& P = Particles[i];
-		FColor Color = ComputeDebugDrawColor(i, TotalCount, P.Position, P.Density, P.bNearBoundary);
-		DrawDebugPoint(World, P.Position, DebugPointSize, Color, false, -1.0f, 0);
+		// Draw particles
+		for (int32 i = 0; i < TotalCount; ++i)
+		{
+			const FFluidParticle& P = Particles[i];
+			FColor Color = ComputeDebugDrawColor(i, TotalCount, P.Position, P.Density);
+			DrawDebugPoint(World, P.Position, DebugPointSize, Color, false, -1.0f, 0);
+		}
 	}
 }
 
@@ -1625,9 +1645,11 @@ int32 AKawaiiFluidVolume::RemoveParticlesInRadius(const FVector& WorldCenter, fl
 		return 0;
 	}
 
-	// Get readback particle data from GPU
-	TArray<FGPUFluidParticle> ReadbackParticles;
-	if (!GPUSimulator->GetReadbackGPUParticles(ReadbackParticles))
+	// Get lightweight particle data (Position + ParticleID + SourceID only, no 6.4MB copy)
+	TArray<FVector3f> Positions;
+	TArray<int32> ParticleIDs;
+	TArray<int32> SourceIDs;
+	if (!GPUSimulator->GetParticlePositionsAndIDs(Positions, ParticleIDs, SourceIDs))
 	{
 		// No valid readback data yet, skip this frame
 		return 0;
@@ -1637,18 +1659,15 @@ int32 AKawaiiFluidVolume::RemoveParticlesInRadius(const FVector& WorldCenter, fl
 	const float RadiusSq = Radius * Radius;
 	const FVector3f WorldCenterF = FVector3f(WorldCenter);
 	TArray<int32> ParticleIDsToRemove;
-	TArray<int32> AllReadbackIDs;
 	ParticleIDsToRemove.Reserve(128);
-	AllReadbackIDs.Reserve(ReadbackParticles.Num());
 
-	for (const FGPUFluidParticle& Particle : ReadbackParticles)
+	const int32 NumParticles = Positions.Num();
+	for (int32 i = 0; i < NumParticles; ++i)
 	{
-		AllReadbackIDs.Add(Particle.ParticleID);
-
-		const float DistSq = FVector3f::DistSquared(Particle.Position, WorldCenterF);
+		const float DistSq = FVector3f::DistSquared(Positions[i], WorldCenterF);
 		if (DistSq <= RadiusSq)
 		{
-			ParticleIDsToRemove.Add(Particle.ParticleID);
+			ParticleIDsToRemove.Add(ParticleIDs[i]);
 		}
 	}
 

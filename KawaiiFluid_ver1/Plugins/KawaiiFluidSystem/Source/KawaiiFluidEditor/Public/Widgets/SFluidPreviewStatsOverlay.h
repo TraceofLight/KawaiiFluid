@@ -27,7 +27,6 @@ private:
 	FText GetParticleCountText() const;
 	FText GetSimulationTimeText() const;
 	FText GetFPSText() const;
-	FText GetAverageDensityText() const;
 
 private:
 	/** Preview scene reference */
@@ -38,5 +37,4 @@ private:
 	float FPSAccumulator{};
 	int32 FrameCount{};
 	int32 CachedParticleCount{};
-	float CachedDensity{};
 };

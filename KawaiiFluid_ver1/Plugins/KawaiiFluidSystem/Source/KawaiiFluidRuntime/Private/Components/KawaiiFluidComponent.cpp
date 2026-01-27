@@ -1405,9 +1405,11 @@ int32 UKawaiiFluidComponent::RemoveParticlesInRadius(const FVector& WorldCenter,
 		return 0;
 	}
 
-	// Get readback particle data from GPU
-	TArray<FGPUFluidParticle> ReadbackParticles;
-	if (!GPUSimulator->GetReadbackGPUParticles(ReadbackParticles))
+	// Get lightweight particle data (Position + ParticleID + SourceID only, no 6.4MB copy)
+	TArray<FVector3f> Positions;
+	TArray<int32> ParticleIDs;
+	TArray<int32> SourceIDs;
+	if (!GPUSimulator->GetParticlePositionsAndIDs(Positions, ParticleIDs, SourceIDs))
 	{
 		// No valid readback data yet, skip this frame
 		return 0;
@@ -1418,24 +1420,21 @@ int32 UKawaiiFluidComponent::RemoveParticlesInRadius(const FVector& WorldCenter,
 	const FVector3f WorldCenterF = FVector3f(WorldCenter);
 	const int32 MySourceID = SimulationModule->GetSourceID();
 	TArray<int32> ParticleIDsToRemove;
-	TArray<int32> AllReadbackIDs;
 	ParticleIDsToRemove.Reserve(128);  // Pre-allocate for typical brush operation
-	AllReadbackIDs.Reserve(ReadbackParticles.Num());
 
-	for (const FGPUFluidParticle& Particle : ReadbackParticles)
+	const int32 NumParticles = Positions.Num();
+	for (int32 i = 0; i < NumParticles; ++i)
 	{
-		AllReadbackIDs.Add(Particle.ParticleID);
-
 		// Only target particles with my SourceID for removal
-		if (Particle.SourceID != MySourceID)
+		if (SourceIDs[i] != MySourceID)
 		{
 			continue;
 		}
 
-		const float DistSq = FVector3f::DistSquared(Particle.Position, WorldCenterF);
+		const float DistSq = FVector3f::DistSquared(Positions[i], WorldCenterF);
 		if (DistSq <= RadiusSq)
 		{
-			ParticleIDsToRemove.Add(Particle.ParticleID);
+			ParticleIDsToRemove.Add(ParticleIDs[i]);
 		}
 	}
 
@@ -1522,37 +1521,147 @@ void UKawaiiFluidComponent::DrawDebugParticles()
 		PointSize = Preset->ParticleRadius;
 	}
 
-	// Get particle data (GPU or CPU)
-	const TArray<FFluidParticle>* ParticlesPtr = nullptr;
-	TArray<FFluidParticle> GPUParticlesCache;
-
-	if (SimulationModule->IsGPUSimulationActive())
+	// Lambda for Z-Order analysis (used by both GPU and CPU paths)
+	auto PerformZOrderAnalysis = [this](const TArray<FVector>& Positions, int32 NumParticles)
 	{
-		// GPU mode: Use readback data
-		FGPUFluidSimulator* Simulator = SimulationModule->GetGPUSimulator();
-		if (Simulator && Simulator->GetAllGPUParticles(GPUParticlesCache))
+		static int32 SortVerifyCounter = 0;
+		if (++SortVerifyCounter % 120 != 1)  // Log every 2 seconds at 60fps
 		{
-			ParticlesPtr = &GPUParticlesCache;
-		}
-		else
-		{
-			// No readback data available
 			return;
 		}
-	}
-	else
-	{
-		// CPU mode: Direct particle array
-		ParticlesPtr = &SimulationModule->GetParticles();
-	}
 
-	if (!ParticlesPtr || ParticlesPtr->Num() == 0)
+		// Get CellSize from simulation module
+		float CellSize = 100.0f;  // Default fallback
+		if (SimulationModule)
+		{
+			CellSize = SimulationModule->GetParticleRadius() * 4.0f;
+		}
+
+		// Compute CELL-BASED Morton code (MUST match GPU FluidMortonCode.usf)
+		auto ComputeCellBasedMortonCode = [CellSize](const FVector& Pos, const FVector& BoundsMin) -> uint32
+		{
+			FIntVector CellCoord(
+				FMath::FloorToInt(Pos.X / CellSize),
+				FMath::FloorToInt(Pos.Y / CellSize),
+				FMath::FloorToInt(Pos.Z / CellSize)
+			);
+			FIntVector GridMin(
+				FMath::FloorToInt(BoundsMin.X / CellSize),
+				FMath::FloorToInt(BoundsMin.Y / CellSize),
+				FMath::FloorToInt(BoundsMin.Z / CellSize)
+			);
+			FIntVector Offset = CellCoord - GridMin;
+			uint32 ux = FMath::Clamp(Offset.X, 0, 1023);
+			uint32 uy = FMath::Clamp(Offset.Y, 0, 1023);
+			uint32 uz = FMath::Clamp(Offset.Z, 0, 1023);
+
+			auto ExpandBits = [](uint32 v) -> uint32 {
+				v = (v * 0x00010001u) & 0xFF0000FFu;
+				v = (v * 0x00000101u) & 0x0F00F00Fu;
+				v = (v * 0x00000011u) & 0xC30C30C3u;
+				v = (v * 0x00000005u) & 0x49249249u;
+				return v;
+			};
+			uint32 MortonCode = (ExpandBits(uz) << 2) | (ExpandBits(uy) << 1) | ExpandBits(ux);
+			return MortonCode & 0xFFFF;
+		};
+
+		TMap<uint32, int32> CellIDCounts;
+		for (int32 i = 0; i < NumParticles; ++i)
+		{
+			uint32 CellID = ComputeCellBasedMortonCode(Positions[i], DebugDrawBoundsMin);
+			CellIDCounts.FindOrAdd(CellID, 0)++;
+		}
+
+		uint32 MaxCellID = 0;
+		int32 MaxCount = 0;
+		for (const auto& Pair : CellIDCounts)
+		{
+			if (Pair.Value > MaxCount)
+			{
+				MaxCount = Pair.Value;
+				MaxCellID = Pair.Key;
+			}
+		}
+
+		int32 Cell0Count = CellIDCounts.FindRef(0);
+
+		UE_LOG(LogTemp, Warning, TEXT("Z-Order CellID Analysis: TotalParticles=%d, UniqueCells=%d, LargestCell=%u has %d particles (%.1f%%), Cell0 has %d particles"),
+			NumParticles, CellIDCounts.Num(), MaxCellID, MaxCount,
+			(NumParticles > 0) ? (100.0f * MaxCount / NumParticles) : 0.0f,
+			Cell0Count);
+
+		if (MaxCount > NumParticles / 4)
+		{
+			UE_LOG(LogTemp, Error, TEXT("Z-Order BLACK HOLE DETECTED! CellID %u has %d/%d particles (%.1f%%). This will cause severe performance issues!"),
+				MaxCellID, MaxCount, NumParticles, 100.0f * MaxCount / NumParticles);
+		}
+	};
+
+	// GPU mode: Use lightweight readback (no sync, position-only)
+	if (SimulationModule->IsGPUSimulationActive())
 	{
+		FGPUFluidSimulator* Simulator = SimulationModule->GetGPUSimulator();
+		if (!Simulator)
+		{
+			return;
+		}
+
+		TArray<FVector3f> Positions;
+		TArray<int32> ParticleIDs;
+		TArray<int32> SourceIDs;
+		if (!Simulator->GetParticlePositionsAndIDs(Positions, ParticleIDs, SourceIDs))
+		{
+			return;
+		}
+
+		const int32 NumParticles = Positions.Num();
+		if (NumParticles == 0)
+		{
+			return;
+		}
+
+		// Auto-compute bounds if not set
+		if (DebugDrawBoundsMin.IsNearlyZero() && DebugDrawBoundsMax.IsNearlyZero())
+		{
+			FVector MinBounds(FLT_MAX);
+			FVector MaxBounds(-FLT_MAX);
+			for (const FVector3f& Pos : Positions)
+			{
+				FVector P(Pos);
+				MinBounds = MinBounds.ComponentMin(P);
+				MaxBounds = MaxBounds.ComponentMax(P);
+			}
+			DebugDrawBoundsMin = MinBounds;
+			DebugDrawBoundsMax = MaxBounds;
+		}
+
+		// Z-Order analysis (convert to FVector array)
+		TArray<FVector> PositionsForAnalysis;
+		PositionsForAnalysis.SetNumUninitialized(NumParticles);
+		for (int32 i = 0; i < NumParticles; ++i)
+		{
+			PositionsForAnalysis[i] = FVector(Positions[i]);
+		}
+		PerformZOrderAnalysis(PositionsForAnalysis, NumParticles);
+
+		// Draw particles (GPU mode: no Density available, use 0.0f)
+		for (int32 i = 0; i < NumParticles; ++i)
+		{
+			FVector Pos(Positions[i]);
+			FColor Color = ComputeDebugDrawColor(i, NumParticles, Pos, 0.0f);
+			DrawDebugPoint(World, Pos, PointSize, Color, false, -1.0f, 0);
+		}
 		return;
 	}
 
-	const TArray<FFluidParticle>& Particles = *ParticlesPtr;
+	// CPU mode: Direct particle array
+	const TArray<FFluidParticle>& Particles = SimulationModule->GetParticles();
 	const int32 NumParticles = Particles.Num();
+	if (NumParticles == 0)
+	{
+		return;
+	}
 
 	// Auto-compute bounds if not set
 	if (DebugDrawBoundsMin.IsNearlyZero() && DebugDrawBoundsMax.IsNearlyZero())
@@ -1568,99 +1677,20 @@ void UKawaiiFluidComponent::DrawDebugParticles()
 		DebugDrawBoundsMax = MaxBounds;
 	}
 
-	// Verify Z-Order sorting by computing cell-based Morton codes (matching GPU shader)
-	static int32 SortVerifyCounter = 0;
-	if (++SortVerifyCounter % 120 == 1)  // Log every 2 seconds at 60fps
+	// Z-Order analysis (convert to FVector array)
+	TArray<FVector> PositionsForAnalysis;
+	PositionsForAnalysis.SetNumUninitialized(NumParticles);
+	for (int32 i = 0; i < NumParticles; ++i)
 	{
-		// Get CellSize from simulation module
-		// CellSize = SmoothingRadius typically, and SmoothingRadius ≈ 4 * ParticleRadius
-		float CellSize = 100.0f;  // Default fallback
-		if (SimulationModule)
-		{
-			// CellSize is typically smoothing radius (≈ 4 * particle radius for SPH)
-			CellSize = SimulationModule->GetParticleRadius() * 4.0f;
-		}
-
-		// Compute CELL-BASED Morton code (MUST match GPU FluidMortonCode.usf)
-		auto ComputeCellBasedMortonCode = [CellSize](const FVector& Pos, const FVector& BoundsMin) -> uint32
-		{
-			// GPU: cellCoord = floor(pos / CellSize)
-			FIntVector CellCoord(
-				FMath::FloorToInt(Pos.X / CellSize),
-				FMath::FloorToInt(Pos.Y / CellSize),
-				FMath::FloorToInt(Pos.Z / CellSize)
-			);
-
-			// GPU: gridMin = floor(BoundsMin / CellSize)
-			FIntVector GridMin(
-				FMath::FloorToInt(BoundsMin.X / CellSize),
-				FMath::FloorToInt(BoundsMin.Y / CellSize),
-				FMath::FloorToInt(BoundsMin.Z / CellSize)
-			);
-
-			// GPU: offset = cellCoord - gridMin, clamped to [0, 1023]
-			FIntVector Offset = CellCoord - GridMin;
-			uint32 ux = FMath::Clamp(Offset.X, 0, 1023);
-			uint32 uy = FMath::Clamp(Offset.Y, 0, 1023);
-			uint32 uz = FMath::Clamp(Offset.Z, 0, 1023);
-
-			// Morton3D expansion
-			auto ExpandBits = [](uint32 v) -> uint32 {
-				v = (v * 0x00010001u) & 0xFF0000FFu;
-				v = (v * 0x00000101u) & 0x0F00F00Fu;
-				v = (v * 0x00000011u) & 0xC30C30C3u;
-				v = (v * 0x00000005u) & 0x49249249u;
-				return v;
-			};
-			uint32 MortonCode = (ExpandBits(uz) << 2) | (ExpandBits(uy) << 1) | ExpandBits(ux);
-
-			// GPU: cellID = mortonCode & (MAX_CELLS - 1)  // MAX_CELLS = 65536
-			return MortonCode & 0xFFFF;
-		};
-
-		// Count unique CellIDs and find the largest cell
-		TMap<uint32, int32> CellIDCounts;
-		for (int32 i = 0; i < NumParticles; ++i)
-		{
-			uint32 CellID = ComputeCellBasedMortonCode(Particles[i].Position, DebugDrawBoundsMin);
-			CellIDCounts.FindOrAdd(CellID, 0)++;
-		}
-
-		// Find the cell with most particles
-		uint32 MaxCellID = 0;
-		int32 MaxCount = 0;
-		for (const auto& Pair : CellIDCounts)
-		{
-			if (Pair.Value > MaxCount)
-			{
-				MaxCount = Pair.Value;
-				MaxCellID = Pair.Key;
-			}
-		}
-
-		// Check Cell 0 specifically
-		int32 Cell0Count = CellIDCounts.FindRef(0);
-
-		// Log diagnostic info
-		UE_LOG(LogTemp, Warning, TEXT("Z-Order CellID Analysis: TotalParticles=%d, UniqueCells=%d, LargestCell=%u has %d particles (%.1f%%), Cell0 has %d particles"),
-			NumParticles, CellIDCounts.Num(), MaxCellID, MaxCount,
-			(NumParticles > 0) ? (100.0f * MaxCount / NumParticles) : 0.0f,
-			Cell0Count);
-
-		// Warn if too many particles in one cell (Black Hole Cell issue!)
-		if (MaxCount > NumParticles / 4)  // More than 25% in one cell
-		{
-			UE_LOG(LogTemp, Error, TEXT("Z-Order BLACK HOLE DETECTED! CellID %u has %d/%d particles (%.1f%%). This will cause severe performance issues!"),
-				MaxCellID, MaxCount, NumParticles, 100.0f * MaxCount / NumParticles);
-		}
+		PositionsForAnalysis[i] = Particles[i].Position;
 	}
+	PerformZOrderAnalysis(PositionsForAnalysis, NumParticles);
 
 	// Draw each particle
 	for (int32 i = 0; i < NumParticles; ++i)
 	{
 		const FFluidParticle& Particle = Particles[i];
-		FColor Color = ComputeDebugDrawColor(i, NumParticles, Particle.Position, Particle.Density, Particle.bNearBoundary);
-
+		FColor Color = ComputeDebugDrawColor(i, NumParticles, Particle.Position, Particle.Density);
 		DrawDebugPoint(World, Particle.Position, PointSize, Color, false, -1.0f, 0);
 	}
 }

@@ -548,37 +548,6 @@ float FFluidPreviewScene::GetSimulationTime() const
 	return TotalSimulationTime;
 }
 
-float FFluidPreviewScene::GetAverageDensity() const
-{
-	// Read density from GPU readback data
-	if (!SimulationContext)
-	{
-		return 0.0f;
-	}
-
-	FGPUFluidSimulator* GPUSimulator = SimulationContext->GetGPUSimulator();
-	if (!GPUSimulator)
-	{
-		return 0.0f;
-	}
-
-	// Get readback GPU particles
-	TArray<FGPUFluidParticle> GPUParticles;
-	if (!GPUSimulator->GetReadbackGPUParticles(GPUParticles) || GPUParticles.Num() == 0)
-	{
-		return 0.0f;
-	}
-
-	// Calculate average density
-	double TotalDensity = 0.0;
-	for (const FGPUFluidParticle& Particle : GPUParticles)
-	{
-		TotalDensity += Particle.Density;
-	}
-
-	return static_cast<float>(TotalDensity / GPUParticles.Num());
-}
-
 //========================================
 // GPU Simulation Interface
 //========================================

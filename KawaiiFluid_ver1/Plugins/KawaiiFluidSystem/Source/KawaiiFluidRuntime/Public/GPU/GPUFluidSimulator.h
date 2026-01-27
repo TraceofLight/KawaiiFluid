@@ -591,12 +591,29 @@ public:
 	void AddDespawnByIDRequests(const TArray<int32>& ParticleIDs);
 
 	/**
-	 * Get readback GPU particle data (thread-safe)
-	 * Returns false if no valid GPU results available
-	 * @param OutParticles - Output array of GPU particles with ParticleID
+	 * Lightweight API for despawn operations - returns positions, IDs and source IDs
+	 * Uses cached data from ProcessStatsReadback (no sync GPU readback needed)
+	 * @param OutPositions - Output array of particle positions
+	 * @param OutParticleIDs - Output array of particle IDs (same index as positions)
+	 * @param OutSourceIDs - Output array of source IDs (same index as positions)
 	 * @return true if valid data was copied
 	 */
-	bool GetReadbackGPUParticles(TArray<FGPUFluidParticle>& OutParticles);
+	bool GetParticlePositionsAndIDs(TArray<FVector3f>& OutPositions, TArray<int32>& OutParticleIDs, TArray<int32>& OutSourceIDs);
+
+	/**
+	 * Lightweight API for ISM rendering - returns positions and velocities only
+	 * Much faster than GetAllGPUParticles (24 bytes vs 64 bytes per particle)
+	 * @param OutPositions - Output array of positions
+	 * @param OutVelocities - Output array of velocities
+	 * @return true if valid data was copied
+	 */
+	bool GetParticlePositionsAndVelocities(TArray<FVector3f>& OutPositions, TArray<FVector3f>& OutVelocities);
+
+	/**
+	 * Enable/disable velocity readback for ISM rendering
+	 * When enabled, CachedParticleVelocities is populated during ProcessStatsReadback
+	 */
+	void SetFullReadbackEnabled(bool bEnabled) { bFullReadbackEnabled.store(bEnabled); }
 
 	/**
 	 * Get particle IDs for a specific SourceID from cached readback data
@@ -992,11 +1009,8 @@ private:
 	// Frame lifecycle state
 	bool bFrameActive = false;
 
-	// Cached GPU particle data for upload/readback
+	// Cached GPU particle data for upload
 	TArray<FGPUFluidParticle> CachedGPUParticles;
-
-	// Separate buffer for GPU readback results (to avoid race with upload)
-	TArray<FGPUFluidParticle> ReadbackGPUParticles;
 
 	// Cached SourceID → ParticleIDs mapping (built during readback processing)
 	// Fixed-size array indexed by SourceID (0~63), no hash lookup needed
@@ -1005,8 +1019,21 @@ private:
 	// Cached all particle IDs (built during readback processing)
 	TArray<int32> CachedAllParticleIDs;
 
+	// Cached particle positions (always built during readback for lightweight despawn API)
+	TArray<FVector3f> CachedParticlePositions;
+
+	// Cached particle source IDs (always built during readback for lightweight despawn API)
+	TArray<int32> CachedParticleSourceIDs;
+
+	// Cached particle velocities (always built during readback for lightweight ISM rendering)
+	TArray<FVector3f> CachedParticleVelocities;
+
 	// Flag indicating valid GPU results are available for download
 	std::atomic<bool> bHasValidGPUResults{false};
+
+	// Flag to enable velocity readback (for ISM rendering)
+	// When true, CachedParticleVelocities is populated during ProcessStatsReadback
+	std::atomic<bool> bFullReadbackEnabled{false};
 
 	// Persistent GPU buffer - reused across frames (Phase 2)
 	// After simulation, this contains the results to be used next frame
@@ -1328,7 +1355,7 @@ void ReleaseAnisotropyReadbackObjects();
 	/** Enqueue stats readback (full particle data for ID-based operations) */
 	void EnqueueStatsReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount);
 
-	/** Process stats readback (check for completion, copy to ReadbackGPUParticles) */
+	/** Process stats readback (check for completion, populate cached lightweight data) */
 	void ProcessStatsReadback(FRHICommandListImmediate& RHICmdList);
 };
 

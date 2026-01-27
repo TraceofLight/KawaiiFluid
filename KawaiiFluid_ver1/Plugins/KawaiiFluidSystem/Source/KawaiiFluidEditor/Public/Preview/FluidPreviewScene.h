@@ -110,10 +110,7 @@ public:
 	/** Get mutable particles array (not available in GPU mode) */
 	TArray<FFluidParticle>& GetParticlesMutable();
 
-	/** Get average density (not available in GPU mode) */
-	float GetAverageDensity() const;
-
-	/** Get simulation time (not available in GPU mode) */
+	/** Get simulation time */
 	float GetSimulationTime() const;
 
 private:

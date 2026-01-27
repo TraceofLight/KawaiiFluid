@@ -91,45 +91,57 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 	}
 
 	// Get simulation data from DataProvider (GPU or CPU)
-	const TArray<FFluidParticle>* ParticlesPtr = nullptr;
-	TArray<FFluidParticle> GPUParticlesCache;
+	TArray<FVector3f> Positions;
+	TArray<FVector3f> Velocities;
 
 	if (DataProvider->IsGPUSimulationActive())
 	{
-		// GPU mode: Use readback data (same as DrawDebugParticles)
+		// GPU mode: Use lightweight readback API (Position + Velocity only)
 		FGPUFluidSimulator* Simulator = DataProvider->GetGPUSimulator();
-		if (Simulator && Simulator->GetAllGPUParticles(GPUParticlesCache))
+		if (Simulator)
 		{
-			ParticlesPtr = &GPUParticlesCache;
+			// Enable velocity readback for ISM rendering
+			Simulator->SetFullReadbackEnabled(true);
+
+			if (!Simulator->GetParticlePositionsAndVelocities(Positions, Velocities))
+			{
+				// No readback data available
+				if (bShouldLog)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("ISMRenderer: GPU readback not available"));
+				}
+				return;
+			}
 		}
 		else
 		{
-			// No readback data available
-			if (bShouldLog)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("ISMRenderer: GPU readback not available"));
-			}
 			return;
 		}
 	}
 	else
 	{
-		// CPU mode: Direct particle array
-		ParticlesPtr = &DataProvider->GetParticles();
+		// CPU mode: Extract positions and velocities from particle array
+		const TArray<FFluidParticle>& CPUParticles = DataProvider->GetParticles();
+		const int32 Count = CPUParticles.Num();
+		Positions.SetNumUninitialized(Count);
+		Velocities.SetNumUninitialized(Count);
+		for (int32 i = 0; i < Count; ++i)
+		{
+			Positions[i] = FVector3f(CPUParticles[i].Position);
+			Velocities[i] = FVector3f(CPUParticles[i].Velocity);
+		}
 	}
 
-	if (!ParticlesPtr || ParticlesPtr->Num() == 0)
+	if (Positions.Num() == 0)
 	{
 		ISMComponent->ClearInstances();
 		return;
 	}
 
-	const TArray<FFluidParticle>& SimParticles = *ParticlesPtr;
-
 	if (bShouldLog)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("=== ISM Debug: Particles=%d, Registered=%d, Visible=%d, Mesh=%s, Material=%s, InstanceCount=%d ==="),
-			SimParticles.Num(),
+			Positions.Num(),
 			ISMComponent->IsRegistered() ? 1 : 0,
 			ISMComponent->IsVisible() ? 1 : 0,
 			ISMComponent->GetStaticMesh() ? TEXT("OK") : TEXT("NULL"),
@@ -138,7 +150,7 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 	}
 
 	// Limit number of particles to render
-	int32 NumInstances = FMath::Min(SimParticles.Num(), MaxRenderParticles);
+	int32 NumInstances = FMath::Min(Positions.Num(), MaxRenderParticles);
 
 	// Clear existing instances and preallocate memory
 	ISMComponent->ClearInstances();
@@ -155,20 +167,24 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 	float ScaleFactor = ParticleRenderRadius / 50.0f;
 	FVector ScaleVec(ScaleFactor, ScaleFactor, ScaleFactor);
 
+	// Check if velocities available
+	const bool bHasVelocities = Velocities.Num() == Positions.Num();
+
 	// Add each particle as instance
 	for (int32 i = 0; i < NumInstances; ++i)
 	{
-		const FFluidParticle& Particle = SimParticles[i];
+		const FVector3f& Position = Positions[i];
+		const FVector3f Velocity = bHasVelocities ? Velocities[i] : FVector3f::ZeroVector;
 
 		// Create transform
 		FTransform InstanceTransform;
-		InstanceTransform.SetLocation(Particle.Position);
+		InstanceTransform.SetLocation(FVector(Position));
 		InstanceTransform.SetScale3D(ScaleVec);
 
 		// Velocity-based rotation (optional)
-		if (bRotateByVelocity && !Particle.Velocity.IsNearlyZero())
+		if (bRotateByVelocity && bHasVelocities && !Velocity.IsNearlyZero())
 		{
-			FRotator Rotation = Particle.Velocity.ToOrientationRotator();
+			FRotator Rotation = FVector(Velocity).ToOrientationRotator();
 			InstanceTransform.SetRotation(Rotation.Quaternion());
 		}
 
@@ -176,9 +192,9 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 		ISMComponent->AddInstance(InstanceTransform, false);
 
 		// Velocity-based color (optional)
-		if (bColorByVelocity)
+		if (bColorByVelocity && bHasVelocities)
 		{
-			float VelocityMagnitude = Particle.Velocity.Size();
+			float VelocityMagnitude = Velocity.Size();
 			float T = FMath::Clamp(VelocityMagnitude / MaxVelocityForColor, 0.0f, 1.0f);
 			FLinearColor Color = FMath::Lerp(MinVelocityColor, MaxVelocityColor, T);
 

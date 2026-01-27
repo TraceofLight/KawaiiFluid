@@ -186,7 +186,6 @@ void FGPUFluidSimulator::Release()
 	MaxParticleCount = 0;
 	CurrentParticleCount = 0;
 	bHasValidGPUResults.store(false);
-	ReadbackGPUParticles.Empty();
 	CachedGPUParticles.Empty();
 	PersistentParticleBuffer = nullptr;
 
@@ -659,18 +658,11 @@ void FGPUFluidSimulator::EndFrame()
 		{
 			SCOPED_DRAW_EVENT(RHICmdList, GPUFluid_EndFrame);
 
-			// Clear stale ReadbackGPUParticles if despawn caused count to become 0
-			if (Self->CurrentParticleCount == 0 && Self->ReadbackGPUParticles.Num() > 0)
+			// Cleanup despawn tracking when particles become 0
+			// This allows reusing the same IDs immediately after a full clear
+			if (Self->CurrentParticleCount == 0 && Self->SpawnManager.IsValid())
 			{
-				Self->ReadbackGPUParticles.Empty();
-				UE_LOG(LogGPUFluidSimulator, Log, TEXT("EndFrame: Cleared stale ReadbackGPUParticles (CurrentCount=0)"));
-
-				// [Critial Fix] Cleanup despawn tracking when particles are 0.
-				// This allows reusing the same IDs immediately after a full clear.
-				if (Self->SpawnManager.IsValid())
-				{
-					Self->SpawnManager->CleanupCompletedRequests(TArray<int32>());
-				}
+				Self->SpawnManager->CleanupCompletedRequests(TArray<int32>());
 			}
 
 			// Reset NextParticleID when particle count is 0 (prevents overflow)
@@ -1690,7 +1682,7 @@ void FGPUFluidSimulator::AddDespawnByIDRequests(const TArray<int32>& ParticleIDs
 	}
 }
 
-bool FGPUFluidSimulator::GetReadbackGPUParticles(TArray<FGPUFluidParticle>& OutParticles)
+bool FGPUFluidSimulator::GetParticlePositionsAndIDs(TArray<FVector3f>& OutPositions, TArray<int32>& OutParticleIDs, TArray<int32>& OutSourceIDs)
 {
 	if (!bHasValidGPUResults.load())
 	{
@@ -1699,12 +1691,33 @@ bool FGPUFluidSimulator::GetReadbackGPUParticles(TArray<FGPUFluidParticle>& OutP
 
 	FScopeLock Lock(&BufferLock);
 
-	if (ReadbackGPUParticles.Num() == 0)
+	if (CachedParticlePositions.Num() == 0 || CachedAllParticleIDs.Num() == 0)
 	{
 		return false;
 	}
 
-	OutParticles = ReadbackGPUParticles;
+	OutPositions = CachedParticlePositions;
+	OutParticleIDs = CachedAllParticleIDs;
+	OutSourceIDs = CachedParticleSourceIDs;
+	return true;
+}
+
+bool FGPUFluidSimulator::GetParticlePositionsAndVelocities(TArray<FVector3f>& OutPositions, TArray<FVector3f>& OutVelocities)
+{
+	if (!bHasValidGPUResults.load())
+	{
+		return false;
+	}
+
+	FScopeLock Lock(&BufferLock);
+
+	if (CachedParticlePositions.Num() == 0)
+	{
+		return false;
+	}
+
+	OutPositions = CachedParticlePositions;
+	OutVelocities = CachedParticleVelocities;  // May be empty if ISM not enabled
 	return true;
 }
 
@@ -2269,16 +2282,8 @@ void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
 		}
 	);
 
-	// Also populate readback data immediately
-	// Reason: CreateImmediatePersistentBuffer uploads directly to GPU without simulation,
-	// so simulation-based readback doesn't exist yet. For GetReadbackGPUParticles() to work,
-	// ReadbackGPUParticles and bHasValidGPUResults are needed.
-	// Without this: Clear, Despawn, and other readback-dependent features won't work
-	{
-		FScopeLock Lock(&BufferLock);
-		ReadbackGPUParticles = CachedGPUParticles;
-		bHasValidGPUResults.store(true);
-	}
+	// Mark as valid (sync readback functions will read from GPU directly when needed)
+	bHasValidGPUResults.store(true);
 
 
 	// Initialize SourceCounter (level load doesn't go through spawn shader, so initialize directly)
@@ -2332,13 +2337,8 @@ void FGPUFluidSimulator::CreateImmediatePersistentBufferFromCopy(const TArray<FG
 		}
 	);
 
-	// Set readback data (lock needed - can be read from other threads)
-	// InParticles is still valid (const ref)
-	{
-		FScopeLock Lock(&BufferLock);
-		ReadbackGPUParticles = InParticles;
-		bHasValidGPUResults.store(true);
-	}
+	// Mark as valid (sync readback functions will read from GPU directly when needed)
+	bHasValidGPUResults.store(true);
 
 	// Initialize SourceCounter (level load doesn't go through spawn shader, so initialize directly)
 	// InParticles is still valid (const ref)
@@ -2371,11 +2371,67 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FFluidParticle>& OutCPUParticl
 		return;
 	}
 
-	FScopeLock Lock(&BufferLock);
+	// Perform synchronous readback for Save/Load
+	TArray<FGPUFluidParticle> ParticleBuffer;
+	int32 Count = 0;
 
-	// Read from separate readback buffer (not CachedGPUParticles)
-	const int32 Count = ReadbackGPUParticles.Num();
-	if (Count == 0)
+	if (PersistentParticleBuffer.IsValid())
+	{
+
+		Count = CurrentParticleCount;
+		const int32 DataSize = Count * sizeof(FGPUFluidParticle);
+		ParticleBuffer.SetNum(Count);
+		FGPUFluidParticle* DestPtr = ParticleBuffer.GetData();
+		bool bSuccess = false;
+
+		// Use FRHIGPUBufferReadback for proper GPU->CPU transfer
+		FRHIGPUBufferReadback* SyncReadback = new FRHIGPUBufferReadback(TEXT("DownloadParticles_SyncReadback"));
+
+		ENQUEUE_RENDER_COMMAND(SyncReadbackEnqueue)(
+			[this, SyncReadback, DestPtr, DataSize, &bSuccess](FRHICommandListImmediate& RHICmdList)
+			{
+				if (!PersistentParticleBuffer.IsValid())
+				{
+					return;
+				}
+
+				FRHIBuffer* Buffer = PersistentParticleBuffer->GetRHI();
+				if (!Buffer)
+				{
+					return;
+				}
+
+				// Enqueue copy and immediately submit + flush GPU
+				SyncReadback->EnqueueCopy(RHICmdList, Buffer, DataSize);
+				RHICmdList.SubmitCommandsAndFlushGPU();
+				RHICmdList.BlockUntilGPUIdle();
+
+				// Now readback should be ready
+				if (SyncReadback->IsReady())
+				{
+					const void* ReadbackData = SyncReadback->Lock(DataSize);
+					if (ReadbackData)
+					{
+						FMemory::Memcpy(DestPtr, ReadbackData, DataSize);
+						bSuccess = true;
+					}
+					SyncReadback->Unlock();
+				}
+			}
+		);
+		FlushRenderingCommands();
+
+		if (!bSuccess)
+		{
+			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("DownloadParticles: Sync readback failed"));
+			ParticleBuffer.Empty();
+			Count = 0;
+		}
+
+		delete SyncReadback;
+	}
+
+	if (Count == 0 || ParticleBuffer.Num() == 0)
 	{
 		return;
 	}
@@ -2392,7 +2448,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FFluidParticle>& OutCPUParticl
 	static int32 DebugFrameCounter = 0;
 	if (DebugFrameCounter++ % 60 == 0)
 	{
-		const FGPUFluidParticle& P = ReadbackGPUParticles[0];
+		const FGPUFluidParticle& P = ParticleBuffer[0];
 		UE_LOG(LogGPUFluidSimulator, Log, TEXT("DownloadParticles: GPUCount=%d, CPUCount=%d, Readback[0] Pos=(%.2f, %.2f, %.2f)"),
 			Count, OutCPUParticles.Num(), P.Position.X, P.Position.Y, P.Position.Z);
 	}
@@ -2405,7 +2461,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FFluidParticle>& OutCPUParticl
 
 	for (int32 i = 0; i < Count; ++i)
 	{
-		const FGPUFluidParticle& GPUParticle = ReadbackGPUParticles[i];
+		const FGPUFluidParticle& GPUParticle = ParticleBuffer[i];
 		if (int32* CPUIndex = ParticleIDToIndex.Find(GPUParticle.ParticleID))
 		{
 			ConvertFromGPU(OutCPUParticles[*CPUIndex], GPUParticle);
@@ -2455,75 +2511,8 @@ bool FGPUFluidSimulator::GetAllGPUParticles(TArray<FFluidParticle>& OutParticles
 		return false;
 	}
 
-	FScopeLock Lock(&BufferLock);
-
-	// Read from readback buffer
-	const int32 Count = ReadbackGPUParticles.Num();
-	if (Count == 0)
-	{
-		return false;
-	}
-
-	// Create new particles from GPU data (no ParticleID matching required)
-	OutParticles.SetNum(Count);
-
-	for (int32 i = 0; i < Count; ++i)
-	{
-		const FGPUFluidParticle& GPUParticle = ReadbackGPUParticles[i];
-		FFluidParticle& OutParticle = OutParticles[i];
-
-		// Initialize with default values
-		OutParticle = FFluidParticle();
-
-		// Convert GPU data to CPU particle
-		FVector NewPosition = FVector(GPUParticle.Position);
-		FVector NewVelocity = FVector(GPUParticle.Velocity);
-
-		// Validate data
-		const float MaxValidValue = 1000000.0f;
-		bool bValidPosition = !NewPosition.ContainsNaN() && NewPosition.GetAbsMax() < MaxValidValue;
-		bool bValidVelocity = !NewVelocity.ContainsNaN() && NewVelocity.GetAbsMax() < MaxValidValue;
-
-		if (bValidPosition)
-		{
-			OutParticle.Position = NewPosition;
-			OutParticle.PredictedPosition = FVector(GPUParticle.PredictedPosition);
-		}
-
-		if (bValidVelocity)
-		{
-			OutParticle.Velocity = NewVelocity;
-		}
-
-		OutParticle.Mass = FMath::IsFinite(GPUParticle.Mass) ? GPUParticle.Mass : 1.0f;
-		OutParticle.Density = FMath::IsFinite(GPUParticle.Density) ? GPUParticle.Density : 0.0f;
-		OutParticle.Lambda = FMath::IsFinite(GPUParticle.Lambda) ? GPUParticle.Lambda : 0.0f;
-		OutParticle.ParticleID = GPUParticle.ParticleID;
-		OutParticle.SourceID = GPUParticle.SourceID;
-
-		// Unpack flags
-		OutParticle.bIsAttached = (GPUParticle.Flags & EGPUParticleFlags::IsAttached) != 0;
-		OutParticle.bIsSurfaceParticle = (GPUParticle.Flags & EGPUParticleFlags::IsSurface) != 0;
-		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
-		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
-		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
-		OutParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;
-
-		// Set neighbor count (resize array so NeighborIndices.Num() returns the count)
-		// GPU stores count only, not actual indices (computed on-the-fly during spatial hash queries)
-		if (GPUParticle.NeighborCount > 0)
-		{
-			OutParticle.NeighborIndices.SetNum(GPUParticle.NeighborCount);
-		}
-	}
-
-	static int32 DebugFrameCounter = 0;
-	if (++DebugFrameCounter % 60 == 0)
-	{
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("GetAllGPUParticles: Retrieved %d particles"), Count);
-	}
-
-	return true;
+	// Use sync readback (acceptable for debug/stats features that don't run every frame)
+	return GetAllGPUParticlesSync(OutParticles);
 }
 
 bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FFluidParticle>& OutParticles)
@@ -2639,15 +2628,70 @@ bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FFluidPar
 		return false;
 	}
 
-	FScopeLock Lock(&BufferLock);
+	// Perform synchronous readback for Save/Load
+	TArray<FGPUFluidParticle> ParticleBuffer;
+	int32 Count = 0;
 
-	if (ReadbackGPUParticles.Num() == 0)
+	if (PersistentParticleBuffer.IsValid())
+	{
+
+		Count = CurrentParticleCount;
+		const int32 DataSize = Count * sizeof(FGPUFluidParticle);
+		ParticleBuffer.SetNum(Count);
+		FGPUFluidParticle* DestPtr = ParticleBuffer.GetData();
+		bool bSuccess = false;
+
+		FRHIGPUBufferReadback* SyncReadback = new FRHIGPUBufferReadback(TEXT("GetParticlesBySourceID_SyncReadback"));
+
+		ENQUEUE_RENDER_COMMAND(SyncReadbackEnqueue)(
+			[this, SyncReadback, DestPtr, DataSize, &bSuccess](FRHICommandListImmediate& RHICmdList)
+			{
+				if (!PersistentParticleBuffer.IsValid())
+				{
+					return;
+				}
+
+				FRHIBuffer* Buffer = PersistentParticleBuffer->GetRHI();
+				if (!Buffer)
+				{
+					return;
+				}
+
+				SyncReadback->EnqueueCopy(RHICmdList, Buffer, DataSize);
+				RHICmdList.SubmitCommandsAndFlushGPU();
+				RHICmdList.BlockUntilGPUIdle();
+
+				if (SyncReadback->IsReady())
+				{
+					const void* ReadbackData = SyncReadback->Lock(DataSize);
+					if (ReadbackData)
+					{
+						FMemory::Memcpy(DestPtr, ReadbackData, DataSize);
+						bSuccess = true;
+					}
+					SyncReadback->Unlock();
+				}
+			}
+		);
+		FlushRenderingCommands();
+
+		if (!bSuccess)
+		{
+			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("GetParticlesBySourceID: Sync readback failed"));
+			ParticleBuffer.Empty();
+			Count = 0;
+		}
+
+		delete SyncReadback;
+	}
+
+	if (Count == 0)
 	{
 		return false;
 	}
 
 	// Filter by SourceID
-	for (const FGPUFluidParticle& GPUParticle : ReadbackGPUParticles)
+	for (const FGPUFluidParticle& GPUParticle : ParticleBuffer)
 	{
 		if (GPUParticle.SourceID != SourceID)
 		{
@@ -3179,15 +3223,23 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 		}
 
 		// Pre-allocate data arrays (will be filled in parallel)
-		// Position/Velocity/NeighborCount only when shadow readback enabled
+		// Position/SourceID are ALWAYS copied (needed for lightweight despawn API)
+		// Velocity only when ISM rendering enabled
+		// NeighborCount only when shadow readback enabled
 		const bool bNeedShadowData = bShadowReadbackEnabled.load();
+		const bool bNeedVelocity = bFullReadbackEnabled.load();  // ISM needs velocity
 		TArray<FVector3f> NewPositions;
+		TArray<int32> NewSourceIDs;
 		TArray<FVector3f> NewVelocities;
 		TArray<uint32> NewNeighborCounts;
+		NewPositions.SetNumUninitialized(ParticleCount);   // Always needed for despawn
+		NewSourceIDs.SetNumUninitialized(ParticleCount);   // Always needed for despawn
+		if (bNeedVelocity)
+		{
+			NewVelocities.SetNumUninitialized(ParticleCount);  // ISM rendering
+		}
 		if (bNeedShadowData)
 		{
-			NewPositions.SetNumUninitialized(ParticleCount);
-			NewVelocities.SetNumUninitialized(ParticleCount);
 			NewNeighborCounts.SetNumUninitialized(ParticleCount);
 		}
 
@@ -3212,11 +3264,19 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 					LocalSourceArrays[P.SourceID].Add(P.ParticleID);
 				}
 
-				// Position/Velocity/NeighborCount only when shadow readback enabled
+				// Position and SourceID always copied (needed for lightweight despawn API)
+				NewPositions[i] = P.Position;
+				NewSourceIDs[i] = P.SourceID;
+
+				// Velocity only when ISM rendering enabled
+				if (bNeedVelocity)
+				{
+					NewVelocities[i] = P.Velocity;
+				}
+
+				// NeighborCount only when shadow readback enabled
 				if (bNeedShadowData)
 				{
-					NewPositions[i] = P.Position;
-					NewVelocities[i] = P.Velocity;
 					NewNeighborCounts[i] = P.NeighborCount;
 				}
 			}
@@ -3235,10 +3295,10 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 				NewAllParticleIDs.Append(MoveTemp(ChunkAllIDs[c]));
 			}
 
-			// Merge SourceID arrays - first chunk uses MoveTemp, rest uses Append
-			for (int32 SourceID = 0; SourceID < MaxSources; ++SourceID)
+			// Merge SourceID arrays - chunk-first loop order for cache efficiency
+			for (int32 c = 0; c < NumChunks; ++c)
 			{
-				for (int32 c = 0; c < NumChunks; ++c)
+				for (int32 SourceID = 0; SourceID < MaxSources; ++SourceID)
 				{
 					if (ChunkSourceArrays[c][SourceID].Num() > 0)
 					{
@@ -3261,17 +3321,22 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 			FScopeLock Lock(&BufferLock);
 			CachedSourceIDToParticleIDs = MoveTemp(NewSourceIDArrays);
 			CachedAllParticleIDs = MoveTemp(NewAllParticleIDs);
+			CachedParticlePositions = MoveTemp(NewPositions);    // Always available for despawn API
+			CachedParticleSourceIDs = MoveTemp(NewSourceIDs);    // Always available for despawn API
 
-			// Copy full particle data for GetReadbackGPUParticles
-			ReadbackGPUParticles.SetNumUninitialized(ParticleCount);
-			FMemory::Memcpy(ReadbackGPUParticles.GetData(), ParticleData, ParticleCount * sizeof(FGPUFluidParticle));
+			// Velocity for ISM rendering (lightweight API)
+			if (bNeedVelocity)
+			{
+				CachedParticleVelocities = MoveTemp(NewVelocities);
+			}
+
 			bHasValidGPUResults.store(true);
 
-			// Position/Velocity/NeighborCount only when shadow readback enabled
+			// NeighborCount only when shadow readback enabled
 			if (bNeedShadowData)
 			{
-				ReadyShadowPositions = MoveTemp(NewPositions);
-				ReadyShadowVelocities = MoveTemp(NewVelocities);
+				ReadyShadowPositions = CachedParticlePositions;  // Share with despawn data
+				ReadyShadowVelocities = CachedParticleVelocities;  // Share with ISM data
 				ReadyShadowNeighborCounts = MoveTemp(NewNeighborCounts);
 				ReadyShadowPositionsFrame.store(StatsReadbackFrameNumbers[ReadIdx]);
 			}
