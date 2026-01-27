@@ -299,7 +299,8 @@ protected:
 		const FKawaiiFluidSimulationParams& Params,
 		const FBox& QueryBounds,
 		float DefaultFriction,
-		float DefaultRestitution
+		float DefaultRestitution,
+		const TSet<const AActor*>& FluidColliderOwners
 	);
 
 protected:

@@ -741,6 +741,16 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 		// Check if adhesion is enabled (use bone-aware export path)
 		const bool bUseGPUAdhesion = (Preset->Adhesion > 0.0f || Preset->AdhesionVelocityStrength > 0.0f);
 
+		// Collect FluidCollider owner actors to exclude from World Collision query (avoid duplicate collision)
+		TSet<const AActor*> FluidColliderOwners;
+		for (const UFluidCollider* Collider : Params.Colliders)
+		{
+			if (Collider && Collider->GetOwner())
+			{
+				FluidColliderOwners.Add(Collider->GetOwner());
+			}
+		}
+
 		for (UFluidCollider* Collider : Params.Colliders)
 		{
 			if (!Collider || !Collider->IsColliderEnabled())
@@ -798,6 +808,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 		}
 
 		// Auto-collect Simple Collision from StaticMeshes within Simulation Volume
+		// FluidColliderOwners are excluded to avoid duplicate collision processing
 		{
 			TRACE_CPUPROFILER_EVENT_SCOPE(SimGPU_WorldCollision);
 			AppendGPUWorldCollisionPrimitives(
@@ -805,7 +816,8 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 				Params,
 				GPUWorldQueryBounds,
 				DefaultFriction,
-				DefaultRestitution
+				DefaultRestitution,
+				FluidColliderOwners
 			);
 		}
 
@@ -1311,7 +1323,8 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 	const FKawaiiFluidSimulationParams& Params,
 	const FBox& QueryBounds,
 	float DefaultFriction,
-	float DefaultRestitution)
+	float DefaultRestitution,
+	const TSet<const AActor*>& FluidColliderOwners)
 {
 	// Diagnostic log (every 60 frames)
 	static int32 DiagLogCounter = 0;
@@ -1415,6 +1428,12 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 			}
 
 			const AActor* Owner = PrimComp->GetOwner();
+
+			// Skip if this actor has FluidCollider (already processed, avoid duplicate collision)
+			if (Owner && FluidColliderOwners.Contains(Owner))
+			{
+				continue;
+			}
 
 			const UStaticMeshComponent* StaticMeshComp = Cast<UStaticMeshComponent>(PrimComp);
 			if (!StaticMeshComp)
