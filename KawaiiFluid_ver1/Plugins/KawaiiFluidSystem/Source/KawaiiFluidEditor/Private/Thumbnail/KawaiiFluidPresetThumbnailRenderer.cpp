@@ -47,7 +47,7 @@ public:
 		AddComponent(PreviewMeshComponent, FTransform::Identity);
 
 		// 2. Material setup (load default preview material)
-		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/KawaiiFluidSystem/PreviewMat"));
+		UMaterialInterface* BaseMat = LoadObject<UMaterialInterface>(nullptr, TEXT("/KawaiiFluidSystem/Material/ThumbnailMaterial"));
 		if (BaseMat)
 		{
 			ThumbnailMID = UMaterialInstanceDynamic::Create(BaseMat, GetTransientPackage());
@@ -85,7 +85,7 @@ public:
 			else
 			{
 				static UTexture2D* DefaultWhite = LoadObject<UTexture2D>(nullptr,
-					TEXT("/KawaiiFluidSystem/PreviewDefaultTexture"));
+					TEXT("/KawaiiFluidSystem/Textures/ThumbnailDefaultTexture"));
 				ThumbnailMID->SetTextureParameterValue(TEXT("FluidTexture"), DefaultWhite);
 			}
 		}
