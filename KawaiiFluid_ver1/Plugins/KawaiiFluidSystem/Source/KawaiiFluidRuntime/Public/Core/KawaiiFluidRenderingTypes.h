@@ -64,6 +64,11 @@ enum class EFluidDebugVisualization : uint8
 	/** Color by density value */
 	Density			UMETA(DisplayName = "Density"),
 
+	//--- Boundary Debug ---
+
+	/** Color by IS_ATTACHED flag (Green = attached, Blue = free) */
+	IsAttached		UMETA(DisplayName = "Is Attached (Boundary)"),
+
 	//--- Legacy (deprecated, use ZOrderArrayIndex/ZOrderMortonCode instead) ---
 	ArrayIndex		UMETA(DisplayName = "Array Index (Legacy)", Hidden),
 	MortonCode		UMETA(DisplayName = "Morton Code (Legacy)", Hidden),

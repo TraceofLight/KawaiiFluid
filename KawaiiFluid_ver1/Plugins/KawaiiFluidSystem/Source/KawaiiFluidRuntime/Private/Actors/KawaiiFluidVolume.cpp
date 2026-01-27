@@ -288,12 +288,14 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 			// Determine if readback is needed:
 			// 1. ISM Shadow enabled (needs position/anisotropy data for ISM)
 			// 2. SplashVFX assigned (needs velocity/neighbor data)
+			// 3. Debug visualization enabled (needs particle flags for debug draw)
 			UFluidRendererSubsystem* RendererSubsystem = World->GetSubsystem<UFluidRendererSubsystem>();
-			const bool bNeedShadow = RendererSubsystem && 
-			                         RendererSubsystem->bEnableISMShadow && 
+			const bool bNeedShadow = RendererSubsystem &&
+			                         RendererSubsystem->bEnableISMShadow &&
 			                         VolumeComponent->bEnableShadow;
 			const bool bNeedVFX = VolumeComponent->SplashVFX != nullptr;
-			const bool bNeedReadback = bNeedShadow || bNeedVFX;
+			const bool bNeedDebug = VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::DebugDraw;
+			const bool bNeedReadback = bNeedShadow || bNeedVFX || bNeedDebug;
 			
 			// Only enable readback when actually needed (avoids GPU barrier overhead)
 			GPUSimulator->SetShadowReadbackEnabled(bNeedReadback);
@@ -1114,7 +1116,7 @@ void AKawaiiFluidVolume::DrawDebugParticles()
 	for (int32 i = 0; i < TotalCount; ++i)
 	{
 		const FFluidParticle& P = Particles[i];
-		FColor Color = ComputeDebugDrawColor(i, TotalCount, P.Position, P.Density);
+		FColor Color = ComputeDebugDrawColor(i, TotalCount, P.Position, P.Density, P.bNearBoundary);
 		DrawDebugPoint(World, P.Position, DebugPointSize, Color, false, -1.0f, 0);
 	}
 }
@@ -1486,7 +1488,7 @@ void AKawaiiFluidVolume::GenerateEditorBoundaryParticlesPreview()
 }
 #endif
 
-FColor AKawaiiFluidVolume::ComputeDebugDrawColor(int32 ParticleIndex, int32 TotalCount, const FVector& InPosition, float Density) const
+FColor AKawaiiFluidVolume::ComputeDebugDrawColor(int32 ParticleIndex, int32 TotalCount, const FVector& InPosition, float Density, bool bNearBoundary) const
 {
 	if (!VolumeComponent)
 	{
@@ -1555,6 +1557,20 @@ FColor AKawaiiFluidVolume::ComputeDebugDrawColor(int32 ParticleIndex, int32 Tota
 			const float RestDensity = Preset ? Preset->Density : 1000.0f;
 			const float NormalizedDensity = FMath::Clamp(Density / (RestDensity * 2.0f), 0.0f, 1.0f);
 			return FLinearColor::LerpUsingHSV(FLinearColor::Blue, FLinearColor::Red, NormalizedDensity).ToFColor(true);
+		}
+
+	case EFluidDebugVisualization::IsAttached:
+		{
+			// Green = near boundary, Blue = free particle
+			// This visualizes NEAR_BOUNDARY flag which is dynamically set by GPU BoundaryAdhesion pass
+			if (bNearBoundary)
+			{
+				return FColor(50, 255, 50, 255);  // Bright green for near boundary
+			}
+			else
+			{
+				return FColor(50, 100, 255, 255);  // Blue for free particles
+			}
 		}
 
 	default:

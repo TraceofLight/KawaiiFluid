@@ -345,13 +345,14 @@ void BoundaryAdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	//=========================================================================
 	// Position-Based Follow: Move particles with bone movement
 	// Directly adjusts position by bone delta (not force-based)
+	// [DISABLED FOR TESTING] - 회전 시 탈락 문제 테스트
 	//=========================================================================
-	if (totalDeltaWeight > SMALL_NUMBER)
-	{
-		float3 avgBoneDelta = totalBoneDelta / totalDeltaWeight;
-		particle.Position += avgBoneDelta;
-		particle.PredictedPosition += avgBoneDelta;
-	}
+	// if (totalDeltaWeight > SMALL_NUMBER)
+	// {
+	// 	float3 avgBoneDelta = totalBoneDelta / totalDeltaWeight;
+	// 	particle.Position += avgBoneDelta;
+	// 	particle.PredictedPosition += avgBoneDelta;
+	// }
 
 	// Note: Force normalization removed to allow proper force accumulation
 	// Previously divided by a weight sum which caused weak adhesion with many boundary particles
@@ -416,6 +417,20 @@ void BoundaryAdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	// Apply as velocity change (F = ma, dv = F/m * dt)
 	particle.Velocity += totalForce / particle.Mass * DeltaTime;
+
+	//=========================================================================
+	// Set NEAR_BOUNDARY flag if particle is near boundary (for debug visualization)
+	// This allows debug view to show which particles are interacting with boundary
+	// Note: Uses NEAR_BOUNDARY flag (not IS_ATTACHED) so physics is not skipped
+	//=========================================================================
+	if (normalWeightSum > SMALL_NUMBER)
+	{
+		particle.Flags = SetFlag(particle.Flags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY);
+	}
+	else
+	{
+		particle.Flags = ClearFlag(particle.Flags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY);
+	}
 
 	//=========================================================================
 	// Coulomb Friction Model (replaces old gravity cancellation)

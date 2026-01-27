@@ -1659,13 +1659,13 @@ void UKawaiiFluidComponent::DrawDebugParticles()
 	for (int32 i = 0; i < NumParticles; ++i)
 	{
 		const FFluidParticle& Particle = Particles[i];
-		FColor Color = ComputeDebugDrawColor(i, NumParticles, Particle.Position, Particle.Density);
+		FColor Color = ComputeDebugDrawColor(i, NumParticles, Particle.Position, Particle.Density, Particle.bNearBoundary);
 
 		DrawDebugPoint(World, Particle.Position, PointSize, Color, false, -1.0f, 0);
 	}
 }
 
-FColor UKawaiiFluidComponent::ComputeDebugDrawColor(int32 ParticleIndex, int32 TotalCount, const FVector& Position, float Density) const
+FColor UKawaiiFluidComponent::ComputeDebugDrawColor(int32 ParticleIndex, int32 TotalCount, const FVector& Position, float Density, bool bNearBoundary) const
 {
 	switch (DebugVisualizationType)
 	{
@@ -1733,6 +1733,20 @@ FColor UKawaiiFluidComponent::ComputeDebugDrawColor(int32 ParticleIndex, int32 T
 		{
 			float T = (NormDensity - 0.5f) * 2.0f;
 			return FColor((uint8)(T * 255), (uint8)((1.0f - T) * 255), 0, 255);
+		}
+	}
+
+	case EFluidDebugVisualization::IsAttached:
+	{
+		// Green = near boundary, Blue = free particle
+		// This visualizes NEAR_BOUNDARY flag which is dynamically set by GPU BoundaryAdhesion pass
+		if (bNearBoundary)
+		{
+			return FColor(50, 255, 50, 255);  // Bright green for near boundary
+		}
+		else
+		{
+			return FColor(50, 100, 255, 255);  // Blue for free particles
 		}
 	}
 

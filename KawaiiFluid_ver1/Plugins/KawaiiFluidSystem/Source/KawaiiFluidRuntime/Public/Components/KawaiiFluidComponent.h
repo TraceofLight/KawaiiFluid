@@ -609,7 +609,7 @@ private:
 #endif
 
 	/** Compute debug color for a particle */
-	FColor ComputeDebugDrawColor(int32 ParticleIndex, int32 TotalCount, const FVector& Position, float Density) const;
+	FColor ComputeDebugDrawColor(int32 ParticleIndex, int32 TotalCount, const FVector& Position, float Density, bool bNearBoundary = false) const;
 
 	/** Cached bounds for debug visualization (auto-computed) */
 	FVector DebugDrawBoundsMin = FVector::ZeroVector;

@@ -1534,6 +1534,8 @@ public:
 		SHADER_PARAMETER(FVector3f, BoundaryAABBMin)
 		SHADER_PARAMETER(FVector3f, BoundaryAABBMax)
 		SHADER_PARAMETER(int32, bUseBoundaryAABBCulling)
+		// Attached particle counter for GPU readback (statistics/logging)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, AttachedParticleCount)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;

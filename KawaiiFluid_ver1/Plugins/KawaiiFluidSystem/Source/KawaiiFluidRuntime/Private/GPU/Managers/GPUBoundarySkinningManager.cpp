@@ -1076,6 +1076,19 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 			PassParameters->BoundaryAABBMax = FVector3f(FLT_MAX);
 		}
 
+		// =========================================================================
+		// Attached Particle Counter for GPU Statistics
+		// Counts how many particles have IS_ATTACHED flag set dynamically
+		// =========================================================================
+		FRDGBufferRef AttachedCountBuffer = GraphBuilder.CreateBuffer(
+			FRDGBufferDesc::CreateBufferDesc(sizeof(uint32), 1),
+			TEXT("GPUFluid.AttachedParticleCount"));
+
+		// Clear counter to 0
+		AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(AttachedCountBuffer, PF_R32_UINT), 0u);
+
+		PassParameters->AttachedParticleCount = GraphBuilder.CreateUAV(AttachedCountBuffer, PF_R32_UINT);
+
 		// Debug: Log adhesion pass parameters (every 60 frames)
 		static int32 AdhesionDebugCounter = 0;
 		if (++AdhesionDebugCounter % 60 == 1)
@@ -1099,6 +1112,9 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 			PassParameters,
 			FIntVector(NumGroups, 1, 1)
 		);
+
+		// Note: IS_ATTACHED particles are visually debugged via cyan color in rendering
+		// See particle rendering shader for visual debugging
 	}
 }
 

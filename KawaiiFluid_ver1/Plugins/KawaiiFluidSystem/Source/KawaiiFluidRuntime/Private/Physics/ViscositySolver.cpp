@@ -11,7 +11,6 @@ namespace ViscosityConstants
 }
 
 FViscositySolver::FViscositySolver()
-	: SpringThreshold(0.8f)
 {
 }
 
@@ -95,105 +94,4 @@ void FViscositySolver::ApplyXSPH(TArray<FFluidParticle>& Particles, float Viscos
 	{
 		Particles[i].Velocity = NewVelocities[i];
 	}
-}
-
-void FViscositySolver::ApplyViscoelasticSprings(TArray<FFluidParticle>& Particles, float SpringStiffness, float DeltaTime)
-{
-	if (SpringStiffness <= 0.0f || Springs.Num() == 0)
-	{
-		return;
-	}
-
-	for (const FSpringConnection& Spring : Springs)
-	{
-		if (!Particles.IsValidIndex(Spring.ParticleA) || !Particles.IsValidIndex(Spring.ParticleB))
-		{
-			continue;
-		}
-
-		FFluidParticle& ParticleA = Particles[Spring.ParticleA];
-		FFluidParticle& ParticleB = Particles[Spring.ParticleB];
-
-		FVector Delta = ParticleA.Position - ParticleB.Position;
-		float CurrentLength = Delta.Size();
-
-		if (CurrentLength < KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		// Displacement
-		float Displacement = CurrentLength - Spring.RestLength;
-
-		// Spring force: F = -k * x
-		FVector Force = SpringStiffness * Displacement * (Delta / CurrentLength);
-
-		// Apply force to velocity (divide by mass)
-		ParticleA.Velocity -= Force * DeltaTime / ParticleA.Mass;
-		ParticleB.Velocity += Force * DeltaTime / ParticleB.Mass;
-	}
-}
-
-void FViscositySolver::UpdateSprings(const TArray<FFluidParticle>& Particles, float SmoothingRadius)
-{
-	// Keep only valid springs
-	Springs.RemoveAll([&](const FSpringConnection& Spring)
-	{
-		if (!Particles.IsValidIndex(Spring.ParticleA) || !Particles.IsValidIndex(Spring.ParticleB))
-		{
-			return true;
-		}
-
-		float Distance = FVector::Dist(
-			Particles[Spring.ParticleA].Position,
-			Particles[Spring.ParticleB].Position
-		);
-
-		// Break spring if too far apart
-		return Distance > SmoothingRadius * 2.0f;
-	});
-
-	// Add new springs (between close neighbors)
-	TSet<uint64> ExistingPairs;
-	for (const FSpringConnection& Spring : Springs)
-	{
-		int32 MinIdx = FMath::Min(Spring.ParticleA, Spring.ParticleB);
-		int32 MaxIdx = FMath::Max(Spring.ParticleA, Spring.ParticleB);
-		ExistingPairs.Add((uint64)MinIdx << 32 | (uint64)MaxIdx);
-	}
-
-	for (int32 i = 0; i < Particles.Num(); ++i)
-	{
-		const FFluidParticle& Particle = Particles[i];
-
-		for (int32 NeighborIdx : Particle.NeighborIndices)
-		{
-			if (NeighborIdx <= i)
-			{
-				continue;
-			}
-
-			const FFluidParticle& Neighbor = Particles[NeighborIdx];
-			float Distance = FVector::Dist(Particle.Position, Neighbor.Position);
-
-			// Spring creation condition
-			if (Distance < SmoothingRadius * SpringThreshold)
-			{
-				int32 MinIdx = FMath::Min(i, NeighborIdx);
-				int32 MaxIdx = FMath::Max(i, NeighborIdx);
-				uint64 PairKey = (uint64)MinIdx << 32 | (uint64)MaxIdx;
-
-				if (!ExistingPairs.Contains(PairKey))
-				{
-					Springs.Add(FSpringConnection(i, NeighborIdx, Distance));
-					ExistingPairs.Add(PairKey);
-				}
-			}
-		}
-	}
-}
-
-void FViscositySolver::ClearSprings()
-{
-	Springs.Empty();
 }

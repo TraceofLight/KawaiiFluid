@@ -30,38 +30,4 @@ public:
 	 */
 	void ApplyXSPH(TArray<FFluidParticle>& Particles, float ViscosityCoeff, float SmoothingRadius);
 
-	/**
-	 * @brief Apply viscoelastic springs (optional - for slime).
-	 * Maintains spring connections between particles for stretch-and-return effects.
-	 *
-	 * @param Particles Particle array
-	 * @param SpringStiffness Spring stiffness
-	 * @param DeltaTime Time step
-	 */
-	void ApplyViscoelasticSprings(TArray<FFluidParticle>& Particles, float SpringStiffness, float DeltaTime);
-
-private:
-	/** Viscoelastic spring connection */
-	struct FSpringConnection
-	{
-		int32 ParticleA;
-		int32 ParticleB;
-		float RestLength;
-
-		FSpringConnection() : ParticleA(-1), ParticleB(-1), RestLength(0.0f) {}
-		FSpringConnection(int32 A, int32 B, float Length) : ParticleA(A), ParticleB(B), RestLength(Length) {}
-	};
-
-	/** Spring connection list */
-	TArray<FSpringConnection> Springs;
-
-	/** Spring creation distance threshold */
-	float SpringThreshold;
-
-public:
-	/** Update spring connections (neighbor-based) */
-	void UpdateSprings(const TArray<FFluidParticle>& Particles, float SmoothingRadius);
-
-	/** Remove all springs */
-	void ClearSprings();
 };

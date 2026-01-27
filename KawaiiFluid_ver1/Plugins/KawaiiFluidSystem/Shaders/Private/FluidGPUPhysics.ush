@@ -49,6 +49,7 @@ bool HasValidSource(int sourceID)
 #define GPU_PARTICLE_FLAG_NEAR_GROUND         (1 << 4)
 #define GPU_PARTICLE_FLAG_HAS_COLLIDED        (1 << 5)
 #define GPU_PARTICLE_FLAG_IS_SLEEPING         (1 << 6)
+#define GPU_PARTICLE_FLAG_NEAR_BOUNDARY       (1 << 7)  // Near boundary particle (for visualization, doesn't skip physics)
 
 
 //=============================================================================

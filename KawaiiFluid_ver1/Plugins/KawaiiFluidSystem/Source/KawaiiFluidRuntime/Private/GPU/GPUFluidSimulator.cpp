@@ -2037,10 +2037,10 @@ void FGPUFluidSimulator::ConvertFromGPU(FFluidParticle& OutCPUParticle, const FG
 	OutCPUParticle.Lambda = FMath::IsFinite(GPUParticle.Lambda) ? GPUParticle.Lambda : OutCPUParticle.Lambda;
 
 	// Unpack flags
+	OutCPUParticle.bIsAttached = (GPUParticle.Flags & EGPUParticleFlags::IsAttached) != 0;
 	OutCPUParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
 	OutCPUParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
-
-	// Note: bIsAttached is not updated from GPU - CPU handles attachment state
+	OutCPUParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;
 }
 
 void FGPUFluidSimulator::UploadParticles(const TArray<FFluidParticle>& CPUParticles, bool bAppend)
@@ -2516,6 +2516,7 @@ bool FGPUFluidSimulator::GetAllGPUParticles(TArray<FFluidParticle>& OutParticles
 		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
 		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
 		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
+		OutParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;
 
 		// Set neighbor count (resize array so NeighborIndices.Num() returns the count)
 		// GPU stores count only, not actual indices (computed on-the-fly during spatial hash queries)
@@ -2625,6 +2626,7 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FFluidParticle>& OutParti
 		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
 		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
 		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
+		OutParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;
 
 		if (GPUParticle.NeighborCount > 0)
 		{
@@ -2692,6 +2694,7 @@ bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FFluidPar
 		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
 		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
 		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
+		OutParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;
 
 		if (GPUParticle.NeighborCount > 0)
 		{

@@ -61,6 +61,9 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 	// Near ground (for reduced adhesion maintenance margin)
 	bool bNearGround;
 
+	// Near boundary particle (for debug visualization, doesn't affect physics)
+	bool bNearBoundary;
+
 	// Particle ID
 	UPROPERTY(BlueprintReadOnly, Category = "Particle")
 	int32 ParticleID;
@@ -109,6 +112,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 		, AttachedSurfaceNormal(FVector::UpVector)
 		, bJustDetached(false)
 		, bNearGround(false)
+		, bNearBoundary(false)
 		, ParticleID(-1)
 		, SourceID(-1)
 		, RestOffset(FVector::ZeroVector)
@@ -133,6 +137,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 		, AttachedSurfaceNormal(FVector::UpVector)
 		, bJustDetached(false)
 		, bNearGround(false)
+		, bNearBoundary(false)
 		, ParticleID(InID)
 		, SourceID(-1)
 		, RestOffset(FVector::ZeroVector)
