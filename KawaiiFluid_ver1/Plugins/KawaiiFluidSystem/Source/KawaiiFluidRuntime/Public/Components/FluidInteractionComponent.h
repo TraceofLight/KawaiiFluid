@@ -520,6 +520,36 @@ public:
 	float BuoyancyDamping = 0.3f;
 
 	/**
+	 * Added Mass coefficient (C_m).
+	 * Simulates the inertia of surrounding fluid when accelerating.
+	 * Higher = more resistance to acceleration = less oscillation.
+	 * Sphere: 0.5, Vertical cylinder: 1.0
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Auto Physics Forces",
+	          meta = (EditCondition = "bEnableAutoPhysicsForces", ClampMin = "0.0", ClampMax = "2.0",
+	                  ToolTip = "Added Mass coefficient.\nSimulates inertia of surrounding fluid.\n0.5 = sphere (default)\n1.0 = vertical cylinder\nHigher = less oscillation"))
+	float AddedMassCoefficient = 0.5f;
+
+	/**
+	 * Angular damping when submerged in fluid.
+	 * Reduces rotation caused by fluid disturbance.
+	 * 0 = no angular damping, 1.0+ = strong damping
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Auto Physics Forces",
+	          meta = (EditCondition = "bEnableAutoPhysicsForces", ClampMin = "0.0", ClampMax = "5.0",
+	                  ToolTip = "Angular damping in fluid.\n0.0 = no damping\n0.5 = light damping\n1.0+ = strong damping"))
+	float FluidAngularDamping = 1.0f;
+
+	/**
+	 * Linear damping when submerged in fluid (relative velocity drag).
+	 * Applies drag based on object-fluid relative velocity.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Interaction|Auto Physics Forces",
+	          meta = (EditCondition = "bEnableAutoPhysicsForces", ClampMin = "0.0", ClampMax = "5.0",
+	                  ToolTip = "Linear damping in fluid.\nApplies drag based on relative velocity.\n0.5 = light, 1.0 = medium, 2.0+ = heavy"))
+	float FluidLinearDamping = 0.5f;
+
+	/**
 	 * Current buoyancy force being applied (read-only, for debugging).
 	 */
 	UPROPERTY(BlueprintReadOnly, Category = "Fluid Interaction|Auto Physics Forces")
@@ -530,6 +560,13 @@ public:
 	 */
 	UPROPERTY(BlueprintReadOnly, Category = "Fluid Interaction|Auto Physics Forces")
 	float EstimatedSubmergedVolume = 0.0f;
+
+	/**
+	 * Estimated buoyancy center offset from object center (cm, read-only).
+	 * Non-zero offset creates righting torque for stability.
+	 */
+	UPROPERTY(BlueprintReadOnly, Category = "Fluid Interaction|Auto Physics Forces")
+	FVector EstimatedBuoyancyCenterOffset = FVector::ZeroVector;
 
 	/**
 	 * Get the current buoyancy force.
@@ -656,6 +693,9 @@ private:
 
 	/** Apply automatic physics forces (buoyancy + drag). Called in TickComponent. */
 	void ApplyAutoPhysicsForces(float DeltaTime);
+
+	/** Previous frame velocity for Added Mass calculation. */
+	FVector PreviousPhysicsVelocity = FVector::ZeroVector;
 
 	//========================================
 	// Boundary Particles (Flex-style Adhesion)

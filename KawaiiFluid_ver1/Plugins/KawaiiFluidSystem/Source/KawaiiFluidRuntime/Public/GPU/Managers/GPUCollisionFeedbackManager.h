@@ -34,7 +34,15 @@ public:
 	// Constants
 	//=========================================================================
 
-	static constexpr int32 MAX_COLLISION_FEEDBACK = 1024;
+	/** Max feedback entries for bone colliders (BoneIndex >= 0) */
+	static constexpr int32 MAX_COLLISION_FEEDBACK = 4096;
+
+	/** Max feedback entries for WorldCollision StaticMesh (BoneIndex < 0, bHasFluidInteraction = 0) */
+	static constexpr int32 MAX_STATICMESH_COLLISION_FEEDBACK = 1024;
+
+	/** Max feedback entries for FluidInteraction StaticMesh (BoneIndex < 0, bHasFluidInteraction = 1) */
+	static constexpr int32 MAX_FLUIDINTERACTION_SM_FEEDBACK = 1024;
+
 	static constexpr int32 NUM_FEEDBACK_BUFFERS = 3;
 	static constexpr int32 MAX_COLLIDER_COUNT = 256;
 
@@ -71,14 +79,26 @@ public:
 	/** Release readback objects */
 	void ReleaseReadbackObjects();
 
-	/** Get or create feedback buffer for RDG pass */
+	/** Get or create feedback buffer for RDG pass (bone colliders) */
 	TRefCountPtr<FRDGPooledBuffer>& GetFeedbackBuffer() { return CollisionFeedbackBuffer; }
 
-	/** Get or create counter buffer for RDG pass */
+	/** Get or create counter buffer for RDG pass (bone colliders) */
 	TRefCountPtr<FRDGPooledBuffer>& GetCounterBuffer() { return CollisionCounterBuffer; }
 
 	/** Get or create contact count buffer for RDG pass */
 	TRefCountPtr<FRDGPooledBuffer>& GetContactCountBuffer() { return ColliderContactCountBuffer; }
+
+	/** Get or create StaticMesh feedback buffer for RDG pass (WorldCollision, no FluidInteraction) */
+	TRefCountPtr<FRDGPooledBuffer>& GetStaticMeshFeedbackBuffer() { return StaticMeshFeedbackBuffer; }
+
+	/** Get or create StaticMesh counter buffer for RDG pass (WorldCollision, no FluidInteraction) */
+	TRefCountPtr<FRDGPooledBuffer>& GetStaticMeshCounterBuffer() { return StaticMeshCounterBuffer; }
+
+	/** Get or create FluidInteraction StaticMesh feedback buffer for RDG pass */
+	TRefCountPtr<FRDGPooledBuffer>& GetFluidInteractionSMFeedbackBuffer() { return FluidInteractionSMFeedbackBuffer; }
+
+	/** Get or create FluidInteraction StaticMesh counter buffer for RDG pass */
+	TRefCountPtr<FRDGPooledBuffer>& GetFluidInteractionSMCounterBuffer() { return FluidInteractionSMCounterBuffer; }
 
 	//=========================================================================
 	// Readback Processing (called from render thread after simulation)
@@ -113,15 +133,39 @@ public:
 	bool GetFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
 
 	/**
-	 * Get all collision feedback (unfiltered)
+	 * Get all collision feedback (unfiltered, bone colliders only)
 	 * @param OutFeedback - Output array of all feedback entries
 	 * @param OutCount - Number of feedback entries
 	 * @return true if feedback is available
 	 */
 	bool GetAllFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
 
-	/** Get current feedback count */
+	/** Get current feedback count (bone colliders) */
 	int32 GetFeedbackCount() const { return ReadyFeedbackCount; }
+
+	/**
+	 * Get all StaticMesh collision feedback (BoneIndex < 0, bHasFluidInteraction = 0)
+	 * WorldCollision StaticMesh without FluidInteraction component
+	 * @param OutFeedback - Output array of StaticMesh feedback entries
+	 * @param OutCount - Number of feedback entries
+	 * @return true if feedback is available
+	 */
+	bool GetAllStaticMeshFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
+
+	/** Get current StaticMesh feedback count (WorldCollision) */
+	int32 GetStaticMeshFeedbackCount() const { return ReadyStaticMeshFeedbackCount; }
+
+	/**
+	 * Get all FluidInteraction StaticMesh collision feedback (BoneIndex < 0, bHasFluidInteraction = 1)
+	 * StaticMesh with FluidInteraction component - used for buoyancy center calculation
+	 * @param OutFeedback - Output array of FluidInteraction SM feedback entries
+	 * @param OutCount - Number of feedback entries
+	 * @return true if feedback is available
+	 */
+	bool GetAllFluidInteractionSMFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
+
+	/** Get current FluidInteraction StaticMesh feedback count */
+	int32 GetFluidInteractionSMFeedbackCount() const { return ReadyFluidInteractionSMFeedbackCount; }
 
 	/**
 	 * Get contact count for a specific collider index
@@ -148,17 +192,35 @@ private:
 	// GPU Buffers (managed via RDG extraction)
 	//=========================================================================
 
+	// Bone collider feedback (BoneIndex >= 0)
 	TRefCountPtr<FRDGPooledBuffer> CollisionFeedbackBuffer;
 	TRefCountPtr<FRDGPooledBuffer> CollisionCounterBuffer;
 	TRefCountPtr<FRDGPooledBuffer> ColliderContactCountBuffer;
+
+	// StaticMesh collider feedback (BoneIndex < 0, bHasFluidInteraction = 0, WorldCollision)
+	TRefCountPtr<FRDGPooledBuffer> StaticMeshFeedbackBuffer;
+	TRefCountPtr<FRDGPooledBuffer> StaticMeshCounterBuffer;
+
+	// FluidInteraction StaticMesh feedback (BoneIndex < 0, bHasFluidInteraction = 1)
+	TRefCountPtr<FRDGPooledBuffer> FluidInteractionSMFeedbackBuffer;
+	TRefCountPtr<FRDGPooledBuffer> FluidInteractionSMCounterBuffer;
 
 	//=========================================================================
 	// Async Readback Objects (triple buffered)
 	//=========================================================================
 
+	// Bone collider readbacks
 	FRHIGPUBufferReadback* FeedbackReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
 	FRHIGPUBufferReadback* CounterReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
 	FRHIGPUBufferReadback* ContactCountReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
+
+	// StaticMesh collider readbacks (WorldCollision, no FluidInteraction)
+	FRHIGPUBufferReadback* StaticMeshFeedbackReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
+	FRHIGPUBufferReadback* StaticMeshCounterReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
+
+	// FluidInteraction StaticMesh readbacks
+	FRHIGPUBufferReadback* FluidInteractionSMFeedbackReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
+	FRHIGPUBufferReadback* FluidInteractionSMCounterReadbacks[NUM_FEEDBACK_BUFFERS] = {nullptr};
 
 	//=========================================================================
 	// Ready Data (thread-safe access via lock)
@@ -166,8 +228,17 @@ private:
 
 	mutable FCriticalSection FeedbackLock;
 
+	// Bone collider ready data (BoneIndex >= 0)
 	TArray<FGPUCollisionFeedback> ReadyFeedback;
 	int32 ReadyFeedbackCount = 0;
+
+	// StaticMesh collider ready data (BoneIndex < 0, bHasFluidInteraction = 0, WorldCollision)
+	TArray<FGPUCollisionFeedback> ReadyStaticMeshFeedback;
+	int32 ReadyStaticMeshFeedbackCount = 0;
+
+	// FluidInteraction StaticMesh ready data (BoneIndex < 0, bHasFluidInteraction = 1)
+	TArray<FGPUCollisionFeedback> ReadyFluidInteractionSMFeedback;
+	int32 ReadyFluidInteractionSMFeedbackCount = 0;
 
 	TArray<int32> ReadyContactCounts;
 

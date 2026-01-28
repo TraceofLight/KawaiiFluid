@@ -367,8 +367,7 @@ struct FGPUCollisionSphere
 	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
 	int32 FluidTagID;     // 4 bytes - Fluid tag hash for event identification (e.g., "Water", "Lava")
 	int32 OwnerID;        // 4 bytes - Unique ID of collider owner (actor/component)
-	float Padding;        // 4 bytes - Alignment padding
-
+	int32 bHasFluidInteraction; // 4 bytes - 1 if from FluidInteraction component, 0 if from WorldCollision
 
 	FGPUCollisionSphere()
 		: Center(FVector3f::ZeroVector)
@@ -378,15 +377,14 @@ struct FGPUCollisionSphere
 		, BoneIndex(-1)
 		, FluidTagID(0)
 		, OwnerID(0)
-		, Padding(0.0f)
-
+		, bHasFluidInteraction(0)
 	{
 	}
 };
 static_assert(sizeof(FGPUCollisionSphere) == 40, "FGPUCollisionSphere must be 40 bytes");
 
 /**
- * GPU Capsule Primitive (48 bytes)
+ * GPU Capsule Primitive (56 bytes)
  */
 struct FGPUCollisionCapsule
 {
@@ -398,7 +396,8 @@ struct FGPUCollisionCapsule
 	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
 	int32 FluidTagID;     // 4 bytes - Fluid tag hash for event identification
 	int32 OwnerID;        // 4 bytes - Unique ID of collider owner (actor/component)
-
+	int32 bHasFluidInteraction; // 4 bytes - 1 if from FluidInteraction component, 0 if from WorldCollision
+	int32 Padding;        // 4 bytes - Alignment padding
 
 	FGPUCollisionCapsule()
 		: Start(FVector3f::ZeroVector)
@@ -409,11 +408,12 @@ struct FGPUCollisionCapsule
 		, BoneIndex(-1)
 		, FluidTagID(0)
 		, OwnerID(0)
-
+		, bHasFluidInteraction(0)
+		, Padding(0)
 	{
 	}
 };
-static_assert(sizeof(FGPUCollisionCapsule) == 48, "FGPUCollisionCapsule must be 48 bytes");
+static_assert(sizeof(FGPUCollisionCapsule) == 56, "FGPUCollisionCapsule must be 56 bytes");
 
 /**
  * GPU Box Primitive (64 bytes)
@@ -428,8 +428,7 @@ struct FGPUCollisionBox
 	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
 	int32 FluidTagID;     // 4 bytes - Fluid tag hash for event identification
 	int32 OwnerID;        // 4 bytes - Unique ID of collider owner (actor/component)
-	float Padding2;       // 4 bytes
-
+	int32 bHasFluidInteraction; // 4 bytes - 1 if from FluidInteraction component, 0 if from WorldCollision
 
 	FGPUCollisionBox()
 		: Center(FVector3f::ZeroVector)
@@ -440,8 +439,7 @@ struct FGPUCollisionBox
 		, BoneIndex(-1)
 		, FluidTagID(0)
 		, OwnerID(0)
-		, Padding2(0.0f)
-
+		, bHasFluidInteraction(0)
 	{
 	}
 };
@@ -479,7 +477,7 @@ struct FGPUCollisionConvex
 	int32 BoneIndex;      // 4 bytes - Index into bone transform buffer (-1 = no bone)
 	int32 FluidTagID;     // 4 bytes - Fluid tag hash for event identification
 	int32 OwnerID;        // 4 bytes - Unique ID of collider owner (actor/component)
-	float Padding;        // 4 bytes - Alignment padding
+	int32 bHasFluidInteraction; // 4 bytes - 1 if from FluidInteraction component, 0 if from WorldCollision
 
 	FGPUCollisionConvex()
 		: Center(FVector3f::ZeroVector)
@@ -491,7 +489,7 @@ struct FGPUCollisionConvex
 		, BoneIndex(-1)
 		, FluidTagID(0)
 		, OwnerID(0)
-		, Padding(0.0f)
+		, bHasFluidInteraction(0)
 	{
 	}
 };
@@ -657,6 +655,10 @@ struct FGPUCollisionFeedback
 	FVector3f ImpactOffset;       // 12 bytes - Impact position in bone-local space
 	int32 Padding2;               // 4 bytes - Alignment padding
 
+	// Row 6 (16 bytes) - Particle world position (for buoyancy center calculation)
+	FVector3f ParticlePosition;   // 12 bytes - Particle world position at collision time
+	int32 Padding3;               // 4 bytes - Alignment padding
+
 	FGPUCollisionFeedback()
 		: ParticleIndex(0)
 		, ColliderIndex(0)
@@ -672,6 +674,8 @@ struct FGPUCollisionFeedback
 		, Padding1(0)
 		, ImpactOffset(FVector3f::ZeroVector)
 		, Padding2(0)
+		, ParticlePosition(FVector3f::ZeroVector)
+		, Padding3(0)
 	{
 	}
 
@@ -681,7 +685,7 @@ struct FGPUCollisionFeedback
 	/** Get source Component ID */
 	int32 GetSourceComponentID() const { return ParticleSourceID; }
 };
-static_assert(sizeof(FGPUCollisionFeedback) == 80, "FGPUCollisionFeedback must be 80 bytes for GPU alignment");
+static_assert(sizeof(FGPUCollisionFeedback) == 96, "FGPUCollisionFeedback must be 96 bytes for GPU alignment");
 
 /**
  * GPU Collision Primitives Collection

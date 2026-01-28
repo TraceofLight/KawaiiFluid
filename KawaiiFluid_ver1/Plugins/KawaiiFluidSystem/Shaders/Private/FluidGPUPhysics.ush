@@ -391,6 +391,10 @@ struct FGPUCollisionFeedback
 	float3 ImpactOffset;     // 12 bytes - Impact position in bone-local space
 	int Padding2;            // 4 bytes - Alignment padding
 
+	// Row 6: 16 bytes
+	float3 ParticlePosition; // 12 bytes - Particle world position (for buoyancy center)
+	int Padding3;            // 4 bytes - Alignment padding
+
 };
 
 // Collision primitive type constants

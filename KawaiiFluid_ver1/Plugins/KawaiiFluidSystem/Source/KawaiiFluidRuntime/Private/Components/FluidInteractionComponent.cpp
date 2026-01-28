@@ -118,7 +118,8 @@ void UFluidInteractionComponent::TickComponent(float DeltaTime, ELevelTick TickT
 	// Bone level tracking is handled in FluidSimulator::UpdateAttachedParticlePositions()
 
 	// Process GPU Collision Feedback (Particle -> Player Interaction)
-	if (bEnableForceFeedback)
+	// Also needed for bEnableAutoPhysicsForces (buoyancy center calculation)
+	if (bEnableForceFeedback || bEnableAutoPhysicsForces)
 	{
 		// Auto-enable GPU feedback (on first tick)
 		EnableGPUCollisionFeedbackIfNeeded();
@@ -294,6 +295,9 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 		CurrentFluidForce = SmoothedForce;
 		CurrentContactCount = 0;
 		CurrentAveragePressure = 0.0f;
+		// 서서히 감쇠 (급격한 변화 방지)
+		EstimatedBuoyancyCenterOffset = FMath::VInterpTo(
+			EstimatedBuoyancyCenterOffset, FVector::ZeroVector, DeltaTime, 2.0f);
 		return;
 	}
 
@@ -317,6 +321,9 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 		CurrentFluidForce = SmoothedForce;
 		CurrentContactCount = 0;
 		CurrentAveragePressure = 0.0f;
+		// 서서히 감쇠 (급격한 변화 방지)
+		EstimatedBuoyancyCenterOffset = FMath::VInterpTo(
+			EstimatedBuoyancyCenterOffset, FVector::ZeroVector, DeltaTime, 2.0f);
 		return;
 	}
 
@@ -356,6 +363,20 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 		int32 FeedbackCount = 0;
 		GPUSimulator->GetAllCollisionFeedback(AllFeedback, FeedbackCount);
 
+		// Debug: 피드백 수신 확인 + ColliderOwnerID 샘플
+		static int32 FeedbackDebugCounter = 0;
+		if (++FeedbackDebugCounter % 60 == 0)
+		{
+			// 첫 5개 피드백의 ColliderOwnerID 확인
+			FString OwnerIDSample;
+			for (int32 i = 0; i < FMath::Min(5, FeedbackCount); ++i)
+			{
+				OwnerIDSample += FString::Printf(TEXT("%d "), AllFeedback[i].ColliderOwnerID);
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[CollisionFeedback] FeedbackCount=%d, MyOwnerID=%d, SampleOwnerIDs=[%s]"),
+				FeedbackCount, MyOwnerID, *OwnerIDSample);
+		}
+
 		// Process per-bone forces
 		if (bEnablePerBoneForce)
 		{
@@ -366,6 +387,10 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 			ProcessBoneCollisionEvents(DeltaTime, AllFeedback, FeedbackCount);
 		}
 
+		// =====================================================
+		// Drag Force Calculation (from bone collider feedback)
+		// Only process if there's bone feedback (characters with bones)
+		// =====================================================
 		if (FeedbackCount > 0)
 		{
 			// Drag calculation parameters
@@ -420,7 +445,7 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 					// Only fast-moving fluid pushes the character
 					EffectiveVelocity = ParticleVelocityInMS;
 				}
-				
+
 				float EffectiveSpeed = EffectiveVelocity.Size();
 
 				DensitySum += Feedback.Density;
@@ -448,10 +473,100 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 		}
 		else
 		{
-			// No feedback → decay force
+			// No bone feedback → decay force (but don't reset buoyancy center here)
 			SmoothedForce = FMath::VInterpTo(SmoothedForce, FVector::ZeroVector, DeltaTime, ForceSmoothingSpeed);
 			CurrentFluidForce = SmoothedForce;
 			CurrentAveragePressure = 0.0f;
+		}
+
+		// =====================================================
+		// Buoyancy Center Calculation (FluidInteraction StaticMesh Feedback)
+		// Uses dedicated FluidInteractionSM buffer (BoneIndex < 0, bHasFluidInteraction = 1)
+		// Averages particle positions colliding with FluidInteraction StaticMesh
+		// Separate buffer prevents competition with WorldCollision and SkeletalMesh
+		// NOTE: This section runs independently from bone feedback
+		// =====================================================
+		TArray<FGPUCollisionFeedback> FluidInteractionSMFeedback;
+		int32 FluidInteractionSMFeedbackCount = 0;
+		GPUSimulator->GetAllFluidInteractionSMCollisionFeedback(FluidInteractionSMFeedback, FluidInteractionSMFeedbackCount);
+
+		// Debug: FluidInteractionSM feedback confirmation (every 60 frames)
+		static int32 FISMFeedbackDebugCounter = 0;
+		if (++FISMFeedbackDebugCounter % 60 == 0 && FluidInteractionSMFeedbackCount > 0)
+		{
+			// Check BoneIndex of first few feedback entries
+			FString BoneIdxSamples;
+			int32 SampleCount = FMath::Min(5, FluidInteractionSMFeedbackCount);
+			for (int32 s = 0; s < SampleCount; ++s)
+			{
+				BoneIdxSamples += FString::Printf(TEXT("%d "), FluidInteractionSMFeedback[s].BoneIndex);
+			}
+			UE_LOG(LogTemp, Warning, TEXT("[FluidInteractionSMFeedback] OwnerID=%d, Count=%d, BoneIdxSamples=[%s]"),
+				MyOwnerID, FluidInteractionSMFeedbackCount, *BoneIdxSamples);
+		}
+
+		FVector ParticlePositionAccum = FVector::ZeroVector;
+		int32 BuoyancyContactCount = 0;
+
+		for (int32 i = 0; i < FluidInteractionSMFeedbackCount; ++i)
+		{
+			const FGPUCollisionFeedback& Feedback = FluidInteractionSMFeedback[i];
+
+			// Filter by ColliderOwnerID: only use feedback from this actor's colliders
+			if (Feedback.ColliderOwnerID != 0 && Feedback.ColliderOwnerID != MyOwnerID)
+			{
+				continue;
+			}
+
+			// Buoyancy center: accumulate all contacting particle positions
+			// ParticlePosition is in world coordinates
+			FVector ParticlePos(Feedback.ParticlePosition.X, Feedback.ParticlePosition.Y, Feedback.ParticlePosition.Z);
+			if (!ParticlePos.IsNearlyZero())  // Valid positions only
+			{
+				ParticlePositionAccum += ParticlePos;
+				BuoyancyContactCount++;
+			}
+		}
+
+		// Buoyancy center calculation: average of particle positions
+		// Apply smoothing to prevent abrupt changes
+		const float BuoyancyCenterSmoothingSpeed = 5.0f;  // Fast response, oscillation prevented by angular velocity damping
+
+		if (BuoyancyContactCount > 0)
+		{
+			// Buoyancy center = average position of contacting particles
+			FVector BuoyancyCenter = ParticlePositionAccum / BuoyancyContactCount;
+
+			// Offset = buoyancy center - object center
+			if (UPrimitiveComponent* RootPrimitive = Cast<UPrimitiveComponent>(Owner->GetRootComponent()))
+			{
+				FVector ObjectCenter = RootPrimitive->GetComponentLocation();
+				FVector TargetOffset = BuoyancyCenter - ObjectCenter;
+
+				// Apply smoothing (prevents sudden jumps)
+				EstimatedBuoyancyCenterOffset = FMath::VInterpTo(
+					EstimatedBuoyancyCenterOffset, TargetOffset, DeltaTime, BuoyancyCenterSmoothingSpeed);
+
+				// Debug: Buoyancy center calculation confirmation
+				static int32 BuoyancyDebugCounter = 0;
+				if (++BuoyancyDebugCounter % 60 == 0)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[BuoyancyCenter] Owner=%s, FISMFeedback=%d, Contacts=%d, Offset=(%.1f, %.1f, %.1f), Size=%.1f"),
+						*Owner->GetName(),
+						FluidInteractionSMFeedbackCount,
+						BuoyancyContactCount,
+						EstimatedBuoyancyCenterOffset.X, EstimatedBuoyancyCenterOffset.Y, EstimatedBuoyancyCenterOffset.Z,
+						EstimatedBuoyancyCenterOffset.Size());
+				}
+			}
+			// If RootPrimitive is null, maintain existing offset (don't reset)
+		}
+		else
+		{
+			// No contacts: decay slowly (don't reset immediately)
+			// This prevents flickering due to GPU readback latency
+			EstimatedBuoyancyCenterOffset = FMath::VInterpTo(
+				EstimatedBuoyancyCenterOffset, FVector::ZeroVector, DeltaTime, BuoyancyCenterSmoothingSpeed * 0.5f);
 		}
 	}
 	else
@@ -460,6 +575,9 @@ void UFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 		SmoothedForce = FMath::VInterpTo(SmoothedForce, FVector::ZeroVector, DeltaTime, ForceSmoothingSpeed);
 		CurrentFluidForce = SmoothedForce;
 		CurrentAveragePressure = 0.0f;
+		// Even when feedback disabled, decay slowly
+		EstimatedBuoyancyCenterOffset = FMath::VInterpTo(
+			EstimatedBuoyancyCenterOffset, FVector::ZeroVector, DeltaTime, 2.0f);
 	}
 
 	// Broadcast event
@@ -2282,6 +2400,7 @@ void UFluidInteractionComponent::ApplyAutoPhysicsForces(float DeltaTime)
 		// 물리 바디가 없으면 부력/항력 초기화
 		CurrentBuoyancyForce = FVector::ZeroVector;
 		EstimatedSubmergedVolume = 0.0f;
+		PreviousPhysicsVelocity = FVector::ZeroVector;
 		return;
 	}
 
@@ -2290,6 +2409,7 @@ void UFluidInteractionComponent::ApplyAutoPhysicsForces(float DeltaTime)
 	{
 		CurrentBuoyancyForce = FVector::ZeroVector;
 		EstimatedSubmergedVolume = 0.0f;
+		PreviousPhysicsVelocity = PhysicsBody->GetPhysicsLinearVelocity();  // 속도는 유지
 		return;
 	}
 
@@ -2334,17 +2454,49 @@ void UFluidInteractionComponent::ApplyAutoPhysicsForces(float DeltaTime)
 			FVector UpDirection = -Gravity.GetSafeNormal();
 			float VerticalVelocity = FVector::DotProduct(Velocity, UpDirection);
 
-			// 댐핑 힘: 속도 반대 방향으로 적용
-			FVector DampingForce = -UpDirection * VerticalVelocity * BuoyancyDamping * 100.0f;
+			// 질량 기반 댐핑 (무거운 물체도 같은 감쇠율)
+			float Mass = PhysicsBody->GetMass();
+
+			// 댐핑 힘: 속도 × 질량 × 계수 (모멘텀에 비례)
+			FVector DampingForce = -UpDirection * VerticalVelocity * Mass * BuoyancyDamping;
 			BuoyancyForce += DampingForce;
 		}
 
 		CurrentBuoyancyForce = BuoyancyForce;
 
-		// 부력 적용
+		// Apply buoyancy (force at buoyancy center → generates restoring torque)
 		if (!BuoyancyForce.IsNearlyZero())
 		{
-			PhysicsBody->AddForce(BuoyancyForce);
+			// Buoyancy center calculation: object center + offset
+			// If offset exists → torque generated → object rotates to stable pose
+			FVector ObjectCenter = PhysicsBody->GetComponentLocation();
+
+			// Angular velocity-based offset scaling to prevent oscillation
+			// When rotating fast, reduce offset effect to prevent over-rotation
+			FVector AngularVelocity = PhysicsBody->GetPhysicsAngularVelocityInRadians();
+			float AngularSpeed = AngularVelocity.Size();
+			const float MaxAngularSpeedForFullOffset = 0.5f;  // rad/s, above this start reducing
+			const float MinOffsetScale = 0.1f;  // Don't reduce below 10%
+			float OffsetScale = FMath::Clamp(1.0f - (AngularSpeed / MaxAngularSpeedForFullOffset) * 0.9f, MinOffsetScale, 1.0f);
+
+			FVector ScaledOffset = EstimatedBuoyancyCenterOffset * OffsetScale;
+			FVector BuoyancyCenter = ObjectCenter + ScaledOffset;
+
+			// Debug: buoyancy application position
+			static int32 ForceDebugCounter = 0;
+			if (++ForceDebugCounter % 60 == 0)
+			{
+				AActor* OwnerActor = GetOwner();
+				UE_LOG(LogTemp, Warning, TEXT("[ApplyBuoyancy] Owner=%s, Force=(%.1f), Offset=(%.1f, %.1f, %.1f), Scale=%.2f, AngSpeed=%.2f"),
+					OwnerActor ? *OwnerActor->GetName() : TEXT("None"),
+					BuoyancyForce.Z,
+					EstimatedBuoyancyCenterOffset.X, EstimatedBuoyancyCenterOffset.Y, EstimatedBuoyancyCenterOffset.Z,
+					OffsetScale,
+					AngularSpeed);
+			}
+
+			// AddForceAtLocation: apply force at specific position → torque based on distance from center
+			PhysicsBody->AddForceAtLocation(BuoyancyForce, BuoyancyCenter);
 		}
 	}
 	else
@@ -2363,5 +2515,122 @@ void UFluidInteractionComponent::ApplyAutoPhysicsForces(float DeltaTime)
 		FVector DragForce = CurrentFluidForce * PhysicsDragMultiplier;
 
 		PhysicsBody->AddForce(DragForce);
+	}
+
+	//========================================
+	// 3. Added Mass Effect (가속 억제)
+	// 물체가 가속할 때 주변 유체도 가속해야 하므로
+	// 유효 질량이 증가하는 효과를 시뮬레이션
+	//========================================
+	if (AddedMassCoefficient > 0.0f && DeltaTime > SMALL_NUMBER)
+	{
+		FVector CurrentVelocity = PhysicsBody->GetPhysicsLinearVelocity();
+
+		// 가속도 계산
+		FVector Acceleration = (CurrentVelocity - PreviousPhysicsVelocity) / DeltaTime;
+
+		// 가속도 크기 제한 (첫 프레임 스파이크 방지)
+		// 최대 2g (약 2000 cm/s²) 정도로 제한
+		const float MaxAcceleration = 2000.0f;  // cm/s²
+		float AccelMagnitude = Acceleration.Size();
+		if (AccelMagnitude > MaxAcceleration)
+		{
+			Acceleration = Acceleration.GetSafeNormal() * MaxAcceleration;
+		}
+
+		// 부가 질량 계산 (kg)
+		// SubmergedVolume: cm³ → m³ (×1e-6)
+		// FluidDensity: kg/m³
+		// AddedMass = ρ × V × C_m (kg)
+		float SubmergedVolumeM3 = EstimatedSubmergedVolume * 1e-6f;
+		float AddedMass = FluidDensity * SubmergedVolumeM3 * AddedMassCoefficient;
+
+		// 가속에 저항하는 힘 적용 (F = -m × a)
+		// 물체가 가속하려 하면 부가 질량만큼 반대 방향으로 힘이 작용
+		FVector AddedMassForce = -Acceleration * AddedMass;
+
+		// 힘 크기도 부력의 2배 이하로 제한 (안전장치)
+		float MaxForce = CurrentBuoyancyForce.Size() * 2.0f + 1000.0f;
+		float ForceMagnitude = AddedMassForce.Size();
+		if (ForceMagnitude > MaxForce)
+		{
+			AddedMassForce = AddedMassForce.GetSafeNormal() * MaxForce;
+		}
+
+		if (!AddedMassForce.IsNearlyZero())
+		{
+			PhysicsBody->AddForce(AddedMassForce);
+		}
+
+		// 다음 프레임용 저장
+		PreviousPhysicsVelocity = CurrentVelocity;
+	}
+
+	//========================================
+	// 4. 유체 내 댐핑 (선형 + 각속도)
+	// 상대 속도 기반 항력 및 회전 감쇠
+	//========================================
+
+	// 침수 비율 계산 (0~1, 부분 침수 시 댐핑도 비례)
+	// EstimatedSubmergedVolume 기반으로 대략적인 침수율 추정
+	float SubmersionRatio = FMath::Clamp(EstimatedSubmergedVolume / 10000.0f, 0.0f, 1.0f);  // 10000 cm³ = 완전 침수 기준
+
+	// 4-1. 각속도 댐핑 (회전 감쇠)
+	if (FluidAngularDamping > 0.0f && SubmersionRatio > 0.0f)
+	{
+		FVector AngularVelocity = PhysicsBody->GetPhysicsAngularVelocityInRadians();
+
+		// 각속도에 비례한 반대 토크 적용
+		// T = -c × ω (선형 비례로 변경 - 더 안정적)
+		float AngularSpeed = AngularVelocity.Size();
+		if (AngularSpeed > 0.01f)
+		{
+			// 물체 질량 기반으로 토크 스케일링
+			float Mass = PhysicsBody->GetMass();
+
+			// 토크 = -ω × 질량 × 계수 × 침수율
+			FVector AngularDampingTorque = -AngularVelocity * Mass * FluidAngularDamping * SubmersionRatio * 100.0f;
+
+			// 디버그 로그 (3초마다)
+			static float DebugTimer = 0.0f;
+			DebugTimer += DeltaTime;
+			if (DebugTimer > 3.0f)
+			{
+				DebugTimer = 0.0f;
+				UE_LOG(LogTemp, Warning, TEXT("[AngularDamping] AngularSpeed=%.2f, Mass=%.1f, SubmersionRatio=%.2f, Torque=%.1f"),
+					AngularSpeed, Mass, SubmersionRatio, AngularDampingTorque.Size());
+			}
+
+			PhysicsBody->AddTorqueInRadians(AngularDampingTorque);
+		}
+	}
+
+	// 4-2. 선형 댐핑 (상대 속도 기반 항력)
+	if (FluidLinearDamping > 0.0f && SubmersionRatio > 0.0f)
+	{
+		FVector ObjectVelocity = PhysicsBody->GetPhysicsLinearVelocity();
+
+		// 유체 평균 속도 (CurrentFluidForce 방향으로 추정, 또는 0)
+		// 정지 유체 가정 시 상대 속도 = 물체 속도
+		FVector FluidVelocity = FVector::ZeroVector;  // TODO: 실제 유체 속도 사용 가능
+
+		FVector RelativeVelocity = ObjectVelocity - FluidVelocity;
+		float RelativeSpeed = RelativeVelocity.Size();
+
+		if (RelativeSpeed > 1.0f)
+		{
+			// F_drag = -C × v × |v| (속도 제곱에 비례)
+			FVector LinearDampingForce = -RelativeVelocity.GetSafeNormal() * RelativeSpeed * RelativeSpeed
+			                             * FluidLinearDamping * SubmersionRatio * 0.1f;
+
+			// 최대 힘 제한 (부력의 3배)
+			float MaxDampingForce = CurrentBuoyancyForce.Size() * 3.0f + 500.0f;
+			if (LinearDampingForce.Size() > MaxDampingForce)
+			{
+				LinearDampingForce = LinearDampingForce.GetSafeNormal() * MaxDampingForce;
+			}
+
+			PhysicsBody->AddForce(LinearDampingForce);
+		}
 	}
 }

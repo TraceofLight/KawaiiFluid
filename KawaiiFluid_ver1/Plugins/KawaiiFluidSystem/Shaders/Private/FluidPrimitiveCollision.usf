@@ -41,7 +41,7 @@ float CollisionThreshold;
 // Collision Feedback Buffer (for Particle -> Player Interaction)
 //=============================================================================
 
-// Feedback buffer for CPU readback
+// Feedback buffer for CPU readback (BoneIndex >= 0, character bones)
 RWStructuredBuffer<FGPUCollisionFeedback> CollisionFeedback;
 
 // Atomic counter for feedback entries
@@ -52,6 +52,32 @@ int MaxCollisionFeedback;
 
 // Enable/disable feedback recording (0 = disabled, 1 = enabled)
 int bEnableCollisionFeedback;
+
+//=============================================================================
+// StaticMesh Collision Feedback Buffer (WorldCollision, BoneIndex < 0, bHasFluidInteraction = 0)
+//=============================================================================
+
+// StaticMesh feedback buffer for CPU readback (WorldCollision without FluidInteraction)
+RWStructuredBuffer<FGPUCollisionFeedback> StaticMeshCollisionFeedback;
+
+// Atomic counter for StaticMesh feedback entries
+RWStructuredBuffer<uint> StaticMeshCollisionCounter;
+
+// Maximum number of StaticMesh feedback entries
+int MaxStaticMeshCollisionFeedback;
+
+//=============================================================================
+// FluidInteraction StaticMesh Feedback Buffer (BoneIndex < 0, bHasFluidInteraction = 1)
+//=============================================================================
+
+// FluidInteraction StaticMesh feedback buffer for CPU readback (buoyancy center calculation)
+RWStructuredBuffer<FGPUCollisionFeedback> FluidInteractionSMCollisionFeedback;
+
+// Atomic counter for FluidInteraction StaticMesh feedback entries
+RWStructuredBuffer<uint> FluidInteractionSMCollisionCounter;
+
+// Maximum number of FluidInteraction StaticMesh feedback entries
+int MaxFluidInteractionSMCollisionFeedback;
 
 //=============================================================================
 // Collider Contact Count Buffer (for simple collision count)
@@ -71,6 +97,11 @@ int MaxColliderCount;
  * Records collision feedback for CPU readback (particle -> player interaction)
  * Uses atomic counter to safely write to shared buffer
  *
+ * 3-Way Buffer Routing:
+ * - boneIndex >= 0 -> CollisionFeedback (SkeletalMesh bones)
+ * - boneIndex < 0, bHasFluidInteraction = 0 -> StaticMeshCollisionFeedback (WorldCollision)
+ * - boneIndex < 0, bHasFluidInteraction = 1 -> FluidInteractionSMCollisionFeedback (FluidInteraction StaticMesh)
+ *
  * @param particleIdx - Index of the colliding particle
  * @param colliderIdx - Index of the collider (unique across all types)
  * @param colliderType - Type of collider (0=Sphere, 1=Capsule, 2=Box, 3=Convex)
@@ -81,11 +112,14 @@ int MaxColliderCount;
  * @param colliderOwnerID - Unique ID of collider owner (for filtering by actor)
  * @param particleSourceID - Particle's SourceID (PresetIndex | ComponentIndex << 16)
  * @param boneIndex - Bone index for per-bone force calculation (-1 = no bone)
+ * @param bHasFluidInteraction - 1 if from FluidInteraction component, 0 if from WorldCollision
  * @param impactWorld - Impact position in world space
+ * @param particlePosition - Particle world position (for buoyancy center calculation)
  */
 void RecordCollisionFeedback(int particleIdx, int colliderIdx, int colliderType,
                              float density, float3 normal, float penetration, float3 velocity,
-                             int colliderOwnerID, int particleSourceID,  int boneIndex, float3 impactWorld)
+                             int colliderOwnerID, int particleSourceID, int boneIndex,
+                             int bHasFluidInteraction, float3 impactWorld, float3 particlePosition)
 {
 	// Increment collision count per collider (always executed)
 	if (colliderIdx >= 0 && colliderIdx < MaxColliderCount)
@@ -94,41 +128,68 @@ void RecordCollisionFeedback(int particleIdx, int colliderIdx, int colliderType,
 		InterlockedAdd(ColliderContactCounts[colliderIdx], 1, dummy);
 	}
 
-	// Record detailed feedback (only for colliders with bones - for Per-Bone Force)
-	// BoneIndex < 0 means collider without bone (StaticMeshActor, etc.)
-	if (bEnableCollisionFeedback == 0 || boneIndex < 0)
+	// Record detailed feedback when enabled
+	if (bEnableCollisionFeedback == 0)
 	{
 		return;
 	}
 
-	uint feedbackIdx;
-	InterlockedAdd(CollisionCounter[0], 1, feedbackIdx);
-
-	if ((int)feedbackIdx < MaxCollisionFeedback)
+	// Build feedback struct (common for all buffers)
+	FGPUCollisionFeedback feedback;
+	feedback.ParticleIndex = particleIdx;
+	feedback.ColliderIndex = colliderIdx;
+	feedback.ColliderType = colliderType;
+	feedback.Density = density;
+	feedback.ImpactNormal = normal;
+	feedback.Penetration = penetration;
+	feedback.ParticleVelocity = velocity;
+	feedback.ColliderOwnerID = colliderOwnerID;
+	feedback.ParticleSourceID = particleSourceID;
+	feedback.ParticleActorID = 0;  // Reserved for future use
+	feedback.BoneIndex = boneIndex;
+	feedback.Padding1 = 0;
+	if (boneIndex >= 0 && boneIndex < BoneCount)
 	{
-		FGPUCollisionFeedback feedback;
-		feedback.ParticleIndex = particleIdx;
-		feedback.ColliderIndex = colliderIdx;
-		feedback.ColliderType = colliderType;
-		feedback.Density = density;
-		feedback.ImpactNormal = normal;
-		feedback.Penetration = penetration;
-		feedback.ParticleVelocity = velocity;
-		feedback.ColliderOwnerID = colliderOwnerID;
-		feedback.ParticleSourceID = particleSourceID;
-		feedback.ParticleActorID = 0;  // Reserved for future use
-		feedback.BoneIndex = boneIndex;
-		feedback.Padding1 = 0;
-		if (boneIndex >= 0 && boneIndex < BoneCount)
+		feedback.ImpactOffset = WorldToBoneLocal(impactWorld, BoneTransforms[boneIndex]);
+	}
+	else
+	{
+		feedback.ImpactOffset = float3(0, 0, 0);
+	}
+	feedback.Padding2 = 0;
+	feedback.ParticlePosition = particlePosition;
+	feedback.Padding3 = 0;
+
+	// 3-Way Branch: Route to appropriate buffer based on boneIndex and bHasFluidInteraction
+	uint feedbackIdx;
+	if (boneIndex >= 0)
+	{
+		// SkeletalMesh bone colliders -> CollisionFeedback buffer
+		InterlockedAdd(CollisionCounter[0], 1, feedbackIdx);
+		if ((int)feedbackIdx < MaxCollisionFeedback)
 		{
-			feedback.ImpactOffset = WorldToBoneLocal(impactWorld, BoneTransforms[boneIndex]);
+			CollisionFeedback[feedbackIdx] = feedback;
 		}
-		else
+	}
+	else if (bHasFluidInteraction != 0)
+	{
+		// FluidInteraction StaticMesh (boneIndex < 0, bHasFluidInteraction = 1)
+		// -> FluidInteractionSMCollisionFeedback buffer (for buoyancy center calculation)
+		InterlockedAdd(FluidInteractionSMCollisionCounter[0], 1, feedbackIdx);
+		if ((int)feedbackIdx < MaxFluidInteractionSMCollisionFeedback)
 		{
-			feedback.ImpactOffset = float3(0, 0, 0);
+			FluidInteractionSMCollisionFeedback[feedbackIdx] = feedback;
 		}
-		feedback.Padding2 = 0;
-		CollisionFeedback[feedbackIdx] = feedback;
+	}
+	else
+	{
+		// WorldCollision StaticMesh (boneIndex < 0, bHasFluidInteraction = 0)
+		// -> StaticMeshCollisionFeedback buffer
+		InterlockedAdd(StaticMeshCollisionCounter[0], 1, feedbackIdx);
+		if ((int)feedbackIdx < MaxStaticMeshCollisionFeedback)
+		{
+			StaticMeshCollisionFeedback[feedbackIdx] = feedback;
+		}
 	}
 }
 
@@ -178,7 +239,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			bCollided = true;
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, si, COLLIDER_TYPE_SPHERE, particle.Density, normal, penetration, particle.Velocity, sphere.OwnerID, particle.SourceID, sphere.BoneIndex, impactWorld);
+			RecordCollisionFeedback(idx, si, COLLIDER_TYPE_SPHERE, particle.Density, normal, penetration, particle.Velocity, sphere.OwnerID, particle.SourceID, sphere.BoneIndex, sphere.bHasFluidInteraction, impactWorld, pos);
 		}
 	}
 
@@ -201,7 +262,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			bCollided = true;
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, SphereCount + ci, COLLIDER_TYPE_CAPSULE, particle.Density, normal, penetration, particle.Velocity, capsule.OwnerID, particle.SourceID, capsule.BoneIndex, impactWorld);
+			RecordCollisionFeedback(idx, SphereCount + ci, COLLIDER_TYPE_CAPSULE, particle.Density, normal, penetration, particle.Velocity, capsule.OwnerID, particle.SourceID, capsule.BoneIndex, capsule.bHasFluidInteraction, impactWorld, pos);
 		}
 	}
 
@@ -230,7 +291,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			bCollided = true;
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + bi, COLLIDER_TYPE_BOX, particle.Density, normal, penetration, particle.Velocity, box.OwnerID, particle.SourceID, box.BoneIndex, impactWorld);
+			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + bi, COLLIDER_TYPE_BOX, particle.Density, normal, penetration, particle.Velocity, box.OwnerID, particle.SourceID, box.BoneIndex, box.bHasFluidInteraction, impactWorld, pos);
 		}
 	}
 
@@ -281,7 +342,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			bCollided = true;
 
 			// Record feedback for particle -> player interaction (includes velocity for drag calculation)
-			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + BoxCount + cxi, COLLIDER_TYPE_CONVEX, particle.Density, normal, penetration, particle.Velocity, convex.OwnerID, particle.SourceID, convex.BoneIndex, impactWorld);
+			RecordCollisionFeedback(idx, SphereCount + CapsuleCount + BoxCount + cxi, COLLIDER_TYPE_CONVEX, particle.Density, normal, penetration, particle.Velocity, convex.OwnerID, particle.SourceID, convex.BoneIndex, convex.bHasFluidInteraction, impactWorld, pos);
 		}
 	}
 
