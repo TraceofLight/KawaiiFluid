@@ -309,6 +309,7 @@ protected:
 	float StreamParticleSpacing = 0.0f;
 	float StreamJitter = 0.15f;
 	float StreamLayerSpacingRatio = 0.816f;
+	int32 MaxLayersPerFrame = 1;  // Prevents particle explosion on frame drops
 
 	/** Cached SourceID for this emitter (allocated from Subsystem, 0~63 range) */
 	int32 CachedSourceID = -1;

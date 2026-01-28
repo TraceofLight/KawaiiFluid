@@ -355,8 +355,17 @@ void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 		return;  // Not enough distance accumulated for a layer
 	}
 
-	// Calculate number of layers to spawn and residual distance
-	const int32 LayerCount = FMath::FloorToInt(LayerDistanceAccumulator / LayerSpacing);
+	// Calculate number of layers to spawn
+	// Clamp to MaxLayersPerFrame to prevent particle explosion on frame drops
+	// When frame drops occur, DeltaTime increases causing many layers to spawn at once
+	// This creates overlapping particles that repel each other violently
+	const int32 RawLayerCount = FMath::FloorToInt(LayerDistanceAccumulator / LayerSpacing);
+	const int32 LayerCount = FMath::Min(RawLayerCount, MaxLayersPerFrame);
+
+	// IMPORTANT: Discard ALL excess accumulated distance, not just what we spawned
+	// Only keep the fractional residual from LayerSpacing, discarding any "skipped" layers
+	// This prevents catch-up spawning in subsequent frames which would still cause overlap
+	// Example: If RawLayerCount=5 but we only spawn 1, we discard 4 layers worth of distance
 	const float ResidualDistance = FMath::Fmod(LayerDistanceAccumulator, LayerSpacing);
 
 	if (LayerCount <= 0)
