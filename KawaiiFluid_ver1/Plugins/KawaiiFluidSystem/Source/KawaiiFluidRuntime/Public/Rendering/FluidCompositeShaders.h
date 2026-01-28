@@ -56,6 +56,7 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     SHADER_PARAMETER(float, SpecularStrength)
     SHADER_PARAMETER(float, SpecularRoughness)
     SHADER_PARAMETER(float, AmbientIntensity)  // SkyLight contribution scale (default 0.15)
+    SHADER_PARAMETER(float, LightingScale)    // Overall lighting scale for HDR compensation (default 0.2)
 
     // ------------------------------------------------------
     // Multi-Light Support

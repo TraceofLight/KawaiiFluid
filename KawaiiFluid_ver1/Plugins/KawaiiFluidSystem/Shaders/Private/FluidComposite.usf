@@ -33,6 +33,7 @@ float4 AbsorptionColorCoefficients;  // Per-channel absorption coefficients (Bee
 float SpecularStrength;
 float SpecularRoughness;
 float AmbientIntensity;  // SkyLight contribution scale (default 0.15)
+float LightingScale;     // Overall lighting scale for HDR compensation (default 0.2)
 
 // -----------------------------------------------------------------------------
 // Multi-Light Support
@@ -730,8 +731,8 @@ void MainPS(
 		TotalDiffuse += kD * NoL * LightColor;
 	}
 
-	// Use accumulated specular
-	float3 Specular = TotalSpecular;
+	// Use accumulated specular (apply LightingScale to match diffuse)
+	float3 Specular = TotalSpecular * LightingScale;
 
 	// Ambient (prevents completely dark surfaces)
 	// Use SkyLightColor if available, otherwise fallback to DirectionalLightColor, then fixed value
@@ -748,7 +749,8 @@ void MainPS(
 	float3 AmbientColor = EnvironmentColor * AmbientIntensity;
 
 	// Total Lighting (diffuse + ambient, specular added separately)
-	float3 TotalLighting = TotalDiffuse + AmbientColor;
+	// Apply LightingScale to compensate for HDR scene lighting
+	float3 TotalLighting = (TotalDiffuse + AmbientColor) * LightingScale;
 
 	// Fresnel for environment reflection (IBL/Cubemap/SSR)
 	// ========================================================================
@@ -815,6 +817,9 @@ void MainPS(
 			VolumeScatterContribution += ScatterColor * ScatterLightColor * Phase * Extinction;
 		}
 	}
+
+	// Apply LightingScale to volume scattering as well
+	VolumeScatterContribution *= LightingScale;
 
 	// ========================================================================
 	// Color Compositing (Flex-style Simple Approach)
@@ -1248,7 +1253,12 @@ void MainPS(
 	// 7. Add Specular + SSS
 	FinalColor = BaseColor + Specular + VolumeScatterContribution;
 
-	// 8. Alpha calculation
+	// 8. Apply PreExposure to match UE5 HDR pipeline
+	// SceneColor already has PreExposure applied, so fluid must match
+	// This ensures consistent brightness with other scene objects
+	FinalColor *= View.PreExposure;
+
+	// 9. Alpha calculation
 	// Opacity: base opacity (minimum alpha)
 	// ThicknessSensitivity: how steeply thickness adds opacity on top
 	//   0 = thickness has no effect (use base Opacity only)

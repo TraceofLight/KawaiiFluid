@@ -189,6 +189,16 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float AmbientIntensity = 0.15f;
 
+	/**
+	 * Overall lighting scale applied to diffuse + ambient.
+	 * Use this to compensate for HDR scene lighting.
+	 * Lower values make the fluid appear darker regardless of scene light intensity.
+	 * 1.0 = no scaling (raw HDR), 0.1~0.3 = typical for bright outdoor scenes.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Lighting",
+		meta = (ClampMin = "0.01", ClampMax = "1.0"))
+	float LightingScale = 0.2f;
+
 	//========================================
 	// Absorption (Beer's Law)
 	//========================================
@@ -200,14 +210,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Absorption",
 		meta = (HideAlphaChannel))
 	FLinearColor AbsorptionColorCoefficients = FLinearColor(0.4f, 0.1f, 0.05f, 1.0f);
-
-	/**
-	 * Absorption bias (Ray Marching only). Higher = FluidColor appears stronger.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Absorption",
-		meta = (EditCondition = "PipelineType == EMetaballPipelineType::RayMarching",
-			ClampMin = "0.0", ClampMax = "1.0"))
-	float AbsorptionBias = 0.7f;
 
 	//========================================
 	// Refraction
@@ -664,10 +666,10 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.SpecularStrength));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SpecularRoughness));
 	Hash = HashCombine(Hash, GetTypeHash(Params.AmbientIntensity));
+	Hash = HashCombine(Hash, GetTypeHash(Params.LightingScale));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ThicknessSensitivity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RefractionScale));
 	Hash = HashCombine(Hash, GetTypeHash(Params.FresnelReflectionBlend));
-	Hash = HashCombine(Hash, GetTypeHash(Params.AbsorptionBias));
 	// Reflection Cubemap parameters
 	Hash = HashCombine(Hash, GetTypeHash(Params.ReflectionCubemap.Get()));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ReflectionIntensity));
@@ -734,10 +736,10 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 		FMath::IsNearlyEqual(A.SpecularStrength, B.SpecularStrength, 0.001f) &&
 		FMath::IsNearlyEqual(A.SpecularRoughness, B.SpecularRoughness, 0.001f) &&
 		FMath::IsNearlyEqual(A.AmbientIntensity, B.AmbientIntensity, 0.001f) &&
+		FMath::IsNearlyEqual(A.LightingScale, B.LightingScale, 0.001f) &&
 		FMath::IsNearlyEqual(A.ThicknessSensitivity, B.ThicknessSensitivity, 0.001f) &&
 		FMath::IsNearlyEqual(A.RefractionScale, B.RefractionScale, 0.001f) &&
 		FMath::IsNearlyEqual(A.FresnelReflectionBlend, B.FresnelReflectionBlend, 0.001f) &&
-		FMath::IsNearlyEqual(A.AbsorptionBias, B.AbsorptionBias, 0.001f) &&
 		// Reflection Cubemap parameters
 		A.ReflectionCubemap == B.ReflectionCubemap &&
 		FMath::IsNearlyEqual(A.ReflectionIntensity, B.ReflectionIntensity, 0.001f) &&
