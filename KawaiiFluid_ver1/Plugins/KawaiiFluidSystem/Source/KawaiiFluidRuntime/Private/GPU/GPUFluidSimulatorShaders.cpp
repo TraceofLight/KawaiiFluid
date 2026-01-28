@@ -234,6 +234,20 @@ IMPLEMENT_GLOBAL_SHADER(FComputeBoundaryCellStartEndCS,
 	"ComputeBoundaryCellStartEndCS", SF_Compute);
 
 //=============================================================================
+// Bone Delta Attachment Shaders (NEW simplified bone-following system)
+// ApplyBoneTransform: Simulation start - transform attached particles with bones
+// UpdateBoneDeltaAttachment: Simulation end - update attachment data, detach check
+//=============================================================================
+
+IMPLEMENT_GLOBAL_SHADER(FApplyBoneTransformCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidApplyBoneTransform.usf",
+	"ApplyBoneTransformCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FUpdateBoneDeltaAttachmentCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidUpdateBoneDeltaAttachment.usf",
+	"UpdateBoneDeltaAttachmentCS", SF_Compute);
+
+//=============================================================================
 // Pass Builder Implementation
 //=============================================================================
 

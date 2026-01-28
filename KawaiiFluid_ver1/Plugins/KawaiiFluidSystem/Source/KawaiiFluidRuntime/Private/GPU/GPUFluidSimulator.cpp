@@ -5,6 +5,7 @@
 #include "GPU/FluidAnisotropyComputeShader.h"
 #include "GPU/Managers/GPUZOrderSortManager.h"
 #include "GPU/Managers/GPUBoundarySkinningManager.h"
+#include "GPU/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
 #include "Core/FluidParticle.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Rendering/Shaders/FluidSpatialHashShaders.h"
@@ -248,6 +249,10 @@ void FGPUFluidSimulator::ReleaseRHI()
 	SleepCountersBuffer.SafeRelease();
 	SleepCountersCapacity = 0;
 
+	// Release BoneDeltaAttachment buffer (NEW simplified bone-following system)
+	BoneDeltaAttachmentBuffer.SafeRelease();
+	BoneDeltaAttachmentCapacity = 0;
+
 	// Collision cleanup is handled by CollisionManager::Release()
 }
 
@@ -356,11 +361,25 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("SimulateSubstep called without BeginFrame! Call BeginFrame first."));
 		return;
 	}
-	
+
+	// =========================================================================
+	// BONE TRANSFORM REFRESH - MUST happen HERE, not in BeginRenderViewFamily!
+	//
+	// Simulation is called from HandlePostActorTick (OnWorldPostActorTick delegate),
+	// which fires AFTER animation evaluation. Bones are current at this point.
+	//
+	// We refresh bones HERE because the fallback ENQUEUE_RENDER_COMMAND below
+	// can execute BEFORE BeginRenderViewFamily (RT runs parallel to GT).
+	// If we only refresh in BeginRenderViewFamily, fallback would read stale bones.
+	//
+	// BeginRenderViewFamily should NOT refresh bones (disabled separately).
+	// =========================================================================
+	RefreshAllBoneTransforms();
+
 	FGPUFluidSimulator* Self = this;
 	FGPUFluidSimulationParams ParamsCopy = Params;
 
-	// Physics simulation only (spawn/despawn done in BeginFrame, readback in EndFrame)
+	// Execute simulation directly in render command
 	ENQUEUE_RENDER_COMMAND(GPUFluidSimulate)(
 		[Self, ParamsCopy](FRHICommandListImmediate& RHICmdList)
 		{
@@ -382,6 +401,60 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 			Self->bHasValidGPUResults.store(true);
 		}
 	);
+}
+
+void FGPUFluidSimulator::EnqueueSimulation(const FGPUFluidSimulationParams& Params)
+{
+	FScopeLock Lock(&PendingSimulationLock);
+	PendingSimulationParams.Add(Params);
+
+	// Bone transforms are refreshed ONCE in BeginRenderViewFamily (FluidSceneViewExtension).
+	// This is the optimal timing: after animation evaluation, before render thread starts.
+	// Both ViewExtension and fallback execution paths will use these refreshed transforms.
+}
+
+bool FGPUFluidSimulator::HasPendingSimulations() const
+{
+	FScopeLock Lock(&PendingSimulationLock);
+	return PendingSimulationParams.Num() > 0;
+}
+
+void FGPUFluidSimulator::ExecutePendingSimulations_RenderThread(FRDGBuilder& GraphBuilder)
+{
+	// Move pending params to local array (thread-safe)
+	TArray<FGPUFluidSimulationParams> ParamsToExecute;
+	{
+		FScopeLock Lock(&PendingSimulationLock);
+		ParamsToExecute = MoveTemp(PendingSimulationParams);
+		PendingSimulationParams.Reset();
+	}
+
+	if (ParamsToExecute.Num() == 0)
+	{
+		return;
+	}
+
+	// Limit logging to first 10 frames
+	static int32 RenderFrameCounter = 0;
+	const bool bLogThisFrame = (RenderFrameCounter++ < 10);
+
+	if (bLogThisFrame)
+	{
+		UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> ExecutePendingSimulations_RenderThread: %d substeps (Frame %d)"),
+			ParamsToExecute.Num(), RenderFrameCounter);
+	}
+
+	// Execute all pending substeps in the same RDG
+	// NOTE: Bone transforms are now refreshed in BeginRenderViewFamily (game thread)
+	// right before render thread starts, so we always use the latest transforms
+	// that match the skeletal mesh rendering.
+	for (const FGPUFluidSimulationParams& Params : ParamsToExecute)
+	{
+		SimulateSubstep_RDG(GraphBuilder, Params);
+	}
+
+	// Mark that we have valid GPU results
+	bHasValidGPUResults.store(true);
 }
 
 void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params)
@@ -424,16 +497,96 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	FRDGBufferSRVRef PositionsSRVLocal = GraphBuilder.CreateSRV(PositionBuffer);
 
 	// =====================================================
+	// Phase 1.5: Bone Delta Attachment - Apply Bone Transform (SIMULATION START)
+	// Moves attached particles to follow bone positions.
+	// FinalizePositions will preserve this position for NEAR_BOUNDARY particles.
+	// =====================================================
+	FRDGBufferRef BoneDeltaAttachmentBufferRDG = nullptr;
+	FRDGBufferSRVRef BoneDeltaAttachmentSRVLocal = nullptr;
+	FRDGBufferUAVRef BoneDeltaAttachmentUAVLocal = nullptr;
+
+	// WorldBoundaryParticles buffer (output of BoundarySkinningCS, unsorted)
+	FRDGBufferRef WorldBoundaryParticlesBuffer = nullptr;
+	FRDGBufferSRVRef WorldBoundaryParticlesSRVLocal = nullptr;
+	int32 WorldBoundaryParticleCount = 0;
+
+	if (BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled())
+	{
+		// Step 1: Run BoundarySkinningCS first to create WorldBoundaryParticles
+		FGPUBoundarySkinningManager::FBoundarySkinningOutputs SkinningOutputs;
+		BoundarySkinningManager->AddBoundarySkinningPass(
+			GraphBuilder, WorldBoundaryParticlesBuffer, WorldBoundaryParticleCount, Params.DeltaTime,
+			&SkinningOutputs);
+
+		if (WorldBoundaryParticlesBuffer && WorldBoundaryParticleCount > 0)
+		{
+			WorldBoundaryParticlesSRVLocal = GraphBuilder.CreateSRV(WorldBoundaryParticlesBuffer);
+
+			// Ensure BoneDeltaAttachment buffer exists
+			BoneDeltaAttachmentBufferRDG = EnsureBoneDeltaAttachmentBuffer(GraphBuilder, CurrentParticleCount);
+			BoneDeltaAttachmentSRVLocal = GraphBuilder.CreateSRV(BoneDeltaAttachmentBufferRDG);
+			BoneDeltaAttachmentUAVLocal = GraphBuilder.CreateUAV(BoneDeltaAttachmentBufferRDG);
+
+			// Step 2: Apply bone transform (SIMULATION START)
+			// Position is set here, and FinalizePositions will PRESERVE it for attached particles
+			if (SkinningOutputs.LocalBoundaryParticlesBuffer && SkinningOutputs.BoneTransformsBuffer)
+			{
+				FRDGBufferSRVRef LocalBoundarySRV = GraphBuilder.CreateSRV(SkinningOutputs.LocalBoundaryParticlesBuffer);
+				FRDGBufferSRVRef BoneTransformsSRV = GraphBuilder.CreateSRV(SkinningOutputs.BoneTransformsBuffer);
+
+				AddApplyBoneTransformPass(
+					GraphBuilder,
+					ParticlesUAVLocal,
+					BoneDeltaAttachmentSRVLocal,
+					LocalBoundarySRV,
+					WorldBoundaryParticleCount,
+					BoneTransformsSRV,
+					SkinningOutputs.BoneCount,
+					SkinningOutputs.ComponentTransform);
+			}
+
+			// Debug log
+			static int32 BoneAttachDebugCounter = 0;
+			if (++BoneAttachDebugCounter % 60 == 0)
+			{
+				UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDeltaAttachment] ApplyBoneTransform: BoundaryCount=%d, BoneCount=%d"),
+					WorldBoundaryParticleCount, SkinningOutputs.BoneCount);
+			}
+		}
+	}
+
+	// =====================================================
 	// Phase 2: Build Spatial Structures (Predict -> Extract -> Sort -> Hash)
+	// Also reorders BoneDeltaAttachment buffer to stay synchronized with particles after Z-Order sorting
 	// =====================================================
 	FSimulationSpatialData SpatialData = BuildSpatialStructures(
-		GraphBuilder, 
-		ParticleBuffer, 
-		ParticlesSRVLocal, 
-		ParticlesUAVLocal, 
-		PositionsSRVLocal, 
-		PositionsUAVLocal, 
-		Params);
+		GraphBuilder,
+		ParticleBuffer,
+		ParticlesSRVLocal,
+		ParticlesUAVLocal,
+		PositionsSRVLocal,
+		PositionsUAVLocal,
+		Params,
+		BoneDeltaAttachmentBufferRDG ? &BoneDeltaAttachmentBufferRDG : nullptr);
+
+	// If we pre-computed WorldBoundaryParticles in Phase 1.5, store it in SpatialData
+	// This ensures the data is available for density calculations and other passes
+	// Note: BuildSpatialStructures may have also run BoundarySkinningPass,
+	// but we prefer the Phase 1.5 result as it was used for ApplyBoneTransform
+	if (WorldBoundaryParticlesBuffer && WorldBoundaryParticleCount > 0)
+	{
+		SpatialData.WorldBoundaryBuffer = WorldBoundaryParticlesBuffer;
+		SpatialData.WorldBoundarySRV = WorldBoundaryParticlesSRVLocal;
+		SpatialData.WorldBoundaryParticleCount = WorldBoundaryParticleCount;
+		SpatialData.bBoundarySkinningPerformed = true;
+	}
+
+	// Update attachment SRV/UAV refs after sorting (buffer was replaced with sorted version)
+	if (BoneDeltaAttachmentBufferRDG)
+	{
+		BoneDeltaAttachmentSRVLocal = GraphBuilder.CreateSRV(BoneDeltaAttachmentBufferRDG);
+		BoneDeltaAttachmentUAVLocal = GraphBuilder.CreateUAV(BoneDeltaAttachmentBufferRDG);
+	}
 
 	// =====================================================
 	// Phase 3: Constraint Solver Loop (Density/Pressure + Collision per iteration)
@@ -450,6 +603,73 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	// Phase 5: Post-Simulation (Viscosity, Finalize, Anisotropy)
 	// =====================================================
 	ExecutePostSimulation(GraphBuilder, ParticleBuffer, ParticlesUAVLocal, SpatialData, Params);
+
+	// =====================================================
+	// Phase 5.5: Bone Delta Attachment - Update Attachment Data (SIMULATION END)
+	// After physics simulation: detach if moved too far, find new attachment.
+	// Stores OriginalIndex for stable attachment across Z-Order sorting.
+	// =====================================================
+	if (BoneDeltaAttachmentUAVLocal != nullptr && WorldBoundaryParticleCount > 0)
+	{
+		// Get Z-Order sorted boundary data (prefer skinned, fallback to static)
+		FRDGBufferSRVRef BoundarySRV = nullptr;
+		FRDGBufferSRVRef CellStartSRV = nullptr;
+		FRDGBufferSRVRef CellEndSRV = nullptr;
+		int32 BoundaryCount = 0;
+
+		if (SpatialData.bSkinnedZOrderPerformed && SpatialData.SkinnedZOrderSortedSRV)
+		{
+			BoundarySRV = SpatialData.SkinnedZOrderSortedSRV;
+			CellStartSRV = SpatialData.SkinnedZOrderCellStartSRV;
+			CellEndSRV = SpatialData.SkinnedZOrderCellEndSRV;
+			BoundaryCount = SpatialData.SkinnedZOrderParticleCount;
+		}
+		else if (SpatialData.bStaticBoundaryAvailable && SpatialData.StaticZOrderSortedSRV)
+		{
+			BoundarySRV = SpatialData.StaticZOrderSortedSRV;
+			CellStartSRV = SpatialData.StaticZOrderCellStartSRV;
+			CellEndSRV = SpatialData.StaticZOrderCellEndSRV;
+			BoundaryCount = SpatialData.StaticBoundaryParticleCount;
+		}
+
+		if (BoundarySRV && CellStartSRV && CellEndSRV && BoundaryCount > 0 && WorldBoundaryParticlesSRVLocal)
+		{
+			AddUpdateBoneDeltaAttachmentPass(
+				GraphBuilder,
+				ParticlesUAVLocal,
+				BoneDeltaAttachmentUAVLocal,
+				BoundarySRV,
+				CellStartSRV,
+				CellEndSRV,
+				BoundaryCount,
+				WorldBoundaryParticlesSRVLocal,  // Unsorted, for LocalOffset calculation
+				WorldBoundaryParticleCount,
+				Params);
+
+			// Debug log
+			static int32 UpdateAttachDebugCounter = 0;
+			if (++UpdateAttachDebugCounter % 60 == 0)
+			{
+				UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDeltaAttachment] UpdatePass: BoundaryCount=%d, WorldBoundaryCount=%d, AttachRadius=%.1f"),
+					BoundaryCount, WorldBoundaryParticleCount, Params.SmoothingRadius);
+			}
+		}
+		else
+		{
+			// Debug: why is UpdatePass being skipped?
+			static int32 SkipDebugCounter = 0;
+			if (++SkipDebugCounter % 60 == 0)
+			{
+				UE_LOG(LogGPUFluidSimulator, Warning, TEXT("[BoneDeltaAttachment] UpdatePass SKIPPED: BoundarySRV=%d, CellStartSRV=%d, BoundaryCount=%d"),
+					BoundarySRV != nullptr, CellStartSRV != nullptr, BoundaryCount);
+			}
+		}
+
+		// Store buffer reference for extraction
+		SpatialData.BoneDeltaAttachmentBuffer = BoneDeltaAttachmentBufferRDG;
+		SpatialData.BoneDeltaAttachmentUAV = BoneDeltaAttachmentUAVLocal;
+		SpatialData.BoneDeltaAttachmentSRV = BoneDeltaAttachmentSRVLocal;
+	}
 
 	// =====================================================
 	// Phase 6: Extract Persistent Buffers
@@ -842,7 +1062,8 @@ FGPUFluidSimulator::FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStruc
 	FRDGBufferUAVRef& OutParticlesUAV,
 	FRDGBufferSRVRef& OutPositionsSRV,
 	FRDGBufferUAVRef& OutPositionsUAV,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef* InOutAttachmentBuffer)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_BuildSpatialStructures");
 
@@ -869,13 +1090,24 @@ FGPUFluidSimulator::FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStruc
 		FRDGBufferUAVRef CellStartUAVLocal = nullptr;
 		FRDGBufferUAVRef CellEndUAVLocal = nullptr;
 
+		// Pass attachment buffer for reordering if provided
+		FRDGBufferRef InAttachment = (InOutAttachmentBuffer && *InOutAttachmentBuffer) ? *InOutAttachmentBuffer : nullptr;
+		FRDGBufferRef SortedAttachment = nullptr;
+
 		FRDGBufferRef SortedParticleBuffer = ExecuteZOrderSortingPipeline(
 			GraphBuilder, InOutParticleBuffer,
 			CellStartUAVLocal, SpatialData.CellStartSRV,
 			CellEndUAVLocal, SpatialData.CellEndSRV,
 			SpatialData.CellStartBuffer, SpatialData.CellEndBuffer,
-			Params);
-		
+			Params,
+			InAttachment,
+			InAttachment ? &SortedAttachment : nullptr);
+
+		// Replace attachment buffer with sorted version if provided
+		if (InOutAttachmentBuffer && SortedAttachment)
+		{
+			*InOutAttachmentBuffer = SortedAttachment;
+		}
 
 		// Replace particle buffer with sorted version
 		InOutParticleBuffer = SortedParticleBuffer;
@@ -1560,12 +1792,20 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteParticleIDSortPipeline(
 	FRDGBufferDesc SortedParticlesDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), ParticleCount);
 	FRDGBufferRef SortedParticleBuffer = GraphBuilder.CreateBuffer(SortedParticlesDesc, TEXT("ParticleIDSort.SortedParticles"));
 
+	// ParticleID 정렬에서는 Attachment 버퍼 재정렬 불필요 - 더미 버퍼 생성
+	FRDGBufferDesc DummyAttachmentDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoneDeltaAttachment), 1);
+	FRDGBufferRef DummyAttachmentBuffer = GraphBuilder.CreateBuffer(DummyAttachmentDesc, TEXT("ParticleIDSort.DummyAttachment"));
+
 	{
 		TShaderMapRef<FReorderParticlesCS> ComputeShader(ShaderMap);
 		FReorderParticlesCS::FParameters* Params = GraphBuilder.AllocParameters<FReorderParticlesCS::FParameters>();
 		Params->OldParticles = GraphBuilder.CreateSRV(InParticleBuffer);
 		Params->SortedIndices = GraphBuilder.CreateSRV(SortedIndices);
 		Params->SortedParticles = GraphBuilder.CreateUAV(SortedParticleBuffer);
+		// 더미 버퍼 바인딩 (RDG는 nullptr 허용 안함)
+		Params->OldBoneDeltaAttachments = GraphBuilder.CreateSRV(DummyAttachmentBuffer);
+		Params->SortedBoneDeltaAttachments = GraphBuilder.CreateUAV(DummyAttachmentBuffer);
+		Params->bReorderAttachments = 0;  // 실제로 재정렬하지 않음
 		Params->ParticleCount = ParticleCount;
 
 		const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FReorderParticlesCS::ThreadGroupSize);
@@ -1635,6 +1875,15 @@ void FGPUFluidSimulator::ExtractPersistentBuffers(
 	// =====================================================
 	// Note: NeighborListBuffer/NeighborCountsBuffer are already extracted in ExecuteConstraintSolverLoop
 	// We just need to track the particle count for validation in SwapNeighborCacheBuffers
+
+	// =====================================================
+	// Extract Bone Delta Attachment buffer for next frame
+	// Persists BoneIndex, LocalOffset, PreviousPosition per particle
+	// =====================================================
+	if (SpatialData.BoneDeltaAttachmentBuffer)
+	{
+		GraphBuilder.QueueBufferExtraction(SpatialData.BoneDeltaAttachmentBuffer, &BoneDeltaAttachmentBuffer, ERHIAccess::UAVCompute);
+	}
 }
 
 void FGPUFluidSimulator::SwapNeighborCacheBuffers()
@@ -1822,6 +2071,16 @@ void FGPUFluidSimulator::UploadBoneTransformsForBoundary(int32 OwnerID, const TA
 	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UploadBoneTransformsForBoundary(OwnerID, BoneTransforms, ComponentTransform); }
 }
 
+void FGPUFluidSimulator::RegisterSkeletalMeshForBoundary(int32 OwnerID, USkeletalMeshComponent* SkelMesh)
+{
+	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->RegisterSkeletalMeshReference(OwnerID, SkelMesh); }
+}
+
+void FGPUFluidSimulator::RefreshAllBoneTransforms()
+{
+	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->RefreshAllBoneTransforms(); }
+}
+
 void FGPUFluidSimulator::UpdateBoundaryOwnerAABB(int32 OwnerID, const FGPUBoundaryOwnerAABB& AABB)
 {
 	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UpdateBoundaryOwnerAABB(OwnerID, AABB); }
@@ -1964,6 +2223,55 @@ void FGPUFluidSimulator::AddBoundarySkinningPass(FRDGBuilder& GraphBuilder, FSim
 }
 
 //=============================================================================
+// Bone Delta Attachment Buffer Management (NEW simplified bone-following)
+//=============================================================================
+
+FRDGBufferRef FGPUFluidSimulator::EnsureBoneDeltaAttachmentBuffer(
+	FRDGBuilder& GraphBuilder,
+	int32 RequiredCapacity)
+{
+	// Check if we need to create a new buffer (capacity insufficient or buffer invalid)
+	if (BoneDeltaAttachmentCapacity < RequiredCapacity || !BoneDeltaAttachmentBuffer.IsValid())
+	{
+		// Initialize attachment data with BoundaryParticleIndex = -1 (not attached)
+		// IMPORTANT: GPU memory might be zero-initialized, which would make BoundaryParticleIndex = 0 (attached to boundary 0)
+		// This would cause newly spawned particles to teleport to boundary particle 0's position!
+		TArray<FGPUBoneDeltaAttachment> InitialData;
+		InitialData.SetNum(RequiredCapacity);
+		for (int32 i = 0; i < RequiredCapacity; ++i)
+		{
+			InitialData[i].BoundaryParticleIndex = -1;  // -1 = not attached
+			InitialData[i].Reserved = FVector3f::ZeroVector;
+			InitialData[i].PreviousPosition = FVector3f::ZeroVector;
+		}
+
+		// Create buffer with initialized data
+		// IMPORTANT: Use ERDGInitialDataFlags::None to copy data, NOT NoCopy
+		// NoCopy would cause crash because InitialData goes out of scope before RDG executes
+		FRDGBufferRef NewBuffer = CreateStructuredBuffer(
+			GraphBuilder,
+			TEXT("GPUFluidBoneDeltaAttachment"),
+			sizeof(FGPUBoneDeltaAttachment),
+			RequiredCapacity,
+			InitialData.GetData(),
+			RequiredCapacity * sizeof(FGPUBoneDeltaAttachment),
+			ERDGInitialDataFlags::None);
+
+		// Update capacity tracking
+		BoneDeltaAttachmentCapacity = RequiredCapacity;
+
+		UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Created new BoneDeltaAttachment buffer with capacity: %d (initialized with BoneIndex=-1)"), RequiredCapacity);
+
+		return NewBuffer;
+	}
+	else
+	{
+		// Re-use existing buffer
+		return GraphBuilder.RegisterExternalBuffer(BoneDeltaAttachmentBuffer, TEXT("GPUFluidBoneDeltaAttachment"));
+	}
+}
+
+//=============================================================================
 // Z-Order Sorting (Delegated to FGPUZOrderSortManager)
 //=============================================================================
 
@@ -1972,7 +2280,9 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
 	FRDGBufferUAVRef& OutCellStartUAV, FRDGBufferSRVRef& OutCellStartSRV,
 	FRDGBufferUAVRef& OutCellEndUAV, FRDGBufferSRVRef& OutCellEndSRV,
 	FRDGBufferRef& OutCellStartBuffer, FRDGBufferRef& OutCellEndBuffer,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef InAttachmentBuffer,
+	FRDGBufferRef* OutSortedAttachmentBuffer)
 {
 	// Check both manager validity AND enabled flag
 	if (!ZOrderSortManager.IsValid() || !ZOrderSortManager->IsZOrderSortingEnabled())
@@ -1982,7 +2292,8 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
 	return ZOrderSortManager->ExecuteZOrderSortingPipeline(GraphBuilder, InParticleBuffer,
 		OutCellStartUAV, OutCellStartSRV, OutCellEndUAV, OutCellEndSRV,
 		OutCellStartBuffer, OutCellEndBuffer,
-		CurrentParticleCount, Params);
+		CurrentParticleCount, Params,
+		InAttachmentBuffer, OutSortedAttachmentBuffer);
 }
 
 //=============================================================================

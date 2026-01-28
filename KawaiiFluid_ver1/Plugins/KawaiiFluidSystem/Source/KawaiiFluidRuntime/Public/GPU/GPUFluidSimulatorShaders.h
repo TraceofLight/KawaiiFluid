@@ -8,6 +8,7 @@
 #include "RenderGraphResources.h"
 #include "RenderGraphUtils.h"
 #include "GPU/GPUFluidParticle.h"
+#include "GPU/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment (NEW bone-following system)
 #include "Core/KawaiiFluidSimulationTypes.h"  // For EGridResolutionPreset
 
 // Spatial hash constants (must match FluidSpatialHash.ush)
@@ -2002,6 +2003,10 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, OldParticles)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, SortedIndices)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, SortedParticles)
+		// Optional: BoneDeltaAttachment reordering
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoneDeltaAttachment>, OldBoneDeltaAttachments)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUBoneDeltaAttachment>, SortedBoneDeltaAttachments)
+		SHADER_PARAMETER(int32, bReorderAttachments)
 		SHADER_PARAMETER(int32, ParticleCount)
 	END_SHADER_PARAMETER_STRUCT()
 
@@ -2311,6 +2316,124 @@ public:
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
 
 		// Get grid resolution from permutation
+		const FPermutationDomain PermutationVector(Parameters.PermutationId);
+		const int32 GridPreset = PermutationVector.Get<FGridResolutionDim>();
+		const int32 AxisBits = GridResolutionPermutation::GetAxisBits(GridPreset);
+		const int32 MaxCells = GridResolutionPermutation::GetMaxCells(GridPreset);
+
+		OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), AxisBits);
+		OutEnvironment.SetDefine(TEXT("MAX_CELLS"), MaxCells);
+	}
+};
+
+//=============================================================================
+// Bone Delta Attachment Compute Shaders (NEW simplified bone-following)
+// Part of the new attachment system: ApplyBoneTransform + UpdateBoneDeltaAttachment
+//=============================================================================
+
+/**
+ * Apply Bone Transform Compute Shader
+ * Runs at SIMULATION START: Moves attached particles to follow WorldBoundaryParticles
+ * Uses BoundaryParticleIndex (OriginalIndex from Z-Order sorting) for stable attachment
+ */
+class FApplyBoneTransformCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FApplyBoneTransformCS);
+	SHADER_USE_PARAMETER_STRUCT(FApplyBoneTransformCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		// Particles buffer (read/write)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER(int32, ParticleCount)
+
+		// Bone Delta Attachment buffer (read only)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoneDeltaAttachment>, BoneDeltaAttachments)
+
+		// Local boundary particles (for direct bone transform application)
+		// Using LocalBoundaryParticles + BoneTransforms instead of WorldBoundaryParticles
+		// ensures PERFECT sync with skeletal mesh rendering - no 1-frame delay!
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticleLocal>, LocalBoundaryParticles)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+
+		// Bone transforms (same buffer used by BoundarySkinningCS)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FMatrix44f>, BoneTransforms)
+		SHADER_PARAMETER(int32, BoneCount)
+		SHADER_PARAMETER(FMatrix44f, ComponentTransform)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+/**
+ * Update Bone Delta Attachment Compute Shader
+ * Runs at SIMULATION END: Updates attachment data after physics simulation
+ * Finds nearest boundary particle and stores its OriginalIndex for stable attachment
+ */
+class FUpdateBoneDeltaAttachmentCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FUpdateBoneDeltaAttachmentCS);
+	SHADER_USE_PARAMETER_STRUCT(FUpdateBoneDeltaAttachmentCS, FGlobalShader);
+
+	// Permutation domain for grid resolution (for Z-Order boundary search)
+	using FPermutationDomain = TShaderPermutationDomain<FGridResolutionDim>;
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		// Particles buffer (read/write)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER(int32, ParticleCount)
+
+		// Bone Delta Attachment buffer (read/write)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUBoneDeltaAttachment>, BoneDeltaAttachments)
+
+		// Z-Order sorted boundary particles
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, SortedBoundaryParticles)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellStart)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellEnd)
+		SHADER_PARAMETER(int32, BoundaryParticleCount)
+
+		// World boundary particles (unsorted, for LocalOffset calculation by OriginalIndex)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, WorldBoundaryParticles)
+		SHADER_PARAMETER(int32, WorldBoundaryParticleCount)
+
+		// Parameters
+		SHADER_PARAMETER(float, AttachRadius)       // Radius for attaching to boundary (cm)
+		SHADER_PARAMETER(float, DetachDistance)     // Distance threshold for detaching (default: 300cm)
+
+		// Z-Order bounds
+		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
+		SHADER_PARAMETER(float, CellSize)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static constexpr int32 ThreadGroupSize = 256;
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(
+		const FGlobalShaderPermutationParameters& Parameters,
+		FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+
+		// Get grid resolution from permutation for Morton code calculation
 		const FPermutationDomain PermutationVector(Parameters.PermutationId);
 		const int32 GridPreset = PermutationVector.Get<FGridResolutionDim>();
 		const int32 AxisBits = GridResolutionPermutation::GetAxisBits(GridPreset);

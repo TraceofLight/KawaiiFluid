@@ -24,11 +24,15 @@ struct FGPUBoundaryParticleLocal
 struct FGPUBoundaryParticle
 {
 	float3 Position;        // 12 bytes - World position
-	float Psi;              // 4 bytes  - Volume contribution
+	float Psi;              // 4 bytes  - Volume contribution (total: 16)
 	float3 Normal;          // 12 bytes - World normal
-	int OwnerID;            // 4 bytes  - Owner component ID
+	int OwnerID;            // 4 bytes  - Owner component ID (total: 32)
 	float3 Velocity;        // 12 bytes - World velocity (for moving boundaries)
-	float FrictionCoeff;    // 4 bytes  - Coulomb friction coefficient (0~2)
+	float FrictionCoeff;    // 4 bytes  - Coulomb friction coefficient (total: 48)
+	int BoneIndex;          // 4 bytes  - Skeleton bone index (-1 for static mesh)
+	int OriginalIndex;      // 4 bytes  - Original index before Z-Order sorting
+	float Padding1;         // 4 bytes  - Alignment padding
+	float Padding2;         // 4 bytes  - Alignment padding (total: 64)
 };
 
 //=============================================================================
@@ -112,6 +116,10 @@ void BoundarySkinningCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	output.OwnerID = OwnerID;
 	output.Velocity = velocity;
 	output.FrictionCoeff = local.FrictionCoeff;
+	output.BoneIndex = local.BoneIndex;  // Preserve bone index for attachment system
+	output.OriginalIndex = idx;          // Store original index for stable attachment after Z-Order sorting
+	output.Padding1 = 0;
+	output.Padding2 = 0;
 
 	WorldBoundaryParticles[idx] = output;
 }

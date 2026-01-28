@@ -102,7 +102,10 @@ public:
 		FRDGBufferRef& OutCellStartBuffer,
 		FRDGBufferRef& OutCellEndBuffer,
 		int32 CurrentParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		// Optional: BoneDeltaAttachment buffer to reorder along with particles
+		FRDGBufferRef InAttachmentBuffer = nullptr,
+		FRDGBufferRef* OutSortedAttachmentBuffer = nullptr);
 
 private:
 	//=========================================================================
@@ -131,7 +134,10 @@ private:
 		FRDGBufferSRVRef OldParticlesSRV,
 		FRDGBufferSRVRef SortedIndicesSRV,
 		FRDGBufferUAVRef SortedParticlesUAV,
-		int32 CurrentParticleCount);
+		int32 CurrentParticleCount,
+		// Optional: BoneDeltaAttachment reordering
+		FRDGBufferSRVRef OldAttachmentsSRV = nullptr,
+		FRDGBufferUAVRef SortedAttachmentsUAV = nullptr);
 
 	/** Step 4: Compute Cell Start/End indices from sorted Morton codes */
 	void AddComputeCellStartEndPass(

@@ -594,4 +594,114 @@ void FGPUFluidSimulator::AddFinalizePositionsPass(
 	);
 }
 
+//=============================================================================
+// Bone Delta Attachment Passes (NEW simplified bone-following system)
+//=============================================================================
+
+void FGPUFluidSimulator::AddApplyBoneTransformPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	FRDGBufferSRVRef BoneDeltaAttachmentSRV,
+	FRDGBufferSRVRef LocalBoundaryParticlesSRV,
+	int32 BoundaryParticleCount,
+	FRDGBufferSRVRef BoneTransformsSRV,
+	int32 BoneCount,
+	const FMatrix44f& ComponentTransform)
+{
+	if (CurrentParticleCount <= 0 || !BoneDeltaAttachmentSRV || !LocalBoundaryParticlesSRV || BoundaryParticleCount <= 0)
+	{
+		return;
+	}
+
+	// BoneTransformsSRV can be null for static meshes - that's OK, we use ComponentTransform as fallback
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FApplyBoneTransformCS> ComputeShader(ShaderMap);
+
+	FApplyBoneTransformCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FApplyBoneTransformCS::FParameters>();
+	PassParameters->Particles = ParticlesUAV;
+	PassParameters->ParticleCount = CurrentParticleCount;
+	PassParameters->BoneDeltaAttachments = BoneDeltaAttachmentSRV;
+	PassParameters->LocalBoundaryParticles = LocalBoundaryParticlesSRV;
+	PassParameters->BoundaryParticleCount = BoundaryParticleCount;
+	PassParameters->BoneTransforms = BoneTransformsSRV;
+	PassParameters->BoneCount = BoneCount;
+	PassParameters->ComponentTransform = ComponentTransform;
+
+	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FApplyBoneTransformCS::ThreadGroupSize);
+
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::ApplyBoneTransform(%d particles, %d boundary, %d bones)",
+			CurrentParticleCount, BoundaryParticleCount, BoneCount),
+		ComputeShader,
+		PassParameters,
+		FIntVector(NumGroups, 1, 1)
+	);
+}
+
+void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
+	FRDGBuilder& GraphBuilder,
+	FRDGBufferUAVRef ParticlesUAV,
+	FRDGBufferUAVRef BoneDeltaAttachmentUAV,
+	FRDGBufferSRVRef SortedBoundaryParticlesSRV,
+	FRDGBufferSRVRef BoundaryCellStartSRV,
+	FRDGBufferSRVRef BoundaryCellEndSRV,
+	int32 BoundaryParticleCount,
+	FRDGBufferSRVRef WorldBoundaryParticlesSRV,
+	int32 WorldBoundaryParticleCount,
+	const FGPUFluidSimulationParams& Params)
+{
+	if (CurrentParticleCount <= 0 || !BoneDeltaAttachmentUAV)
+	{
+		return;
+	}
+
+	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+
+	// Get grid resolution preset for Z-Order search
+	EGridResolutionPreset GridPreset = EGridResolutionPreset::Medium;
+	if (ZOrderSortManager.IsValid())
+	{
+		GridPreset = ZOrderSortManager->GetGridResolutionPreset();
+	}
+
+	// Create permutation vector
+	FUpdateBoneDeltaAttachmentCS::FPermutationDomain PermutationVector;
+	PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridPreset));
+	TShaderMapRef<FUpdateBoneDeltaAttachmentCS> ComputeShader(ShaderMap, PermutationVector);
+
+	FUpdateBoneDeltaAttachmentCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FUpdateBoneDeltaAttachmentCS::FParameters>();
+	PassParameters->Particles = ParticlesUAV;
+	PassParameters->ParticleCount = CurrentParticleCount;
+	PassParameters->BoneDeltaAttachments = BoneDeltaAttachmentUAV;
+
+	// Boundary particles for attachment search (Z-Order sorted, contains OriginalIndex)
+	PassParameters->SortedBoundaryParticles = SortedBoundaryParticlesSRV;
+	PassParameters->BoundaryCellStart = BoundaryCellStartSRV;
+	PassParameters->BoundaryCellEnd = BoundaryCellEndSRV;
+	PassParameters->BoundaryParticleCount = BoundaryParticleCount;
+
+	// World boundary particles (unsorted, for LocalOffset calculation)
+	PassParameters->WorldBoundaryParticles = WorldBoundaryParticlesSRV;
+	PassParameters->WorldBoundaryParticleCount = WorldBoundaryParticleCount;
+
+	// Attachment parameters
+	PassParameters->AttachRadius = Params.SmoothingRadius;  // Use smoothing radius as attach radius
+	PassParameters->DetachDistance = EBoundaryAttachment::DetachDistance;
+
+	// Z-Order bounds (for cell ID calculation)
+	PassParameters->MortonBoundsMin = SimulationBoundsMin;
+	PassParameters->CellSize = Params.CellSize;
+
+	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateBoneDeltaAttachmentCS::ThreadGroupSize);
+
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::UpdateBoneDeltaAttachment(%d particles)", CurrentParticleCount),
+		ComputeShader,
+		PassParameters,
+		FIntVector(NumGroups, 1, 1)
+	);
+}
 

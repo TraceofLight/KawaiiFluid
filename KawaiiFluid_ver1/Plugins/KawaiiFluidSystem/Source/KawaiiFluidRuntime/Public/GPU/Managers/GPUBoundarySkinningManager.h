@@ -9,6 +9,8 @@
 #include "GPU/GPUFluidParticle.h"
 #include "Core/KawaiiFluidSimulationTypes.h"  // For EGridResolutionPreset
 
+class USkeletalMeshComponent;
+
 class FRDGBuilder;
 
 /**
@@ -114,6 +116,21 @@ public:
 	 */
 	void UploadBoneTransformsForBoundary(int32 OwnerID, const TArray<FMatrix44f>& BoneTransforms, const FMatrix44f& ComponentTransform);
 
+	/**
+	 * Register a skeletal mesh component for late bone transform refresh
+	 * Call this instead of/in addition to UploadBoneTransformsForBoundary
+	 * @param OwnerID - Unique ID for the mesh owner
+	 * @param SkelMesh - Skeletal mesh component to read bones from
+	 */
+	void RegisterSkeletalMeshReference(int32 OwnerID, USkeletalMeshComponent* SkelMesh);
+
+	/**
+	 * Refresh bone transforms from all registered skeletal meshes
+	 * MUST be called on Game Thread, right before render thread starts (BeginRenderViewFamily)
+	 * This ensures bone transforms match what the skeletal mesh will render with
+	 */
+	void RefreshAllBoneTransforms();
+
 	/** Remove skinning data for an owner */
 	void RemoveBoundarySkinningData(int32 OwnerID);
 
@@ -125,6 +142,33 @@ public:
 
 	/** Get total local boundary particle count */
 	int32 GetTotalLocalBoundaryParticleCount() const { return TotalLocalBoundaryParticleCount; }
+
+	//=========================================================================
+	// Bone Transform Access (for BoneDeltaAttachment system)
+	//=========================================================================
+
+	/**
+	 * Get bone transforms for a specific owner
+	 * Used by the BoneDeltaAttachment system to transform attached particles
+	 * @param OwnerID - Unique ID for the mesh owner
+	 * @return Pointer to bone transforms array, nullptr if owner not found
+	 */
+	const TArray<FMatrix44f>* GetBoneTransforms(int32 OwnerID) const;
+
+	/**
+	 * Get the first available bone transforms (for single-owner scenarios)
+	 * Returns the bone transforms of the first registered skeletal mesh owner
+	 * @param OutOwnerID - Output: Owner ID of the returned transforms
+	 * @return Pointer to bone transforms array, nullptr if no owners
+	 */
+	const TArray<FMatrix44f>* GetFirstAvailableBoneTransforms(int32* OutOwnerID = nullptr) const;
+
+	/**
+	 * Get bone count for a specific owner
+	 * @param OwnerID - Unique ID for the mesh owner
+	 * @return Number of bones, 0 if owner not found
+	 */
+	int32 GetBoneCount(int32 OwnerID) const;
 
 	//=========================================================================
 	// Boundary Adhesion Parameters
@@ -172,18 +216,29 @@ public:
 	// RDG Pass (called from simulator)
 	//=========================================================================
 
+	/** Data needed for ApplyBoneTransformPass (returned by AddBoundarySkinningPass) */
+	struct FBoundarySkinningOutputs
+	{
+		FRDGBufferRef LocalBoundaryParticlesBuffer = nullptr;
+		FRDGBufferRef BoneTransformsBuffer = nullptr;
+		int32 BoneCount = 0;
+		FMatrix44f ComponentTransform = FMatrix44f::Identity;
+	};
+
 	/**
 	 * Add boundary skinning pass to transform local particles to world space
 	 * @param GraphBuilder - RDG builder
 	 * @param OutWorldBoundaryBuffer - Output: World-space boundary particles buffer
 	 * @param OutBoundaryParticleCount - Output: Number of boundary particles
 	 * @param DeltaTime - Frame delta time for velocity calculation
+	 * @param OutSkinningOutputs - Optional: Additional outputs for ApplyBoneTransformPass
 	 */
 	void AddBoundarySkinningPass(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferRef& OutWorldBoundaryBuffer,
 		int32& OutBoundaryParticleCount,
-		float DeltaTime);
+		float DeltaTime,
+		FBoundarySkinningOutputs* OutSkinningOutputs = nullptr);
 
 	/**
 	 * Add boundary adhesion pass
@@ -310,9 +365,35 @@ private:
 	{
 		int32 OwnerID = -1;
 		TArray<FGPUBoundaryParticleLocal> LocalParticles;
+
+		// =====================================================================
+		// ATOMIC SWAP DOUBLE BUFFER for thread-safe bone transform transfer
+		// Game Thread writes to Buffer[WriteIndex], then swaps WriteIndex
+		// Render Thread reads from Buffer[1 - WriteIndex] (the completed buffer)
+		// This prevents race conditions without expensive locks
+		// =====================================================================
+		TArray<FMatrix44f> BoneTransformsBuffer[2];       // Double buffer
+		FMatrix44f ComponentTransformBuffer[2];           // Double buffer
+		int32 WriteBufferIndex = 0;                       // Swap index (atomic not needed - see below)
+		// NOTE: We don't need TAtomic because:
+		// 1. Game Thread writes complete BEFORE Render Thread reads (Unreal's frame sync)
+		// 2. The index is only modified by Game Thread
+		// 3. int32 read/write is atomic on x64
+
+		// Legacy single buffer (kept for compatibility, will be removed)
 		TArray<FMatrix44f> BoneTransforms;
+		TArray<FMatrix44f> RenderBoneTransforms;
 		FMatrix44f ComponentTransform = FMatrix44f::Identity;
+		FMatrix44f RenderComponentTransform = FMatrix44f::Identity;
+
+		TWeakObjectPtr<USkeletalMeshComponent> SkeletalMeshRef;  // For late bone refresh
 		bool bLocalParticlesUploaded = false;
+
+		FGPUBoundarySkinningData()
+		{
+			ComponentTransformBuffer[0] = FMatrix44f::Identity;
+			ComponentTransformBuffer[1] = FMatrix44f::Identity;
+		}
 	};
 
 	TMap<int32, FGPUBoundarySkinningData> BoundarySkinningDataMap;
@@ -364,6 +445,66 @@ private:
 	/** Recalculate combined AABB from all owner AABBs */
 	void RecalculateCombinedAABB();
 
+	//=========================================================================
+	// Bone Transform Snapshot Queue (for deferred simulation execution)
+	// Prevents race condition: Game thread overwrites bone transforms before
+	// Render thread uses them. Each simulation enqueue captures a snapshot.
+	//=========================================================================
+
+	/** Lightweight snapshot data (copyable, no atomics) */
+	struct FBoneTransformSnapshotData
+	{
+		int32 OwnerID = -1;
+		TArray<FMatrix44f> BoneTransforms;
+		FMatrix44f ComponentTransform = FMatrix44f::Identity;
+		bool bLocalParticlesUploaded = false;
+	};
+
+	/** Snapshotted bone transforms for a single pending simulation */
+	struct FBoneTransformSnapshot
+	{
+		TMap<int32, FBoneTransformSnapshotData> SkinningDataSnapshot;
+	};
+
+	/** Queue of bone transform snapshots (one per pending simulation) */
+	TArray<FBoneTransformSnapshot> PendingBoneTransformSnapshots;
+
+	/** Currently active snapshot during AddBoundarySkinningPass execution */
+	TOptional<FBoneTransformSnapshot> ActiveSnapshot;
+
+public:
+	/**
+	 * Snapshot current bone transforms for deferred simulation execution.
+	 * Call this from EnqueueSimulation() to capture bone transforms at enqueue time.
+	 * Thread-safe: uses BoundarySkinningLock.
+	 */
+	void SnapshotBoneTransformsForPendingSimulation();
+
+	/**
+	 * Pop and activate a snapshotted bone transform for execution.
+	 * Call before SimulateSubstep_RDG() in ExecutePendingSimulations_RenderThread().
+	 * @return true if a snapshot was available and is now active
+	 */
+	bool PopAndActivateSnapshot();
+
+	/**
+	 * Clear the active snapshot after simulation execution completes.
+	 * Call after SimulateSubstep_RDG() completes.
+	 */
+	void ClearActiveSnapshot();
+
+	/**
+	 * Check if there's an active snapshot being used.
+	 */
+	bool HasActiveSnapshot() const { return ActiveSnapshot.IsSet(); }
+
+	/**
+	 * Get the active snapshot's skinning data for a specific owner.
+	 * Returns nullptr if no active snapshot or owner not found.
+	 */
+	const FBoneTransformSnapshotData* GetActiveSnapshotData(int32 OwnerID) const;
+
+private:
 	//=========================================================================
 	// Thread Safety
 	//=========================================================================

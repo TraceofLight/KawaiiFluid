@@ -1111,7 +1111,9 @@ struct FGPUBoundaryParticle
 	FVector3f Velocity;      // Boundary particle velocity
 	float FrictionCoeff;     // Friction coefficient
 	int32 BoneIndex;         // Skeleton bone index (-1 for static mesh)
-	FVector3f Padding;       // GPU alignment padding
+	int32 OriginalIndex;     // Original index before Z-Order sorting (for stable attachment)
+	float Padding1;          // GPU alignment padding
+	float Padding2;          // GPU alignment padding
 
 	FGPUBoundaryParticle()
 		: Position(FVector3f::ZeroVector)
@@ -1121,13 +1123,15 @@ struct FGPUBoundaryParticle
 		, Velocity(FVector3f::ZeroVector)
 		, FrictionCoeff(0.6f)
 		, BoneIndex(-1)
-		, Padding(FVector3f::ZeroVector)
+		, OriginalIndex(-1)
+		, Padding1(0.0f)
+		, Padding2(0.0f)
 	{
 	}
 
-	FGPUBoundaryParticle(const FVector3f& InPosition, const FVector3f& InNormal, int32 InOwnerID, 
-						 float InPsi = 1.0f, const FVector3f& InVelocity = FVector3f::ZeroVector, 
-						 float InFrictionCoeff = 0.6f, int32 InBoneIndex = -1)
+	FGPUBoundaryParticle(const FVector3f& InPosition, const FVector3f& InNormal, int32 InOwnerID,
+						 float InPsi = 1.0f, const FVector3f& InVelocity = FVector3f::ZeroVector,
+						 float InFrictionCoeff = 0.6f, int32 InBoneIndex = -1, int32 InOriginalIndex = -1)
 		: Position(InPosition)
 		, Psi(InPsi)
 		, Normal(InNormal)
@@ -1135,7 +1139,9 @@ struct FGPUBoundaryParticle
 		, Velocity(InVelocity)
 		, FrictionCoeff(InFrictionCoeff)
 		, BoneIndex(InBoneIndex)
-		, Padding(FVector3f::ZeroVector)
+		, OriginalIndex(InOriginalIndex)
+		, Padding1(0.0f)
+		, Padding2(0.0f)
 	{
 	}
 };

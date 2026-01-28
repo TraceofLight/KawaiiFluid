@@ -13,6 +13,7 @@
 #include "GPU/Managers/GPUBoundarySkinningManager.h"
 #include "GPU/Managers/GPUAdhesionManager.h"
 #include "GPU/Managers/GPUStaticBoundaryManager.h"
+#include "GPU/GPUBoundaryAttachment.h"
 #include "Core/FluidAnisotropy.h"
 #include <atomic>
 
@@ -23,6 +24,7 @@ DECLARE_LOG_CATEGORY_EXTERN(LogGPUFluidSimulator, Log, All);
 struct FFluidParticle;
 class FRDGBuilder;
 class FRHIGPUBufferReadback;
+class USkeletalMeshComponent;
 
 /**
  * GPU Fluid Simulator
@@ -186,11 +188,37 @@ public:
 	 * Must be called from render thread after all SimulateSubstep calls
 	 */
 	void EndFrame();
-	
+
 	/**
 	 * Check if currently in a frame (between BeginFrame and EndFrame)
 	 */
 	bool IsFrameActive() const { return bFrameActive; }
+
+	//=============================================================================
+	// Deferred Simulation Execution (for PreRenderViewFamily synchronization)
+	// This eliminates 1-frame delay by executing simulation in the same RDG
+	// as the ExtractRenderData pass, ensuring particles use current-frame data.
+	//=============================================================================
+
+	/**
+	 * Store simulation parameters for deferred execution.
+	 * Called from game thread, actual simulation runs in PreRenderViewFamily_RenderThread.
+	 * @param Params - Simulation parameters to store
+	 */
+	void EnqueueSimulation(const FGPUFluidSimulationParams& Params);
+
+	/**
+	 * Execute all pending simulations in render thread (called from ViewExtension).
+	 * This must be called BEFORE ExtractRenderDataPass to ensure same-frame data.
+	 * @param GraphBuilder - RDG builder for simulation passes
+	 */
+	void ExecutePendingSimulations_RenderThread(FRDGBuilder& GraphBuilder);
+
+	/**
+	 * Check if there are pending simulations to execute.
+	 * @return true if simulations are queued
+	 */
+	bool HasPendingSimulations() const;
 
 	//=============================================================================
 	// Buffer Access
@@ -430,6 +458,20 @@ public:
 	void UploadBoneTransformsForBoundary(int32 OwnerID, const TArray<FMatrix44f>& BoneTransforms, const FMatrix44f& ComponentTransform);
 
 	/**
+	 * Register a skeletal mesh for late bone transform refresh
+	 * Bone transforms will be read in BeginRenderViewFamily for frame sync
+	 * @param OwnerID - Unique ID for this interaction component
+	 * @param SkelMesh - Skeletal mesh component to read bones from
+	 */
+	void RegisterSkeletalMeshForBoundary(int32 OwnerID, USkeletalMeshComponent* SkelMesh);
+
+	/**
+	 * Refresh all bone transforms from registered skeletal meshes
+	 * MUST be called on Game Thread, right before render thread starts
+	 */
+	void RefreshAllBoneTransforms();
+
+	/**
 	 * Update AABB for a boundary owner (call each frame)
 	 * Used for early-out optimization in boundary adhesion pass
 	 * @param OwnerID - Unique ID for this interaction component
@@ -516,6 +558,32 @@ public:
 		static TArray<FGPUBoundaryParticle> Empty;
 		return StaticBoundaryManager.IsValid() ? StaticBoundaryManager->GetBoundaryParticles() : Empty;
 	}
+
+	//=============================================================================
+	// Bone Delta Attachment System (NEW simplified bone-following)
+	// Per-particle BoneIndex, LocalOffset, PreviousPosition
+	// Detach when distance from PreviousPosition > 300cm
+	//=============================================================================
+
+	/**
+	 * Get the persistent BoneDeltaAttachment buffer for RDG passes
+	 * Contains per-particle attachment data (BoneIndex, LocalOffset, PreviousPosition)
+	 */
+	TRefCountPtr<FRDGPooledBuffer> GetBoneDeltaAttachmentBuffer() const { return BoneDeltaAttachmentBuffer; }
+
+	/**
+	 * Check if BoneDeltaAttachment buffer is valid and has sufficient capacity
+	 * @param RequiredCapacity - Minimum required particle capacity
+	 */
+	bool HasValidBoneDeltaAttachmentBuffer(int32 RequiredCapacity) const
+	{
+		return BoneDeltaAttachmentBuffer.IsValid() && BoneDeltaAttachmentCapacity >= RequiredCapacity;
+	}
+
+	/**
+	 * Get current BoneDeltaAttachment buffer capacity
+	 */
+	int32 GetBoneDeltaAttachmentCapacity() const { return BoneDeltaAttachmentCapacity; }
 
 	//=============================================================================
 	//=============================================================================
@@ -726,6 +794,12 @@ private:
 		int32 StaticBoundaryParticleCount = 0;
 		bool bStaticBoundaryAvailable = false;
 
+		// Bone Delta Attachment buffer (NEW simplified bone-following)
+		// Created by EnsureBoneDeltaAttachmentBuffer, used by ApplyBoneTransform & UpdateBoneDeltaAttachment
+		FRDGBufferRef BoneDeltaAttachmentBuffer = nullptr;
+		FRDGBufferUAVRef BoneDeltaAttachmentUAV = nullptr;
+		FRDGBufferSRVRef BoneDeltaAttachmentSRV = nullptr;
+
 		// Legacy aliases (for backward compatibility during transition)
 		FRDGBufferRef& WorldBoundaryBuffer = SkinnedBoundaryBuffer;
 		FRDGBufferSRVRef& WorldBoundarySRV = SkinnedBoundarySRV;
@@ -755,7 +829,9 @@ private:
 		FRDGBufferUAVRef& OutParticlesUAV,
 		FRDGBufferSRVRef& OutPositionsSRV,
 		FRDGBufferUAVRef& OutPositionsUAV,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		// Optional: BoneDeltaAttachment buffer to reorder along with particles during Z-Order sorting
+		FRDGBufferRef* InOutAttachmentBuffer = nullptr);
 
 	/** Phase 3: Execute constraint solver loop (Density/Pressure + Collision per iteration)
 	 *  XPBD Principle: Collision constraints are solved inside the solver loop
@@ -939,6 +1015,72 @@ private:
 		const FGPUFluidSimulationParams& Params);
 
 	//=============================================================================
+	// Bone Delta Attachment System (NEW simplified bone-following)
+	//=============================================================================
+
+	/**
+	 * Ensure BoneDeltaAttachment buffer exists with sufficient capacity.
+	 * Creates or re-registers the buffer for use in RDG passes.
+	 * @param GraphBuilder - RDG builder
+	 * @param RequiredCapacity - Minimum particle capacity required
+	 * @return RDG buffer reference for the attachment data
+	 */
+	FRDGBufferRef EnsureBoneDeltaAttachmentBuffer(
+		FRDGBuilder& GraphBuilder,
+		int32 RequiredCapacity);
+
+	/**
+	 * Add apply bone transform pass (runs at SIMULATION START)
+	 * Moves attached particles by DIRECTLY applying bone transforms to local positions.
+	 * Uses the SAME bone transform buffer as BoundarySkinningCS for PERFECT sync.
+	 * This eliminates the 1-frame delay by not using pre-computed WorldBoundaryParticles.
+	 * @param GraphBuilder - RDG builder
+	 * @param ParticlesUAV - Particles buffer (read/write)
+	 * @param BoneDeltaAttachmentSRV - Attachment data (read only)
+	 * @param LocalBoundaryParticlesSRV - Local boundary particles (persistent)
+	 * @param BoundaryParticleCount - Number of boundary particles
+	 * @param BoneTransformsSRV - Bone transforms (same as BoundarySkinningCS uses)
+	 * @param BoneCount - Number of bones
+	 * @param ComponentTransform - Fallback transform for static meshes
+	 */
+	void AddApplyBoneTransformPass(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		FRDGBufferSRVRef BoneDeltaAttachmentSRV,
+		FRDGBufferSRVRef LocalBoundaryParticlesSRV,
+		int32 BoundaryParticleCount,
+		FRDGBufferSRVRef BoneTransformsSRV,
+		int32 BoneCount,
+		const FMatrix44f& ComponentTransform);
+
+	/**
+	 * Add update bone delta attachment pass (runs at SIMULATION END)
+	 * Updates attachment data after physics simulation: detach check, new attachment, LocalOffset update.
+	 * Stores OriginalIndex for stable attachment across Z-Order sorting.
+	 * @param GraphBuilder - RDG builder
+	 * @param ParticlesUAV - Particles buffer (read/write)
+	 * @param BoneDeltaAttachmentUAV - Attachment data (read/write)
+	 * @param SortedBoundaryParticlesSRV - Z-Order sorted boundary particles (with OriginalIndex)
+	 * @param BoundaryCellStartSRV - Cell start indices for boundary search
+	 * @param BoundaryCellEndSRV - Cell end indices for boundary search
+	 * @param BoundaryParticleCount - Number of sorted boundary particles
+	 * @param WorldBoundaryParticlesSRV - Unsorted world boundary particles (for LocalOffset calculation)
+	 * @param WorldBoundaryParticleCount - Number of world boundary particles
+	 * @param Params - Simulation parameters
+	 */
+	void AddUpdateBoneDeltaAttachmentPass(
+		FRDGBuilder& GraphBuilder,
+		FRDGBufferUAVRef ParticlesUAV,
+		FRDGBufferUAVRef BoneDeltaAttachmentUAV,
+		FRDGBufferSRVRef SortedBoundaryParticlesSRV,
+		FRDGBufferSRVRef BoundaryCellStartSRV,
+		FRDGBufferSRVRef BoundaryCellEndSRV,
+		int32 BoundaryParticleCount,
+		FRDGBufferSRVRef WorldBoundaryParticlesSRV,
+		int32 WorldBoundaryParticleCount,
+		const FGPUFluidSimulationParams& Params);
+
+	//=============================================================================
 	// Z-Order (Morton Code) Sorting Pipeline (Delegated to FGPUZOrderSortManager)
 	//=============================================================================
 
@@ -952,7 +1094,10 @@ private:
 		FRDGBufferSRVRef& OutCellEndSRV,
 		FRDGBufferRef& OutCellStartBuffer,
 		FRDGBufferRef& OutCellEndBuffer,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		// Optional: BoneDeltaAttachment buffer to reorder along with particles
+		FRDGBufferRef InAttachmentBuffer = nullptr,
+		FRDGBufferRef* OutSortedAttachmentBuffer = nullptr);
 
 	//=============================================================================
 	// ParticleID Sorting for Readback Optimization
@@ -1009,6 +1154,12 @@ private:
 	// Frame lifecycle state
 	bool bFrameActive = false;
 
+	// Deferred simulation execution (for PreRenderViewFamily synchronization)
+	// Stores simulation parameters from game thread, executed in render thread
+	TArray<FGPUFluidSimulationParams> PendingSimulationParams;
+	mutable FCriticalSection PendingSimulationLock;
+
+	// Cached GPU particle data for upload/readback
 	// Cached GPU particle data for upload
 	TArray<FGPUFluidParticle> CachedGPUParticles;
 
@@ -1164,6 +1315,18 @@ private:
 	//=============================================================================
 
 	TUniquePtr<FGPUStaticBoundaryManager> StaticBoundaryManager;
+
+	//=============================================================================
+	// Bone Delta Attachment (NEW simplified bone-following system)
+	// Per-particle attachment data: BoneIndex, LocalOffset, PreviousPosition
+	// Used by ApplyBoneTransform (start) and UpdateBoneDeltaAttachment (end)
+	//=============================================================================
+
+	/** Persistent buffer for per-particle bone delta attachment data */
+	TRefCountPtr<FRDGPooledBuffer> BoneDeltaAttachmentBuffer;
+
+	/** Current capacity of BoneDeltaAttachment buffer */
+	int32 BoneDeltaAttachmentCapacity = 0;
 
 	//=============================================================================
 	// Shadow Data (extracted from StatsReadback in ProcessStatsReadback)

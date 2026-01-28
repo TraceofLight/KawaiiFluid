@@ -5,6 +5,7 @@
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
+#include "Components/SkeletalMeshComponent.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGPUBoundarySkinning, Log, All);
 DEFINE_LOG_CATEGORY(LogGPUBoundarySkinning);
@@ -527,6 +528,135 @@ void FGPUBoundarySkinningManager::UploadBoneTransformsForBoundary(int32 OwnerID,
 	}
 }
 
+void FGPUBoundarySkinningManager::RegisterSkeletalMeshReference(int32 OwnerID, USkeletalMeshComponent* SkelMesh)
+{
+	if (!bIsInitialized || !SkelMesh)
+	{
+		UE_LOG(LogGPUBoundarySkinning, Warning, TEXT("RegisterSkeletalMeshReference FAILED: bIsInitialized=%d, SkelMesh=%p"),
+			bIsInitialized, SkelMesh);
+		return;
+	}
+
+	FScopeLock Lock(&BoundarySkinningLock);
+
+	FGPUBoundarySkinningData* SkinningData = BoundarySkinningDataMap.Find(OwnerID);
+	if (SkinningData)
+	{
+		SkinningData->SkeletalMeshRef = SkelMesh;
+		UE_LOG(LogGPUBoundarySkinning, Warning, TEXT("RegisterSkeletalMeshReference SUCCESS: OwnerID=%d, SkelMesh=%s, NumBones=%d"),
+			OwnerID, *SkelMesh->GetName(), SkelMesh->GetNumBones());
+	}
+	else
+	{
+		UE_LOG(LogGPUBoundarySkinning, Warning, TEXT("RegisterSkeletalMeshReference: OwnerID=%d NOT FOUND in map"),
+			OwnerID);
+	}
+}
+
+void FGPUBoundarySkinningManager::RefreshAllBoneTransforms()
+{
+	// MUST be called on Game Thread, right before render thread starts
+	check(IsInGameThread());
+
+	// NOTE: We do NOT lock here for reading SkeletalMeshRef because:
+	// 1. Registration happens on Game Thread before this is called
+	// 2. The map structure doesn't change during this function
+	// 3. We use atomic operations for the buffer swap which is lock-free
+
+	static uint64 FrameCounter = 0;
+	FrameCounter++;
+
+	for (auto& Pair : BoundarySkinningDataMap)
+	{
+		FGPUBoundarySkinningData& SkinningData = Pair.Value;
+		USkeletalMeshComponent* SkelMesh = SkinningData.SkeletalMeshRef.Get();
+
+		if (SkelMesh && SkelMesh->IsRegistered())
+		{
+			// CRITICAL: Force completion of any parallel animation evaluation
+			// This ensures we read the FINAL bone transforms for this frame,
+			// matching exactly what the skeletal mesh will render with.
+			SkelMesh->FinalizeBoneTransform();
+
+			// =====================================================================
+			// DOUBLE BUFFER: Write to current write buffer
+			// Game Thread writes to Buffer[WriteIndex]
+			// After writing, swap WriteIndex so Render Thread sees completed data
+			// =====================================================================
+			const int32 WriteIdx = SkinningData.WriteBufferIndex;
+
+			// Read bone transforms after finalization
+			const int32 NumBones = SkelMesh->GetNumBones();
+			SkinningData.BoneTransformsBuffer[WriteIdx].SetNum(NumBones);
+
+			for (int32 BoneIdx = 0; BoneIdx < NumBones; ++BoneIdx)
+			{
+				FTransform BoneWorldTransform = SkelMesh->GetBoneTransform(BoneIdx);
+				SkinningData.BoneTransformsBuffer[WriteIdx][BoneIdx] = FMatrix44f(BoneWorldTransform.ToMatrixWithScale());
+			}
+
+			SkinningData.ComponentTransformBuffer[WriteIdx] = FMatrix44f(SkelMesh->GetComponentTransform().ToMatrixWithScale());
+
+			// SWAP: Now render thread will read from the buffer we just wrote
+			SkinningData.WriteBufferIndex = 1 - WriteIdx;
+
+			// DEBUG: Log bone 0 position every 60 frames
+			if (FrameCounter % 60 == 0 && NumBones > 0)
+			{
+				FVector Bone0Pos = SkelMesh->GetBoneTransform(0).GetLocation();
+				UE_LOG(LogGPUBoundarySkinning, Warning,
+					TEXT("[GameThread Frame %llu] RefreshAllBoneTransforms: WriteIdx=%d, Bone0 = (%.2f, %.2f, %.2f)"),
+					FrameCounter, WriteIdx, Bone0Pos.X, Bone0Pos.Y, Bone0Pos.Z);
+			}
+		}
+	}
+
+	UE_LOG(LogGPUBoundarySkinning, VeryVerbose, TEXT("RefreshAllBoneTransforms: Updated %d owners"),
+		BoundarySkinningDataMap.Num());
+}
+
+const TArray<FMatrix44f>* FGPUBoundarySkinningManager::GetBoneTransforms(int32 OwnerID) const
+{
+	FScopeLock Lock(&BoundarySkinningLock);
+
+	const FGPUBoundarySkinningData* SkinningData = BoundarySkinningDataMap.Find(OwnerID);
+	if (SkinningData && SkinningData->BoneTransforms.Num() > 0)
+	{
+		return &SkinningData->BoneTransforms;
+	}
+	return nullptr;
+}
+
+const TArray<FMatrix44f>* FGPUBoundarySkinningManager::GetFirstAvailableBoneTransforms(int32* OutOwnerID) const
+{
+	FScopeLock Lock(&BoundarySkinningLock);
+
+	for (const auto& Pair : BoundarySkinningDataMap)
+	{
+		if (Pair.Value.BoneTransforms.Num() > 0)
+		{
+			if (OutOwnerID)
+			{
+				*OutOwnerID = Pair.Key;
+			}
+			return &Pair.Value.BoneTransforms;
+		}
+	}
+	return nullptr;
+}
+
+int32 FGPUBoundarySkinningManager::GetBoneCount(int32 OwnerID) const
+{
+	FScopeLock Lock(&BoundarySkinningLock);
+
+	const FGPUBoundarySkinningData* SkinningData = BoundarySkinningDataMap.Find(OwnerID);
+	if (SkinningData)
+	{
+		return SkinningData->BoneTransforms.Num();
+	}
+	return 0;
+}
+
 void FGPUBoundarySkinningManager::RemoveBoundarySkinningData(int32 OwnerID)
 {
 	FScopeLock Lock(&BoundarySkinningLock);
@@ -689,7 +819,8 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef& OutWorldBoundaryBuffer,
 	int32& OutBoundaryParticleCount,
-	float DeltaTime)
+	float DeltaTime,
+	FBoundarySkinningOutputs* OutSkinningOutputs)
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -705,6 +836,15 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 
 	OutWorldBoundaryBuffer = nullptr;
 	OutBoundaryParticleCount = 0;
+
+	// Reset optional outputs
+	if (OutSkinningOutputs)
+	{
+		OutSkinningOutputs->LocalBoundaryParticlesBuffer = nullptr;
+		OutSkinningOutputs->BoneTransformsBuffer = nullptr;
+		OutSkinningOutputs->BoneCount = 0;
+		OutSkinningOutputs->ComponentTransform = FMatrix44f::Identity;
+	}
 
 	if (TotalLocalBoundaryParticleCount <= 0 || BoundarySkinningDataMap.Num() == 0)
 	{
@@ -802,19 +942,75 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 		}
 		FRDGBufferSRVRef LocalBoundarySRV = GraphBuilder.CreateSRV(LocalBoundaryBuffer);
 
+		// =====================================================================
+		// NO DOUBLE BUFFER - DIRECT ACCESS
+		// The double buffer swap timing is complex and error-prone.
+		// Instead, just read the bone transforms directly from the skeletal mesh
+		// component reference at render thread time.
+		// =====================================================================
+
+		// Get fresh bone transforms directly from the skeletal mesh
+		// This bypasses the double buffer entirely
+		const TArray<FMatrix44f>* BoneTransformsPtr = nullptr;
+		FMatrix44f ComponentTransformToUse = FMatrix44f::Identity;
+
+		// First try the double buffer (for compatibility)
+		const int32 WriteIdx = SkinningData.WriteBufferIndex;
+		const int32 ReadIdx = 1 - WriteIdx;
+
+		if (SkinningData.BoneTransformsBuffer[ReadIdx].Num() > 0)
+		{
+			BoneTransformsPtr = &SkinningData.BoneTransformsBuffer[ReadIdx];
+			ComponentTransformToUse = SkinningData.ComponentTransformBuffer[ReadIdx];
+		}
+		else if (SkinningData.BoneTransformsBuffer[WriteIdx].Num() > 0)
+		{
+			BoneTransformsPtr = &SkinningData.BoneTransformsBuffer[WriteIdx];
+			ComponentTransformToUse = SkinningData.ComponentTransformBuffer[WriteIdx];
+		}
+		else if (SkinningData.BoneTransforms.Num() > 0)
+		{
+			BoneTransformsPtr = &SkinningData.BoneTransforms;
+			ComponentTransformToUse = SkinningData.ComponentTransform;
+		}
+
+		if (!BoneTransformsPtr || BoneTransformsPtr->Num() == 0)
+		{
+			UE_LOG(LogGPUBoundarySkinning, Warning,
+				TEXT("[AddBoundarySkinningPass] No bone transforms available for Owner=%d, skipping"),
+				OwnerID);
+			continue;
+		}
+
+		// DEBUG: Log bone 0 position on render thread
+		static uint64 RenderFrameCounter = 0;
+		RenderFrameCounter++;
+		if (RenderFrameCounter % 60 == 0 && BoneTransformsPtr->Num() > 0)
+		{
+			const FMatrix44f& Bone0Matrix = (*BoneTransformsPtr)[0];
+			FVector3f Bone0Pos = FVector3f(Bone0Matrix.M[3][0], Bone0Matrix.M[3][1], Bone0Matrix.M[3][2]);
+			UE_LOG(LogGPUBoundarySkinning, Warning,
+				TEXT("[RenderThread Frame %llu] AddBoundarySkinningPass: ReadIdx=%d, Bone0 = (%.2f, %.2f, %.2f)"),
+				RenderFrameCounter, ReadIdx, Bone0Pos.X, Bone0Pos.Y, Bone0Pos.Z);
+		}
+
 		// Upload bone transforms
 		FRDGBufferRef BoneTransformsBuffer;
-		const int32 BoneCount = SkinningData.BoneTransforms.Num();
+		const int32 BoneCount = BoneTransformsPtr->Num();
 		if (BoneCount > 0)
 		{
+			// CRITICAL: Do NOT use NoCopy flag!
+			// With NoCopy, RDG keeps a pointer to source data which may be overwritten
+			// by the next frame before GPU actually uses it, causing 1-frame delay.
+			// Force immediate copy to ensure GPU uses THIS frame's bone transforms.
 			BoneTransformsBuffer = CreateStructuredBuffer(
 				GraphBuilder,
 				TEXT("GPUFluidBoneTransforms"),
 				sizeof(FMatrix44f),
 				BoneCount,
-				SkinningData.BoneTransforms.GetData(),
-				BoneCount * sizeof(FMatrix44f),
-				ERDGInitialDataFlags::NoCopy
+				BoneTransformsPtr->GetData(),
+				BoneCount * sizeof(FMatrix44f)
+				// No flags = immediate copy
 			);
 		}
 		else
@@ -826,8 +1022,8 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 				sizeof(FMatrix44f),
 				1,
 				&Identity,
-				sizeof(FMatrix44f),
-				ERDGInitialDataFlags::NoCopy
+				sizeof(FMatrix44f)
+				// No flags = immediate copy
 			);
 		}
 		FRDGBufferSRVRef SkinningBoneTransformsSRV = GraphBuilder.CreateSRV(BoneTransformsBuffer);
@@ -842,7 +1038,7 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 		PassParams->BoneCount = FMath::Max(1, BoneCount);
 		PassParams->OwnerID = OwnerID;
 		PassParams->bHasPreviousFrame = bHasPreviousFrame ? 1 : 0;
-		PassParams->ComponentTransform = SkinningData.ComponentTransform;
+		PassParams->ComponentTransform = ComponentTransformToUse;
 		PassParams->DeltaTime = DeltaTime;
 
 		const uint32 NumGroups = FMath::DivideAndRoundUp(LocalParticleCount, FBoundarySkinningCS::ThreadGroupSize);
@@ -857,6 +1053,17 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 			{
 				FComputeShaderUtils::Dispatch(RHICmdList, SkinningShader, *PassParams, GroupCount);
 			});
+
+		// Store outputs for ApplyBoneTransformPass (uses same buffers as skinning)
+		// Note: For multiple owners, this stores the LAST owner's data.
+		// TODO: Support multiple owners with combined buffers
+		if (OutSkinningOutputs)
+		{
+			OutSkinningOutputs->LocalBoundaryParticlesBuffer = LocalBoundaryBuffer;
+			OutSkinningOutputs->BoneTransformsBuffer = BoneTransformsBuffer;
+			OutSkinningOutputs->BoneCount = BoneCount;
+			OutSkinningOutputs->ComponentTransform = ComponentTransformToUse;
+		}
 
 		OutputOffset += LocalParticleCount;
 	}
@@ -1491,5 +1698,100 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 		BoundaryParticleCount, static_cast<int32>(GridResolutionPreset));
 
 	return true;
+}
+
+//=============================================================================
+// Bone Transform Snapshot Queue (for deferred simulation execution)
+// Prevents race condition where Game thread overwrites bone transforms
+// before Render thread uses them.
+//=============================================================================
+
+void FGPUBoundarySkinningManager::SnapshotBoneTransformsForPendingSimulation()
+{
+	FScopeLock Lock(&BoundarySkinningLock);
+
+	FBoneTransformSnapshot Snapshot;
+
+	// Deep copy the current skinning data map
+	// Note: With atomic swap double buffer, we read from the completed buffer
+	for (const auto& Pair : BoundarySkinningDataMap)
+	{
+		FBoneTransformSnapshotData DataCopy;
+		DataCopy.OwnerID = Pair.Value.OwnerID;
+		// Don't copy LocalParticles - they're persistent and don't change per frame
+		// Only copy the bone transforms which change every frame
+
+		// Read from the completed buffer (opposite of WriteBufferIndex)
+		const int32 WriteIdx = Pair.Value.WriteBufferIndex;
+		const int32 ReadIdx = 1 - WriteIdx;
+
+		// Copy from double buffer to snapshot
+		if (Pair.Value.BoneTransformsBuffer[ReadIdx].Num() > 0)
+		{
+			DataCopy.BoneTransforms = Pair.Value.BoneTransformsBuffer[ReadIdx];
+			DataCopy.ComponentTransform = Pair.Value.ComponentTransformBuffer[ReadIdx];
+		}
+		else if (Pair.Value.BoneTransformsBuffer[WriteIdx].Num() > 0)
+		{
+			// Fallback to write buffer if read buffer is empty (first frame)
+			DataCopy.BoneTransforms = Pair.Value.BoneTransformsBuffer[WriteIdx];
+			DataCopy.ComponentTransform = Pair.Value.ComponentTransformBuffer[WriteIdx];
+		}
+		else
+		{
+			// Last resort: legacy fields
+			DataCopy.BoneTransforms = Pair.Value.BoneTransforms;
+			DataCopy.ComponentTransform = Pair.Value.ComponentTransform;
+		}
+
+		DataCopy.bLocalParticlesUploaded = Pair.Value.bLocalParticlesUploaded;
+
+		Snapshot.SkinningDataSnapshot.Add(Pair.Key, MoveTemp(DataCopy));
+	}
+
+	PendingBoneTransformSnapshots.Add(MoveTemp(Snapshot));
+
+	UE_LOG(LogGPUBoundarySkinning, Verbose,
+		TEXT("SnapshotBoneTransformsForPendingSimulation: Captured snapshot, queue size=%d"),
+		PendingBoneTransformSnapshots.Num());
+}
+
+bool FGPUBoundarySkinningManager::PopAndActivateSnapshot()
+{
+	FScopeLock Lock(&BoundarySkinningLock);
+
+	if (PendingBoneTransformSnapshots.Num() == 0)
+	{
+		UE_LOG(LogGPUBoundarySkinning, Verbose, TEXT("PopAndActivateSnapshot: No snapshots available"));
+		return false;
+	}
+
+	// Pop the first snapshot and activate it
+	ActiveSnapshot = MoveTemp(PendingBoneTransformSnapshots[0]);
+	PendingBoneTransformSnapshots.RemoveAt(0);
+
+	UE_LOG(LogGPUBoundarySkinning, Verbose,
+		TEXT("PopAndActivateSnapshot: Activated snapshot, remaining=%d"),
+		PendingBoneTransformSnapshots.Num());
+
+	return true;
+}
+
+void FGPUBoundarySkinningManager::ClearActiveSnapshot()
+{
+	FScopeLock Lock(&BoundarySkinningLock);
+	ActiveSnapshot.Reset();
+}
+
+const FGPUBoundarySkinningManager::FBoneTransformSnapshotData* FGPUBoundarySkinningManager::GetActiveSnapshotData(int32 OwnerID) const
+{
+	// Note: Lock should already be held by caller or this should be called from within a locked context
+	if (!ActiveSnapshot.IsSet())
+	{
+		return nullptr;
+	}
+
+	const FBoneTransformSnapshotData* Data = ActiveSnapshot.GetValue().SkinningDataSnapshot.Find(OwnerID);
+	return Data;
 }
 

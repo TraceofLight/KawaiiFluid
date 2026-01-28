@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
+#include "Engine/EngineBaseTypes.h"  // For ELevelTick
 #include "Core/KawaiiFluidSimulationTypes.h"
 #include "Components/FluidInteractionComponent.h"
 #include "GPU/GPUFluidParticle.h"
@@ -23,6 +24,7 @@ class ULevel;
 // EFluidType is now defined in KawaiiFluidSimulationTypes.h (included above)
 class FSpatialHash;
 struct FFluidParticle;
+class FGPUFluidSimulator;
 
 // Legacy typedef for backward compatibility
 using UKawaiiFluidSimulationVolumeComponent = UKawaiiFluidVolumeComponent;
@@ -232,6 +234,12 @@ public:
 		return GetOrCreateContext(nullptr, Preset);
 	}
 
+	/**
+	 * Get all active GPUSimulators (for ViewExtension deferred simulation execution)
+	 * @param OutSimulators Array to fill with GPUSimulator pointers
+	 */
+	void GetAllGPUSimulators(TArray<FGPUFluidSimulator*>& OutSimulators) const;
+
 private:
 	//========================================
 	// Module Management (New)
@@ -349,7 +357,17 @@ private:
 	void HandleLevelRemoved(ULevel* InLevel, UWorld* InWorld);
 	void MarkAllContextsWorldCollisionDirty();
 
+	/**
+	 * Post-actor tick handler - runs simulation AFTER animation evaluation
+	 * This fixes 1-frame delay in bone attachment following
+	 * @param World - The world being ticked
+	 * @param TickType - Type of tick (viewports only, time only, etc.)
+	 * @param DeltaTime - Frame delta time
+	 */
+	void HandlePostActorTick(UWorld* World, ELevelTick TickType, float DeltaTime);
+
 	FDelegateHandle OnActorSpawnedHandle;
 	FDelegateHandle OnLevelAddedHandle;
 	FDelegateHandle OnLevelRemovedHandle;
+	FDelegateHandle OnPostActorTickHandle;
 };

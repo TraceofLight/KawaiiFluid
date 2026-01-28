@@ -69,6 +69,7 @@ void FFluidSceneViewExtension::SetupViewFamily(FSceneViewFamily& InViewFamily)
 
 /**
  * @brief Called at the beginning of each frame's view family rendering.
+ * This is the LAST game thread callback before render thread starts.
  * @param InViewFamily The view family being rendered.
  */
 void FFluidSceneViewExtension::BeginRenderViewFamily(FSceneViewFamily& InViewFamily)
@@ -81,14 +82,26 @@ void FFluidSceneViewExtension::BeginRenderViewFamily(FSceneViewFamily& InViewFam
 
 	// World filtering: Only process ViewFamily from our World
 	// This prevents multiple extensions from competing over the same resources
+	UWorld* OurWorld = SubsystemPtr->GetWorld();
 	if (InViewFamily.Scene)
 	{
 		UWorld* ViewWorld = InViewFamily.Scene->GetWorld();
-		if (ViewWorld != SubsystemPtr->GetWorld())
+		if (ViewWorld != OurWorld)
 		{
 			return; // Skip ViewFamily from other World
 		}
 	}
+
+	// ============================================
+	// NOTE: Bone transform refresh is now done in SimulateSubstep(), NOT here.
+	//
+	// SimulateSubstep is called from HandlePostActorTick (after animation),
+	// and it refreshes bones BEFORE enqueueing the fallback render command.
+	// This ensures fallback execution uses current frame's bones.
+	//
+	// If we also refresh here, the double buffer would swap twice per frame,
+	// causing the render thread to potentially read stale data.
+	// ============================================
 
 	// Note: Per-frame deduplication is handled by Preset-based TMap batching
 }
@@ -104,17 +117,22 @@ void FFluidSceneViewExtension::PreRenderViewFamily_RenderThread(
 	}
 
 	// World filtering
+	UWorld* OurWorld = SubsystemPtr->GetWorld();
 	if (InViewFamily.Scene)
 	{
 		UWorld* ViewWorld = InViewFamily.Scene->GetWorld();
-		if (ViewWorld != SubsystemPtr->GetWorld())
+		if (ViewWorld != OurWorld)
 		{
 			return;
 		}
 	}
 
 	RDG_EVENT_SCOPE(GraphBuilder, "KawaiiFluid_PrepareRenderResources");
-	
+
+	// NOTE: Simulation execution is handled by the fallback render command in
+	// GPUFluidSimulator::SimulateSubstep, which creates its own RDG graph.
+	// Executing simulation here in the same RDG as rendering causes resource
+	// lifetime issues with SSFR (GPU buffer direct access).
 
 	// Track processed RenderResources to prevent duplicate processing
 	TSet<FKawaiiFluidRenderResource*> ProcessedResources;

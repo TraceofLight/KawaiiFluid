@@ -32,7 +32,6 @@ void FinalizePositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	FGPUFluidParticle particle = Particles[idx];
 
 	// Skip CPU-attached particles only (they follow bone position directly)
-	// Boundary-attached particles need velocity recalculation for physics
 	if (HasFlag(particle.Flags, GPU_PARTICLE_FLAG_IS_ATTACHED))
 	{
 		// For CPU-attached particles, just sync position
@@ -44,7 +43,7 @@ void FinalizePositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Store old position for velocity calculation
 	float3 oldPosition = particle.Position;
 
-	// Finalize position
+	// Update position from predicted position
 	particle.Position = particle.PredictedPosition;
 
 	// Recalculate velocity from position change (pure PBF formula per paper Algorithm 1 line 22)

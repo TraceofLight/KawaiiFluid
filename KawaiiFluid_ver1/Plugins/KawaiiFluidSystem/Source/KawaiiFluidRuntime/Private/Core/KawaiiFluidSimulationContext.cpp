@@ -941,23 +941,19 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 					if (LocalParticles.Num() > 0)
 					{
 						GPUSimulator->UploadLocalBoundaryParticles(OwnerID, LocalParticles);
+
+						// Register skeletal mesh reference for late bone transform refresh
+						// Bone transforms will be read in BeginRenderViewFamily for frame sync
+						if (USkeletalMeshComponent* SkelMesh = Interaction->GetOwnerSkeletalMesh())
+						{
+							GPUSimulator->RegisterSkeletalMeshForBoundary(OwnerID, SkelMesh);
+						}
 					}
 				}
 
-				// Upload bone transforms each frame
-				TArray<FMatrix> BoneTransforms;
-				FMatrix ComponentTransform;
-				Interaction->CollectBoneTransformsForBoundary(BoneTransforms, ComponentTransform);
-
-				// Convert to FMatrix44f
-				TArray<FMatrix44f> BoneTransforms44f;
-				BoneTransforms44f.SetNum(BoneTransforms.Num());
-				for (int32 i = 0; i < BoneTransforms.Num(); ++i)
-				{
-					BoneTransforms44f[i] = FMatrix44f(BoneTransforms[i]);
-				}
-
-				GPUSimulator->UploadBoneTransformsForBoundary(OwnerID, BoneTransforms44f, FMatrix44f(ComponentTransform));
+				// NOTE: Bone transforms are NO LONGER uploaded here!
+				// They are refreshed in FluidSceneViewExtension::BeginRenderViewFamily
+				// right before render thread starts, ensuring sync with skeletal mesh rendering
 
 				// Update boundary owner AABB for early-out optimization
 				// Get bounds from SkeletalMeshComponent if available

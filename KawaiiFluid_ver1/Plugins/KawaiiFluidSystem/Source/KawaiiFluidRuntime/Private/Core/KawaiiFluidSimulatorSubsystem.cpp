@@ -13,6 +13,7 @@
 #include "Rendering/KawaiiFluidRenderResource.h"
 #include "Components/FluidInteractionComponent.h"
 #include "Collision/FluidCollider.h"
+#include "GPU/GPUFluidSimulator.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 
@@ -54,7 +55,12 @@ void UKawaiiFluidSimulatorSubsystem::Initialize(FSubsystemCollectionBase& Collec
 	OnLevelRemovedHandle = FWorldDelegates::LevelRemovedFromWorld.AddUObject(
 		this, &UKawaiiFluidSimulatorSubsystem::HandleLevelRemoved);
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidSimulatorSubsystem initialized"));
+	// Bind simulation to post-actor tick (AFTER animation evaluation)
+	// This fixes 1-frame delay in bone attachment following
+	OnPostActorTickHandle = FWorldDelegates::OnWorldPostActorTick.AddUObject(
+		this, &UKawaiiFluidSimulatorSubsystem::HandlePostActorTick);
+
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidSimulatorSubsystem initialized (simulation runs post-actor tick)"));
 }
 
 void UKawaiiFluidSimulatorSubsystem::Deinitialize()
@@ -75,6 +81,12 @@ void UKawaiiFluidSimulatorSubsystem::Deinitialize()
 	if (OnLevelRemovedHandle.IsValid())
 	{
 		FWorldDelegates::LevelRemovedFromWorld.Remove(OnLevelRemovedHandle);
+	}
+
+	// Unbind post-actor tick delegate
+	if (OnPostActorTickHandle.IsValid())
+	{
+		FWorldDelegates::OnWorldPostActorTick.Remove(OnPostActorTickHandle);
 	}
 
 	AllModules.Empty();
@@ -99,14 +111,33 @@ TStatId UKawaiiFluidSimulatorSubsystem::GetStatId() const
 
 void UKawaiiFluidSimulatorSubsystem::Tick(float DeltaTime)
 {
-	SCOPE_CYCLE_COUNTER(STAT_SubsystemTick);
-	TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiFluidSubsystem_Tick);
+	// NOTE: Simulation moved to HandlePostActorTick() for correct bone transform timing
+	// This Tick() only handles early-frame tasks
 
 	// Reset event counter at frame start
 	EventCountThisFrame.store(0, std::memory_order_relaxed);
+}
+
+void UKawaiiFluidSimulatorSubsystem::HandlePostActorTick(UWorld* World, ELevelTick TickType, float DeltaTime)
+{
+	// Only process for our world
+	if (World != GetWorld())
+	{
+		return;
+	}
+
+	// Skip if paused or not a game tick
+	if (TickType == LEVELTICK_ViewportsOnly)
+	{
+		return;
+	}
+
+	SCOPE_CYCLE_COUNTER(STAT_SubsystemTick);
+	TRACE_CPUPROFILER_EVENT_SCOPE(KawaiiFluidSubsystem_PostActorTick);
 
 	//========================================
-	// New: Module-based simulation
+	// Module-based simulation (runs AFTER animation evaluation)
+	// This ensures bone transforms are up-to-date for attachment following
 	//========================================
 	if (AllModules.Num() > 0)
 	{
@@ -474,6 +505,32 @@ UKawaiiFluidSimulationModule* UKawaiiFluidSimulatorSubsystem::GetModuleBySourceI
 	}
 
 	return nullptr;
+}
+
+void UKawaiiFluidSimulatorSubsystem::GetAllGPUSimulators(TArray<FGPUFluidSimulator*>& OutSimulators) const
+{
+	OutSimulators.Reset();
+
+	// Collect GPUSimulators from all contexts
+	for (const auto& Pair : ContextCache)
+	{
+		if (UKawaiiFluidSimulationContext* Context = Pair.Value)
+		{
+			if (FGPUFluidSimulator* Simulator = Context->GetGPUSimulator())
+			{
+				OutSimulators.AddUnique(Simulator);
+			}
+		}
+	}
+
+	// Also check DefaultContext
+	if (DefaultContext)
+	{
+		if (FGPUFluidSimulator* Simulator = DefaultContext->GetGPUSimulator())
+		{
+			OutSimulators.AddUnique(Simulator);
+		}
+	}
 }
 
 //========================================

@@ -3,6 +3,7 @@
 
 #include "GPU/Managers/GPUZOrderSortManager.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "GPU/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
@@ -55,7 +56,9 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 	FRDGBufferRef& OutCellStartBuffer,
 	FRDGBufferRef& OutCellEndBuffer,
 	int32 CurrentParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef InAttachmentBuffer,
+	FRDGBufferRef* OutSortedAttachmentBuffer)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid::ZOrderSorting");
 
@@ -115,8 +118,10 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 
 	//=========================================================================
 	// Step 4: Reorder particle data based on sorted indices
+	// Also reorder BoneDeltaAttachment buffer if provided (keeps indices synchronized)
 	//=========================================================================
 	FRDGBufferRef SortedParticleBuffer;
+	FRDGBufferRef SortedAttachmentBuffer = nullptr;
 	{
 		FRDGBufferDesc SortedDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), CurrentParticleCount);
 		SortedParticleBuffer = GraphBuilder.CreateBuffer(SortedDesc, TEXT("GPUFluid.SortedParticles"));
@@ -125,7 +130,25 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 		FRDGBufferSRVRef SortedIndicesSRV = GraphBuilder.CreateSRV(SortIndicesRDG);
 		FRDGBufferUAVRef SortedParticlesUAV = GraphBuilder.CreateUAV(SortedParticleBuffer);
 
-		AddReorderParticlesPass(GraphBuilder, OldParticlesSRV, SortedIndicesSRV, SortedParticlesUAV, CurrentParticleCount);
+		// Optional: Create sorted attachment buffer if input is provided
+		FRDGBufferSRVRef OldAttachmentsSRV = nullptr;
+		FRDGBufferUAVRef SortedAttachmentsUAV = nullptr;
+		if (InAttachmentBuffer)
+		{
+			FRDGBufferDesc AttachmentDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoneDeltaAttachment), CurrentParticleCount);
+			SortedAttachmentBuffer = GraphBuilder.CreateBuffer(AttachmentDesc, TEXT("GPUFluid.SortedBoneDeltaAttachments"));
+			OldAttachmentsSRV = GraphBuilder.CreateSRV(InAttachmentBuffer);
+			SortedAttachmentsUAV = GraphBuilder.CreateUAV(SortedAttachmentBuffer);
+		}
+
+		AddReorderParticlesPass(GraphBuilder, OldParticlesSRV, SortedIndicesSRV, SortedParticlesUAV, CurrentParticleCount,
+			OldAttachmentsSRV, SortedAttachmentsUAV);
+
+		// Output sorted attachment buffer if requested
+		if (OutSortedAttachmentBuffer && SortedAttachmentBuffer)
+		{
+			*OutSortedAttachmentBuffer = SortedAttachmentBuffer;
+		}
 	}
 
 	//=========================================================================
@@ -337,7 +360,9 @@ void FGPUZOrderSortManager::AddReorderParticlesPass(
 	FRDGBufferSRVRef OldParticlesSRV,
 	FRDGBufferSRVRef SortedIndicesSRV,
 	FRDGBufferUAVRef SortedParticlesUAV,
-	int32 CurrentParticleCount)
+	int32 CurrentParticleCount,
+	FRDGBufferSRVRef OldAttachmentsSRV,
+	FRDGBufferUAVRef SortedAttachmentsUAV)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FReorderParticlesCS> ComputeShader(ShaderMap);
@@ -346,13 +371,18 @@ void FGPUZOrderSortManager::AddReorderParticlesPass(
 	PassParameters->OldParticles = OldParticlesSRV;
 	PassParameters->SortedIndices = SortedIndicesSRV;
 	PassParameters->SortedParticles = SortedParticlesUAV;
+	// Optional: BoneDeltaAttachment reordering
+	PassParameters->OldBoneDeltaAttachments = OldAttachmentsSRV;
+	PassParameters->SortedBoneDeltaAttachments = SortedAttachmentsUAV;
+	PassParameters->bReorderAttachments = (OldAttachmentsSRV != nullptr && SortedAttachmentsUAV != nullptr) ? 1 : 0;
 	PassParameters->ParticleCount = CurrentParticleCount;
 
 	const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FReorderParticlesCS::ThreadGroupSize);
 
 	FComputeShaderUtils::AddPass(
 		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ReorderParticles(%d)", CurrentParticleCount),
+		RDG_EVENT_NAME("GPUFluid::ReorderParticles(%d)%s", CurrentParticleCount,
+			PassParameters->bReorderAttachments ? TEXT("+Attachments") : TEXT("")),
 		ComputeShader,
 		PassParameters,
 		FIntVector(NumGroups, 1, 1)
