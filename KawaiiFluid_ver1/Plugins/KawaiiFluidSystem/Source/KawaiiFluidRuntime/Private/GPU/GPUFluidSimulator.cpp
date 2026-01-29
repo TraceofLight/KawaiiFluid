@@ -3572,21 +3572,41 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 		// Position/SourceID are ALWAYS copied (needed for lightweight despawn API)
 		// Velocity only when ISM rendering enabled
 		// NeighborCount only when shadow readback enabled
+		// Density/VelocityMagnitude/Mass only when detailed GPU stats enabled
 		const bool bNeedShadowData = bShadowReadbackEnabled.load();
 		const bool bNeedVelocity = bFullReadbackEnabled.load() || bNeedShadowData;  // ISM or Shadow needs velocity
+		const bool bNeedDetailedStats = GetFluidStatsCollector().IsDetailedGPUEnabled();
+		const bool bNeedBasicStats = GetFluidStatsCollector().IsEnabled();
 		TArray<FVector3f> NewPositions;
 		TArray<int32> NewSourceIDs;
 		TArray<FVector3f> NewVelocities;
 		TArray<uint32> NewNeighborCounts;
+		TArray<float> NewDensities;
+		TArray<float> NewVelocityMagnitudes;
+		TArray<float> NewMasses;
+		TArray<uint32> NewFlags;
 		NewPositions.SetNumUninitialized(ParticleCount);   // Always needed for despawn
 		NewSourceIDs.SetNumUninitialized(ParticleCount);   // Always needed for despawn
 		if (bNeedVelocity)
 		{
 			NewVelocities.SetNumUninitialized(ParticleCount);  // ISM rendering
 		}
-		if (bNeedShadowData)
+		if (bNeedShadowData || bNeedBasicStats)
 		{
 			NewNeighborCounts.SetNumUninitialized(ParticleCount);
+		}
+		if (bNeedDetailedStats || bNeedBasicStats)
+		{
+			NewDensities.SetNumUninitialized(ParticleCount);
+			NewVelocityMagnitudes.SetNumUninitialized(ParticleCount);
+		}
+		if (bNeedDetailedStats)
+		{
+			NewMasses.SetNumUninitialized(ParticleCount);
+		}
+		if (bNeedBasicStats)
+		{
+			NewFlags.SetNumUninitialized(ParticleCount);
 		}
 
 		ParallelFor(NumChunks, [&](int32 ChunkIndex)
@@ -3620,10 +3640,29 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 					NewVelocities[i] = P.Velocity;
 				}
 
-				// NeighborCount only when shadow readback enabled
-				if (bNeedShadowData)
+				// NeighborCount when shadow readback or basic stats enabled
+				if (bNeedShadowData || bNeedBasicStats)
 				{
 					NewNeighborCounts[i] = P.NeighborCount;
+				}
+
+				// Density and Velocity magnitude for detailed or basic stats
+				if (bNeedDetailedStats || bNeedBasicStats)
+				{
+					NewDensities[i] = P.Density;
+					NewVelocityMagnitudes[i] = P.Velocity.Length();
+				}
+
+				// Mass only for detailed stats (stability metrics calculation)
+				if (bNeedDetailedStats)
+				{
+					NewMasses[i] = P.Mass;
+				}
+
+				// Flags for basic stats (attached particle count)
+				if (bNeedBasicStats)
+				{
+					NewFlags[i] = P.Flags;
 				}
 			}
 		}, EParallelForFlags::Unbalanced);
@@ -3694,6 +3733,97 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 		if (SpawnManager.IsValid())
 		{
 			SpawnManager->CleanupCompletedRequests(CachedAllParticleIDs);
+		}
+
+		// Calculate basic stats from GPU readback data
+		if (bNeedBasicStats && ParticleCount > 0)
+		{
+			// Count attached particles
+			int32 AttachedCount = 0;
+			for (int32 i = 0; i < ParticleCount; ++i)
+			{
+				if (NewFlags[i] & EGPUParticleFlags::IsAttached)
+				{
+					++AttachedCount;
+				}
+			}
+
+			// Calculate velocity stats
+			float MinVel = TNumericLimits<float>::Max();
+			float MaxVel = TNumericLimits<float>::Lowest();
+			double VelSum = 0.0;
+			for (int32 i = 0; i < ParticleCount; ++i)
+			{
+				const float Vel = NewVelocityMagnitudes[i];
+				VelSum += Vel;
+				MinVel = FMath::Min(MinVel, Vel);
+				MaxVel = FMath::Max(MaxVel, Vel);
+			}
+
+			// Calculate density stats
+			float MinDen = TNumericLimits<float>::Max();
+			float MaxDen = TNumericLimits<float>::Lowest();
+			double DenSum = 0.0;
+			for (int32 i = 0; i < ParticleCount; ++i)
+			{
+				const float Den = NewDensities[i];
+				DenSum += Den;
+				MinDen = FMath::Min(MinDen, Den);
+				MaxDen = FMath::Max(MaxDen, Den);
+			}
+
+			// Calculate neighbor stats
+			int32 MinNeighbor = TNumericLimits<int32>::Max();
+			int32 MaxNeighbor = TNumericLimits<int32>::Lowest();
+			double NeighborSum = 0.0;
+			for (int32 i = 0; i < ParticleCount; ++i)
+			{
+				const int32 Neighbor = static_cast<int32>(NewNeighborCounts[i]);
+				NeighborSum += Neighbor;
+				MinNeighbor = FMath::Min(MinNeighbor, Neighbor);
+				MaxNeighbor = FMath::Max(MaxNeighbor, Neighbor);
+			}
+
+			// Update stats collector
+			auto& Collector = GetFluidStatsCollector();
+			auto& Stats = const_cast<FKawaiiFluidSimulationStats&>(Collector.GetStats());
+
+			Stats.ParticleCount = ParticleCount;
+			Stats.ActiveParticleCount = ParticleCount - AttachedCount;
+			Stats.AttachedParticleCount = AttachedCount;
+
+			Stats.AvgVelocity = static_cast<float>(VelSum / ParticleCount);
+			Stats.MinVelocity = MinVel;
+			Stats.MaxVelocity = MaxVel;
+
+			Stats.AvgDensity = static_cast<float>(DenSum / ParticleCount);
+			Stats.MinDensity = MinDen;
+			Stats.MaxDensity = MaxDen;
+
+			// Density error calculation
+			const float RestDensity = Stats.RestDensity;
+			if (RestDensity > 0.001f)
+			{
+				Stats.DensityError = FMath::Abs(Stats.AvgDensity - RestDensity) / RestDensity * 100.0f;
+			}
+
+			Stats.AvgNeighborCount = static_cast<float>(NeighborSum / ParticleCount);
+			Stats.MinNeighborCount = MinNeighbor;
+			Stats.MaxNeighborCount = MaxNeighbor;
+
+			Stats.bIsGPUSimulation = true;
+		}
+
+		// Calculate stability metrics for detailed GPU stats
+		if (bNeedDetailedStats && ParticleCount > 0)
+		{
+			const float RestDensity = GetFluidStatsCollector().GetStats().RestDensity;
+			GetFluidStatsCollector().CalculateStabilityMetrics(
+				NewDensities.GetData(),
+				NewVelocityMagnitudes.GetData(),
+				NewMasses.GetData(),
+				ParticleCount,
+				RestDensity);
 		}
 	}
 

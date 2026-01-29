@@ -197,8 +197,58 @@ void FKawaiiFluidSimulationStatsCollector::BeginFrame()
 	// Save previous stats
 	PreviousStats = CurrentStats;
 
+	// For GPU simulation, stats are updated asynchronously via readback.
+	// Preserve all GPU-updated stats before reset to avoid flickering.
+	const bool bIsGPU = CurrentStats.bIsGPUSimulation;
+
+	// Save basic stats (GPU readback is async, not every frame)
+	const int32 SavedParticleCount = CurrentStats.ParticleCount;
+	const int32 SavedActiveParticleCount = CurrentStats.ActiveParticleCount;
+	const int32 SavedAttachedParticleCount = CurrentStats.AttachedParticleCount;
+	const float SavedAvgVelocity = CurrentStats.AvgVelocity;
+	const float SavedMinVelocity = CurrentStats.MinVelocity;
+	const float SavedMaxVelocity = CurrentStats.MaxVelocity;
+	const float SavedAvgDensity = CurrentStats.AvgDensity;
+	const float SavedMinDensity = CurrentStats.MinDensity;
+	const float SavedMaxDensity = CurrentStats.MaxDensity;
+	const float SavedDensityError = CurrentStats.DensityError;
+	const float SavedAvgNeighborCount = CurrentStats.AvgNeighborCount;
+	const int32 SavedMinNeighborCount = CurrentStats.MinNeighborCount;
+	const int32 SavedMaxNeighborCount = CurrentStats.MaxNeighborCount;
+
+	// Save stability metrics
+	const float SavedDensityStdDev = CurrentStats.DensityStdDev;
+	const float SavedVelocityStdDev = CurrentStats.VelocityStdDev;
+	const float SavedPerParticleDensityError = CurrentStats.PerParticleDensityError;
+	const float SavedKineticEnergy = CurrentStats.KineticEnergy;
+	const float SavedStabilityScore = CurrentStats.StabilityScore;
+
 	// Reset current stats
 	CurrentStats.Reset();
+
+	// Restore GPU stats (only updated when GPU readback completes)
+	if (bIsGPU)
+	{
+		CurrentStats.bIsGPUSimulation = true;
+		CurrentStats.ParticleCount = SavedParticleCount;
+		CurrentStats.ActiveParticleCount = SavedActiveParticleCount;
+		CurrentStats.AttachedParticleCount = SavedAttachedParticleCount;
+		CurrentStats.AvgVelocity = SavedAvgVelocity;
+		CurrentStats.MinVelocity = SavedMinVelocity;
+		CurrentStats.MaxVelocity = SavedMaxVelocity;
+		CurrentStats.AvgDensity = SavedAvgDensity;
+		CurrentStats.MinDensity = SavedMinDensity;
+		CurrentStats.MaxDensity = SavedMaxDensity;
+		CurrentStats.DensityError = SavedDensityError;
+		CurrentStats.AvgNeighborCount = SavedAvgNeighborCount;
+		CurrentStats.MinNeighborCount = SavedMinNeighborCount;
+		CurrentStats.MaxNeighborCount = SavedMaxNeighborCount;
+		CurrentStats.DensityStdDev = SavedDensityStdDev;
+		CurrentStats.VelocityStdDev = SavedVelocityStdDev;
+		CurrentStats.PerParticleDensityError = SavedPerParticleDensityError;
+		CurrentStats.KineticEnergy = SavedKineticEnergy;
+		CurrentStats.StabilityScore = SavedStabilityScore;
+	}
 
 	// Reset accumulators
 	VelocitySum = 0.0;
@@ -214,13 +264,16 @@ void FKawaiiFluidSimulationStatsCollector::BeginFrame()
 	CohesionForceSum = 0.0;
 	CohesionForceSampleCount = 0;
 
-	// Initialize min/max
-	CurrentStats.MinVelocity = TNumericLimits<float>::Max();
-	CurrentStats.MaxVelocity = TNumericLimits<float>::Lowest();
-	CurrentStats.MinDensity = TNumericLimits<float>::Max();
-	CurrentStats.MaxDensity = TNumericLimits<float>::Lowest();
-	CurrentStats.MinNeighborCount = TNumericLimits<int32>::Max();
-	CurrentStats.MaxNeighborCount = TNumericLimits<int32>::Lowest();
+	// Initialize min/max (only for CPU simulation - GPU stats are preserved above)
+	if (!bIsGPU)
+	{
+		CurrentStats.MinVelocity = TNumericLimits<float>::Max();
+		CurrentStats.MaxVelocity = TNumericLimits<float>::Lowest();
+		CurrentStats.MinDensity = TNumericLimits<float>::Max();
+		CurrentStats.MaxDensity = TNumericLimits<float>::Lowest();
+		CurrentStats.MinNeighborCount = TNumericLimits<int32>::Max();
+		CurrentStats.MaxNeighborCount = TNumericLimits<int32>::Lowest();
+	}
 
 	bFrameActive = true;
 }
