@@ -603,15 +603,35 @@ public:
 		return CollisionManager->GetCollisionFeedbackForCollider(ColliderIndex, OutFeedback, OutCount);
 	}
 
-	/** Get all collision feedback (unfiltered) */
+	/** Get all collision feedback (unfiltered, bone colliders only) */
 	bool GetAllCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 	{
 		if (!CollisionManager.IsValid()) { OutFeedback.Reset(); OutCount = 0; return false; }
 		return CollisionManager->GetAllCollisionFeedback(OutFeedback, OutCount);
 	}
 
-	/** Get current collision feedback count */
+	/** Get current collision feedback count (bone colliders) */
 	int32 GetCollisionFeedbackCount() const { return CollisionManager.IsValid() ? CollisionManager->GetCollisionFeedbackCount() : 0; }
+
+	/** Get all StaticMesh collision feedback (BoneIndex < 0, for buoyancy center calculation) */
+	bool GetAllStaticMeshCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+	{
+		if (!CollisionManager.IsValid()) { OutFeedback.Reset(); OutCount = 0; return false; }
+		return CollisionManager->GetAllStaticMeshCollisionFeedback(OutFeedback, OutCount);
+	}
+
+	/** Get current StaticMesh collision feedback count */
+	int32 GetStaticMeshCollisionFeedbackCount() const { return CollisionManager.IsValid() ? CollisionManager->GetStaticMeshCollisionFeedbackCount() : 0; }
+
+	/** Get all FluidInteraction StaticMesh collision feedback (BoneIndex < 0, bHasFluidInteraction = 1) */
+	bool GetAllFluidInteractionSMCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+	{
+		if (!CollisionManager.IsValid()) { OutFeedback.Reset(); OutCount = 0; return false; }
+		return CollisionManager->GetAllFluidInteractionSMCollisionFeedback(OutFeedback, OutCount);
+	}
+
+	/** Get current FluidInteraction StaticMesh collision feedback count */
+	int32 GetFluidInteractionSMCollisionFeedbackCount() const { return CollisionManager.IsValid() ? CollisionManager->GetFluidInteractionSMCollisionFeedbackCount() : 0; }
 
 	//=============================================================================
 	// Collider Contact Count API (Delegated to FGPUCollisionManager)

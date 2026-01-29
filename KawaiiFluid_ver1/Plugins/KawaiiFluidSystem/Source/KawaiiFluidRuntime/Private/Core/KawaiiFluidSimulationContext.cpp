@@ -240,6 +240,7 @@ namespace
 		Convex.Restitution = Restitution;
 		Convex.BoneIndex = -1;
 		Convex.OwnerID = OwnerID;
+		Convex.bHasFluidInteraction = 0;  // WorldCollision (no FluidInteraction)
 
 		OutPrimitives.Convexes.Add(Convex);
 		OutPrimitives.ConvexPlanes.Append(Planes);
@@ -265,6 +266,7 @@ namespace
 			Sphere.Restitution = Restitution;
 			Sphere.BoneIndex = -1;
 			Sphere.OwnerID = OwnerID;
+			Sphere.bHasFluidInteraction = 0;  // WorldCollision (no FluidInteraction)
 			OutPrimitives.Spheres.Add(Sphere);
 		}
 
@@ -285,6 +287,7 @@ namespace
 			Capsule.Restitution = Restitution;
 			Capsule.BoneIndex = -1;
 			Capsule.OwnerID = OwnerID;
+			Capsule.bHasFluidInteraction = 0;  // WorldCollision (no FluidInteraction)
 			OutPrimitives.Capsules.Add(Capsule);
 		}
 
@@ -309,6 +312,7 @@ namespace
 			Box.Restitution = Restitution;
 			Box.BoneIndex = -1;
 			Box.OwnerID = OwnerID;
+			Box.bHasFluidInteraction = 0;  // WorldCollision (no FluidInteraction)
 			OutPrimitives.Boxes.Add(Box);
 		}
 

@@ -2475,9 +2475,9 @@ void UFluidInteractionComponent::ApplyAutoPhysicsForces(float DeltaTime)
 			// When rotating fast, reduce offset effect to prevent over-rotation
 			FVector AngularVelocity = PhysicsBody->GetPhysicsAngularVelocityInRadians();
 			float AngularSpeed = AngularVelocity.Size();
-			const float MaxAngularSpeedForFullOffset = 0.5f;  // rad/s, above this start reducing
-			const float MinOffsetScale = 0.1f;  // Don't reduce below 10%
-			float OffsetScale = FMath::Clamp(1.0f - (AngularSpeed / MaxAngularSpeedForFullOffset) * 0.9f, MinOffsetScale, 1.0f);
+			const float MaxAngularSpeedForFullOffset = 0.2f;  // rad/s, above this start reducing (lowered for stronger damping)
+			const float MinOffsetScale = 0.0f;  // Allow complete suppression when rotating fast
+			float OffsetScale = FMath::Clamp(1.0f - (AngularSpeed / MaxAngularSpeedForFullOffset), MinOffsetScale, 1.0f);
 
 			FVector ScaledOffset = EstimatedBuoyancyCenterOffset * OffsetScale;
 			FVector BuoyancyCenter = ObjectCenter + ScaledOffset;

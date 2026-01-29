@@ -18,7 +18,7 @@ struct FGPUCollisionSphere
 	int BoneIndex;     // Index into bone transform buffer (-1 = no bone)
 	int FluidTagID;    // Fluid tag hash for event identification
 	int OwnerID;       // Unique ID of collider owner (actor/component)
-	float Padding;     // Alignment padding
+	int bHasFluidInteraction; // 1 if from FluidInteraction component, 0 if from WorldCollision
 };
 
 struct FGPUCollisionCapsule
@@ -31,6 +31,8 @@ struct FGPUCollisionCapsule
 	int BoneIndex;     // Index into bone transform buffer (-1 = no bone)
 	int FluidTagID;    // Fluid tag hash for event identification
 	int OwnerID;       // Unique ID of collider owner (actor/component)
+	int bHasFluidInteraction; // 1 if from FluidInteraction component, 0 if from WorldCollision
+	int Padding;       // Alignment padding
 };
 
 struct FGPUCollisionBox
@@ -43,7 +45,7 @@ struct FGPUCollisionBox
 	int BoneIndex;    // Index into bone transform buffer (-1 = no bone)
 	int FluidTagID;   // Fluid tag hash for event identification
 	int OwnerID;      // Unique ID of collider owner (actor/component)
-	float Padding2;
+	int bHasFluidInteraction; // 1 if from FluidInteraction component, 0 if from WorldCollision
 };
 
 struct FGPUCollisionConvex
@@ -57,7 +59,7 @@ struct FGPUCollisionConvex
 	int BoneIndex;    // Index into bone transform buffer (-1 = no bone)
 	int FluidTagID;   // Fluid tag hash for event identification
 	int OwnerID;      // Unique ID of collider owner (actor/component)
-	float Padding;    // Alignment padding
+	int bHasFluidInteraction; // 1 if from FluidInteraction component, 0 if from WorldCollision
 };
 
 struct FGPUConvexPlane

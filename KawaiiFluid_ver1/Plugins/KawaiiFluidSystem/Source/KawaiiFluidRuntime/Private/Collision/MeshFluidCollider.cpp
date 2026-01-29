@@ -483,6 +483,12 @@ void UMeshFluidCollider::CacheStaticMeshCollision(UStaticMeshComponent* StaticMe
 		CachedBx.Rotation = BoxWorldTransform.GetRotation();
 		CachedBx.BoneName = NAME_None;
 		CachedBx.BoneTransform = ComponentTransform;
+		// BoneIndex stays at default value (-1) for StaticMesh
+
+		// [Debug] Verify StaticMesh box BoneIndex at cache time
+		UE_LOG(LogTemp, Warning, TEXT("[StaticMeshCache] Box: BoneIndex=%d (should be -1), Extent=(%.1f,%.1f,%.1f)"),
+			CachedBx.BoneIndex, CachedBx.Extent.X, CachedBx.Extent.Y, CachedBx.Extent.Z);
+
 		CachedBoxes.Add(CachedBx);
 
 		// Add 8 box corners
@@ -1330,6 +1336,7 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		GPUSphere.Restitution = InRestitution;
 		GPUSphere.BoneIndex = Sph.BoneIndex;  // Use cached bone index
 		GPUSphere.OwnerID = InOwnerID;
+		GPUSphere.bHasFluidInteraction = 1;  // From FluidInteraction component
 
 		// [Debug] GPU Collider log (first call only)
 		if (!bLoggedSpheres)
@@ -1360,6 +1367,7 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		GPUCapsule.Restitution = InRestitution;
 		GPUCapsule.BoneIndex = Cap.BoneIndex;  // Use cached bone index
 		GPUCapsule.OwnerID = InOwnerID;
+		GPUCapsule.bHasFluidInteraction = 1;  // From FluidInteraction component
 
 		// [Debug] Verify BoneIndex during GPU export
 		if (bShouldLog)
@@ -1372,6 +1380,7 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 	}
 
 	// Export boxes
+	static bool bLoggedBoxes = false;
 	for (const FCachedBox& Box : CachedBoxes)
 	{
 		FGPUCollisionBox GPUBox;
@@ -1387,8 +1396,20 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		GPUBox.Restitution = InRestitution;
 		GPUBox.BoneIndex = Box.BoneIndex;  // Use cached bone index
 		GPUBox.OwnerID = InOwnerID;
+		GPUBox.bHasFluidInteraction = 1;  // From FluidInteraction component
+
+		// [Debug] GPU Box export log (first call only)
+		if (!bLoggedBoxes)
+		{
+			int32 ColliderArrayIndex = OutBoxes.Num();
+			UE_LOG(LogTemp, Warning, TEXT("[GPUCollider] Box[%d]: BoneName='%s', BoneIndex=%d, OwnerID=%d, Extent=(%.1f,%.1f,%.1f)"),
+				ColliderArrayIndex, *Box.BoneName.ToString(), Box.BoneIndex, InOwnerID,
+				Box.Extent.X, Box.Extent.Y, Box.Extent.Z);
+		}
+
 		OutBoxes.Add(GPUBox);
 	}
+	if (!bLoggedBoxes && CachedBoxes.Num() > 0) bLoggedBoxes = true;
 
 	// Export convexes (with plane references)
 	for (const FCachedConvex& Cvx : CachedConvexes)
@@ -1402,6 +1423,7 @@ void UMeshFluidCollider::ExportToGPUPrimitives(
 		GPUConvex.Restitution = InRestitution;
 		GPUConvex.BoneIndex = Cvx.BoneIndex;  // Use cached bone index
 		GPUConvex.OwnerID = InOwnerID;
+		GPUConvex.bHasFluidInteraction = 1;  // From FluidInteraction component
 		OutConvexes.Add(GPUConvex);
 
 		// Add planes to the plane buffer
@@ -1487,6 +1509,7 @@ void UMeshFluidCollider::ExportToGPUPrimitivesWithBones(
 		GPUSphere.Restitution = InRestitution;
 		GPUSphere.BoneIndex = Sph.BoneIndex;  // Use Skeleton BoneIndex directly (BUG FIX)
 		GPUSphere.OwnerID = InOwnerID;
+		GPUSphere.bHasFluidInteraction = 1;  // From FluidInteraction component
 
 		// Update BoneTransforms array (for velocity calculation)
 		GetOrCreateBoneIndex(Sph.BoneName, Sph.BoneTransform);
@@ -1505,6 +1528,7 @@ void UMeshFluidCollider::ExportToGPUPrimitivesWithBones(
 		GPUCapsule.Restitution = InRestitution;
 		GPUCapsule.BoneIndex = Cap.BoneIndex;  // Use Skeleton BoneIndex directly (BUG FIX)
 		GPUCapsule.OwnerID = InOwnerID;
+		GPUCapsule.bHasFluidInteraction = 1;  // From FluidInteraction component
 
 		// Update BoneTransforms array (for velocity calculation)
 		GetOrCreateBoneIndex(Cap.BoneName, Cap.BoneTransform);
@@ -1528,6 +1552,7 @@ void UMeshFluidCollider::ExportToGPUPrimitivesWithBones(
 		GPUBox.Restitution = InRestitution;
 		GPUBox.BoneIndex = Box.BoneIndex;  // Use Skeleton BoneIndex directly (BUG FIX)
 		GPUBox.OwnerID = InOwnerID;
+		GPUBox.bHasFluidInteraction = 1;  // From FluidInteraction component
 
 		// Update BoneTransforms array (for velocity calculation)
 		GetOrCreateBoneIndex(Box.BoneName, Box.BoneTransform);
@@ -1547,6 +1572,7 @@ void UMeshFluidCollider::ExportToGPUPrimitivesWithBones(
 		GPUConvex.Restitution = InRestitution;
 		GPUConvex.BoneIndex = Cvx.BoneIndex;  // Use Skeleton BoneIndex directly (BUG FIX)
 		GPUConvex.OwnerID = InOwnerID;
+		GPUConvex.bHasFluidInteraction = 1;  // From FluidInteraction component
 
 		// Update BoneTransforms array (for velocity calculation)
 		GetOrCreateBoneIndex(Cvx.BoneName, Cvx.BoneTransform);

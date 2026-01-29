@@ -148,11 +148,23 @@ public:
 	/** Get collision feedback for a specific collider */
 	bool GetCollisionFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
 
-	/** Get all collision feedback (unfiltered) */
+	/** Get all collision feedback (unfiltered, bone colliders only) */
 	bool GetAllCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
 
-	/** Get current collision feedback count */
+	/** Get current collision feedback count (bone colliders) */
 	int32 GetCollisionFeedbackCount() const;
+
+	/** Get all StaticMesh collision feedback (BoneIndex < 0, for buoyancy center) */
+	bool GetAllStaticMeshCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
+
+	/** Get current StaticMesh collision feedback count */
+	int32 GetStaticMeshCollisionFeedbackCount() const;
+
+	/** Get all FluidInteraction StaticMesh collision feedback (BoneIndex < 0, bHasFluidInteraction = 1) */
+	bool GetAllFluidInteractionSMCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount);
+
+	/** Get current FluidInteraction StaticMesh collision feedback count */
+	int32 GetFluidInteractionSMCollisionFeedbackCount() const;
 
 	/** Get collider contact count */
 	int32 GetColliderContactCount(int32 ColliderIndex) const;
