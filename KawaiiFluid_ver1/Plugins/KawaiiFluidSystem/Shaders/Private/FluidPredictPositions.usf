@@ -56,6 +56,9 @@ int PrevParticleCount;       // Safety: bounds check
 void PredictPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint idx = DispatchThreadId.x;
+
+    // Bounds check - this one branch is unavoidable (prevents out-of-bounds write)
+    // Writing to invalid indices could corrupt memory or crash
     if (idx >= (uint)ParticleCount)
     {
         return;
@@ -63,103 +66,98 @@ void PredictPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     FGPUFluidParticle particle = Particles[idx];
 
-    // Skip CPU-attached particles (they follow bone position directly)
-    if (HasFlag(particle.Flags, GPU_PARTICLE_FLAG_IS_ATTACHED))
-    {
-        particle.PredictedPosition = particle.Position;
-        Particles[idx] = particle;
-        return;
-    }
+    //=========================================================================
+    // Attached Mask: CPU-attached particles only update PredictedPosition
+    // BRANCHLESS: All paths computed, result selected via lerp
+    //=========================================================================
+    float attachedMask = (float)HasFlag(particle.Flags, GPU_PARTICLE_FLAG_IS_ATTACHED);
+    float activeMask = 1.0f - attachedMask;
 
     //=========================================================================
     // 1. Force Accumulation (Cohesion + Viscosity in single neighbor loop)
+    // OPTIMIZED: Always call, *0 masking handles disabled features
     //=========================================================================
-    
-    float3 cohesionAccel = float3(0.0f, 0.0f, 0.0f);
-    float3 viscosityCorrection = float3(0.0f, 0.0f, 0.0f);
-    float3 laplacianForce = float3(0.0f, 0.0f, 0.0f);
-    float viscosityWeightSum = 0.0f;
-    
-    // Only calculate forces if we have valid neighbor cache
-    if (bUsePrevNeighborCache && (CohesionStrength > 0.0f || ViscosityCoefficient > 0.0f))
-    {
-        FForceAccumulationResult forceResult = CalculateForceAccumulation(
-            idx,
-            particle.Position,
-            particle.Velocity,
-            particle.Mass,
-            particle.Density,
-            // Cohesion params
-            CohesionStrength,
-            MaxCohesionForce,
-            RestDensity,
-            // Viscosity params
-            ViscosityCoefficient,
-            Poly6Coeff,
-            ViscLaplacianCoeff,
-            // Common params
-            SmoothingRadius,
-            // Buffers
-            PrevNeighborList,
-            PrevNeighborCounts,
-            ParticleCount,
-            PrevParticleCount,
-            Particles
-        );
-        
-        cohesionAccel = forceResult.CohesionAccel;
-        viscosityCorrection = forceResult.ViscosityCorrection;
-        laplacianForce = forceResult.LaplacianForce;
-        viscosityWeightSum = forceResult.WeightSum;
-    }
-    
+
+    // bUsePrevNeighborCache: first frame has no cache, multiply by 0 to skip
+    float cacheValid = (float)bUsePrevNeighborCache * activeMask;
+
+    FForceAccumulationResult forceResult = CalculateForceAccumulation(
+        idx,
+        particle.Position,
+        particle.Velocity,
+        particle.Mass,
+        particle.Density,
+        // Cohesion params - multiplied by cacheValid to handle first frame & attached
+        CohesionStrength * cacheValid,
+        MaxCohesionForce,
+        RestDensity,
+        // Viscosity params
+        ViscosityCoefficient,
+        Poly6Coeff,
+        ViscLaplacianCoeff,
+        // Common params
+        SmoothingRadius,
+        // Buffers
+        PrevNeighborList,
+        PrevNeighborCounts,
+        ParticleCount,
+        PrevParticleCount,
+        Particles
+    );
+
+    // Apply cache validity mask
+    float3 cohesionAccel = forceResult.CohesionAccel;  // Already masked via CohesionStrength * cacheValid
+    float3 viscosityCorrection = forceResult.ViscosityCorrection * cacheValid;
+    float3 laplacianForce = forceResult.LaplacianForce * cacheValid;
+    float viscosityWeightSum = forceResult.WeightSum * cacheValid;
+
     //=========================================================================
-    // 2. Apply Forces to Velocity
+    // 2. Apply Forces to Velocity (only for active particles via activeMask)
     //=========================================================================
-    
+
     // Total acceleration: Gravity + External + Cohesion
     float3 totalAcceleration = Gravity + ExternalForce + cohesionAccel;
-    
-    // Apply acceleration (Semi-implicit Euler)
-    particle.Velocity += totalAcceleration * DeltaTime;
-    
+
+    // Apply acceleration (Semi-implicit Euler) - masked for active particles only
+    particle.Velocity += totalAcceleration * DeltaTime * activeMask;
+
     //=========================================================================
     // 3. Apply Viscosity to Velocity
+    // OPTIMIZED: No branches - uses *0 masking and safe division
     //=========================================================================
-    
-    if (ViscosityCoefficient > 0.0f)
-    {
-        // XSPH velocity smoothing
-        if (viscosityWeightSum > SMALL_NUMBER)
-        {
-            viscosityCorrection /= viscosityWeightSum;
-            particle.Velocity += ViscosityCoefficient * viscosityCorrection;
-        }
-        
-        // Laplacian viscosity (drag force)
-        float mu = ViscosityCoefficient * ViscosityCoefficient * LAPLACIAN_VISCOSITY_SCALE;
-        if (mu > SMALL_NUMBER)
-        {
-            particle.Velocity += mu * laplacianForce * DeltaTime;
-        }
-        
-        // Velocity drag (air resistance)
-        float dragCoeff = ViscosityCoefficient * ViscosityCoefficient * VELOCITY_DRAG_SCALE;
-        if (dragCoeff > SMALL_NUMBER)
-        {
-            float damping = 1.0f - dragCoeff * DeltaTime;
-            damping = max(damping, 0.0f);
-            particle.Velocity *= damping;
-        }
-    }
+
+    // XSPH velocity smoothing (branchless, matches original logic)
+    // When WeightSum < SMALL_NUMBER: no neighbors, skip correction (multiply by 0)
+    float weightMask = step(SMALL_NUMBER, viscosityWeightSum);  // 1 if WeightSum >= SMALL_NUMBER, else 0
+    float safeWeightSum = max(viscosityWeightSum, SMALL_NUMBER);
+    viscosityCorrection = (viscosityCorrection / safeWeightSum) * weightMask;
+    // When ViscosityCoefficient=0 or attached, this adds 0
+    particle.Velocity += ViscosityCoefficient * viscosityCorrection * activeMask;
+
+    // Laplacian viscosity (drag force) - masked
+    float mu = ViscosityCoefficient * ViscosityCoefficient * LAPLACIAN_VISCOSITY_SCALE;
+    particle.Velocity += mu * laplacianForce * DeltaTime * activeMask;
+
+    // Velocity drag (air resistance) - use lerp for branchless damping
+    float dragCoeff = ViscosityCoefficient * ViscosityCoefficient * VELOCITY_DRAG_SCALE;
+    float damping = max(1.0f - dragCoeff * DeltaTime, 0.0f);
+    // Active: apply damping, Attached: keep velocity unchanged (damping = 1.0)
+    float effectiveDamping = lerp(damping, 1.0f, attachedMask);
+    particle.Velocity *= effectiveDamping;
 
     //=========================================================================
     // 4. Position Prediction
+    // Active: Position + Velocity * DeltaTime
+    // Attached: Position (no movement)
     //=========================================================================
-    particle.PredictedPosition = particle.Position + particle.Velocity * DeltaTime;
+    float3 activePredicted = particle.Position + particle.Velocity * DeltaTime;
+    float3 attachedPredicted = particle.Position;
+    particle.PredictedPosition = lerp(activePredicted, attachedPredicted, attachedMask);
 
-    // XPBD Warm Starting: Preserve Lambda with damping
-    particle.Lambda *= 0.9f;
+    // XPBD Warm Starting: Preserve Lambda with damping (only for active)
+    // Attached: Lambda unchanged (multiply by 1.0)
+    float lambdaDamping = lerp(0.9f, 1.0f, attachedMask);
+    particle.Lambda *= lambdaDamping;
 
     // Store back
     Particles[idx] = particle;
