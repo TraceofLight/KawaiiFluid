@@ -273,6 +273,8 @@ public:
 		// Morton bounds for Z-Order cell ID calculation
 		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
 		SHADER_PARAMETER(FVector3f, MortonBoundsExtent)
+		// Hybrid Tiled Z-Order mode: 1 = enabled (32-bit keys, unlimited range), 0 = disabled (classic Morton)
+		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 		// Neighbor caching buffers
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, NeighborList)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, NeighborCounts)
@@ -1505,6 +1507,8 @@ public:
 		// Z-Order bounds (must match fluid simulation)
 		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
 		SHADER_PARAMETER(float, CellSize)
+		// Hybrid Tiled Z-Order mode (for unlimited simulation range)
+		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 		// Adhesion parameters
 		SHADER_PARAMETER(float, AdhesionForceStrength)
 		SHADER_PARAMETER(float, AdhesionRadius)
@@ -1713,6 +1717,8 @@ public:
 		SHADER_PARAMETER(FVector3f, BoundsMin)
 		SHADER_PARAMETER(FVector3f, BoundsExtent)
 		SHADER_PARAMETER(float, CellSize)
+		// Hybrid Tiled Z-Order mode: 1 = enabled (32-bit keys, unlimited range), 0 = disabled (classic Morton)
+		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -2207,6 +2213,8 @@ public:
 		SHADER_PARAMETER(int32, BoundaryParticleCount)
 		SHADER_PARAMETER(FVector3f, BoundsMin)
 		SHADER_PARAMETER(float, CellSize)
+		// Hybrid Tiled Z-Order mode: 1 = enabled (32-bit keys, unlimited range), 0 = disabled (classic Morton)
+		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -2453,6 +2461,9 @@ public:
 		// Z-Order bounds
 		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
 		SHADER_PARAMETER(float, CellSize)
+
+		// Hybrid Tiled Z-Order mode (for unlimited simulation range)
+		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;

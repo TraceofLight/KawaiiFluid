@@ -54,30 +54,47 @@ public:
 	 * Use uniform (cube) size for simulation volume
 	 * When checked, enter a single size value. When unchecked, enter separate X/Y/Z values.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume", meta = (DisplayName = "Uniform Size"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume",
+		meta = (DisplayName = "Uniform Size", EditCondition = "!bUseUnlimitedSize", EditConditionHides))
 	bool bUniformSize = true;
 
 	/**
 	 * Simulation volume size (cm) - cube dimensions when Uniform Size is checked
-	 * Particles are confined within this box. Enter the full box size (not half).
-	 * Maximum size is automatically limited by Internal Grid (Large preset) capacity.
+	 * Particles are confined within this box and collide with its boundaries.
+	 *
+	 * When "Enable Unlimited Simulation Range" is OFF: Size is clamped to grid capacity.
+	 * When "Enable Unlimited Simulation Range" is ON: No size limit - can be any size.
 	 *
 	 * Example: 400 cm means a 400x400x400 cm cube.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume",
-		meta = (EditCondition = "bUniformSize", EditConditionHides, DisplayName = "Size", ClampMin = "10.0"))
+		meta = (EditCondition = "bUniformSize && !bUseUnlimitedSize", EditConditionHides, DisplayName = "Size", ClampMin = "10.0"))
 	float UniformVolumeSize = 2560.0f;
 
 	/**
 	 * Simulation volume size (cm) - separate X/Y/Z dimensions
-	 * Particles are confined within this box. Enter the full box size (not half).
-	 * Each axis is automatically clamped to Internal Grid (Large preset) capacity.
+	 * Particles are confined within this box and collide with its boundaries.
+	 *
+	 * When "Enable Unlimited Simulation Range" is OFF: Size is clamped to grid capacity.
+	 * When "Enable Unlimited Simulation Range" is ON: No size limit - can be any size.
 	 *
 	 * Example: (400, 300, 200) means a 400x300x200 cm box.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume",
-		meta = (EditCondition = "bUniformSize == false", EditConditionHides, DisplayName = "Size"))
+		meta = (EditCondition = "!bUniformSize && !bUseUnlimitedSize", EditConditionHides, DisplayName = "Size"))
 	FVector VolumeSize = FVector(2560.0f, 2560.0f, 2560.0f);
+
+	/**
+	 * Disable the volume box entirely - no collision boundaries, no wireframe
+	 * Particles can move freely without any box constraints.
+	 * Only available when "Enable Unlimited Simulation Range" is enabled.
+	 *
+	 * When enabled: Size properties are hidden, no bounds collision, no wireframe visualization
+	 * When disabled: Volume box acts as collision boundary with the specified size
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume",
+		meta = (DisplayName = "Use Unlimited Size", EditCondition = "bUseHybridTiledZOrder", EditConditionHides))
+	bool bUseUnlimitedSize = false;
 
 	//========================================
 	// Preset Configuration
@@ -285,6 +302,29 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Debug|Z-Order Space",
 		meta = (EditCondition = "bShowZOrderSpaceWireframe", EditConditionHides, DisplayName = "Z-Order Space Wireframe Color"))
 	FColor ZOrderSpaceWireframeColor = FColor::Red;
+
+	//========================================
+	// Hybrid Tiled Z-Order (Unlimited Simulation Range)
+	//========================================
+
+	/**
+	 * Enable Hybrid Tiled Z-Order mode for UNLIMITED simulation range
+	 * When enabled:
+	 *   - Particles can exist anywhere in the world (no bounds clipping)
+	 *   - Characters with attached fluid can move freely across the entire map
+	 *   - Uses 32-bit sort keys (TileHash 14 bits + LocalMorton 18 bits)
+	 *   - Radix sort uses 4 passes instead of 3 (~10% performance overhead)
+	 *   - Cache efficiency ~95% (vs 100% for classic bounded mode)
+	 * When disabled (default):
+	 *   - Uses classic bounded Morton code (21-bit keys)
+	 *   - Particles outside bounds are clamped (may cause incorrect neighbor search)
+	 *   - Default simulation range: ±1280cm from volume center
+	 *
+	 * Recommended: Enable for games with character-attached fluids or large maps
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Z-Order Space",
+		meta = (DisplayName = "Enable Unlimited Simulation Range"))
+	bool bUseHybridTiledZOrder = true;
 
 	//========================================
 	// Internal Grid Data (Auto-Calculated, access via getter functions)

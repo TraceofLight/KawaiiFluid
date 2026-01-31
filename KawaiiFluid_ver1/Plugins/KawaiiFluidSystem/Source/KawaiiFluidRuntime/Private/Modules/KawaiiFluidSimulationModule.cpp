@@ -491,6 +491,9 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 			// Use external volume's collision parameters
 			Params.BoundsRestitution = ExternalVolume->GetWallBounce();
 			Params.BoundsFriction = ExternalVolume->GetWallFriction();
+
+			// Skip bounds collision when Unlimited Size mode is enabled
+			Params.bSkipBoundsCollision = ExternalVolume->bUseUnlimitedSize;
 		}
 		else
 		{

@@ -188,6 +188,9 @@ struct FGPUFluidSimulationParams
 	// Surface Tension max correction
 	float MaxSurfaceTensionCorrectionPerIteration;  // cm, max position correction per iteration
 
+	// Bounds Collision Skip (for Unlimited Size mode)
+	int32 bSkipBoundsCollision;                 // 1 = skip volume bounds collision (Unlimited Size mode)
+
 	FGPUFluidSimulationParams()
 		: RestDensity(1000.0f)
 		, SmoothingRadius(20.0f)
@@ -257,6 +260,8 @@ struct FGPUFluidSimulationParams
 		, CohesionExponent(2)  // Quadratic = stringy
 		// Surface Tension max correction
 		, MaxSurfaceTensionCorrectionPerIteration(5.0f)
+		// Bounds Collision Skip
+		, bSkipBoundsCollision(0)  // 0 = use bounds collision, 1 = skip (Unlimited Size mode)
 	{
 	}
 

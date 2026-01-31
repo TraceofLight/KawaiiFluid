@@ -1572,6 +1572,9 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					// CRITICAL: Pass GridResolutionPreset for correct Morton code calculation
 					// Without this, shader uses default Medium (7-bit) even when Large (8-bit) is configured
 					AnisotropyParams.GridResolutionPreset = ZOrderSortManager->GetGridResolutionPreset();
+					// CRITICAL: Pass Hybrid mode flag for correct cell ID calculation
+					// Without this, shader uses Classic Morton while CellStart/End uses Hybrid keys
+					AnisotropyParams.bUseHybridTiledZOrder = ZOrderSortManager->IsHybridTiledZOrderEnabled();
 				}
 
 				// =========================================================================
@@ -3073,6 +3076,14 @@ void FGPUFluidSimulator::AddBoundsCollisionPass(
 	FRDGBufferUAVRef ParticlesUAV,
 	const FGPUFluidSimulationParams& Params)
 {
+	// Skip bounds collision when bSkipBoundsCollision is set
+	// This is enabled when "Use Unlimited Size" is checked in the Volume component
+	// Particles can move freely without volume box constraints
+	if (Params.bSkipBoundsCollision)
+	{
+		return;
+	}
+
 	if (CollisionManager.IsValid())
 	{
 		CollisionManager->AddBoundsCollisionPass(GraphBuilder, ParticlesUAV, CurrentParticleCount, Params);

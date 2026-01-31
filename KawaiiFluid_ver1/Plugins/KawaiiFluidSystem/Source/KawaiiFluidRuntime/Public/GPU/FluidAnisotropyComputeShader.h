@@ -82,6 +82,10 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 	bool bUseBoundaryZOrder = false;
 	float BoundaryWeight = 1.0f;	// Weight for boundary contribution to covariance
 
+	// Hybrid Tiled Z-Order mode (for unlimited simulation range)
+	// When true, uses 21-bit Hybrid keys instead of classic Morton codes
+	bool bUseHybridTiledZOrder = false;
+
 	// Temporal Smoothing parameters
 	FRDGBufferSRVRef PrevAxis1SRV = nullptr;
 	FRDGBufferSRVRef PrevAxis2SRV = nullptr;
@@ -145,6 +149,7 @@ public:
 		// TODO(KHJ): Remove bUseZOrderSorting - always 1, legacy path is dead code
 		SHADER_PARAMETER(int32, bUseZOrderSorting)  // 1 = Morton-sorted, 0 = legacy hash
 		SHADER_PARAMETER(FVector3f, MortonBoundsMin)  // Grid origin for Morton code
+		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)  // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton
 
 		// Attached particle anisotropy params
 		SHADER_PARAMETER(float, AttachedFlattenScale)  // How flat (0.3 = 30% height)

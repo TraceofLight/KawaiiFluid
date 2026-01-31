@@ -60,6 +60,11 @@ int IterationIndex;
 float3 MortonBoundsMin;     // Simulation bounds minimum
 float3 MortonBoundsExtent;  // Simulation bounds extent (Max - Min)
 
+// Hybrid Tiled Z-Order mode flag
+// When enabled, uses 21-bit Hybrid keys (3-bit TileHash + 18-bit LocalMorton)
+// for unlimited simulation range. Must match FluidMortonCode.usf
+int bUseHybridTiledZOrder;
+
 //=============================================================================
 // Boundary Particles for density contribution (Akinci 2012)
 //=============================================================================
@@ -130,8 +135,19 @@ float MaxSurfaceTensionCorrection;        // Max correction per iteration (cm)
 // Compute Morton-based cell ID from cell coordinates (integer)
 // This version uses shader parameters (MortonBoundsMin, CellSize) directly.
 // IMPORTANT: Must match FluidMortonCode.usf's ComputeMortonCodesCellBasedCS
+// IMPORTANT: Result is truncated to fit CellStart/CellEnd buffer size (MAX_CELLS)
 uint GetMortonCellIDFromCellCoord(int3 cellCoord)
 {
+	// Hybrid mode: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
+	if (bUseHybridTiledZOrder)
+	{
+		// ComputeHybridTiledKey returns 21-bit key matching MAX_CELLS
+		// Mask is a no-op but kept for consistency
+		// Hash collisions (8 tile buckets) are filtered by distance check
+		return ComputeHybridTiledKey(cellCoord) & (MAX_CELLS - 1);
+	}
+
+	// Classic mode: Use bounded Morton code
 	// Compute grid minimum cell (same as in FluidMortonCode.usf)
 	int3 gridMin = int3(floor(MortonBoundsMin / CellSize));
 

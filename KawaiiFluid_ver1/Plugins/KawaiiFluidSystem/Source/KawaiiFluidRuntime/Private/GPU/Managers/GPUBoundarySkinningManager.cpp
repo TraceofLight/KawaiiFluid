@@ -192,7 +192,9 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 		RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid::StaticBoundaryZOrderSort");
 
 		FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-		const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(GridResolutionPreset);
+		// CRITICAL: Hybrid Tiled Z-Order uses fixed 21-bit keys, so use Medium preset (2^21 cells)
+		const EGridResolutionPreset EffectivePreset = bUseHybridTiledZOrder ? EGridResolutionPreset::Medium : GridResolutionPreset;
+		const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(EffectivePreset);
 		const int32 ParticleCount = StaticBoundaryParticleCount;
 
 		// Register source buffer
@@ -254,7 +256,7 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 		// Pass 1: Compute Morton codes
 		{
 			FComputeBoundaryMortonCodesCS::FPermutationDomain PermutationVector;
-			PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+			PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 			TShaderMapRef<FComputeBoundaryMortonCodesCS> ComputeShader(ShaderMap, PermutationVector);
 
 			FComputeBoundaryMortonCodesCS::FParameters* PassParams =
@@ -265,6 +267,7 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 			PassParams->BoundaryParticleCount = ParticleCount;
 			PassParams->BoundsMin = ZOrderBoundsMin;
 			PassParams->CellSize = Params.CellSize;
+			PassParams->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 
 			const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FComputeBoundaryMortonCodesCS::ThreadGroupSize);
 
@@ -280,9 +283,19 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 
 		// Pass 2: Radix sort (using multi-pass histogram-based radix sort)
 		{
-			const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
-			const int32 MortonCodeBits = GridAxisBits * 3;
-			int32 RadixSortPasses = (MortonCodeBits + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS;
+			// Hybrid mode uses 21-bit keys (3-bit TileHash + 18-bit LocalMorton)
+			// Must match fluid particle key structure to ensure correct CellStart/CellEnd lookup
+			int32 SortKeyBits;
+			if (bUseHybridTiledZOrder)
+			{
+				SortKeyBits = 21;
+			}
+			else
+			{
+				const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
+				SortKeyBits = GridAxisBits * 3;
+			}
+			int32 RadixSortPasses = (SortKeyBits + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS;
 			if (RadixSortPasses % 2 != 0) RadixSortPasses++;
 
 			const int32 NumBlocks = FMath::DivideAndRoundUp(ParticleCount, GPU_RADIX_ELEMENTS_PER_GROUP);
@@ -399,7 +412,7 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 		// Pass 3: Clear cell indices
 		{
 			FComputeBoundaryCellStartEndCS::FPermutationDomain PermutationVector;
-			PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+			PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 			TShaderMapRef<FClearBoundaryCellIndicesCS> ClearShader(ShaderMap, PermutationVector);
 
 			FClearBoundaryCellIndicesCS::FParameters* ClearParams =
@@ -447,7 +460,7 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 			// FinalMortonBuffer is already defined from Pass 2
 
 			FComputeBoundaryCellStartEndCS::FPermutationDomain PermutationVector;
-			PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+			PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 			TShaderMapRef<FComputeBoundaryCellStartEndCS> CellShader(ShaderMap, PermutationVector);
 
 			FComputeBoundaryCellStartEndCS::FParameters* CellParams =
@@ -784,6 +797,13 @@ bool FGPUBoundarySkinningManager::ShouldSkipBoundaryAdhesionPass(const FGPUFluid
 	if (!CombinedBoundaryAABB.IsValid())
 	{
 		return false;
+	}
+
+	// In Hybrid Tiled Z-Order mode, simulation range is unlimited
+	// Skip the volume overlap check - particles can be anywhere
+	if (bUseHybridTiledZOrder)
+	{
+		return false;  // Don't skip - always run adhesion in Hybrid mode
 	}
 
 	// Check if boundary AABB overlaps with simulation volume
@@ -1197,8 +1217,10 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 		const bool bCanUseZOrder = bUseSameFrameZOrder || bUsePersistentZOrder;
 
 		// Create permutation vector for grid resolution
+		// CRITICAL: Hybrid Tiled Z-Order uses fixed 21-bit keys, so use Medium preset (2^21 cells)
+		const EGridResolutionPreset EffectivePreset = bUseHybridTiledZOrder ? EGridResolutionPreset::Medium : GridResolutionPreset;
 		FBoundaryAdhesionCS::FPermutationDomain PermutationVector;
-		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 		TShaderMapRef<FBoundaryAdhesionCS> AdhesionShader(ShaderMap, PermutationVector);
 
 		FBoundaryAdhesionCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FBoundaryAdhesionCS::FParameters>();
@@ -1221,6 +1243,7 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 			PassParameters->bUseBoundaryZOrder = 1;
 			PassParameters->MortonBoundsMin = ZOrderBoundsMin;
 			PassParameters->CellSize = Params.CellSize;
+			PassParameters->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 		}
 		else if (bUsePersistentZOrder)
 		{
@@ -1238,6 +1261,7 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 			PassParameters->bUseBoundaryZOrder = 1;
 			PassParameters->MortonBoundsMin = ZOrderBoundsMin;
 			PassParameters->CellSize = Params.CellSize;
+			PassParameters->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 		}
 		else
 		{
@@ -1265,6 +1289,7 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 			PassParameters->bUseBoundaryZOrder = 0;
 			PassParameters->MortonBoundsMin = FVector3f::ZeroVector;
 			PassParameters->CellSize = Params.CellSize;
+			PassParameters->bUseHybridTiledZOrder = 0;  // Not relevant when Z-Order is disabled
 		}
 
 		// Adhesion parameters
@@ -1400,7 +1425,9 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 
 	// Get grid parameters from preset
-	const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(GridResolutionPreset);
+	// CRITICAL: Hybrid Tiled Z-Order uses fixed 21-bit keys, so use Medium preset (2^21 cells)
+	const EGridResolutionPreset EffectivePreset = bUseHybridTiledZOrder ? EGridResolutionPreset::Medium : GridResolutionPreset;
+	const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(EffectivePreset);
 
 	// Create transient buffers for sorting
 	FRDGBufferRef MortonCodesBuffer = GraphBuilder.CreateBuffer(
@@ -1477,7 +1504,7 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 	//=========================================================================
 	{
 		FComputeBoundaryMortonCodesCS::FPermutationDomain PermutationVector;
-		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 		TShaderMapRef<FComputeBoundaryMortonCodesCS> ComputeShader(ShaderMap, PermutationVector);
 
 		FComputeBoundaryMortonCodesCS::FParameters* PassParams =
@@ -1488,6 +1515,7 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 		PassParams->BoundaryParticleCount = BoundaryParticleCount;
 		PassParams->BoundsMin = ZOrderBoundsMin;
 		PassParams->CellSize = Params.CellSize;
+		PassParams->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 
 		const int32 NumGroups = FMath::DivideAndRoundUp(BoundaryParticleCount, FComputeBoundaryMortonCodesCS::ThreadGroupSize);
 
@@ -1505,9 +1533,19 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 	// Pass 2: Radix Sort (reuse existing radix sort passes)
 	//=========================================================================
 	{
-		const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
-		const int32 MortonCodeBits = GridAxisBits * 3;
-		int32 RadixSortPasses = (MortonCodeBits + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS;
+		// Hybrid mode uses 21-bit keys (3-bit TileHash + 18-bit LocalMorton)
+		// Must match fluid particle key structure to ensure correct CellStart/CellEnd lookup
+		int32 SortKeyBits;
+		if (bUseHybridTiledZOrder)
+		{
+			SortKeyBits = 21;
+		}
+		else
+		{
+			const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
+			SortKeyBits = GridAxisBits * 3;
+		}
+		int32 RadixSortPasses = (SortKeyBits + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS;
 		if (RadixSortPasses % 2 != 0) RadixSortPasses++;
 
 		const int32 NumBlocks = FMath::DivideAndRoundUp(BoundaryParticleCount, GPU_RADIX_ELEMENTS_PER_GROUP);
@@ -1622,7 +1660,7 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 	//=========================================================================
 	{
 		FClearBoundaryCellIndicesCS::FPermutationDomain PermutationVector;
-		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 		TShaderMapRef<FClearBoundaryCellIndicesCS> ClearShader(ShaderMap, PermutationVector);
 
 		FClearBoundaryCellIndicesCS::FParameters* ClearParams =
@@ -1672,7 +1710,7 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 	//=========================================================================
 	{
 		FComputeBoundaryCellStartEndCS::FPermutationDomain PermutationVector;
-		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+		PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 		TShaderMapRef<FComputeBoundaryCellStartEndCS> CellStartEndShader(ShaderMap, PermutationVector);
 
 		FComputeBoundaryCellStartEndCS::FParameters* CellParams =

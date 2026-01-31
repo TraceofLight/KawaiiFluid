@@ -352,6 +352,10 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 	/** Bounds collision friction - used for Containment on GPU */
 	float BoundsFriction = 0.1f;
 
+	/** Skip bounds collision entirely (Unlimited Size mode)
+	 * When true, particles are not constrained by the volume box */
+	bool bSkipBoundsCollision = false;
+
 	//========================================
 	// Static Boundary Particles (Akinci 2012)
 	//========================================

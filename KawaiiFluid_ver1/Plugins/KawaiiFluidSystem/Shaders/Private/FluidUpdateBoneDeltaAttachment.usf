@@ -73,17 +73,30 @@ float AdhesionStrength;    // Adhesion strength - if 0, no attachment allowed
 float3 MortonBoundsMin;
 float CellSize;
 
+// Hybrid Tiled Z-Order mode (for unlimited simulation range)
+int bUseHybridTiledZOrder;
+
 //=============================================================================
 // Z-Order Cell ID Calculation
 //=============================================================================
 
 uint GetMortonCellIDFromCellCoord_Update(int3 cellCoord)
 {
-	int3 gridMin = int3(floor(MortonBoundsMin / CellSize));
-	int3 offset = cellCoord - gridMin;
-	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
-	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
-	return Morton3D(uoffset.x, uoffset.y, uoffset.z);
+	if (bUseHybridTiledZOrder)
+	{
+		// Hybrid Tiled Z-Order: 21-bit key (matches MAX_CELLS, no truncation needed)
+		// Hash collisions (8 tile buckets) are filtered by distance check
+		return ComputeHybridTiledKey(cellCoord) & (MAX_CELLS - 1);
+	}
+	else
+	{
+		// Classic Morton code with bounded range
+		int3 gridMin = int3(floor(MortonBoundsMin / CellSize));
+		int3 offset = cellCoord - gridMin;
+		uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
+		uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+		return Morton3D(uoffset.x, uoffset.y, uoffset.z);
+	}
 }
 
 int3 WorldToCell_Update(float3 worldPos)

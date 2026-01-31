@@ -57,6 +57,7 @@ int bUseBoundaryZOrder;                    // 1 = use Z-Order sorted boundary, 0
 // Z-Order bounds (must match fluid simulation)
 float3 MortonBoundsMin;
 float CellSize;  // Cell size for Morton code calculation
+int bUseHybridTiledZOrder;  // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton (bounded)
 
 // Parameters
 float AdhesionForceStrength;
@@ -92,9 +93,20 @@ float DistanceSquaredToAABB(float3 testPos, float3 aabbMin, float3 aabbMax)
 
 //=============================================================================
 // Z-Order Cell ID Calculation (must match FluidSolveDensityPressure.usf)
+// IMPORTANT: Result is truncated to fit CellStart/CellEnd buffer size (MAX_CELLS)
 //=============================================================================
 uint GetMortonCellIDFromCellCoord_Adhesion(int3 cellCoord)
 {
+	// Hybrid mode: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
+	if (bUseHybridTiledZOrder)
+	{
+		// ComputeHybridTiledKey returns 21-bit key matching MAX_CELLS
+		// Mask is a no-op but kept for consistency
+		// Hash collisions (8 tile buckets) are filtered by distance check
+		return ComputeHybridTiledKey(cellCoord) & (MAX_CELLS - 1);
+	}
+
+	// Classic mode: Use bounded Morton code
 	// Compute grid minimum cell
 	int3 gridMin = int3(floor(MortonBoundsMin / CellSize));
 

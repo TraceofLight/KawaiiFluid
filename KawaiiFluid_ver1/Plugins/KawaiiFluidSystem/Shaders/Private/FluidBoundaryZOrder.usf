@@ -30,6 +30,7 @@ struct FGPUBoundaryParticle
 int BoundaryParticleCount;
 float3 BoundsMin;
 float CellSize;
+int bUseHybridTiledZOrder;  // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton (bounded)
 
 //=============================================================================
 // Pass 1: Compute Boundary Morton Codes
@@ -54,18 +55,29 @@ void ComputeBoundaryMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Compute cell coordinates
 	int3 cellCoord = int3(floor(pos / CellSize));
 
-	// Compute grid offset relative to bounds minimum
-	int3 gridMin = int3(floor(BoundsMin / CellSize));
-	int3 offset = cellCoord - gridMin;
+	uint sortKey;
+	if (bUseHybridTiledZOrder)
+	{
+		// Hybrid Tiled Z-Order: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
+		// Must match fluid particle key computation in FluidMortonCode.usf
+		sortKey = ComputeHybridTiledKey(cellCoord);
+	}
+	else
+	{
+		// Classic Morton code: bounded range
+		// Compute grid offset relative to bounds minimum
+		int3 gridMin = int3(floor(BoundsMin / CellSize));
+		int3 offset = cellCoord - gridMin;
 
-	// Clamp to valid Morton code range
-	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
-	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+		// Clamp to valid Morton code range
+		uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
+		uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
-	// Compute Morton code
-	uint mortonCode = Morton3D(uoffset.x, uoffset.y, uoffset.z);
+		// Compute Morton code
+		sortKey = Morton3D(uoffset.x, uoffset.y, uoffset.z);
+	}
 
-	BoundaryMortonCodes[idx] = mortonCode;
+	BoundaryMortonCodes[idx] = sortKey;
 	BoundaryParticleIndices[idx] = idx;
 }
 
@@ -131,26 +143,32 @@ void ComputeBoundaryCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	uint currentMorton = SortedBoundaryMortonCodes[idx];
 
+	// In Hybrid mode, key is 21-bit matching MAX_CELLS (mask is a no-op)
+	// Hash collisions (8 tile buckets) are filtered by distance check
+	uint currentCellID = currentMorton & (MAX_CELLS - 1);
+
 	// First particle or different from previous - this is a cell start
 	if (idx == 0)
 	{
-		BoundaryCellStart[currentMorton] = idx;
+		BoundaryCellStart[currentCellID] = idx;
 	}
 	else
 	{
 		uint prevMorton = SortedBoundaryMortonCodes[idx - 1];
-		if (currentMorton != prevMorton)
+		uint prevCellID = prevMorton & (MAX_CELLS - 1);
+
+		if (currentCellID != prevCellID)
 		{
 			// End of previous cell
-			BoundaryCellEnd[prevMorton] = idx - 1;
+			BoundaryCellEnd[prevCellID] = idx - 1;
 			// Start of current cell
-			BoundaryCellStart[currentMorton] = idx;
+			BoundaryCellStart[currentCellID] = idx;
 		}
 	}
 
 	// Last particle - this is a cell end
 	if (idx == (uint)(BoundaryParticleCount - 1))
 	{
-		BoundaryCellEnd[currentMorton] = idx;
+		BoundaryCellEnd[currentCellID] = idx;
 	}
 }

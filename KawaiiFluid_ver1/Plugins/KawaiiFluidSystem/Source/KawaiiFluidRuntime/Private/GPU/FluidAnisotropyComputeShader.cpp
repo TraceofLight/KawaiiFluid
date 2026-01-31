@@ -41,8 +41,10 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 
 	// Create permutation vector based on grid resolution preset
+	// CRITICAL: Hybrid Tiled Z-Order uses fixed 21-bit keys, so use Medium preset (2^21 cells)
+	const EGridResolutionPreset EffectivePreset = Params.bUseHybridTiledZOrder ? EGridResolutionPreset::Medium : Params.GridResolutionPreset;
 	FFluidAnisotropyCS::FPermutationDomain PermutationVector;
-	PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(Params.GridResolutionPreset));
+	PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 	TShaderMapRef<FFluidAnisotropyCS> ComputeShader(GlobalShaderMap, PermutationVector);
 
 	FFluidAnisotropyCS::FParameters* PassParameters =
@@ -221,6 +223,7 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 	// Morton code params
 	PassParameters->bUseZOrderSorting = Params.bUseZOrderSorting ? 1 : 0;
 	PassParameters->MortonBoundsMin = Params.MortonBoundsMin;
+	PassParameters->bUseHybridTiledZOrder = Params.bUseHybridTiledZOrder ? 1 : 0;
 
 	// Attached particle anisotropy params
 	PassParameters->AttachedFlattenScale = Params.AttachedFlattenScale;
@@ -251,8 +254,8 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 
 	FComputeShaderUtils::AddPass(
 		GraphBuilder,
-		RDG_EVENT_NAME("FluidAnisotropy(%d,Preset=%d,mode=%d)",
-			Params.ParticleCount, static_cast<int32>(Params.GridResolutionPreset), static_cast<int32>(Params.Mode)),
+		RDG_EVENT_NAME("FluidAnisotropy(%d,Preset=%d,mode=%d,Hybrid=%d)",
+			Params.ParticleCount, static_cast<int32>(EffectivePreset), static_cast<int32>(Params.Mode), Params.bUseHybridTiledZOrder ? 1 : 0),
 		ComputeShader,
 		PassParameters,
 		FIntVector(NumGroups, 1, 1));

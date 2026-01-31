@@ -91,10 +91,25 @@ void UKawaiiFluidVolumeComponent::TickComponent(float DeltaTime, ELevelTick Tick
 	// Update bounds if component moved
 	RecalculateBounds();
 
-	// Update wireframe color based on selection
-	if (AActor* Owner = GetOwner())
+	// Update UBoxComponent visibility based on settings
+	// In Unlimited Size mode, always hide the wireframe box
+	UWorld* World = GetWorld();
+	if (World)
 	{
-		ShapeColor = Owner->IsSelected() ? FColor::Yellow : BoundsColor;
+		const bool bIsEditor = !World->IsGameWorld();
+		const bool bShouldBeVisible = !bUseUnlimitedSize && ((bIsEditor && bShowBoundsInEditor) || (!bIsEditor && bShowBoundsAtRuntime));
+
+		SetHiddenInGame(!bShowBoundsAtRuntime || bUseUnlimitedSize);
+		SetVisibility(bShouldBeVisible);
+
+		// Update wireframe color based on selection (only if visible)
+		if (!bUseUnlimitedSize)
+		{
+			if (AActor* Owner = GetOwner())
+			{
+				ShapeColor = Owner->IsSelected() ? FColor::Yellow : BoundsColor;
+			}
+		}
 	}
 
 	// Draw additional debug visualization (Z-Order space, info text)
@@ -128,7 +143,8 @@ void UKawaiiFluidVolumeComponent::PostEditChangeProperty(FPropertyChangedEvent& 
 		}
 	}
 
-	// Apply minimum size constraint only (max is handled by RecalculateBounds with rotation awareness)
+	// Apply minimum size constraint (max is handled by RecalculateBounds with rotation awareness)
+	// In Hybrid Tiled Z-Order mode, only apply minimum constraint - no maximum clamping
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidVolumeComponent, UniformVolumeSize) ||
 		PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidVolumeComponent, bUniformSize))
 	{
@@ -142,6 +158,23 @@ void UKawaiiFluidVolumeComponent::PostEditChangeProperty(FPropertyChangedEvent& 
 		VolumeSize.X = FMath::Max(VolumeSize.X, 10.0f);
 		VolumeSize.Y = FMath::Max(VolumeSize.Y, 10.0f);
 		VolumeSize.Z = FMath::Max(VolumeSize.Z, 10.0f);
+	}
+
+	// When bUseUnlimitedSize changes, ensure wireframe visibility is updated
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidVolumeComponent, bUseUnlimitedSize))
+	{
+		// In Unlimited Size mode, hide the wireframe box
+		if (bUseUnlimitedSize)
+		{
+			bShowBoundsInEditor = false;
+			bShowBoundsAtRuntime = false;
+			SetVisibility(false);
+		}
+		else
+		{
+			bShowBoundsInEditor = true;
+			bShowBoundsAtRuntime = false;
+		}
 	}
 
 	// Handle size-related property changes or Preset change (which affects CellSize)
@@ -205,14 +238,10 @@ void UKawaiiFluidVolumeComponent::RecalculateBounds()
 	// Ensure valid CellSize
 	CellSize = FMath::Max(CellSize, 1.0f);
 
-	// Get the maximum half-extent supported by Large preset
-	const float LargeMaxHalfExtent = GridResolutionPresetHelper::GetMaxExtentForPreset(EGridResolutionPreset::Large, CellSize);
-
 	// Get user-defined volume size (full size)
 	const FVector OriginalHalfExtent = GetEffectiveVolumeSize() * 0.5f;
-
-	// First pass: Clamp half-extent to Large max (without rotation)
-	FVector WorkingHalfExtent = GridResolutionPresetHelper::ClampExtentToMaxSupported(OriginalHalfExtent, CellSize);
+	FVector WorkingHalfExtent = OriginalHalfExtent;
+	FVector EffectiveHalfExtent = WorkingHalfExtent;
 
 	// Get component rotation
 	const FQuat ComponentRotation = GetComponentQuat();
@@ -251,55 +280,74 @@ void UKawaiiFluidVolumeComponent::RecalculateBounds()
 		);
 	};
 
-	// Calculate the AABB extent for the rotated OBB
-	FVector EffectiveHalfExtent = WorkingHalfExtent;
-
-	if (!ComponentRotation.Equals(FQuat::Identity))
+	// In Hybrid Tiled Z-Order mode, skip all size clamping - unlimited range supported
+	// In classic mode, clamp to grid capacity
+	if (!bUseHybridTiledZOrder)
 	{
-		// Compute rotated AABB
-		EffectiveHalfExtent = ComputeRotatedAABBHalfExtent(WorkingHalfExtent);
+		// Get the maximum half-extent supported by Large preset
+		const float LargeMaxHalfExtent = GridResolutionPresetHelper::GetMaxExtentForPreset(EGridResolutionPreset::Large, CellSize);
 
-		// Check if rotated AABB exceeds Large preset limits
-		const float MaxAABBHalfExtent = FMath::Max3(EffectiveHalfExtent.X, EffectiveHalfExtent.Y, EffectiveHalfExtent.Z);
-		if (MaxAABBHalfExtent > LargeMaxHalfExtent)
+		// First pass: Clamp half-extent to Large max (without rotation)
+		WorkingHalfExtent = GridResolutionPresetHelper::ClampExtentToMaxSupported(OriginalHalfExtent, CellSize);
+
+		// Calculate the AABB extent for the rotated OBB
+		EffectiveHalfExtent = WorkingHalfExtent;
+
+		if (!ComponentRotation.Equals(FQuat::Identity))
 		{
-			// Scale down the original extent proportionally so rotated AABB fits within Large
-			const float ScaleFactor = LargeMaxHalfExtent / MaxAABBHalfExtent;
-			WorkingHalfExtent = WorkingHalfExtent * ScaleFactor;
-
-			// Recompute rotated AABB with scaled extent
+			// Compute rotated AABB
 			EffectiveHalfExtent = ComputeRotatedAABBHalfExtent(WorkingHalfExtent);
-		}
-	}
 
-	// Apply final extent if different from original (update VolumeSize/UniformVolumeSize)
-	if (!WorkingHalfExtent.Equals(OriginalHalfExtent, 0.01f))
-	{
-		const FVector NewSize = WorkingHalfExtent * 2.0f;
+			// Check if rotated AABB exceeds Large preset limits
+			const float MaxAABBHalfExtent = FMath::Max3(EffectiveHalfExtent.X, EffectiveHalfExtent.Y, EffectiveHalfExtent.Z);
+			if (MaxAABBHalfExtent > LargeMaxHalfExtent)
+			{
+				// Scale down the original extent proportionally so rotated AABB fits within Large
+				const float ScaleFactor = LargeMaxHalfExtent / MaxAABBHalfExtent;
+				WorkingHalfExtent = WorkingHalfExtent * ScaleFactor;
+
+				// Recompute rotated AABB with scaled extent
+				EffectiveHalfExtent = ComputeRotatedAABBHalfExtent(WorkingHalfExtent);
+			}
+		}
+
+		// Apply final extent if different from original (update VolumeSize/UniformVolumeSize)
+		if (!WorkingHalfExtent.Equals(OriginalHalfExtent, 0.01f))
+		{
+			const FVector NewSize = WorkingHalfExtent * 2.0f;
 
 #if WITH_EDITOR
-		const bool bWasRotated = !ComponentRotation.Equals(FQuat::Identity);
-		const FVector OriginalSize = OriginalHalfExtent * 2.0f;
+			const bool bWasRotated = !ComponentRotation.Equals(FQuat::Identity);
+			const FVector OriginalSize = OriginalHalfExtent * 2.0f;
 
-		if (bWasRotated)
-		{
-			const FVector OriginalRotatedAABB = ComputeRotatedAABBHalfExtent(OriginalHalfExtent);
-			const float RotatedAABBMax = FMath::Max3(OriginalRotatedAABB.X, OriginalRotatedAABB.Y, OriginalRotatedAABB.Z);
-			UE_LOG(LogTemp, Warning, TEXT("VolumeSize adjusted: Rotated AABB (%.1f cm) exceeds limit (%.1f cm). Size scaled from (%s) to (%s)"),
-				RotatedAABBMax * 2.0f, LargeMaxHalfExtent * 2.0f, *OriginalSize.ToString(), *NewSize.ToString());
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("VolumeSize exceeds limit (%.1f cm per axis). Clamped from (%s) to (%s)"),
-				LargeMaxHalfExtent * 2.0f, *OriginalSize.ToString(), *NewSize.ToString());
-		}
+			if (bWasRotated)
+			{
+				const FVector OriginalRotatedAABB = ComputeRotatedAABBHalfExtent(OriginalHalfExtent);
+				const float RotatedAABBMax = FMath::Max3(OriginalRotatedAABB.X, OriginalRotatedAABB.Y, OriginalRotatedAABB.Z);
+				UE_LOG(LogTemp, Warning, TEXT("VolumeSize adjusted: Rotated AABB (%.1f cm) exceeds limit (%.1f cm). Size scaled from (%s) to (%s)"),
+					RotatedAABBMax * 2.0f, LargeMaxHalfExtent * 2.0f, *OriginalSize.ToString(), *NewSize.ToString());
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("VolumeSize exceeds limit (%.1f cm per axis). Clamped from (%s) to (%s)"),
+					LargeMaxHalfExtent * 2.0f, *OriginalSize.ToString(), *NewSize.ToString());
+			}
 #endif
 
-		// Update the stored size values
-		VolumeSize = NewSize;
-		if (bUniformSize)
+			// Update the stored size values
+			VolumeSize = NewSize;
+			if (bUniformSize)
+			{
+				UniformVolumeSize = FMath::Max3(NewSize.X, NewSize.Y, NewSize.Z);
+			}
+		}
+	}
+	else
+	{
+		// Hybrid mode: compute effective half-extent for rotated AABB (for grid preset selection)
+		if (!ComponentRotation.Equals(FQuat::Identity))
 		{
-			UniformVolumeSize = FMath::Max3(NewSize.X, NewSize.Y, NewSize.Z);
+			EffectiveHalfExtent = ComputeRotatedAABBHalfExtent(WorkingHalfExtent);
 		}
 	}
 
@@ -307,18 +355,28 @@ void UKawaiiFluidVolumeComponent::RecalculateBounds()
 	const FVector FinalHalfExtent = WorkingHalfExtent;
 
 	// Sync UBoxComponent's BoxExtent with our VolumeSize
-	// Only call SetBoxExtent after the component is registered (not in constructor)
-	if (IsRegistered())
+	// Skip if bUseUnlimitedSize is enabled (no box collision/wireframe needed)
+	if (!bUseUnlimitedSize)
 	{
-		SetBoxExtent(FinalHalfExtent, false);
+		// Only call SetBoxExtent after the component is registered (not in constructor)
+		if (IsRegistered())
+		{
+			SetBoxExtent(FinalHalfExtent, false);
+		}
+		else
+		{
+			// Direct assignment for pre-registration (constructor) phase
+			BoxExtent = FinalHalfExtent;
+		}
 	}
 	else
 	{
-		// Direct assignment for pre-registration (constructor) phase
-		BoxExtent = FinalHalfExtent;
+		// In Unlimited Size mode, set a minimal extent (box is hidden anyway)
+		BoxExtent = FVector(1.0f, 1.0f, 1.0f);
 	}
 
 	// Auto-select optimal GridResolutionPreset based on rotated AABB size
+	// In Hybrid mode, we still use this for internal grid parameters
 	GridResolutionPreset = GridResolutionPresetHelper::SelectPresetForExtent(EffectiveHalfExtent, CellSize);
 
 	// Update grid parameters from auto-selected preset
@@ -393,6 +451,12 @@ void UKawaiiFluidVolumeComponent::UnregisterFromSubsystem()
 
 void UKawaiiFluidVolumeComponent::DrawBoundsVisualization()
 {
+	// Skip all visualization in Unlimited Size mode (no box, no text)
+	if (bUseUnlimitedSize)
+	{
+		return;
+	}
+
 	UWorld* World = GetWorld();
 	if (!World)
 	{

@@ -197,6 +197,8 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	// Morton bounds for Z-Order cell ID calculation (must match FluidMortonCode.usf)
 	PassParameters->MortonBoundsMin = SimulationBoundsMin;
 	PassParameters->MortonBoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
+	// Hybrid Tiled Z-Order mode for unlimited simulation range
+	PassParameters->bUseHybridTiledZOrder = (bUseZOrderSorting && ZOrderSortManager->IsHybridTiledZOrderEnabled()) ? 1 : 0;
 	// Neighbor caching buffers
 	PassParameters->NeighborList = InNeighborListUAV;
 	PassParameters->NeighborCounts = InNeighborCountsUAV;
@@ -725,6 +727,10 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 	// Z-Order bounds (for cell ID calculation)
 	PassParameters->MortonBoundsMin = SimulationBoundsMin;
 	PassParameters->CellSize = Params.CellSize;
+
+	// Hybrid Tiled Z-Order mode (for unlimited simulation range)
+	bool bUseHybridTiledZOrder = ZOrderSortManager.IsValid() && ZOrderSortManager->IsHybridTiledZOrderEnabled();
+	PassParameters->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 
 	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateBoneDeltaAttachmentCS::ThreadGroupSize);
 

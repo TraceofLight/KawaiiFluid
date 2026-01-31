@@ -328,6 +328,34 @@ public:
 		}
 	}
 
+	/**
+	 * Enable/disable Hybrid Tiled Z-Order mode for unlimited simulation range
+	 * When enabled:
+	 *   - Uses 32-bit sort keys (TileHash 14 bits + LocalMorton 18 bits)
+	 *   - Simulation range is UNLIMITED (no bounds clipping)
+	 *   - Radix sort uses 4 passes instead of 3
+	 * When disabled:
+	 *   - Uses 21-bit Morton codes (classic mode)
+	 *   - Simulation range limited to bounds (±1280cm default)
+	 * @param bEnabled - true to enable Hybrid mode
+	 */
+	void SetHybridTiledZOrderEnabled(bool bEnabled)
+	{
+		if (ZOrderSortManager.IsValid())
+		{
+			ZOrderSortManager->SetHybridTiledZOrderEnabled(bEnabled);
+		}
+		if (BoundarySkinningManager.IsValid())
+		{
+			BoundarySkinningManager->SetHybridTiledZOrderEnabled(bEnabled);
+		}
+	}
+
+	/** Check if Hybrid Tiled Z-Order mode is enabled */
+	bool IsHybridTiledZOrderEnabled() const
+	{
+		return ZOrderSortManager.IsValid() && ZOrderSortManager->IsHybridTiledZOrderEnabled();
+	}
 
 	/** Get anisotropy parameters */
 	const FFluidAnisotropyParams& GetAnisotropyParams() const { return CachedAnisotropyParams; }

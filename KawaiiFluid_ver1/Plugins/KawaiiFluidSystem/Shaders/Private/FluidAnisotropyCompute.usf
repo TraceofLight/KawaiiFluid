@@ -95,6 +95,7 @@ float AttachedStretchScale;   // Perpendicular stretch (1.5 = 150%)
 
 // Morton code parameters (for Z-Order sorting mode)
 float3 MortonBoundsMin;       // Grid origin for Morton code calculation
+int bUseHybridTiledZOrder;    // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton
 
 //-----------------------------------------------------------------------------
 // Boundary Particles for anisotropy calculation (Akinci 2012 style)
@@ -136,22 +137,34 @@ int bHasPreviousFrame;
 // Morton code functions are provided by FluidMortonUtils.ush
 //-----------------------------------------------------------------------------
 
-// Compute Morton-based cell ID from cell coordinates (integer)
-// This version uses shader parameters (MortonBoundsMin, CellSize) directly.
-uint GetMortonCellIDFromCellCoord(int3 cellCoord)
+// Compute cell ID from cell coordinates (integer)
+// Supports both Hybrid Tiled Z-Order (unlimited range) and Classic Morton (bounded)
+// This version uses shader parameters (MortonBoundsMin, CellSize, bUseHybridTiledZOrder) directly.
+uint GetMortonCellIDFromCellCoord_Aniso(int3 cellCoord)
 {
-	// Compute grid minimum cell (same as in FluidMortonCode.usf)
-	int3 gridMin = int3(floor(MortonBoundsMin / CellSize));
+	if (bUseHybridTiledZOrder)
+	{
+		// Hybrid Tiled Z-Order: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
+		// Matches MAX_CELLS, so mask is a no-op but kept for consistency
+		// Hash collisions (8 tile buckets) are filtered by distance check
+		return ComputeHybridTiledKey(cellCoord) & (MAX_CELLS - 1);
+	}
+	else
+	{
+		// Classic Morton code: bounded range
+		// Compute grid minimum cell (same as in FluidMortonCode.usf)
+		int3 gridMin = int3(floor(MortonBoundsMin / CellSize));
 
-	// Offset cell coordinates to make them positive (relative to grid min)
-	int3 offset = cellCoord - gridMin;
+		// Offset cell coordinates to make them positive (relative to grid min)
+		int3 offset = cellCoord - gridMin;
 
-	// Clamp to valid range for current preset
-	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
-	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+		// Clamp to valid range for current preset
+		uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
+		uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
-	// Compute Morton code using preset-specific function from FluidMortonUtils.ush
-	return Morton3D(uoffset.x, uoffset.y, uoffset.z);
+		// Compute Morton code using preset-specific function from FluidMortonUtils.ush
+		return Morton3D(uoffset.x, uoffset.y, uoffset.z);
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -540,7 +553,7 @@ void CalculateDensityBased(
 				for (int dx = -CellRadius; dx <= CellRadius; ++dx)
 				{
 					int3 NeighborCell = CenterCell + int3(dx, dy, dz);
-					uint CellID = GetMortonCellIDFromCellCoord(NeighborCell, MortonBoundsMin, CellSize);
+					uint CellID = GetMortonCellIDFromCellCoord_Aniso(NeighborCell);
 					uint Start = CellStart[CellID];
 					uint End = CellEnd[CellID];
 
@@ -695,7 +708,7 @@ void CalculateDensityBased(
 					for (int dx = -CellRadius; dx <= CellRadius; ++dx)
 					{
 						int3 NeighborCell = CenterCell + int3(dx, dy, dz);
-						uint CellID = GetMortonCellIDFromCellCoord(NeighborCell);
+						uint CellID = GetMortonCellIDFromCellCoord_Aniso(NeighborCell);
 						uint BStart = BoundaryCellStart[CellID];
 						uint BEnd = BoundaryCellEnd[CellID];
 

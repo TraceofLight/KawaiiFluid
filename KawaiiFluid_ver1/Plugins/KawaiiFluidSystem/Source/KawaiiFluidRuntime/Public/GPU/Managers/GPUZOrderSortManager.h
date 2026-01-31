@@ -74,6 +74,20 @@ public:
 	void SetGridResolutionPreset(EGridResolutionPreset Preset) { GridResolutionPreset = Preset; }
 	EGridResolutionPreset GetGridResolutionPreset() const { return GridResolutionPreset; }
 
+	/**
+	 * Enable/disable Hybrid Tiled Z-Order mode
+	 * When enabled:
+	 *   - Uses 21-bit sort keys (TileHash 3 bits + LocalMorton 18 bits)
+	 *   - Simulation range is UNLIMITED (no bounds clipping)
+	 *   - Same radix sort passes as classic mode (key matches MAX_CELLS)
+	 *   - 8 tile hash buckets, collisions filtered by distance check
+	 * When disabled:
+	 *   - Uses 21-bit Morton codes (classic mode)
+	 *   - Simulation range limited to bounds (±1280cm default)
+	 */
+	void SetHybridTiledZOrderEnabled(bool bEnabled) { bUseHybridTiledZOrder = bEnabled; }
+	bool IsHybridTiledZOrderEnabled() const { return bUseHybridTiledZOrder; }
+
 	//=========================================================================
 	// Z-Order Sorting Pipeline
 	//=========================================================================
@@ -161,6 +175,11 @@ private:
 
 	// Grid resolution preset for shader permutation selection
 	EGridResolutionPreset GridResolutionPreset = EGridResolutionPreset::Medium;
+
+	// Hybrid Tiled Z-Order mode for unlimited simulation range
+	// When enabled, uses 21-bit keys (TileHash 3-bit + LocalMorton 18-bit)
+	// Default: true (recommended for character-attached fluids)
+	bool bUseHybridTiledZOrder = true;
 
 	// Simulation bounds for Morton code computation
 	FVector3f SimulationBoundsMin = FVector3f(-1280.0f, -1280.0f, -1280.0f);

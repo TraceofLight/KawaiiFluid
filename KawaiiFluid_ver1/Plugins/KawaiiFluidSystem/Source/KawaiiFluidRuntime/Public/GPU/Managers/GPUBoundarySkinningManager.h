@@ -310,6 +310,10 @@ public:
 	void SetBoundaryZOrderEnabled(bool bEnabled) { bUseBoundaryZOrder = bEnabled; }
 	bool IsBoundaryZOrderEnabled() const { return bUseBoundaryZOrder; }
 
+	/** Enable/disable Hybrid Tiled Z-Order mode for unlimited simulation range */
+	void SetHybridTiledZOrderEnabled(bool bEnabled) { bUseHybridTiledZOrder = bEnabled; }
+	bool IsHybridTiledZOrderEnabled() const { return bUseHybridTiledZOrder; }
+
 	/** Check if Z-Order data is valid */
 	bool HasBoundaryZOrderData() const
 	{
@@ -427,6 +431,9 @@ private:
 	EGridResolutionPreset GridResolutionPreset = EGridResolutionPreset::Medium;
 	FVector3f ZOrderBoundsMin = FVector3f(-1280.0f, -1280.0f, -1280.0f);
 	FVector3f ZOrderBoundsMax = FVector3f(1280.0f, 1280.0f, 1280.0f);
+
+	// Hybrid Tiled Z-Order mode for unlimited simulation range
+	bool bUseHybridTiledZOrder = false;
 
 	// Persistent Z-Order buffers
 	TRefCountPtr<FRDGPooledBuffer> PersistentSortedBoundaryBuffer;

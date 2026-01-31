@@ -123,6 +123,111 @@ uint GetMortonCellIDFromCellCoord(int3 cellCoord, float3 boundsMin, float cellSi
 }
 
 //=============================================================================
+// Hybrid Tiled Z-Order Functions
+// Enables unlimited simulation range by combining:
+// - TileHash (3 bits): Spatial hash of tile coordinates (8 buckets)
+// - LocalMorton (18 bits): Z-Order within tile (64³ cells, cache-coherent)
+//
+// 21-bit Sort Key Structure (matches MAX_CELLS for correct CellStart/CellEnd):
+// ┌─────────────────────┬───────────────────────────────────────┐
+// │   TileHash (3bit)   │        LocalMorton (18bit)            │
+// │   (bits 18-20)      │        (bits 0-17)                    │
+// └─────────────────────┴───────────────────────────────────────┘
+//
+// CRITICAL: Key is exactly 21 bits to match MAX_CELLS (2^21 = 2,097,152)
+// This ensures particles with same cell ID are CONTIGUOUS after sorting,
+// which is required for correct CellStart/CellEnd building.
+// The 8 tile buckets (3 bits) provide tile separation; hash collisions
+// are filtered by distance check (r² < h²) in neighbor search.
+//=============================================================================
+
+#define HYBRID_TILE_BITS 6           // 6 bits per axis = 64 cells per tile
+#define HYBRID_TILE_SIZE 64          // 2^6 = 64 cells per tile axis
+#define HYBRID_TILE_MASK 0x3F        // 63 (lower 6 bits mask)
+#define HYBRID_LOCAL_MORTON_BITS 18  // 6 bits × 3 axes = 18 bits
+#define HYBRID_TILE_HASH_BITS 3      // 3 bits for tile hash (8 buckets, matches MAX_CELLS)
+#define HYBRID_TILE_HASH_MASK 0x7    // 7 (3-bit mask)
+
+// Spatial hash function for tile coordinates
+// Uses large primes to minimize collisions
+// Handles negative coordinates automatically via unsigned casting
+uint HashTile(int3 tilePos)
+{
+	const uint p1 = 73856093u;
+	const uint p2 = 19349663u;
+	const uint p3 = 83492791u;
+	return (uint(tilePos.x) * p1) ^ (uint(tilePos.y) * p2) ^ (uint(tilePos.z) * p3);
+}
+
+// Compute Hybrid Tiled Z-Order Key (21-bit, matches MAX_CELLS)
+// Input: gridPos = cell coordinate (can be any integer, including negative)
+// Output: 21-bit sort key with TileHash in upper 3 bits, LocalMorton in lower 18 bits
+//
+// CRITICAL: The 21-bit key ensures particles with the same key are CONTIGUOUS
+// after sorting. This is required for correct CellStart/CellEnd building.
+// With 32-bit keys and 21-bit truncation, particles could be scattered in the
+// sorted array, causing CellStart/CellEnd corruption and "lost" particles.
+uint ComputeHybridTiledKey(int3 gridPos)
+{
+	// Step 1: Extract local position within tile (lower 6 bits per axis)
+	// Bitwise AND with TILE_MASK handles negative coordinates correctly:
+	//   (-5) & 0x3F = 0xFFFFFFFB & 0x3F = 59 (valid local coordinate)
+	uint3 localPos = uint3(
+		uint(gridPos.x) & HYBRID_TILE_MASK,
+		uint(gridPos.y) & HYBRID_TILE_MASK,
+		uint(gridPos.z) & HYBRID_TILE_MASK
+	);
+
+	// Step 2: Compute 18-bit local Morton code using existing 6-bit function
+	uint localMorton = Morton3D_6bit(localPos.x, localPos.y, localPos.z);
+
+	// Step 3: Compute tile coordinates (upper bits = tile index)
+	// Arithmetic right shift preserves sign for negative coordinates:
+	//   (-5) >> 6 = -1 (correct tile index)
+	int3 tilePos = int3(
+		gridPos.x >> HYBRID_TILE_BITS,
+		gridPos.y >> HYBRID_TILE_BITS,
+		gridPos.z >> HYBRID_TILE_BITS
+	);
+
+	// Step 4: Hash tile coordinates to 3-bit value (8 buckets)
+	// The 3 bits provide tile separation; collisions are filtered by distance check
+	uint tileHash = HashTile(tilePos) & HYBRID_TILE_HASH_MASK;
+
+	// Step 5: Combine into 21-bit key (matches MAX_CELLS = 2^21)
+	// TileHash in upper 3 bits + LocalMorton in lower 18 bits = 21 bits total
+	// No truncation needed: key == cellID, ensuring contiguous particles per cell
+	return (tileHash << HYBRID_LOCAL_MORTON_BITS) | localMorton;
+}
+
+// Helper: Convert world position to cell coordinate (for Hybrid mode)
+int3 WorldToCellHybrid(float3 worldPos, float cellSize)
+{
+	return int3(floor(worldPos / cellSize));
+}
+
+// Unified function: Get cell key for neighbor search
+// When bUseHybrid is true, uses Hybrid Tiled Z-Order (unlimited range)
+// When false, uses classic Morton code (limited to bounds)
+// Both modes produce 21-bit keys that fit within MAX_CELLS (2^21)
+uint GetCellKey(int3 cellCoord, int3 gridMin, int bUseHybrid)
+{
+	if (bUseHybrid)
+	{
+		// Hybrid key is exactly 21 bits (3-bit TileHash + 18-bit LocalMorton)
+		// Matches MAX_CELLS, so mask is a no-op but kept for consistency
+		return ComputeHybridTiledKey(cellCoord) & (MAX_CELLS - 1);
+	}
+	else
+	{
+		int3 offset = cellCoord - gridMin;
+		uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
+		uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+		return Morton3D(uoffset.x, uoffset.y, uoffset.z);
+	}
+}
+
+//=============================================================================
 // Legacy Functions (10-bit per axis - for reference only, not used)
 //=============================================================================
 

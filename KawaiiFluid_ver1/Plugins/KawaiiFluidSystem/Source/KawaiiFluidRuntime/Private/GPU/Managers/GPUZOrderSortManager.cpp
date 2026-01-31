@@ -68,9 +68,14 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 	}
 
 	// Get grid parameters from current preset
-	const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
-	const int32 GridSize = GridResolutionPresetHelper::GetGridResolution(GridResolutionPreset);
-	const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(GridResolutionPreset);
+	// CRITICAL: Hybrid Tiled Z-Order mode uses fixed 21-bit keys (3-bit TileHash + 18-bit LocalMorton)
+	// The key range is always 0 to 2^21-1, regardless of volume size.
+	// Therefore, in Hybrid mode we MUST use Medium preset (7-bit = 2^21 cells) to match the key range.
+	// Using smaller presets would truncate the key and cause cell ID mismatches.
+	const EGridResolutionPreset EffectivePreset = bUseHybridTiledZOrder ? EGridResolutionPreset::Medium : GridResolutionPreset;
+	const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(EffectivePreset);
+	const int32 GridSize = GridResolutionPresetHelper::GetGridResolution(EffectivePreset);
+	const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(EffectivePreset);
 
 	const int32 NumBlocks = FMath::DivideAndRoundUp(CurrentParticleCount, 256);
 
@@ -203,25 +208,30 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
 	// 		GridMin.X, GridMin.Y, GridMin.Z);
 	// }
 
-	// Get grid parameters from current preset
-	const int32 GridSize = GridResolutionPresetHelper::GetGridResolution(GridResolutionPreset);
+	// Get grid parameters - use Medium preset in Hybrid mode for 21-bit keys
+	const EGridResolutionPreset EffectivePreset = bUseHybridTiledZOrder ? EGridResolutionPreset::Medium : GridResolutionPreset;
+	const int32 GridSize = GridResolutionPresetHelper::GetGridResolution(EffectivePreset);
 
-	// Validate bounds fit within Morton code capacity
-	const float CellSizeToUse = FMath::Max(Params.CellSize, 0.001f);
-	const float MaxExtent = static_cast<float>(GridSize) * CellSizeToUse;
-	const FVector3f BoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
-
-	if (BoundsExtent.X > MaxExtent || BoundsExtent.Y > MaxExtent || BoundsExtent.Z > MaxExtent)
+	// Validate bounds fit within Morton code capacity (Classic mode only)
+	// Hybrid mode has unlimited range via hash-based tile addressing
+	if (!bUseHybridTiledZOrder)
 	{
-		UE_LOG(LogGPUZOrderSort, Warning,
-			TEXT("Morton code bounds overflow! BoundsExtent(%.1f, %.1f, %.1f) exceeds MaxExtent(%.1f). Preset=%d"),
-			BoundsExtent.X, BoundsExtent.Y, BoundsExtent.Z, MaxExtent, static_cast<int32>(GridResolutionPreset));
+		const float CellSizeToUse = FMath::Max(Params.CellSize, 0.001f);
+		const float MaxExtent = static_cast<float>(GridSize) * CellSizeToUse;
+		const FVector3f BoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
+
+		if (BoundsExtent.X > MaxExtent || BoundsExtent.Y > MaxExtent || BoundsExtent.Z > MaxExtent)
+		{
+			UE_LOG(LogGPUZOrderSort, Warning,
+				TEXT("Morton code bounds overflow! BoundsExtent(%.1f, %.1f, %.1f) exceeds MaxExtent(%.1f). Preset=%d"),
+				BoundsExtent.X, BoundsExtent.Y, BoundsExtent.Z, MaxExtent, static_cast<int32>(GridResolutionPreset));
+		}
 	}
 
 	// Get shader with correct permutation
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	FComputeMortonCodesCS::FPermutationDomain PermutationVector;
-	PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+	PermutationVector.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 	TShaderMapRef<FComputeMortonCodesCS> ComputeShader(ShaderMap, PermutationVector);
 
 	FComputeMortonCodesCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FComputeMortonCodesCS::FParameters>();
@@ -232,12 +242,13 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
 	PassParameters->BoundsMin = SimulationBoundsMin;
 	PassParameters->BoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
 	PassParameters->CellSize = Params.CellSize;
+	PassParameters->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 
 	const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FComputeMortonCodesCS::ThreadGroupSize);
 
 	FComputeShaderUtils::AddPass(
 		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ComputeMortonCodes(%d,Preset=%d)", CurrentParticleCount, static_cast<int32>(GridResolutionPreset)),
+		RDG_EVENT_NAME("GPUFluid::ComputeMortonCodes(%d,Preset=%d,Hybrid=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset), bUseHybridTiledZOrder ? 1 : 0),
 		ComputeShader,
 		PassParameters,
 		FIntVector(NumGroups, 1, 1)
@@ -256,12 +267,28 @@ void FGPUZOrderSortManager::AddRadixSortPasses(
 	}
 
 	// Calculate radix sort passes based on Morton code bits from preset
-	// Morton code bits = GridAxisBits × 3 (X, Y, Z interleaved)
+	// Classic mode: Morton code bits = GridAxisBits × 3 (X, Y, Z interleaved)
+	// Hybrid mode: 21-bit keys (TileHash 3 bits + LocalMorton 18 bits)
 	// Sort passes = ceil(MortonCodeBits / RadixBits)
 	// Round up to even number for ping-pong buffer correctness
-	const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
-	const int32 MortonCodeBits = GridAxisBits * 3;
-	int32 RadixSortPasses = (MortonCodeBits + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS;
+	//
+	// NOTE: Hybrid uses 21 bits (not 32) to match MAX_CELLS, ensuring particles
+	// with same cell ID are contiguous after sorting. This prevents CellStart/CellEnd
+	// corruption that occurs when 32-bit keys are truncated to 21-bit cell IDs.
+	int32 SortKeyBits;
+	if (bUseHybridTiledZOrder)
+	{
+		// Hybrid Tiled Z-Order: 21-bit keys (3-bit TileHash + 18-bit LocalMorton)
+		// Matches MAX_CELLS = 2^21, so no truncation needed
+		SortKeyBits = 21;
+	}
+	else
+	{
+		// Classic Morton code: 18/21/24-bit keys based on preset
+		const int32 GridAxisBits = GridResolutionPresetHelper::GetAxisBits(GridResolutionPreset);
+		SortKeyBits = GridAxisBits * 3;
+	}
+	int32 RadixSortPasses = (SortKeyBits + GPU_RADIX_BITS - 1) / GPU_RADIX_BITS;
 	// Round up to even for ping-pong buffer to end in original buffer
 	if (RadixSortPasses % 2 != 0)
 	{
@@ -416,14 +443,16 @@ void FGPUZOrderSortManager::AddComputeCellStartEndPass(
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 
 	// Get cell count from preset
-	const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(GridResolutionPreset);
+	// CRITICAL: Hybrid Tiled Z-Order uses fixed 21-bit keys, so we must use Medium preset (2^21 cells)
+	const EGridResolutionPreset EffectivePreset = bUseHybridTiledZOrder ? EGridResolutionPreset::Medium : GridResolutionPreset;
+	const int32 CellCount = GridResolutionPresetHelper::GetMaxCells(EffectivePreset);
 
-	// Create permutation vector for current preset
+	// Create permutation vector for effective preset
 	FClearCellIndicesCS::FPermutationDomain ClearPermutation;
-	ClearPermutation.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+	ClearPermutation.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 
 	FComputeCellStartEndCS::FPermutationDomain CellStartEndPermutation;
-	CellStartEndPermutation.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(GridResolutionPreset));
+	CellStartEndPermutation.Set<FGridResolutionDim>(GridResolutionPermutation::FromPreset(EffectivePreset));
 
 	// Step 1: Clear cell indices
 	{
@@ -436,7 +465,7 @@ void FGPUZOrderSortManager::AddComputeCellStartEndPass(
 
 		FComputeShaderUtils::AddPass(
 			GraphBuilder,
-			RDG_EVENT_NAME("GPUFluid::ClearCellIndices(%d,Preset=%d)", CellCount, static_cast<int32>(GridResolutionPreset)),
+			RDG_EVENT_NAME("GPUFluid::ClearCellIndices(%d,Preset=%d)", CellCount, static_cast<int32>(EffectivePreset)),
 			ClearShader,
 			ClearParams,
 			FIntVector(NumGroups, 1, 1)
@@ -456,7 +485,7 @@ void FGPUZOrderSortManager::AddComputeCellStartEndPass(
 
 		FComputeShaderUtils::AddPass(
 			GraphBuilder,
-			RDG_EVENT_NAME("GPUFluid::ComputeCellStartEnd(%d,Preset=%d)", CurrentParticleCount, static_cast<int32>(GridResolutionPreset)),
+			RDG_EVENT_NAME("GPUFluid::ComputeCellStartEnd(%d,Preset=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset)),
 			ComputeShader,
 			PassParameters,
 			FIntVector(NumGroups, 1, 1)

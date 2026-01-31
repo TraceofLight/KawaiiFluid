@@ -531,6 +531,9 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 
 		GPUParams.BoundsRestitution = Params.BoundsRestitution;
 		GPUParams.BoundsFriction = Params.BoundsFriction;
+
+		// Skip bounds collision when Unlimited Size mode is enabled
+		GPUParams.bSkipBoundsCollision = Params.bSkipBoundsCollision ? 1 : 0;
 	}
 	else
 	{
@@ -543,6 +546,7 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 		GPUParams.BoundsRotation = FVector4f(0.0f, 0.0f, 0.0f, 1.0f);  // Identity
 		GPUParams.BoundsRestitution = Preset->Bounciness;
 		GPUParams.BoundsFriction = Preset->Friction;
+		GPUParams.bSkipBoundsCollision = 0;  // Use bounds collision by default
 	}
 
 	// Solver iterations (typically 1-4 for density constraint)
@@ -714,6 +718,15 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 
 	GPUSimulator->SetSimulationBounds(WorldBoundsMin, WorldBoundsMax);
 	GPUSimulator->SetGridResolutionPreset(GridPreset);
+
+	// Hybrid Tiled Z-Order mode for unlimited simulation range
+	// When enabled, particles can exist anywhere in the world (no bounds clipping)
+	bool bUseHybridTiledZOrder = false;
+	if (UKawaiiFluidVolumeComponent* Volume = TargetVolumeComponent.Get())
+	{
+		bUseHybridTiledZOrder = Volume->bUseHybridTiledZOrder;
+	}
+	GPUSimulator->SetHybridTiledZOrderEnabled(bUseHybridTiledZOrder);
 
 	// GPU World Collision Query Bounds (Simulation Volume + Particle Radius padding)
 	FBox GPUWorldQueryBounds{FVector(WorldBoundsMin), FVector(WorldBoundsMax)};

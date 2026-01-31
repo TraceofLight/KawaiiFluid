@@ -28,6 +28,7 @@ int ParticleCount;
 float3 BoundsMin;      // Simulation bounds minimum
 float3 BoundsExtent;   // Simulation bounds extent (Max - Min)
 float CellSize;        // Grid cell size (= SmoothingRadius)
+int bUseHybridTiledZOrder;  // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton (bounded)
 
 //=============================================================================
 // Cell-based Morton Code Helpers
@@ -115,15 +116,26 @@ void ComputeMortonCodesCellBasedCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     // Convert to cell coordinate
     int3 cellCoord = WorldToCell(pos, CellSize);
 
-    // Compute grid minimum cell (based on bounds)
-    int3 gridMin = int3(floor(BoundsMin / CellSize));
+    uint sortKey;
+    if (bUseHybridTiledZOrder)
+    {
+        // Hybrid Tiled Z-Order: 21-bit key (UNLIMITED RANGE!)
+        // Key = TileHash (3 bits) | LocalMorton (18 bits)
+        // No bounds clipping - particles anywhere in the world get valid keys
+        sortKey = ComputeHybridTiledKey(cellCoord);
+    }
+    else
+    {
+        // Classic Morton code: 21-bit key (bounded range)
+        // Compute grid minimum cell (based on bounds)
+        int3 gridMin = int3(floor(BoundsMin / CellSize));
 
-    // Compute 21-bit Morton code from cell coordinate
-    // With 7-bit per axis: Morton code = Cell ID (no truncation needed!)
-    uint mortonCode = Morton3DFromCell(cellCoord, gridMin);
+        // Compute 21-bit Morton code from cell coordinate
+        // With 7-bit per axis: Morton code = Cell ID (no truncation needed!)
+        sortKey = Morton3DFromCell(cellCoord, gridMin);
+    }
 
-    // Output Morton code as sort key (21-bit = Cell ID directly)
-    // No truncation needed since MAX_CELLS = 128^3 = 2,097,152 < 2^21
-    MortonCodes[idx] = mortonCode;
+    // Output sort key
+    MortonCodes[idx] = sortKey;
     ParticleIndices[idx] = idx;
 }
