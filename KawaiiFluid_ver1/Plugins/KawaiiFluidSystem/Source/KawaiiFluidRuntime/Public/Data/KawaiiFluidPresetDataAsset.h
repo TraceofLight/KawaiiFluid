@@ -392,9 +392,26 @@ public:
 	float ArtificialPressureDeltaQ = 0.0f;
 
 	//========================================
-	// Physics | Simulation | Surface Tension (NVIDIA FleX style)
-	// Position-based constraint for spherical droplet formation
+	// Physics | Simulation | Surface Tension
+	// Two modes: Position-Based (FleX style) or Force-Based (Akinci 2013)
 	//========================================
+
+	/**
+	 * Use Akinci Surface Tension (Force-Based) instead of Position-Based.
+	 *
+	 * When DISABLED (default): Position-Based Surface Tension (NVIDIA FleX style)
+	 * - Position constraints pull particles toward activation distance
+	 * - Stable, predictable for game use
+	 * - Uses SurfaceTension value from Physics|Material
+	 *
+	 * When ENABLED: Akinci Surface Tension (Akinci et al. 2013)
+	 * - Force-based approach with C(r) spline kernel
+	 * - Cohesion force with K_ij particle deficiency correction
+	 * - More physically accurate attraction/repulsion behavior
+	 * - Uses SurfaceTension value from Physics|Material as gamma coefficient
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension")
+	bool bUseAkinciSurfaceTension = false;
 
 	/**
 	 * Surface Tension activation distance as ratio of SmoothingRadius
@@ -404,7 +421,7 @@ public:
 	 * Typical: 0.3 ~ 0.5
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.1", ClampMax = "0.9"))
+		meta = (ClampMin = "0.1", ClampMax = "0.9", EditCondition = "!bUseAkinciSurfaceTension"))
 	float SurfaceTensionActivationRatio = 0.4f;
 
 	/**
@@ -414,7 +431,7 @@ public:
 	 * Typical: 0.6 ~ 0.9
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.2", ClampMax = "1.0"))
+		meta = (ClampMin = "0.2", ClampMax = "1.0", EditCondition = "!bUseAkinciSurfaceTension"))
 	float SurfaceTensionFalloffRatio = 0.7f;
 
 	/**
@@ -424,7 +441,7 @@ public:
 	 * 0 = uniform strength for all particles
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0", ClampMax = "30"))
+		meta = (ClampMin = "0", ClampMax = "30", EditCondition = "!bUseAkinciSurfaceTension"))
 	int32 SurfaceTensionSurfaceThreshold = 15;
 
 	/**
@@ -444,7 +461,7 @@ public:
 	 * 0.5~0.8 = good balance between responsiveness and stability
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+		meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "!bUseAkinciSurfaceTension"))
 	float SurfaceTensionVelocityDamping = 0.7f;
 
 	/**
@@ -455,7 +472,7 @@ public:
 	 * Typical: 0.5 ~ 2.0 cm (1~2% of SmoothingRadius)
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.0", ClampMax = "5.0"))
+		meta = (ClampMin = "0.0", ClampMax = "5.0", EditCondition = "!bUseAkinciSurfaceTension"))
 	float SurfaceTensionTolerance = 1.0f;
 
 	//========================================

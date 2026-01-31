@@ -94,9 +94,13 @@ public:
 		SHADER_PARAMETER(FVector3f, Gravity)
 		SHADER_PARAMETER(FVector3f, ExternalForce)
 		
-		// Cohesion Force parameters (moved from PostSimulation to Phase 2)
-		// Cohesion is now applied as a Force during prediction, not as velocity change after solving
-		// This prevents jittering caused by solver fighting against post-hoc cohesion
+		// Surface Tension Mode Selection
+		// 0 = Position-Based (FleX style, handled in SolveDensityPressure)
+		// 1 = Force-Based Akinci (Cohesion + K_ij correction, handled here)
+		SHADER_PARAMETER(int32, bUseAkinciSurfaceTension)
+
+		// Cohesion Force parameters (active when bUseAkinciSurfaceTension = 1)
+		// Uses Akinci 2013 cohesion spline C(r) with K_ij particle deficiency correction
 		SHADER_PARAMETER(float, CohesionStrength)
 		SHADER_PARAMETER(float, SmoothingRadius)
 		SHADER_PARAMETER(float, RestDensity)

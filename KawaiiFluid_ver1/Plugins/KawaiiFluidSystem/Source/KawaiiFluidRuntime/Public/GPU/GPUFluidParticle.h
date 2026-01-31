@@ -167,9 +167,10 @@ struct FGPUFluidSimulationParams
 	float BoundaryAttachCooldown;           // seconds, cooldown after detach before re-attach
 	float BoundaryAttachConstraintBlend;    // 0~1, position constraint strength (1 = fully follow boundary)
 
-	// Surface Tension (NVIDIA FleX style - Position-Based)
-	// Creates rounded droplets by minimizing surface area
-	int32 bEnablePositionBasedSurfaceTension;   // Always 1 (position-based mode)
+	// Surface Tension Mode Selection
+	// Two modes: Position-Based (FleX style) or Force-Based (Akinci 2013)
+	int32 bUseAkinciSurfaceTension;             // 0 = Position-Based (FleX), 1 = Force-Based (Akinci)
+	int32 bEnablePositionBasedSurfaceTension;   // Internal: 1 when NOT using Akinci mode
 	float SurfaceTensionStrength;               // 0~1, from Physics|Material SurfaceTension
 	float SurfaceTensionActivationRatio;        // 0~1, distance ratio where ST activates
 	float SurfaceTensionFalloffRatio;           // 0~1, distance ratio where ST starts fading
@@ -240,8 +241,9 @@ struct FGPUFluidSimulationParams
 		, BoundaryAttachDetachSpeedThreshold(500.0f)
 		, BoundaryAttachCooldown(0.2f)
 		, BoundaryAttachConstraintBlend(0.8f)
-		// Surface Tension (NVIDIA FleX style - Position-Based)
-		, bEnablePositionBasedSurfaceTension(1)  // Always position-based
+		// Surface Tension Mode Selection
+		, bUseAkinciSurfaceTension(0)            // 0 = Position-Based (default), 1 = Akinci Force-Based
+		, bEnablePositionBasedSurfaceTension(1)  // Internal: automatically set based on bUseAkinciSurfaceTension
 		, SurfaceTensionStrength(0.3f)
 		, SurfaceTensionActivationRatio(0.4f)
 		, SurfaceTensionFalloffRatio(0.7f)

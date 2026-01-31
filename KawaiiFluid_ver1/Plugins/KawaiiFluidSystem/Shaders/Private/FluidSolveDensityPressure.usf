@@ -448,7 +448,7 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 									// Position-based constraint that pulls particles toward rest distance
 									// Creates spherical droplets by minimizing surface area
 									//=============================================================
-									if (SurfaceTensionStrength > 0.0f)
+									if (bEnablePositionBasedSurfaceTension && SurfaceTensionStrength > 0.0f)
 									{
 										float stActivationWithTolerance = SurfaceTensionActivationDistance + SurfaceTensionTolerance;
 										if (dist_cm > stActivationWithTolerance)
@@ -598,7 +598,7 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 									//=============================================================
 									// Surface Tension (NVIDIA FleX style)
 									//=============================================================
-									if (SurfaceTensionStrength > 0.0f)
+									if (bEnablePositionBasedSurfaceTension && SurfaceTensionStrength > 0.0f)
 									{
 										float stActivationWithTolerance2 = SurfaceTensionActivationDistance + SurfaceTensionTolerance;
 										if (dist_cm > stActivationWithTolerance2)
@@ -722,7 +722,7 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 					//=============================================================
 					// Surface Tension (NVIDIA FleX style)
 					//=============================================================
-					if (SurfaceTensionStrength > 0.0f)
+					if (bEnablePositionBasedSurfaceTension && SurfaceTensionStrength > 0.0f)
 					{
 						float stActivationWithTolerance3 = SurfaceTensionActivationDistance + SurfaceTensionTolerance;
 						if (dist_cm > stActivationWithTolerance3)

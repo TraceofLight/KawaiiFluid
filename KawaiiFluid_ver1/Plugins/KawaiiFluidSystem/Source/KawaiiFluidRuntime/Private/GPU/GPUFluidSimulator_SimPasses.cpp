@@ -30,16 +30,22 @@ void FGPUFluidSimulator::AddPredictPositionsPass(
 	PassParameters->ExternalForce = ExternalForce;
 
 	//=========================================================================
-	// Cohesion Force Parameters (moved from PostSimulation to Phase 2)
-	// This prevents jittering by letting the solver consider cohesion forces
+	// Surface Tension Mode Selection
+	// When Akinci mode, use SurfaceTensionStrength for force-based cohesion
+	// When Position-Based mode, cohesion is handled in SolveDensityPressure
 	//=========================================================================
-	PassParameters->CohesionStrength = Params.CohesionStrength;
+	PassParameters->bUseAkinciSurfaceTension = Params.bUseAkinciSurfaceTension;
+
+	// Cohesion Force Parameters (active when bUseAkinciSurfaceTension = 1)
+	// In Akinci mode, use SurfaceTensionStrength as the cohesion gamma coefficient
+	PassParameters->CohesionStrength = Params.bUseAkinciSurfaceTension ? Params.SurfaceTensionStrength : 0.0f;
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
 	PassParameters->RestDensity = Params.RestDensity;
-	
+
 	// MaxCohesionForce: stability clamp based on physical parameters
 	const float h_m = Params.SmoothingRadius * 0.01f;  // cm to m
-	PassParameters->MaxCohesionForce = Params.CohesionStrength * Params.RestDensity * h_m * h_m * h_m * 1000.0f;
+	const float effectiveCohesion = Params.bUseAkinciSurfaceTension ? Params.SurfaceTensionStrength : Params.CohesionStrength;
+	PassParameters->MaxCohesionForce = effectiveCohesion * Params.RestDensity * h_m * h_m * h_m * 1000.0f;
 
 	//=========================================================================
 	// Viscosity Parameters (moved from PostSimulation Phase 5 for optimization)

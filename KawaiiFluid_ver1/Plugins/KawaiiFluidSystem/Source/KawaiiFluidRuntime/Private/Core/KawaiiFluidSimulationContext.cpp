@@ -566,9 +566,11 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 	GPUParams.TensileN = Preset->ArtificialPressureExponent;
 	GPUParams.TensileDeltaQ = Preset->ArtificialPressureDeltaQ;
 
-	// Surface Tension (NVIDIA FleX style) - always position-based
-	// Creates spherical droplets by minimizing surface area
-	GPUParams.bEnablePositionBasedSurfaceTension = 1;  // Always use position-based mode
+	// Surface Tension Mode Selection
+	// When bUseAkinciSurfaceTension = true: Force-Based Akinci (Cohesion + K_ij correction)
+	// When bUseAkinciSurfaceTension = false: Position-Based (NVIDIA FleX style)
+	GPUParams.bUseAkinciSurfaceTension = Preset->bUseAkinciSurfaceTension ? 1 : 0;
+	GPUParams.bEnablePositionBasedSurfaceTension = Preset->bUseAkinciSurfaceTension ? 0 : 1;
 	GPUParams.SurfaceTensionStrength = Preset->SurfaceTension;  // From Physics|Material
 	GPUParams.SurfaceTensionActivationRatio = Preset->SurfaceTensionActivationRatio;
 	GPUParams.SurfaceTensionFalloffRatio = Preset->SurfaceTensionFalloffRatio;
