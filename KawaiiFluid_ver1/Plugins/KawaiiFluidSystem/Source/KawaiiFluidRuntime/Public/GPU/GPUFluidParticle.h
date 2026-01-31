@@ -94,7 +94,7 @@ struct FGPUFluidSimulationParams
 	// Forces
 	FVector3f Gravity;            // Gravity vector (cm/s²)
 	float ViscosityCoefficient;   // XSPH viscosity coefficient (0-1)
-	float CohesionStrength;       // Surface tension / cohesion strength (0-1)
+	float CohesionStrength;       // Legacy force-based cohesion (DISABLED - set to 0.0f)
 	float GlobalDamping;          // Velocity damping per substep (1.0 = no damping)
 
 	// SPH kernel coefficients (precomputed)
@@ -130,12 +130,15 @@ struct FGPUFluidSimulationParams
 	int32 SolverIterations;       // Number of XPBD constraint solver iterations
 	float CurrentTime;            // Current game time (seconds)
 
-	// Tensile Instability Correction (PBF paper Eq.13-14)
+	// Cohesion via Artificial Pressure (PBF paper Eq.13-14)
 	// s_corr = -k * (W(r)/W(Δq))^n
-	int32 bEnableTensileInstability;  // Enable tensile instability correction
-	float TensileK;               // Strength coefficient k (typically 0.1)
-	int32 TensileN;               // Exponent n (typically 4)
-	float TensileDeltaQ;          // Reference distance ratio Δq/h (typically 0.2)
+	// Artificial Pressure (Tensile Instability Correction) from Physics|Simulation|Stability
+	// NOTE: TensileK is scaled 100x from user-facing ArtificialPressure value
+	//       (ArtificialPressure=0.1 in editor → TensileK=10 internally)
+	int32 bEnableTensileInstability;  // 1 if ArtificialPressure > 0, 0 otherwise
+	float TensileK;               // Scaled strength k (ArtificialPressure * 100)
+	int32 TensileN;               // Exponent n (from ArtificialPressureExponent, 1~8)
+	float TensileDeltaQ;          // Δq ratio (from ArtificialPressureDeltaQ, 0~0.5)
 	float InvW_DeltaQ;            // Precomputed 1/W(Δq, h) for efficiency
 
 	// Stack Pressure (weight transfer from stacked attached particles)
@@ -164,9 +167,9 @@ struct FGPUFluidSimulationParams
 	float BoundaryAttachCooldown;           // seconds, cooldown after detach before re-attach
 	float BoundaryAttachConstraintBlend;    // 0~1, position constraint strength (1 = fully follow boundary)
 
-	// Position-Based Surface Tension (NVIDIA Flex style)
+	// Surface Tension (NVIDIA FleX style - Position-Based)
 	// Creates rounded droplets by minimizing surface area
-	int32 bEnablePositionBasedSurfaceTension;   // 0: Akinci force-based (default), 1: Position-Based (experimental)
+	int32 bEnablePositionBasedSurfaceTension;   // Always 1 (position-based mode)
 	float SurfaceTensionStrength;               // 0~1, from Physics|Material SurfaceTension
 	float SurfaceTensionActivationRatio;        // 0~1, distance ratio where ST activates
 	float SurfaceTensionFalloffRatio;           // 0~1, distance ratio where ST starts fading
@@ -174,13 +177,14 @@ struct FGPUFluidSimulationParams
 	float SurfaceTensionVelocityDamping;        // 0~1, reduces velocity from ST correction (0=full velocity, 1=no velocity)
 	float SurfaceTensionTolerance;              // cm, dead zone around activation distance (prevents oscillation)
 
-	// Position-Based Cohesion (NVIDIA Flex style)
-	// Pulls particles together to maintain rest distance, creating gooey/stringy fluid
-	float CohesionStrengthNV;                   // 0~1, from Physics|Material Cohesion (renamed to avoid conflict)
-	float CohesionActivationRatio;              // 0~1, distance ratio where cohesion activates
-	float CohesionFalloffRatio;                 // 0~1, distance ratio where cohesion starts fading
+	// Fluid Cohesion (NVIDIA FleX style) - stringy, honey-like effects
+	// Uses quadratic distance scaling for resistance to separation
+	float CohesionStrengthNV;                   // From Physics|Material|Cohesion (0~1)
+	float CohesionActivationRatio;              // 0~1, distance ratio where cohesion starts (smaller = stringier)
+	float CohesionFalloffRatio;                 // 0~1, distance ratio where cohesion starts weakening
+	int32 CohesionExponent;                     // 1=linear, 2=quadratic (stringy), 3=cubic
 
-	// Surface Tension / Cohesion max correction
+	// Surface Tension max correction
 	float MaxSurfaceTensionCorrectionPerIteration;  // cm, max position correction per iteration
 
 	FGPUFluidSimulationParams()
@@ -213,10 +217,10 @@ struct FGPUFluidSimulationParams
 		, TotalSubsteps(1)
 		, SolverIterations(1)
 		, CurrentTime(0.0f)
-		, bEnableTensileInstability(1)
-		, TensileK(0.1f)
-		, TensileN(4)
-		, TensileDeltaQ(0.2f)
+		, bEnableTensileInstability(1)  // Artificial Pressure enabled by default
+		, TensileK(10.0f)  // Default: ArtificialPressure(0.1) * ScaleFactor(100) = 10
+		, TensileN(4)  // Default ArtificialPressureExponent = 4
+		, TensileDeltaQ(0.0f)  // Default ArtificialPressureDeltaQ = 0.0 (Flex style)
 		, InvW_DeltaQ(0.0f)
 		, StackPressureScale(0.0f)
 		, bEnableRelativeVelocityDamping(1)
@@ -236,19 +240,20 @@ struct FGPUFluidSimulationParams
 		, BoundaryAttachDetachSpeedThreshold(500.0f)
 		, BoundaryAttachCooldown(0.2f)
 		, BoundaryAttachConstraintBlend(0.8f)
-		// Position-Based Surface Tension (NVIDIA Flex style)
-		, bEnablePositionBasedSurfaceTension(0)  // Default: Akinci force-based
+		// Surface Tension (NVIDIA FleX style - Position-Based)
+		, bEnablePositionBasedSurfaceTension(1)  // Always position-based
 		, SurfaceTensionStrength(0.3f)
 		, SurfaceTensionActivationRatio(0.4f)
 		, SurfaceTensionFalloffRatio(0.7f)
 		, SurfaceTensionSurfaceThreshold(15)
 		, SurfaceTensionVelocityDamping(0.7f)
 		, SurfaceTensionTolerance(1.0f)
-		// Position-Based Cohesion (NVIDIA Flex style)
-		, CohesionStrengthNV(0.0f)
-		, CohesionActivationRatio(0.5f)
-		, CohesionFalloffRatio(0.8f)
-		// Surface Tension / Cohesion
+		// Fluid Cohesion (NVIDIA FleX style) - stringy effects
+		, CohesionStrengthNV(0.0f)  // From Physics|Material|Cohesion
+		, CohesionActivationRatio(0.2f)  // Smaller = stringier (starts pulling earlier)
+		, CohesionFalloffRatio(0.8f)  // Higher = longer strings before breaking
+		, CohesionExponent(2)  // Quadratic = stringy
+		// Surface Tension max correction
 		, MaxSurfaceTensionCorrectionPerIteration(5.0f)
 	{
 	}

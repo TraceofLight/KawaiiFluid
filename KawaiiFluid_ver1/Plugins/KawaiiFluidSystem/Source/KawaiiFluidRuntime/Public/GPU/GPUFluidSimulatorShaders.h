@@ -307,22 +307,23 @@ public:
 		SHADER_PARAMETER(float, BoundaryMaxDetachSpeed)
 		SHADER_PARAMETER(float, BoundaryAdhesionStrength)
 		SHADER_PARAMETER(int32, SolverIterationCount)
-		// Position-Based Surface Tension (NVIDIA Flex style)
+		// Surface Tension (NVIDIA FleX style - Position-Based)
 		// Creates rounded droplets by minimizing surface area
-		SHADER_PARAMETER(int32, bEnablePositionBasedSurfaceTension)  // 0: Akinci (default), 1: Position-Based
+		SHADER_PARAMETER(int32, bEnablePositionBasedSurfaceTension)  // Always 1 (position-based)
 		SHADER_PARAMETER(float, SurfaceTensionStrength)
 		SHADER_PARAMETER(float, SurfaceTensionActivationDistance)   // cm (h * ratio)
 		SHADER_PARAMETER(float, SurfaceTensionFalloffDistance)      // cm (h * ratio)
 		SHADER_PARAMETER(int32, SurfaceTensionSurfaceThreshold)
 		SHADER_PARAMETER(float, SurfaceTensionVelocityDamping)   // 0~1, under-relaxation for stability
 		SHADER_PARAMETER(float, SurfaceTensionTolerance)         // cm, dead zone around activation (prevents oscillation)
-		// Position-Based Cohesion (NVIDIA Flex style)
-		// Creates gooey/stringy fluid by maintaining rest distance between particles
-		SHADER_PARAMETER(float, CohesionStrength)                   // Cohesion strength (0~1)
-		SHADER_PARAMETER(float, CohesionActivationDistance)         // cm (h * ratio, typically 0.5h)
-		SHADER_PARAMETER(float, CohesionFalloffDistance)            // cm (h * ratio, typically 0.8h)
-		// Shared for Surface Tension and Cohesion
-		SHADER_PARAMETER(float, MaxCohesionCorrection)              // cm per iteration
+		// Fluid Cohesion (NVIDIA FleX style) - stringy, honey-like effects
+		// Uses quadratic distance scaling for resistance to separation
+		SHADER_PARAMETER(float, CohesionStrength)                   // 0~1, from Physics|Material|Cohesion
+		SHADER_PARAMETER(float, CohesionActivationDistance)         // cm (h * ratio), smaller = stringier
+		SHADER_PARAMETER(float, CohesionFalloffDistance)            // cm (h * ratio), higher = longer strings
+		SHADER_PARAMETER(int32, CohesionExponent)                   // 1=linear, 2=quadratic (stringy), 3=cubic
+		// Surface Tension max correction
+		SHADER_PARAMETER(float, MaxSurfaceTensionCorrection)        // cm per iteration
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;

@@ -453,7 +453,9 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 		Preset->Compressibility, Preset->SmoothingRadius, Preset->ComplianceExponent);
 	GPUParams.ParticleRadius = Preset->ParticleRadius;
 	GPUParams.ViscosityCoefficient = Preset->Viscosity;
-	GPUParams.CohesionStrength = Preset->SurfaceTension;
+	// Legacy force-based cohesion is disabled (shader uses forceCohesionStrength = 0.0f)
+	// FleX position-based cohesion uses CohesionStrengthNV instead (set below)
+	GPUParams.CohesionStrength = 0.0f;
 	GPUParams.GlobalDamping = Preset->GetDamping();
 
 	// Stack Pressure (weight transfer from stacked attached particles)
@@ -546,17 +548,27 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 	// Solver iterations (typically 1-4 for density constraint)
 	GPUParams.SolverIterations = Preset->SolverIterations;
 
-	// Tensile Instability Correction (PBF Eq.13-14)
+	// Cohesion via Artificial Pressure (PBF Eq.13-14)
+	// Cohesion controls anti-clumping behavior that creates connected fluid streams
 	// Must be set before PrecomputeKernelCoefficients() to compute InvW_DeltaQ
-	GPUParams.bEnableTensileInstability = Preset->bEnableTensileCorrection ? 1 : 0;
-	GPUParams.TensileK = Preset->TensileInstabilityK;
-	GPUParams.TensileN = Preset->TensileInstabilityN;
-	GPUParams.TensileDeltaQ = Preset->TensileInstabilityDeltaQ;
+	//
+	// SCALE FACTOR: User-facing Cohesion (0~1) is scaled by 100x internally
+	// This is because scorr = -k * ratio^n needs to compete with lambda values
+	// Artificial Pressure (Tensile Instability Correction)
+	// Uses artificial pressure term from PBF (Eq.13-14) to prevent particle clumping
+	// Effective k values:
+	//   ArtificialPressure=0.05 → k=5   (subtle anti-clumping)
+	//   ArtificialPressure=0.1  → k=10  (water-like, recommended)
+	//   ArtificialPressure=0.2  → k=20  (strong anti-clumping)
+	constexpr float ArtificialPressureScaleFactor = 100.0f;
+	GPUParams.bEnableTensileInstability = (Preset->ArtificialPressure > 0.0f) ? 1 : 0;
+	GPUParams.TensileK = Preset->ArtificialPressure * ArtificialPressureScaleFactor;
+	GPUParams.TensileN = Preset->ArtificialPressureExponent;
+	GPUParams.TensileDeltaQ = Preset->ArtificialPressureDeltaQ;
 
-	// Position-Based Surface Tension (NVIDIA Flex style)
-	// When disabled: Uses traditional Akinci force-based surface tension (default)
-	// When enabled: Uses position-based constraint (experimental, smoother droplets)
-	GPUParams.bEnablePositionBasedSurfaceTension = Preset->bEnablePositionBasedSurfaceTension ? 1 : 0;
+	// Surface Tension (NVIDIA FleX style) - always position-based
+	// Creates spherical droplets by minimizing surface area
+	GPUParams.bEnablePositionBasedSurfaceTension = 1;  // Always use position-based mode
 	GPUParams.SurfaceTensionStrength = Preset->SurfaceTension;  // From Physics|Material
 	GPUParams.SurfaceTensionActivationRatio = Preset->SurfaceTensionActivationRatio;
 	GPUParams.SurfaceTensionFalloffRatio = Preset->SurfaceTensionFalloffRatio;
@@ -564,11 +576,12 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 	GPUParams.SurfaceTensionVelocityDamping = Preset->SurfaceTensionVelocityDamping;
 	GPUParams.SurfaceTensionTolerance = Preset->SurfaceTensionTolerance;
 
-	// Position-Based Cohesion (NVIDIA Flex style)
-	// Uses Cohesion from Material for strength, pulls particles to rest distance
+	// Fluid Cohesion (NVIDIA FleX style) - stringy, honey-like effects
+	// Uses quadratic distance scaling for resistance to separation
 	GPUParams.CohesionStrengthNV = Preset->Cohesion;  // From Physics|Material
-	GPUParams.CohesionActivationRatio = Preset->CohesionActivationRatio;
-	GPUParams.CohesionFalloffRatio = Preset->CohesionFalloffRatio;
+	GPUParams.CohesionActivationRatio = Preset->CohesionActivationRatio;  // Smaller = stringier
+	GPUParams.CohesionFalloffRatio = Preset->CohesionFalloffRatio;  // Higher = longer strings
+	GPUParams.CohesionExponent = Preset->CohesionExponent;  // 2 = quadratic (stringy)
 
 	// Surface Tension / Cohesion max correction
 	GPUParams.MaxSurfaceTensionCorrectionPerIteration = Preset->MaxSurfaceTensionCorrectionPerIteration;
@@ -1286,8 +1299,12 @@ void UKawaiiFluidSimulationContext::SolveDensityConstraints(
 		Particles[i].Lambda = 0.0f;
 	});
 
-	// Tensile Instability parameter setup (PBF Eq.13-14)
-	const bool bUseTensileCorrection = Preset->bEnableTensileCorrection;
+	// Artificial Pressure (PBF Eq.13-14) for Tensile Instability Correction
+	// ArtificialPressure > 0 enables anti-clumping effect
+	// SCALE FACTOR: Same as GPU path (100x) for consistent behavior
+	constexpr float ArtificialPressureScaleFactorCPU = 100.0f;
+	const bool bUseArtificialPressure = (Preset->ArtificialPressure > 0.0f);
+	const float ScaledArtificialPressureK = Preset->ArtificialPressure * ArtificialPressureScaleFactorCPU;
 
 	// Scale Compliance based on SmoothingRadius for stability across different particle sizes
 	const float ScaledCompliance = SPHScaling::GetScaledCompliance(
@@ -1297,14 +1314,14 @@ void UKawaiiFluidSimulationContext::SolveDensityConstraints(
 	const int32 SolverIterations = Preset->SolverIterations;
 	for (int32 Iter = 0; Iter < SolverIterations; ++Iter)
 	{
-		if (bUseTensileCorrection)
+		if (bUseArtificialPressure)
 		{
-			// Solver with Tensile Instability correction
+			// Solver with Artificial Pressure (Tensile Instability correction)
 			FTensileInstabilityParams TensileParams;
 			TensileParams.bEnabled = true;
-			TensileParams.K = Preset->TensileInstabilityK;
-			TensileParams.N = Preset->TensileInstabilityN;
-			TensileParams.DeltaQ = Preset->TensileInstabilityDeltaQ;
+			TensileParams.K = ScaledArtificialPressureK;
+			TensileParams.N = Preset->ArtificialPressureExponent;
+			TensileParams.DeltaQ = Preset->ArtificialPressureDeltaQ;
 
 			DensityConstraint->SolveWithTensileCorrection(
 				Particles,

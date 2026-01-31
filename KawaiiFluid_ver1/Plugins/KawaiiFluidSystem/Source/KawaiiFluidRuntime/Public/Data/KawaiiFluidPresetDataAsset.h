@@ -65,12 +65,18 @@ public:
 	float SurfaceTension = 0.3f;
 
 	/**
-	 * Cohesion (Position-Based)
-	 * Keeps particles connected at rest distance (ParticleSpacing)
-	 * Higher values = water streams stay connected, don't scatter like sand
-	 * 0 = no cohesion (particles scatter freely)
-	 * 0.3~0.5 = water-like (streams stay connected)
-	 * Note: Different from Surface Tension - this maintains connections, not shape
+	 * Fluid Cohesion (NVIDIA FleX style)
+	 * Pulls particles toward rest distance - creates stringy, viscous effects.
+	 *
+	 * This is DIFFERENT from Surface Tension:
+	 * - Cohesion: Creates filaments and honey-like stringy streams
+	 * - Surface Tension: Creates spherical mercury-like droplets
+	 *
+	 * Values:
+	 * 0 = no cohesion (particles separate freely)
+	 * 0.1~0.3 = light cohesion (subtle strands)
+	 * 0.5~0.7 = medium cohesion (visible stringy behavior)
+	 * 1.0 = maximum cohesion (very sticky, honey-like)
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Material", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Cohesion = 0.0f;
@@ -291,43 +297,8 @@ public:
 
 	//========================================
 	// Physics | Simulation | Stability
+	// Includes Artificial Pressure (Tensile Instability) correction
 	//========================================
-
-	/**
-	 * Enable artificial pressure (scorr) for surface tension
-	 * Prevents particle clustering at low-density regions (splash, surface)
-	 * Based on PBF paper Section 4 (Macklin & Muller, 2013)
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Stability")
-	bool bEnableTensileCorrection = true;
-
-	/**
-	 * Artificial pressure strength (k in paper)
-	 * Higher values create stronger repulsion at surface
-	 * Typical: 0.1 for water-like, 0.01 for viscous fluids
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Stability",
-		meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bEnableTensileCorrection"))
-	float TensileInstabilityK = 0.1f;
-
-	/**
-	 * Artificial pressure exponent (n in paper)
-	 * Higher values make the correction more localized
-	 * Typical: 4
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Stability",
-		meta = (ClampMin = "1", ClampMax = "8", EditCondition = "bEnableTensileCorrection"))
-	int32 TensileInstabilityN = 4;
-
-	/**
-	 * Reference distance as fraction of smoothing radius (dq/h)
-	 * scorr uses W(r)/W(dq) ratio
-	 * Typical: 0.2 (20% of h), NVIDIA Flex uses 0.0
-	 * When 0.0: W(dq) = W(0) = max kernel value, pure anti-clustering
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Stability",
-		meta = (ClampMin = "0.0", ClampMax = "0.5", EditCondition = "bEnableTensileCorrection"))
-	float TensileInstabilityDeltaQ = 0.2f;
 
 	/**
 	 * Enable particle sleeping for stability
@@ -387,27 +358,53 @@ public:
 		meta = (EditCondition = "bEnableStackPressure", ClampMin = "0.0"))
 	float StackPressureRadius = 0.0f;
 
-	//========================================
-	// Physics | Simulation | Surface Tension (Position-Based, NVIDIA Flex style)
-	//========================================
+	/**
+	 * Artificial Pressure Strength (Tensile Instability Correction)
+	 * Prevents particle clumping caused by SPH tensile instability.
+	 * Uses artificial pressure term from PBF (Eq.13-14).
+	 *
+	 * Values:
+	 * 0 = disabled (particles may clump)
+	 * 0.05~0.1 = recommended for water-like fluids
+	 * 0.2+ = strong anti-clumping (may cause instability)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Stability",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ArtificialPressure = 0.0f;
 
 	/**
-	 * Enable Position-Based Surface Tension (NVIDIA Flex style)
-	 * When enabled: Uses position-based constraint for surface tension (experimental)
-	 * When disabled: Uses traditional Akinci force-based surface tension (default, stable)
-	 * Position-Based creates smoother droplets but may need parameter tuning.
+	 * Artificial Pressure Exponent (n)
+	 * Controls the sharpness of anti-clumping effect.
+	 * Formula: s_corr = -k * (W(r)/W(Δq))^n
+	 * Higher = sharper cutoff, Lower = smoother falloff
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension")
-	bool bEnablePositionBasedSurfaceTension = false;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Stability",
+		meta = (ClampMin = "1", ClampMax = "8"))
+	int32 ArtificialPressureExponent = 4;
+
+	/**
+	 * Artificial Pressure Reference Distance (Δq) as ratio of SmoothingRadius
+	 * 0.0 = NVIDIA Flex style (pure anti-clustering, recommended)
+	 * 0.1~0.3 = PBF paper style (some clustering allowed)
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Stability",
+		meta = (ClampMin = "0.0", ClampMax = "0.5"))
+	float ArtificialPressureDeltaQ = 0.0f;
+
+	//========================================
+	// Physics | Simulation | Surface Tension (NVIDIA FleX style)
+	// Position-based constraint for spherical droplet formation
+	//========================================
 
 	/**
 	 * Surface Tension activation distance as ratio of SmoothingRadius
+	 * Also used as rest distance for Cohesion.
 	 * Surface tension is applied when particle distance exceeds this.
 	 * Lower values = tighter surface (more spherical droplets)
 	 * Typical: 0.3 ~ 0.5
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.1", ClampMax = "0.9", EditCondition = "bEnablePositionBasedSurfaceTension"))
+		meta = (ClampMin = "0.1", ClampMax = "0.9"))
 	float SurfaceTensionActivationRatio = 0.4f;
 
 	/**
@@ -417,7 +414,7 @@ public:
 	 * Typical: 0.6 ~ 0.9
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.2", ClampMax = "1.0", EditCondition = "bEnablePositionBasedSurfaceTension"))
+		meta = (ClampMin = "0.2", ClampMax = "1.0"))
 	float SurfaceTensionFalloffRatio = 0.7f;
 
 	/**
@@ -427,7 +424,7 @@ public:
 	 * 0 = uniform strength for all particles
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0", ClampMax = "30", EditCondition = "bEnablePositionBasedSurfaceTension"))
+		meta = (ClampMin = "0", ClampMax = "30"))
 	int32 SurfaceTensionSurfaceThreshold = 15;
 
 	/**
@@ -437,18 +434,17 @@ public:
 	 * 0 = no limit (not recommended)
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.0", ClampMax = "50.0", EditCondition = "bEnablePositionBasedSurfaceTension"))
+		meta = (ClampMin = "0.0", ClampMax = "50.0"))
 	float MaxSurfaceTensionCorrectionPerIteration = 5.0f;
 
 	/**
-	 * Surface Tension velocity damping (under-relaxation)
-	 * Controls how much of the ST correction becomes velocity.
-	 * 0.0 = full velocity (original, oscillates), 1.0 = no velocity (stable but slow)
+	 * Surface Tension/Cohesion velocity damping (under-relaxation)
+	 * Controls position correction strength.
+	 * 0.0 = full correction (may oscillate), 1.0 = no correction (too stable)
 	 * 0.5~0.8 = good balance between responsiveness and stability
-	 * Higher values = more stable rest state, less responsive to disturbance
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bEnablePositionBasedSurfaceTension"))
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float SurfaceTensionVelocityDamping = 0.7f;
 
 	/**
@@ -459,33 +455,50 @@ public:
 	 * Typical: 0.5 ~ 2.0 cm (1~2% of SmoothingRadius)
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|SurfaceTension",
-		meta = (ClampMin = "0.0", ClampMax = "5.0", EditCondition = "bEnablePositionBasedSurfaceTension"))
+		meta = (ClampMin = "0.0", ClampMax = "5.0"))
 	float SurfaceTensionTolerance = 1.0f;
 
 	//========================================
-	// Physics | Simulation | Cohesion (Position-Based, NVIDIA Flex style)
+	// Physics | Simulation | Cohesion (NVIDIA FleX style)
+	// Position-based constraint for stringy, honey-like effects
 	//========================================
 
 	/**
 	 * Cohesion activation distance as ratio of SmoothingRadius
-	 * Cohesion pulls particles together when distance exceeds this.
-	 * Works with density constraint (which pushes apart) to maintain rest distance.
-	 * Lower values = particles start attracting closer to rest distance
-	 * Typical: 0.4 ~ 0.6 (similar to SurfaceTensionActivationRatio)
+	 * Cohesion starts pulling when distance exceeds this.
+	 * SMALLER than SurfaceTension = earlier pull = stringier effect
+	 *
+	 * Typical values:
+	 * 0.1~0.2 = very stringy (honey, slime)
+	 * 0.3~0.4 = moderate (syrup)
+	 * 0.5+ = similar to surface tension
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Cohesion",
-		meta = (ClampMin = "0.1", ClampMax = "0.9"))
-	float CohesionActivationRatio = 0.5f;
+		meta = (ClampMin = "0.05", ClampMax = "0.9"))
+	float CohesionActivationRatio = 0.2f;
 
 	/**
-	 * Cohesion falloff distance as ratio of SmoothingRadius
-	 * Beyond this, cohesion strength decreases linearly to zero at SmoothingRadius.
-	 * Must be > CohesionActivationRatio
-	 * Typical: 0.7 ~ 0.9
+	 * [DEPRECATED - Not currently used]
+	 * Cohesion now increases all the way to SmoothingRadius for maximum stringy effect.
+	 * Kept for potential future use.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Cohesion",
-		meta = (ClampMin = "0.2", ClampMax = "1.0"))
+		meta = (ClampMin = "0.3", ClampMax = "1.0"))
 	float CohesionFalloffRatio = 0.8f;
+
+	/**
+	 * Cohesion force curve exponent
+	 * Controls how cohesion strength scales with distance.
+	 *
+	 * 1 = Linear (gentle, uniform pull)
+	 * 2 = Quadratic (stronger at larger distances = stringy)
+	 * 3 = Cubic (very strong resistance to separation)
+	 *
+	 * For honey-like stringy effects, use 2 or higher.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Simulation|Cohesion",
+		meta = (ClampMin = "1", ClampMax = "4"))
+	int32 CohesionExponent = 2;
 
 	//========================================
 	// Utility Functions

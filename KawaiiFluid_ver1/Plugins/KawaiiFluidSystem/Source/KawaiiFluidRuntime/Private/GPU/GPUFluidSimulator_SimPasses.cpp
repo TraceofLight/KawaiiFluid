@@ -233,14 +233,15 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	PassParameters->SurfaceTensionVelocityDamping = Params.SurfaceTensionVelocityDamping;
 	PassParameters->SurfaceTensionTolerance = Params.SurfaceTensionTolerance;
 
-	// Position-Based Cohesion (NVIDIA Flex style)
-	// Pulls particles together to maintain rest distance
+	// Fluid Cohesion (NVIDIA FleX style) - stringy, honey-like effects
+	// Uses quadratic distance scaling for resistance to separation
 	PassParameters->CohesionStrength = Params.CohesionStrengthNV;
 	PassParameters->CohesionActivationDistance = Params.SmoothingRadius * Params.CohesionActivationRatio;
 	PassParameters->CohesionFalloffDistance = Params.SmoothingRadius * Params.CohesionFalloffRatio;
+	PassParameters->CohesionExponent = Params.CohesionExponent;
 
-	// Surface Tension / Cohesion max correction
-	PassParameters->MaxCohesionCorrection = Params.MaxSurfaceTensionCorrectionPerIteration;
+	// Surface Tension max correction
+	PassParameters->MaxSurfaceTensionCorrection = Params.MaxSurfaceTensionCorrectionPerIteration;
 
 	// =========================================================================
 	// Boundary Particles for density contribution (Akinci 2012)
