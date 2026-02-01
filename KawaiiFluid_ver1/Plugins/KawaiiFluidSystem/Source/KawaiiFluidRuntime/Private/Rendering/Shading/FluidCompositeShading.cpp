@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/Shading/KawaiiScreenSpaceShadingImpl.h"
+#include "Rendering/Shading/FluidCompositeShading.h"
 #include "Rendering/FluidRenderingParameters.h"
 #include "Rendering/MetaballRenderingData.h"
 #include "Rendering/FluidCompositeShaders.h"
@@ -144,7 +144,16 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	PassParameters->FresnelStrength = RenderParams.FresnelStrength;
 	PassParameters->RefractiveIndex = RenderParams.RefractiveIndex;
 	PassParameters->Opacity = RenderParams.AbsorptionStrength;
-	PassParameters->AbsorptionColorCoefficients = RenderParams.AbsorptionColorCoefficients;
+	// Auto-calculate absorption coefficients from FluidColor (Beer's Law)
+	// Formula: μ = -log(color) where color is the perceived color at unit thickness
+	// Brighter color channels = less absorption of that wavelength
+	// Clamped to prevent infinity when color approaches 0
+	constexpr float MinColor = 0.001f;
+	PassParameters->AbsorptionColorCoefficients = FLinearColor(
+		-FMath::Loge(FMath::Max(RenderParams.FluidColor.R, MinColor)),
+		-FMath::Loge(FMath::Max(RenderParams.FluidColor.G, MinColor)),
+		-FMath::Loge(FMath::Max(RenderParams.FluidColor.B, MinColor)),
+		1.0f);
 	PassParameters->SpecularStrength = RenderParams.SpecularStrength;
 	PassParameters->SpecularRoughness = RenderParams.SpecularRoughness;
 	PassParameters->AmbientIntensity = RenderParams.AmbientIntensity;

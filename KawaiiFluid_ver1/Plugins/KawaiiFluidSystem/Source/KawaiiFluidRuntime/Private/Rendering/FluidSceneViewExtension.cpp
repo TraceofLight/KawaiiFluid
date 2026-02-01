@@ -16,7 +16,7 @@
 #include "EngineUtils.h"
 
 // New Pipeline architecture (ShadingPass removed - Pipeline handles ShadingMode internally)
-#include "Rendering/Pipeline/IKawaiiMetaballRenderingPipeline.h"
+#include "Rendering/Pipeline/IKawaiiFluidRenderingPipeline.h"
 
 // Context-based batching
 #include "Core/KawaiiFluidSimulationContext.h"

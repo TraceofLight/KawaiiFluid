@@ -12,8 +12,8 @@
 #include "Engine/World.h"
 
 // Pipeline architecture
-#include "Rendering/Pipeline/IKawaiiMetaballRenderingPipeline.h"
-#include "Rendering/Pipeline/KawaiiMetaballScreenSpacePipeline.h"
+#include "Rendering/Pipeline/IKawaiiFluidRenderingPipeline.h"
+#include "Rendering/Pipeline/KawaiiFluidScreenSpacePipeline.h"
 
 UKawaiiFluidMetaballRenderer::UKawaiiFluidMetaballRenderer()
 {
@@ -218,7 +218,7 @@ void UKawaiiFluidMetaballRenderer::UpdatePipeline()
 	// Create Pipeline if needed
 	if (!Pipeline)
 	{
-		Pipeline = MakeShared<FKawaiiMetaballScreenSpacePipeline>();
+		Pipeline = MakeShared<FKawaiiFluidScreenSpacePipeline>();
 		UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Created ScreenSpace Pipeline"));
 	}
 }

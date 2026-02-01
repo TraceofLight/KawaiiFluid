@@ -184,18 +184,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	float LightingScale = 1.0f;
 
 	//========================================
-	// Absorption (Beer's Law)
-	//========================================
-
-	/**
-	 * Per-channel absorption coefficients (Beer's Law).
-	 * Water: R=0.4, G=0.1, B=0.05 (absorbs red, appears blue).
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Absorption",
-		meta = (HideAlphaChannel))
-	FLinearColor AbsorptionColorCoefficients = FLinearColor(0.4f, 0.1f, 0.05f, 1.0f);
-
-	//========================================
 	// Refraction
 	//========================================
 
@@ -437,7 +425,6 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.FresnelStrength));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RefractiveIndex));
 	Hash = HashCombine(Hash, GetTypeHash(Params.AbsorptionStrength));
-	Hash = HashCombine(Hash, GetTypeHash(Params.AbsorptionColorCoefficients.ToString()));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SpecularStrength));
 	Hash = HashCombine(Hash, GetTypeHash(Params.SpecularRoughness));
 	Hash = HashCombine(Hash, GetTypeHash(Params.AmbientIntensity));
@@ -491,7 +478,6 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 		FMath::IsNearlyEqual(A.FresnelStrength, B.FresnelStrength, 0.001f) &&
 		FMath::IsNearlyEqual(A.RefractiveIndex, B.RefractiveIndex, 0.001f) &&
 		FMath::IsNearlyEqual(A.AbsorptionStrength, B.AbsorptionStrength, 0.001f) &&
-		A.AbsorptionColorCoefficients.Equals(B.AbsorptionColorCoefficients, 0.001f) &&
 		FMath::IsNearlyEqual(A.SpecularStrength, B.SpecularStrength, 0.001f) &&
 		FMath::IsNearlyEqual(A.SpecularRoughness, B.SpecularRoughness, 0.001f) &&
 		FMath::IsNearlyEqual(A.AmbientIntensity, B.AmbientIntensity, 0.001f) &&

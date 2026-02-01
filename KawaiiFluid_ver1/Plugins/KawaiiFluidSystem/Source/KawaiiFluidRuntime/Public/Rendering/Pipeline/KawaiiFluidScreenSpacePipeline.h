@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "RenderGraphResources.h"
-#include "Rendering/Pipeline/IKawaiiMetaballRenderingPipeline.h"
+#include "Rendering/Pipeline/IKawaiiFluidRenderingPipeline.h"
 
 /**
  * ScreenSpace Pipeline for Metaball Rendering
@@ -18,17 +18,15 @@
  *
  * All rendering happens at PrePostProcess timing.
  */
-class FKawaiiMetaballScreenSpacePipeline : public IKawaiiMetaballRenderingPipeline
+class FKawaiiFluidScreenSpacePipeline : public IKawaiiMetaballRenderingPipeline
 {
 public:
-	FKawaiiMetaballScreenSpacePipeline() = default;
-	virtual ~FKawaiiMetaballScreenSpacePipeline() = default;
+	FKawaiiFluidScreenSpacePipeline() = default;
+	virtual ~FKawaiiFluidScreenSpacePipeline() = default;
 
 	//========================================
 	// IKawaiiMetaballRenderingPipeline Interface
 	//========================================
-
-
 
 	/** Prepare intermediate textures for rendering (depth, normal, thickness) */
 	virtual void PrepareRender(

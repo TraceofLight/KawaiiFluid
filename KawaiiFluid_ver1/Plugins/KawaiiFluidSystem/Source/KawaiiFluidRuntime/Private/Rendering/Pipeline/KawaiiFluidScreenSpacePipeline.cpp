@@ -1,6 +1,6 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/Pipeline/KawaiiMetaballScreenSpacePipeline.h"
+#include "Rendering/Pipeline/KawaiiFluidScreenSpacePipeline.h"
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
 #include "Rendering/FluidDepthPass.h"
 #include "Rendering/FluidSmoothingPass.h"
@@ -8,7 +8,7 @@
 #include "Rendering/FluidThicknessPass.h"
 
 // Separated shading implementation
-#include "Rendering/Shading/KawaiiScreenSpaceShadingImpl.h"
+#include "Rendering/Shading/FluidCompositeShading.h"
 #include "Rendering/FluidSurfaceDecorationPass.h"
 #include "Rendering/FluidFlowAccumulationPass.h"
 
@@ -167,7 +167,7 @@ static bool GenerateIntermediateTextures(
 }
 
 
-void FKawaiiMetaballScreenSpacePipeline::PrepareRender(
+void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,
@@ -264,7 +264,7 @@ void FKawaiiMetaballScreenSpacePipeline::PrepareRender(
 }
 
 
-void FKawaiiMetaballScreenSpacePipeline::ExecuteRender(
+void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,

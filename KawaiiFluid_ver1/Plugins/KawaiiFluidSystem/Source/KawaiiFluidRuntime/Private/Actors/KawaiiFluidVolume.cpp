@@ -469,11 +469,24 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 				{
 					TRACE_CPUPROFILER_EVENT_SCOPE(ISM Shadow Volume)
 
+					// Determine shadow particle radius based on mode:
+					// - ISM debug mode ON (with or without shadow): use simulation radius for consistency
+					// - Shadow only (no ISM debug): use RenderRadius to match visual rendering
+					const bool bISMDebugMode = (VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM);
+					float ShadowParticleRadius = ParticleRadius;  // Default: simulation radius
+					if (!bISMDebugMode)
+					{
+						if (UKawaiiFluidPresetDataAsset* Preset = VolumeComponent->GetPreset())
+						{
+							ShadowParticleRadius = Preset->RenderingParameters.ParticleRenderRadius;
+						}
+					}
+
 					// Register shadow particles for aggregation (will be rendered in Subsystem Tick)
 					RendererSubsystem->RegisterShadowParticles(
 						Positions.GetData(),
 						NumParticles,
-						ParticleRadius,
+						ShadowParticleRadius,
 						VolumeComponent->ShadowMeshQuality
 					);
 				}

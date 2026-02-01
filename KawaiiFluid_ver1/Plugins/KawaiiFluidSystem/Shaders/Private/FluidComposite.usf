@@ -1044,6 +1044,12 @@ float CalculateCaustics(float2 UV, FFluidSurfaceData Surface, float RefractedDep
 
 /**
  * Calculate Beer's Law transmittance and blend with fluid color.
+ *
+ * Beer's Law: T = exp(-μ * c * d)
+ *   μ = absorption coefficient (computed from -log(FluidColor) in C++)
+ *   c = concentration (Opacity parameter, 0-1)
+ *   d = thickness
+ *
  * @param RefractedBackground Refracted/caustic-modified background color
  * @param Thickness Fluid thickness at this pixel
  * @param TotalLighting Total lighting (diffuse + ambient)
@@ -1051,15 +1057,16 @@ float CalculateCaustics(float2 UV, FFluidSurfaceData Surface, float RefractedDep
  */
 float3 CalculateTransmittance(float3 RefractedBackground, float Thickness, float3 TotalLighting)
 {
-	// Calculate per-channel absorption
-	float AbsorptionCoefficient = 1.0 + Opacity * 4.0;
-	float3 AbsorptionRGB = AbsorptionColorCoefficients.rgb * AbsorptionCoefficient;
-	float3 Transmittance = exp(-AbsorptionRGB * Thickness * 0.1f);
+	// Beer's Law: Transmittance = exp(-absorption * concentration * thickness)
+	// AbsorptionColorCoefficients = -log(FluidColor), pre-computed in C++
+	// Opacity acts as concentration multiplier (0 = fully transparent, 1 = normal density)
+	float3 Transmittance = exp(-AbsorptionColorCoefficients.rgb * Opacity * Thickness);
 
 	// Apply transmittance to background
 	float3 TransmittedBackground = RefractedBackground * Transmittance;
 
-	// Blend with fluid color based on absorption
+	// Blend with fluid color based on overall absorption
+	// As more light is absorbed, the fluid's own color becomes more visible
 	float OverallAbsorption = 1.0 - dot(Transmittance, float3(0.333, 0.333, 0.333));
 	float3 LitFluidColor = FluidColor.rgb * TotalLighting;
 
