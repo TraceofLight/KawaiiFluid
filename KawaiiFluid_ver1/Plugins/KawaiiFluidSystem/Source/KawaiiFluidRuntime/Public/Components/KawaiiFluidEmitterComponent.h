@@ -26,6 +26,21 @@ enum class EKawaiiFluidEmitterMode : uint8
 };
 
 /**
+ * Spawn rate mode for Stream emitter
+ */
+UENUM(BlueprintType)
+enum class EStreamSpawnRateMode : uint8
+{
+	/** Spawn rate is automatically determined by InitialSpeed (velocity-based).
+	 *  Faster velocity = higher spawn rate. Natural for water streams. */
+	Automatic UMETA(DisplayName = "Auto"),
+	
+	/** Spawn rate is manually specified as layers per second.
+	 *  Allows independent control of velocity and spawn density. */
+	Manual UMETA(DisplayName = "Manual")
+};
+
+/**
  * Shape type for Shape emitter mode
  */
 UENUM(BlueprintType)
@@ -125,6 +140,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Emitter|Stream",
 		meta = (EditCondition = "EmitterMode == EKawaiiFluidEmitterMode::Stream", EditConditionHides, ClampMin = "1.0"))
 	float StreamRadius = 25.0f;
+
+	/** Spawn rate mode: Automatic (velocity-based) or Manual (fixed rate) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Emitter|Stream",
+		meta = (EditCondition = "EmitterMode == EKawaiiFluidEmitterMode::Stream", EditConditionHides))
+	EStreamSpawnRateMode StreamSpawnRateMode = EStreamSpawnRateMode::Automatic;
+
+	/** Manual spawn rate (layers per second).
+	 *  Only used when StreamSpawnRateMode is Manual.
+	 *  Each layer contains multiple particles based on StreamRadius and particle spacing. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Emitter|Stream",
+		meta = (EditCondition = "EmitterMode == EKawaiiFluidEmitterMode::Stream && StreamSpawnRateMode == EStreamSpawnRateMode::Manual", 
+		        EditConditionHides, ClampMin = "1.0", ClampMax = "1000.0"))
+	float ManualLayersPerSecond = 60.0f;
 
 	/** Use world space for velocity direction (if false, uses local space) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Emitter|Velocity")

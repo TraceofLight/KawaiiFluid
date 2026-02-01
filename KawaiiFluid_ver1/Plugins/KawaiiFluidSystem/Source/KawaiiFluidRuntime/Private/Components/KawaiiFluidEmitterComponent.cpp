@@ -565,27 +565,54 @@ void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 	}
 	const float LayerSpacing = EffectiveSpacing * StreamLayerSpacingRatio;
 
-	// Velocity-based layer spawning (accumulate distance traveled)
-	const float DistanceThisFrame = InitialSpeed * DeltaTime;
-	LayerDistanceAccumulator += DistanceThisFrame;
+	// === Spawn Rate Mode Branching ===
+	int32 LayerCount = 0;
+	float ResidualDistance = 0.0f;
 
-	if (LayerDistanceAccumulator < LayerSpacing)
+	if (StreamSpawnRateMode == EStreamSpawnRateMode::Automatic)
 	{
-		return;  // Not enough distance accumulated for a layer
+		// === AUTOMATIC MODE: Velocity-based layer spawning ===
+		// Spawn rate is determined by InitialSpeed - faster velocity = more layers per second
+		const float DistanceThisFrame = InitialSpeed * DeltaTime;
+		LayerDistanceAccumulator += DistanceThisFrame;
+
+		if (LayerDistanceAccumulator < LayerSpacing)
+		{
+			return;  // Not enough distance accumulated for a layer
+		}
+
+		// Calculate number of layers to spawn
+		// Clamp to MaxLayersPerFrame to prevent particle explosion on frame drops
+		const int32 RawLayerCount = FMath::FloorToInt(LayerDistanceAccumulator / LayerSpacing);
+		LayerCount = FMath::Min(RawLayerCount, MaxLayersPerFrame);
+
+		// IMPORTANT: Discard ALL excess accumulated distance, not just what we spawned
+		// Only keep the fractional residual from LayerSpacing, discarding any "skipped" layers
+		ResidualDistance = FMath::Fmod(LayerDistanceAccumulator, LayerSpacing);
 	}
+	else
+	{
+		// === MANUAL MODE: Time-based layer spawning ===
+		// Spawn rate is fixed at ManualLayersPerSecond, independent of velocity
+		const float LayerInterval = 1.0f / FMath::Max(ManualLayersPerSecond, 1.0f);
+		SpawnAccumulator += DeltaTime;
 
-	// Calculate number of layers to spawn
-	// Clamp to MaxLayersPerFrame to prevent particle explosion on frame drops
-	// When frame drops occur, DeltaTime increases causing many layers to spawn at once
-	// This creates overlapping particles that repel each other violently
-	const int32 RawLayerCount = FMath::FloorToInt(LayerDistanceAccumulator / LayerSpacing);
-	const int32 LayerCount = FMath::Min(RawLayerCount, MaxLayersPerFrame);
+		if (SpawnAccumulator < LayerInterval)
+		{
+			return;  // Not enough time accumulated for a layer
+		}
 
-	// IMPORTANT: Discard ALL excess accumulated distance, not just what we spawned
-	// Only keep the fractional residual from LayerSpacing, discarding any "skipped" layers
-	// This prevents catch-up spawning in subsequent frames which would still cause overlap
-	// Example: If RawLayerCount=5 but we only spawn 1, we discard 4 layers worth of distance
-	const float ResidualDistance = FMath::Fmod(LayerDistanceAccumulator, LayerSpacing);
+		// Calculate number of layers to spawn
+		// Clamp to MaxLayersPerFrame to prevent particle explosion on frame drops
+		const int32 RawLayerCount = FMath::FloorToInt(SpawnAccumulator / LayerInterval);
+		LayerCount = FMath::Min(RawLayerCount, MaxLayersPerFrame);
+
+		// Discard excess accumulated time (same safety as Automatic mode)
+		SpawnAccumulator = FMath::Fmod(SpawnAccumulator, LayerInterval);
+
+		// For Manual mode, still use LayerSpacing for position offset calculation
+		ResidualDistance = 0.0f;
+	}
 
 	if (LayerCount <= 0)
 	{
@@ -647,8 +674,12 @@ void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 		QueueSpawnRequest(AllPositions, AllVelocities);
 	}
 
-	// === Update accumulator with residual distance ===
-	LayerDistanceAccumulator = ResidualDistance;
+	// === Update accumulator with residual distance (Automatic mode only) ===
+	if (StreamSpawnRateMode == EStreamSpawnRateMode::Automatic)
+	{
+		LayerDistanceAccumulator = ResidualDistance;
+	}
+	// Note: Manual mode's SpawnAccumulator is already updated in the branching logic above
 
 	// === Recycle (Stream mode only): After spawning, remove oldest particles if over MaxParticleCount ===
 	// TODO: Implement Quota system for multiple emitters sharing a Volume
