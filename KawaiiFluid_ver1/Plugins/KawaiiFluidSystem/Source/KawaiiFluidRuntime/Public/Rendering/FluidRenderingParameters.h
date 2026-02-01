@@ -109,6 +109,29 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float ThicknessSensitivity = 0.5f;
 
+	/**
+	 * Enable min/max clamping for thickness values.
+	 * Useful for controlling extreme thin/thick areas.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Color")
+	bool bEnableThicknessClamping = false;
+
+	/**
+	 * Minimum thickness value (scaled). Values below this become fully transparent.
+	 * Only used when bEnableThicknessClamping is true.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Color",
+		meta = (EditCondition = "bEnableThicknessClamping", ClampMin = "0.0", ClampMax = "10.0"))
+	float ThicknessMin = 0.0f;
+
+	/**
+	 * Maximum thickness value (scaled). Values above this are clamped.
+	 * Only used when bEnableThicknessClamping is true.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Color",
+		meta = (EditCondition = "bEnableThicknessClamping", ClampMin = "0.1", ClampMax = "50.0"))
+	float ThicknessMax = 10.0f;
+
 	//========================================
 	// Specular
 	//========================================
@@ -337,7 +360,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	 * Higher = more accurate at distance but slower.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
-		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "64", ClampMax = "512"))
+		meta = (DisplayName = "SSR Max Steps", EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "64", ClampMax = "512"))
 	int32 ScreenSpaceReflectionMaxSteps = 256;
 
 	/**
@@ -345,7 +368,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	 * Smaller = more precise hits, larger = faster but may miss thin objects.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
-		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.5", ClampMax = "20.0"))
+		meta = (DisplayName = "SSR Step Size", EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.5", ClampMax = "20.0"))
 	float ScreenSpaceReflectionStepSize = 4.0f;
 
 	/**
@@ -353,7 +376,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	 * Larger = more tolerant (fewer holes), but may cause incorrect hits.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
-		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.5", ClampMax = "5.0"))
+		meta = (DisplayName = "SSR Thickness", EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.5", ClampMax = "5.0"))
 	float ScreenSpaceReflectionThickness = 2.0f;
 
 	/**
@@ -361,15 +384,15 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	 * Controls the blend amount for Screen Space Reflection, independent from FresnelReflectionBlend.
 	 *
 	 * In SSR-only mode (ReflectionMode = ScreenSpaceReflection):
-	 * - BlendFactor = Fresnel * ScreenSpaceReflectionIntensity
+	 * - BlendFactor = Fresnel * SSRIntensity
 	 *
 	 * In SSR+Cubemap mode (ReflectionMode = ScreenSpaceReflectionWithCubemap):
-	 * - SSR hit areas: BlendFactor = Fresnel * ScreenSpaceReflectionIntensity
+	 * - SSR hit areas: BlendFactor = Fresnel * SSRIntensity
 	 * - SSR miss areas (Cubemap fallback): BlendFactor = Fresnel * FresnelReflectionBlend
 	 * - Partial hits interpolate between the two
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
-		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.0", ClampMax = "1.0"))
+		meta = (DisplayName = "SSR Intensity", EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.0", ClampMax = "1.0"))
 	float ScreenSpaceReflectionIntensity = 0.8f;
 
 	/**
@@ -377,7 +400,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	 * Hides abrupt reflection cutoff where ray exits the screen.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
-		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.0", ClampMax = "0.5"))
+		meta = (DisplayName = "SSR Edge Fade", EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap", ClampMin = "0.0", ClampMax = "0.5"))
 	float ScreenSpaceReflectionEdgeFade = 0.1f;
 
 	/**
@@ -385,7 +408,7 @@ struct KAWAIIFLUIDRUNTIME_API FFluidRenderingParameters
 	 * Shows hit/miss status, ray direction, depth comparison, etc.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Reflection",
-		meta = (EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap"))
+		meta = (DisplayName = "SSR Debug Mode", EditCondition = "ReflectionMode == EFluidReflectionMode::ScreenSpaceReflection || ReflectionMode == EFluidReflectionMode::ScreenSpaceReflectionWithCubemap"))
 	EScreenSpaceReflectionDebugMode ScreenSpaceReflectionDebugMode = EScreenSpaceReflectionDebugMode::None;
 
 	//========================================
@@ -420,6 +443,9 @@ FORCEINLINE uint32 GetTypeHash(const FFluidRenderingParameters& Params)
 	Hash = HashCombine(Hash, GetTypeHash(Params.AmbientIntensity));
 	Hash = HashCombine(Hash, GetTypeHash(Params.LightingScale));
 	Hash = HashCombine(Hash, GetTypeHash(Params.ThicknessSensitivity));
+	Hash = HashCombine(Hash, GetTypeHash(Params.bEnableThicknessClamping));
+	Hash = HashCombine(Hash, GetTypeHash(Params.ThicknessMin));
+	Hash = HashCombine(Hash, GetTypeHash(Params.ThicknessMax));
 	Hash = HashCombine(Hash, GetTypeHash(Params.bEnableRefraction));
 	Hash = HashCombine(Hash, GetTypeHash(Params.RefractionScale));
 	// Caustic parameters
@@ -471,6 +497,9 @@ FORCEINLINE bool operator==(const FFluidRenderingParameters& A, const FFluidRend
 		FMath::IsNearlyEqual(A.AmbientIntensity, B.AmbientIntensity, 0.001f) &&
 		FMath::IsNearlyEqual(A.LightingScale, B.LightingScale, 0.001f) &&
 		FMath::IsNearlyEqual(A.ThicknessSensitivity, B.ThicknessSensitivity, 0.001f) &&
+		A.bEnableThicknessClamping == B.bEnableThicknessClamping &&
+		FMath::IsNearlyEqual(A.ThicknessMin, B.ThicknessMin, 0.001f) &&
+		FMath::IsNearlyEqual(A.ThicknessMax, B.ThicknessMax, 0.001f) &&
 		A.bEnableRefraction == B.bEnableRefraction &&
 		FMath::IsNearlyEqual(A.RefractionScale, B.RefractionScale, 0.001f) &&
 		// Caustic parameters

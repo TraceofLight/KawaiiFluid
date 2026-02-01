@@ -72,6 +72,9 @@ BEGIN_SHADER_PARAMETER_STRUCT(FFluidCompositeParameters, )
     // Lighting Scale Parameters
     // ------------------------------------------------------
     SHADER_PARAMETER(float, ThicknessSensitivity)  // How much thickness affects transparency (0 = uniform, 1 = thickness-dependent)
+    SHADER_PARAMETER(int, bEnableThicknessClamping)  // 1 = clamp thickness to min/max, 0 = no clamping
+    SHADER_PARAMETER(float, ThicknessMin)  // Minimum thickness value (when clamping enabled)
+    SHADER_PARAMETER(float, ThicknessMax)  // Maximum thickness value (when clamping enabled)
     SHADER_PARAMETER(float, FresnelReflectionBlend)
 
     // ------------------------------------------------------

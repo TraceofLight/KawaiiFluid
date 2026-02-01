@@ -152,6 +152,9 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 
 	// Lighting scale parameters
 	PassParameters->ThicknessSensitivity = RenderParams.ThicknessSensitivity;
+	PassParameters->bEnableThicknessClamping = RenderParams.bEnableThicknessClamping ? 1 : 0;
+	PassParameters->ThicknessMin = RenderParams.ThicknessMin;
+	PassParameters->ThicknessMax = RenderParams.ThicknessMax;
 	PassParameters->FresnelReflectionBlend = RenderParams.FresnelReflectionBlend;
 
 	// Refraction parameters

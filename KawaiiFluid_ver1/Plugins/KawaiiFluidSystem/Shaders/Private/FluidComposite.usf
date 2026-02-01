@@ -49,6 +49,9 @@ float4 LightColors[FLUID_MAX_LIGHTS];
 
 // Lighting Scale Parameters
 float ThicknessSensitivity;          // How much thickness affects transparency (0 = uniform, 1 = thickness-dependent)
+int bEnableThicknessClamping;        // 1 = clamp thickness to min/max, 0 = no clamping
+float ThicknessMin;                  // Minimum thickness value (when clamping enabled)
+float ThicknessMax;                  // Maximum thickness value (when clamping enabled)
 float FresnelReflectionBlend;
 
 // Refraction
@@ -661,6 +664,12 @@ bool SampleFluidSurface(float2 UV, float2 SceneUV, out FFluidSurfaceData OutSurf
 	// Sample normal and thickness
 	OutSurface.Normal = FluidNormalTexture.Sample(PointClampSampler, UV).xyz;
 	OutSurface.Thickness = FluidThicknessTexture.Sample(PointClampSampler, UV).r;
+
+	// Apply thickness clamping if enabled
+	if (bEnableThicknessClamping > 0)
+	{
+		OutSurface.Thickness = clamp(OutSurface.Thickness, ThicknessMin, ThicknessMax);
+	}
 
 	// Validate and normalize normal
 	bool bInvalidNormal = any(isnan(OutSurface.Normal)) || any(isinf(OutSurface.Normal)) || length(OutSurface.Normal) < 0.1f;
