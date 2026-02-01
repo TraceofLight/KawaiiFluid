@@ -2500,6 +2500,16 @@ public:
 
 		// Hybrid Tiled Z-Order mode (for unlimited simulation range)
 		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
+
+		// Collision primitives (for direct collider surface normal calculation)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionSphere>, CollisionSpheres)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionCapsule>, CollisionCapsules)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionBox>, CollisionBoxes)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoneTransform>, BoneTransforms)
+		SHADER_PARAMETER(int32, SphereCount)
+		SHADER_PARAMETER(int32, CapsuleCount)
+		SHADER_PARAMETER(int32, BoxCount)
+		SHADER_PARAMETER(int32, BoneCount)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;

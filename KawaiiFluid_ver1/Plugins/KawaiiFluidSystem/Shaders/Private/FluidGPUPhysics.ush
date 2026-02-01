@@ -44,12 +44,11 @@ bool HasValidSource(int sourceID)
 #define GPU_PARTICLE_FLAG_NONE                0
 #define GPU_PARTICLE_FLAG_IS_ATTACHED         (1 << 0)
 #define GPU_PARTICLE_FLAG_IS_SURFACE          (1 << 1)
-#define GPU_PARTICLE_FLAG_IS_CORE             (1 << 2)
-#define GPU_PARTICLE_FLAG_JUST_DETACHED       (1 << 3)
-#define GPU_PARTICLE_FLAG_NEAR_GROUND         (1 << 4)
-#define GPU_PARTICLE_FLAG_HAS_COLLIDED        (1 << 5)
-#define GPU_PARTICLE_FLAG_IS_SLEEPING         (1 << 6)
-#define GPU_PARTICLE_FLAG_NEAR_BOUNDARY       (1 << 7)  // Near boundary particle (for visualization, doesn't skip physics)
+#define GPU_PARTICLE_FLAG_JUST_DETACHED       (1 << 2)  // Must match C++ EGPUParticleFlags::JustDetached
+#define GPU_PARTICLE_FLAG_NEAR_GROUND         (1 << 3)  // Must match C++ EGPUParticleFlags::NearGround
+#define GPU_PARTICLE_FLAG_HAS_COLLIDED        (1 << 4)  // Must match C++ EGPUParticleFlags::HasCollided
+#define GPU_PARTICLE_FLAG_IS_SLEEPING         (1 << 5)  // Must match C++ EGPUParticleFlags::IsSleeping
+#define GPU_PARTICLE_FLAG_NEAR_BOUNDARY       (1 << 6)  // Must match C++ EGPUParticleFlags::NearBoundary
 
 
 //=============================================================================

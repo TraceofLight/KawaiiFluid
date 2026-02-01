@@ -510,6 +510,17 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	FRDGBufferSRVRef WorldBoundaryParticlesSRVLocal = nullptr;
 	int32 WorldBoundaryParticleCount = 0;
 
+	// DEBUG: Check BoundarySkinning state
+	{
+		static int32 BoundarySkinningDebugCounter = 0;
+		if (++BoundarySkinningDebugCounter % 120 == 1)
+		{
+			UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDelta] BoundarySkinningManager: Valid=%d, Enabled=%d"),
+				BoundarySkinningManager.IsValid() ? 1 : 0,
+				(BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled()) ? 1 : 0);
+		}
+	}
+
 	if (BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled())
 	{
 		// Step 1: Run BoundarySkinningCS first to create WorldBoundaryParticles
@@ -517,6 +528,16 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		BoundarySkinningManager->AddBoundarySkinningPass(
 			GraphBuilder, WorldBoundaryParticlesBuffer, WorldBoundaryParticleCount, Params.DeltaTime,
 			&SkinningOutputs);
+
+		// DEBUG: Log skinning output
+		{
+			static int32 SkinningOutputDebugCounter = 0;
+			if (++SkinningOutputDebugCounter % 120 == 1)
+			{
+				UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDelta] Skinning Output: Buffer=%d, Count=%d"),
+					WorldBoundaryParticlesBuffer != nullptr ? 1 : 0, WorldBoundaryParticleCount);
+			}
+		}
 
 		if (WorldBoundaryParticlesBuffer && WorldBoundaryParticleCount > 0)
 		{
@@ -1639,7 +1660,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 				AnisotropyParams.DensityWeight = CachedAnisotropyParams.DensityWeight;
 
 				// Use same radius as simulation (per Yu & Turk 2013, NVIDIA FleX)
-				AnisotropyParams.SmoothingRadius = Params.SmoothingRadius * 3.0f;
+				AnisotropyParams.SmoothingRadius = Params.SmoothingRadius * 1.0f;
 				AnisotropyParams.CellSize = Params.CellSize;
 
 				// Morton-sorted spatial lookup (cache-friendly sequential access)
@@ -1702,6 +1723,93 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 				// BoundaryWeight: How much boundary particles influence anisotropy (0-1)
 				// 1.0 = full influence (same as fluid particles)
 				AnisotropyParams.BoundaryWeight = 1.0f;
+
+				// Surface Normal Anisotropy for NEAR_BOUNDARY particles
+				// Pass BoneDeltaAttachments buffer so anisotropy can use surface normals
+				if (SpatialData.BoneDeltaAttachmentBuffer != nullptr)
+				{
+					AnisotropyParams.BoneDeltaAttachmentsSRV = GraphBuilder.CreateSRV(SpatialData.BoneDeltaAttachmentBuffer);
+					AnisotropyParams.bEnableSurfaceNormalAnisotropy = true;
+
+					// DEBUG: Log that surface normal anisotropy is enabled
+					static int32 SurfaceNormalAnisoDebugCounter = 0;
+					if (++SurfaceNormalAnisoDebugCounter % 120 == 1)
+					{
+						UE_LOG(LogGPUFluidSimulator, Log, TEXT("[Anisotropy] Surface Normal Anisotropy ENABLED - BoneDeltaAttachmentBuffer valid"));
+					}
+				}
+				else
+				{
+					// DEBUG: Log that surface normal anisotropy is disabled
+					static int32 SurfaceNormalAnisoDisabledDebugCounter = 0;
+					if (++SurfaceNormalAnisoDisabledDebugCounter % 120 == 1)
+					{
+						UE_LOG(LogGPUFluidSimulator, Warning, TEXT("[Anisotropy] Surface Normal Anisotropy DISABLED - BoneDeltaAttachmentBuffer is NULL"));
+					}
+				}
+
+				// =========================================================================
+				// Collision Primitives for direct surface normal calculation (bone colliders)
+				// NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
+				// =========================================================================
+				if (CollisionManager.IsValid())
+				{
+					const TArray<FGPUCollisionSphere>& Spheres = CollisionManager->GetCachedSpheres();
+					const TArray<FGPUCollisionCapsule>& Capsules = CollisionManager->GetCachedCapsules();
+					const TArray<FGPUCollisionBox>& Boxes = CollisionManager->GetCachedBoxes();
+
+					// Create RDG buffers and upload collision data
+					if (Spheres.Num() > 0)
+					{
+						FRDGBufferRef SpheresBuffer = CreateStructuredBuffer(
+							GraphBuilder,
+							TEXT("Anisotropy_CollisionSpheres"),
+							sizeof(FGPUCollisionSphere),
+							Spheres.Num(),
+							Spheres.GetData(),
+							sizeof(FGPUCollisionSphere) * Spheres.Num());
+						AnisotropyParams.CollisionSpheresSRV = GraphBuilder.CreateSRV(SpheresBuffer);
+						AnisotropyParams.SphereCount = Spheres.Num();
+					}
+
+					if (Capsules.Num() > 0)
+					{
+						FRDGBufferRef CapsulesBuffer = CreateStructuredBuffer(
+							GraphBuilder,
+							TEXT("Anisotropy_CollisionCapsules"),
+							sizeof(FGPUCollisionCapsule),
+							Capsules.Num(),
+							Capsules.GetData(),
+							sizeof(FGPUCollisionCapsule) * Capsules.Num());
+						AnisotropyParams.CollisionCapsulesSRV = GraphBuilder.CreateSRV(CapsulesBuffer);
+						AnisotropyParams.CapsuleCount = Capsules.Num();
+					}
+
+					if (Boxes.Num() > 0)
+					{
+						FRDGBufferRef BoxesBuffer = CreateStructuredBuffer(
+							GraphBuilder,
+							TEXT("Anisotropy_CollisionBoxes"),
+							sizeof(FGPUCollisionBox),
+							Boxes.Num(),
+							Boxes.GetData(),
+							sizeof(FGPUCollisionBox) * Boxes.Num());
+						AnisotropyParams.CollisionBoxesSRV = GraphBuilder.CreateSRV(BoxesBuffer);
+						AnisotropyParams.BoxCount = Boxes.Num();
+					}
+
+					// Search radius for finding closest collider normal
+					// Use BoundaryAttachRadius as the search distance (same as adhesion radius)
+					AnisotropyParams.ColliderSearchRadius = Params.BoundaryAttachRadius > 0.0f ? Params.BoundaryAttachRadius * 2.0f : Params.SmoothingRadius;
+
+					// DEBUG: Log collider counts for anisotropy
+					static int32 AnisotropyColliderDebugCounter = 0;
+					if (++AnisotropyColliderDebugCounter % 120 == 1)
+					{
+						UE_LOG(LogGPUFluidSimulator, Log, TEXT("[Anisotropy] Colliders bound: Spheres=%d, Capsules=%d, Boxes=%d, SearchRadius=%.1f"),
+							AnisotropyParams.SphereCount, AnisotropyParams.CapsuleCount, AnisotropyParams.BoxCount, AnisotropyParams.ColliderSearchRadius);
+					}
+				}
 
 				FFluidAnisotropyPassBuilder::AddAnisotropyPass(GraphBuilder, AnisotropyParams);
 
@@ -2325,7 +2433,7 @@ FRDGBufferRef FGPUFluidSimulator::EnsureBoneDeltaAttachmentBuffer(
 		for (int32 i = 0; i < RequiredCapacity; ++i)
 		{
 			InitialData[i].BoundaryParticleIndex = -1;  // -1 = not attached
-			InitialData[i].Reserved = FVector3f::ZeroVector;
+			InitialData[i].LocalNormal = FVector3f::ZeroVector;
 			InitialData[i].PreviousPosition = FVector3f::ZeroVector;
 		}
 

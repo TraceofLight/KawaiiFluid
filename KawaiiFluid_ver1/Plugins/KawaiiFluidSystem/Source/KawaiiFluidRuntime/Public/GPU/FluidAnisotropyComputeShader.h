@@ -14,6 +14,10 @@
 struct FGPUFluidParticle;
 struct FGPUParticleAttachment;
 struct FGPUBoundaryParticle;
+struct FGPUBoneDeltaAttachment;
+struct FGPUCollisionSphere;
+struct FGPUCollisionCapsule;
+struct FGPUCollisionBox;
 
 //=============================================================================
 // GPU Compute Parameters for Anisotropy Shader Dispatch
@@ -87,6 +91,20 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 	// Hybrid Tiled Z-Order mode (for unlimited simulation range)
 	// When true, uses 21-bit Hybrid keys instead of classic Morton codes
 	bool bUseHybridTiledZOrder = false;
+
+	// Surface Normal Anisotropy for NEAR_BOUNDARY particles
+	FRDGBufferSRVRef BoneDeltaAttachmentsSRV = nullptr;	// FGPUBoneDeltaAttachment for NEAR_BOUNDARY particles
+	bool bEnableSurfaceNormalAnisotropy = true;			// Use surface normal for NEAR_BOUNDARY particles
+
+	// Collision Primitives for direct surface normal calculation
+	// These are bone colliders (Capsule/Box) already transformed to world space
+	FRDGBufferSRVRef CollisionSpheresSRV = nullptr;
+	FRDGBufferSRVRef CollisionCapsulesSRV = nullptr;
+	FRDGBufferSRVRef CollisionBoxesSRV = nullptr;
+	int32 SphereCount = 0;
+	int32 CapsuleCount = 0;
+	int32 BoxCount = 0;
+	float ColliderSearchRadius = 50.0f;  // Search radius for finding closest collider normal
 
 	// Temporal Smoothing parameters
 	FRDGBufferSRVRef PrevAxis1SRV = nullptr;
@@ -178,6 +196,19 @@ public:
 		SHADER_PARAMETER(int32, bEnableTemporalSmoothing)
 		SHADER_PARAMETER(float, TemporalSmoothFactor)
 		SHADER_PARAMETER(int32, bHasPreviousFrame)
+
+		// Surface Normal Anisotropy for NEAR_BOUNDARY particles
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoneDeltaAttachment>, InBoneDeltaAttachments)
+		SHADER_PARAMETER(int32, bEnableSurfaceNormalAnisotropy)
+
+		// Collision Primitives for direct surface normal calculation (already in world space)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionSphere>, CollisionSpheres)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionCapsule>, CollisionCapsules)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUCollisionBox>, CollisionBoxes)
+		SHADER_PARAMETER(int32, SphereCount)
+		SHADER_PARAMETER(int32, CapsuleCount)
+		SHADER_PARAMETER(int32, BoxCount)
+		SHADER_PARAMETER(float, ColliderSearchRadius)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 64;

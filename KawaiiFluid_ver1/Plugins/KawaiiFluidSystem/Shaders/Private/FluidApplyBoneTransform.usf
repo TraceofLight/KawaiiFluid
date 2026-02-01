@@ -115,9 +115,9 @@ void ApplyBoneTransformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float4 localPos4 = float4(localParticle.LocalPosition, 1.0f);
 	float3 boundaryWorldPos = mul(localPos4, transform).xyz;
 
-	// Apply LocalOffset (stored in Reserved field)
+	// Apply LocalOffset (stored in attachment)
 	// This allows physics to affect the particle while still following the boundary
-	float3 localOffset = attachment.Reserved;
+	float3 localOffset = attachment.LocalOffset;
 	float3 targetPos = boundaryWorldPos + localOffset;
 
 	// =========================================================================

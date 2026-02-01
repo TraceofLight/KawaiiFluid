@@ -5,6 +5,7 @@
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "GPU/Managers/GPUBoundarySkinningManager.h"
 #include "GPU/Managers/GPUZOrderSortManager.h"
+#include "GPU/Managers/GPUCollisionManager.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
@@ -742,6 +743,72 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 	// Hybrid Tiled Z-Order mode (for unlimited simulation range)
 	bool bUseHybridTiledZOrder = ZOrderSortManager.IsValid() && ZOrderSortManager->IsHybridTiledZOrderEnabled();
 	PassParameters->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
+
+	//=========================================================================
+	// Collision Primitives (for direct collider surface normal calculation)
+	// These are the same primitives used by FluidAdhesion
+	//=========================================================================
+	const TArray<FGPUCollisionSphere>& CachedSpheres = CollisionManager.IsValid() ? CollisionManager->GetCachedSpheres() : TArray<FGPUCollisionSphere>();
+	const TArray<FGPUCollisionCapsule>& CachedCapsules = CollisionManager.IsValid() ? CollisionManager->GetCachedCapsules() : TArray<FGPUCollisionCapsule>();
+	const TArray<FGPUCollisionBox>& CachedBoxes = CollisionManager.IsValid() ? CollisionManager->GetCachedBoxes() : TArray<FGPUCollisionBox>();
+	const TArray<FGPUBoneTransform>& CachedBoneTransforms = CollisionManager.IsValid() ? CollisionManager->GetCachedBoneTransforms() : TArray<FGPUBoneTransform>();
+
+	// DEBUG: Log collider counts and positions
+	static int32 ColliderDebugCounter = 0;
+	if (++ColliderDebugCounter % 120 == 1)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("[BoneDeltaAttachment] Colliders: Spheres=%d, Capsules=%d, Boxes=%d, Bones=%d"),
+			CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedBoneTransforms.Num());
+
+		// Log first capsule position
+		if (CachedCapsules.Num() > 0)
+		{
+			const FGPUCollisionCapsule& Cap = CachedCapsules[0];
+			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("  Capsule[0]: Start=(%.1f, %.1f, %.1f), End=(%.1f, %.1f, %.1f), Radius=%.1f"),
+				Cap.Start.X, Cap.Start.Y, Cap.Start.Z, Cap.End.X, Cap.End.Y, Cap.End.Z, Cap.Radius);
+		}
+		// Log first box position
+		if (CachedBoxes.Num() > 0)
+		{
+			const FGPUCollisionBox& Box = CachedBoxes[0];
+			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("  Box[0]: Center=(%.1f, %.1f, %.1f), Extent=(%.1f, %.1f, %.1f)"),
+				Box.Center.X, Box.Center.Y, Box.Center.Z, Box.Extent.X, Box.Extent.Y, Box.Extent.Z);
+		}
+	}
+
+	// Create dummy data for empty buffers (RDG requires valid buffers)
+	static FGPUCollisionSphere DummySphere;
+	static FGPUCollisionCapsule DummyCapsule;
+	static FGPUCollisionBox DummyBox;
+	static FGPUBoneTransform DummyBone;
+
+	// Spheres buffer
+	FRDGBufferRef SpheresBuffer = CachedSpheres.Num() > 0
+		? CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaSpheres"), sizeof(FGPUCollisionSphere), CachedSpheres.Num(), CachedSpheres.GetData(), CachedSpheres.Num() * sizeof(FGPUCollisionSphere))
+		: CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaDummySpheres"), sizeof(FGPUCollisionSphere), 1, &DummySphere, sizeof(FGPUCollisionSphere));
+	PassParameters->CollisionSpheres = GraphBuilder.CreateSRV(SpheresBuffer);
+	PassParameters->SphereCount = CachedSpheres.Num();
+
+	// Capsules buffer
+	FRDGBufferRef CapsulesBuffer = CachedCapsules.Num() > 0
+		? CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaCapsules"), sizeof(FGPUCollisionCapsule), CachedCapsules.Num(), CachedCapsules.GetData(), CachedCapsules.Num() * sizeof(FGPUCollisionCapsule))
+		: CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaDummyCapsules"), sizeof(FGPUCollisionCapsule), 1, &DummyCapsule, sizeof(FGPUCollisionCapsule));
+	PassParameters->CollisionCapsules = GraphBuilder.CreateSRV(CapsulesBuffer);
+	PassParameters->CapsuleCount = CachedCapsules.Num();
+
+	// Boxes buffer
+	FRDGBufferRef BoxesBuffer = CachedBoxes.Num() > 0
+		? CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaBoxes"), sizeof(FGPUCollisionBox), CachedBoxes.Num(), CachedBoxes.GetData(), CachedBoxes.Num() * sizeof(FGPUCollisionBox))
+		: CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaDummyBoxes"), sizeof(FGPUCollisionBox), 1, &DummyBox, sizeof(FGPUCollisionBox));
+	PassParameters->CollisionBoxes = GraphBuilder.CreateSRV(BoxesBuffer);
+	PassParameters->BoxCount = CachedBoxes.Num();
+
+	// Bone transforms buffer
+	FRDGBufferRef BoneTransformsBuffer = CachedBoneTransforms.Num() > 0
+		? CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaBoneTransforms"), sizeof(FGPUBoneTransform), CachedBoneTransforms.Num(), CachedBoneTransforms.GetData(), CachedBoneTransforms.Num() * sizeof(FGPUBoneTransform))
+		: CreateStructuredBuffer(GraphBuilder, TEXT("BoneDeltaDummyBoneTransforms"), sizeof(FGPUBoneTransform), 1, &DummyBone, sizeof(FGPUBoneTransform));
+	PassParameters->BoneTransforms = GraphBuilder.CreateSRV(BoneTransformsBuffer);
+	PassParameters->BoneCount = CachedBoneTransforms.Num();
 
 	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateBoneDeltaAttachmentCS::ThreadGroupSize);
 

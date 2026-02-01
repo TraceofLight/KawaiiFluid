@@ -97,8 +97,11 @@ void BoundarySkinningCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float3 worldPos = mul(localPos4, transform).xyz;
 
 	// Transform normal (rotation only, no translation)
+	// Safety check: normalize(0) produces NaN, so fall back to up vector if LocalNormal is zero
 	float3x3 rotationMatrix = (float3x3)transform;
-	float3 worldNormal = normalize(mul(local.LocalNormal, rotationMatrix));
+	float3 transformedNormal = mul(local.LocalNormal, rotationMatrix);
+	float normalLen = length(transformedNormal);
+	float3 worldNormal = (normalLen > 0.001f) ? (transformedNormal / normalLen) : float3(0, 0, 1);
 
 	// Calculate velocity from position difference
 	float3 velocity = float3(0, 0, 0);

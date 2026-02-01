@@ -1,7 +1,8 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "GPU/FluidAnisotropyComputeShader.h"
-#include "GPU/GPUFluidParticle.h"  // Contains FGPUBoundaryParticle
+#include "GPU/GPUFluidParticle.h"  // Contains FGPUBoundaryParticle, FGPUCollisionSphere, FGPUCollisionCapsule, FGPUCollisionBox
+#include "GPU/GPUBoundaryAttachment.h"  // Contains FGPUBoneDeltaAttachment
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ShaderParameterUtils.h"
@@ -250,6 +251,68 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 	PassParameters->bEnableTemporalSmoothing = Params.bEnableTemporalSmoothing ? 1 : 0;
 	PassParameters->TemporalSmoothFactor = Params.TemporalSmoothFactor;
 	PassParameters->bHasPreviousFrame = Params.bHasPreviousFrame ? 1 : 0;
+
+	// Surface Normal Anisotropy for NEAR_BOUNDARY particles
+	FRDGBufferSRVRef BoneDeltaAttachmentsSRV = Params.BoneDeltaAttachmentsSRV;
+
+	// Create dummy buffer for BoneDeltaAttachments if not provided
+	if (!BoneDeltaAttachmentsSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUBoneDeltaAttachment), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyBoneDeltaAttachments_Anisotropy"));
+		FGPUBoneDeltaAttachment ZeroData;
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroData, sizeof(FGPUBoneDeltaAttachment));
+		BoneDeltaAttachmentsSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	PassParameters->InBoneDeltaAttachments = BoneDeltaAttachmentsSRV;
+	PassParameters->bEnableSurfaceNormalAnisotropy = Params.bEnableSurfaceNormalAnisotropy ? 1 : 0;
+
+	// =========================================================================
+	// Collision Primitives for direct surface normal calculation
+	// NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
+	// =========================================================================
+	FRDGBufferSRVRef CollisionSpheresSRV = Params.CollisionSpheresSRV;
+	FRDGBufferSRVRef CollisionCapsulesSRV = Params.CollisionCapsulesSRV;
+	FRDGBufferSRVRef CollisionBoxesSRV = Params.CollisionBoxesSRV;
+
+	// Create dummy buffer for CollisionSpheres if not provided
+	if (!CollisionSpheresSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUCollisionSphere), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyCollisionSpheres_Anisotropy"));
+		FGPUCollisionSphere ZeroData = {};
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroData, sizeof(FGPUCollisionSphere));
+		CollisionSpheresSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	// Create dummy buffer for CollisionCapsules if not provided
+	if (!CollisionCapsulesSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUCollisionCapsule), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyCollisionCapsules_Anisotropy"));
+		FGPUCollisionCapsule ZeroData = {};
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroData, sizeof(FGPUCollisionCapsule));
+		CollisionCapsulesSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	// Create dummy buffer for CollisionBoxes if not provided
+	if (!CollisionBoxesSRV)
+	{
+		FRDGBufferDesc DummyDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUCollisionBox), 1);
+		FRDGBufferRef DummyBuffer = GraphBuilder.CreateBuffer(DummyDesc, TEXT("DummyCollisionBoxes_Anisotropy"));
+		FGPUCollisionBox ZeroData = {};
+		GraphBuilder.QueueBufferUpload(DummyBuffer, &ZeroData, sizeof(FGPUCollisionBox));
+		CollisionBoxesSRV = GraphBuilder.CreateSRV(DummyBuffer);
+	}
+
+	PassParameters->CollisionSpheres = CollisionSpheresSRV;
+	PassParameters->CollisionCapsules = CollisionCapsulesSRV;
+	PassParameters->CollisionBoxes = CollisionBoxesSRV;
+	PassParameters->SphereCount = Params.SphereCount;
+	PassParameters->CapsuleCount = Params.CapsuleCount;
+	PassParameters->BoxCount = Params.BoxCount;
+	PassParameters->ColliderSearchRadius = Params.ColliderSearchRadius;
 
 	const int32 ThreadGroupSize = FFluidAnisotropyCS::ThreadGroupSize;
 	const int32 NumGroups = FMath::DivideAndRoundUp(Params.ParticleCount, ThreadGroupSize);

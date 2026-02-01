@@ -20,15 +20,18 @@ struct FGPUBoneDeltaAttachment
 	int BoundaryParticleIndex;  // 4 bytes - Index into WorldBoundaryParticles (-1 = not attached)
 	float Padding1;             // 4 bytes - Alignment padding (total: 8)
 
-	float3 Reserved;            // 12 bytes - Reserved for future use
+	float3 LocalNormal;         // 12 bytes - Surface normal in world space (for anisotropy)
 	float Padding2;             // 4 bytes - Alignment padding (total: 24)
 
 	float3 PreviousPosition;    // 12 bytes - Previous frame position (for detach check)
 	float Padding3;             // 4 bytes - Alignment padding (total: 40)
 
-	// Additional padding to reach 48 bytes (16-byte aligned)
-	float Padding4;             // 4 bytes
-	float Padding5;             // 4 bytes (total: 48)
+	float3 LocalOffset;         // 12 bytes - Offset from boundary position (physics drift)
+	float Padding4;             // 4 bytes - Alignment padding (total: 56)
+
+	// Additional padding to reach 64 bytes (16-byte aligned)
+	float Padding5;             // 4 bytes
+	float Padding6;             // 4 bytes (total: 64)
 };
 
 //=============================================================================
@@ -60,7 +63,8 @@ bool IsBoneDeltaAttached(FGPUBoneDeltaAttachment attachment)
 void ClearBoneDeltaAttachment(inout FGPUBoneDeltaAttachment attachment)
 {
 	attachment.BoundaryParticleIndex = BONE_DELTA_INVALID_INDEX;
-	attachment.Reserved = float3(0, 0, 0);
+	attachment.LocalNormal = float3(0, 0, 0);
+	attachment.LocalOffset = float3(0, 0, 0);
 	// Note: PreviousPosition is kept for reference
 }
 

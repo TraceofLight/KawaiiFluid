@@ -231,11 +231,12 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	bool bCollided = false;
 
 	// Check collision with all spheres
+	// NOTE: 입자 중심 기준으로 충돌 검사 (ParticleRadius 미적용)
 	for (int si = 0; si < SphereCount; ++si)
 	{
 		FGPUCollisionSphere sphere = CollisionSpheres[si];
 		float sdf = sdSphere(pos, sphere.Center, sphere.Radius);
-		float effectiveDist = sdf - ParticleRadius;
+		float effectiveDist = sdf;  // 중심 기준
 
 		if (effectiveDist < CollisionThreshold)
 		{
@@ -254,11 +255,12 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	// Check collision with all capsules
+	// NOTE: 입자 중심 기준으로 충돌 검사 (ParticleRadius 미적용)
 	for (int ci = 0; ci < CapsuleCount; ++ci)
 	{
 		FGPUCollisionCapsule capsule = CollisionCapsules[ci];
 		float sdf = sdCapsule(pos, capsule.Start, capsule.End, capsule.Radius);
-		float effectiveDist = sdf - ParticleRadius;
+		float effectiveDist = sdf;  // 중심 기준
 
 		if (effectiveDist < CollisionThreshold)
 		{
@@ -277,11 +279,12 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	// Check collision with all boxes
+	// NOTE: 입자 중심 기준으로 충돌 검사 (ParticleRadius 미적용)
 	for (int bi = 0; bi < BoxCount; ++bi)
 	{
 		FGPUCollisionBox box = CollisionBoxes[bi];
 		float sdf = sdBox(pos, box.Center, box.Extent, box.Rotation);
-		float effectiveDist = sdf - ParticleRadius;
+		float effectiveDist = sdf;  // 중심 기준
 
 		if (effectiveDist < CollisionThreshold)
 		{
@@ -310,8 +313,8 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	{
 		FGPUCollisionConvex convex = CollisionConvexes[cxi];
 
-		// Early out with bounding sphere
-		float boundDist = length(pos - convex.Center) - convex.BoundingRadius - ParticleRadius;
+		// Early out with bounding sphere (중심 기준)
+		float boundDist = length(pos - convex.Center) - convex.BoundingRadius;
 		if (boundDist > CollisionThreshold)
 		{
 			continue;
@@ -319,7 +322,7 @@ void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 		float sdf = sdConvex(pos, convex.Center, convex.BoundingRadius,
 		                     convex.PlaneStartIndex, convex.PlaneCount, ConvexPlanes);
-		float effectiveDist = sdf - ParticleRadius;
+		float effectiveDist = sdf;  // 중심 기준
 
 		if (effectiveDist < CollisionThreshold)
 		{

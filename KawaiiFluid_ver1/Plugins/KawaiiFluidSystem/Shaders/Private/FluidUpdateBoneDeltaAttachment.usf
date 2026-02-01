@@ -23,6 +23,7 @@
 #include "FluidGPUPhysics.ush"
 #include "FluidBoneDeltaAttachment.ush"
 #include "FluidMortonUtils.ush"
+#include "FluidCollisionPrimitives.ush"
 
 //=============================================================================
 // Boundary Particle Structure (must match C++ FGPUBoundaryParticle)
@@ -77,6 +78,118 @@ float CellSize;
 int bUseHybridTiledZOrder;
 
 //=============================================================================
+// Collision Primitives (for direct collider surface normal calculation)
+//=============================================================================
+StructuredBuffer<FGPUCollisionSphere> CollisionSpheres;
+StructuredBuffer<FGPUCollisionCapsule> CollisionCapsules;
+StructuredBuffer<FGPUCollisionBox> CollisionBoxes;
+StructuredBuffer<FGPUBoneTransform> BoneTransforms;
+int SphereCount;
+int CapsuleCount;
+int BoxCount;
+int BoneCount;
+
+//=============================================================================
+// Collider Surface Normal Calculation
+// Finds the closest collider and returns its surface normal at contact point
+//=============================================================================
+
+float3 GetClosestColliderNormal(float3 pos, float searchRadius)
+{
+	float closestDist = searchRadius;
+	float3 closestNormal = float3(0, 0, 1);  // Fallback: world up
+	bool foundCollider = false;
+
+	// NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
+	// Do NOT apply bone transforms here!
+
+	// Check spheres
+	for (int si = 0; si < SphereCount; ++si)
+	{
+		FGPUCollisionSphere sphere = CollisionSpheres[si];
+
+		float3 toPoint = pos - sphere.Center;
+		float dist = length(toPoint);
+		float signedDist = dist - sphere.Radius;
+
+		if (abs(signedDist) < closestDist)
+		{
+			closestDist = abs(signedDist);
+			closestNormal = (dist > 0.001f) ? (toPoint / dist) : float3(0, 0, 1);
+			foundCollider = true;
+		}
+	}
+
+	// Check capsules
+	for (int ci = 0; ci < CapsuleCount; ++ci)
+	{
+		FGPUCollisionCapsule capsule = CollisionCapsules[ci];
+
+		float3 ab = capsule.End - capsule.Start;
+		float abLenSq = dot(ab, ab);
+		float t = (abLenSq > 0.0001f) ? saturate(dot(pos - capsule.Start, ab) / abLenSq) : 0.0f;
+		float3 closestOnAxis = capsule.Start + t * ab;
+		float3 toPoint = pos - closestOnAxis;
+		float dist = length(toPoint);
+		float signedDist = dist - capsule.Radius;
+
+		if (abs(signedDist) < closestDist)
+		{
+			closestDist = abs(signedDist);
+			closestNormal = (dist > 0.001f) ? (toPoint / dist) : float3(0, 0, 1);
+			foundCollider = true;
+		}
+	}
+
+	// Check boxes
+	for (int bi = 0; bi < BoxCount; ++bi)
+	{
+		FGPUCollisionBox box = CollisionBoxes[bi];
+
+		// Transform to box local space
+		float3 localP = InverseRotateByQuat(pos - box.Center, box.Rotation);
+
+		// Clamp to box surface
+		float3 clamped = clamp(localP, -box.Extent, box.Extent);
+
+		// Find which face is closest
+		float3 localNormal = float3(0, 0, 1);
+		float3 diff = localP - clamped;
+		float diffLen = length(diff);
+
+		if (diffLen > 0.001f)
+		{
+			// Outside box: normal points from surface to point
+			localNormal = diff / diffLen;
+		}
+		else
+		{
+			// Inside box: find closest face
+			float3 distToFace = box.Extent - abs(localP);
+			if (distToFace.x <= distToFace.y && distToFace.x <= distToFace.z)
+				localNormal = float3(sign(localP.x), 0, 0);
+			else if (distToFace.y <= distToFace.z)
+				localNormal = float3(0, sign(localP.y), 0);
+			else
+				localNormal = float3(0, 0, sign(localP.z));
+		}
+
+		// Transform normal back to world space
+		float3 worldNormal = RotateByQuat(localNormal, box.Rotation);
+		float signedDist = diffLen;
+
+		if (signedDist < closestDist)
+		{
+			closestDist = signedDist;
+			closestNormal = worldNormal;
+			foundCollider = true;
+		}
+	}
+
+	return foundCollider ? normalize(closestNormal) : float3(0, 0, 1);
+}
+
+//=============================================================================
 // Z-Order Cell ID Calculation
 //=============================================================================
 
@@ -125,14 +238,14 @@ void UpdateBoneDeltaAttachmentCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Step 1: Detach Check (if already attached)
 	// Detach if:
 	//   1. Particle moved more than DetachDistance from previous position (급격한 이동)
-	//   2. LocalOffset exceeds AttachRadius * 2 (Boundary에서 너무 멀어짐)
+	//   2. LocalOffset exceeds AttachRadius * 5 (Boundary에서 너무 멀어짐)
 	//=========================================================================
 	if (attachment.BoundaryParticleIndex >= 0)
 	{
 		float moveDist = length(pos - attachment.PreviousPosition);
 
 		// LocalOffset 거리 체크 (물리에 의해 누적된 Boundary로부터의 거리)
-		float3 localOffset = attachment.Reserved;
+		float3 localOffset = attachment.LocalOffset;
 		float offsetDist = length(localOffset);
 
 		// 조건 1: 프레임 간 급격한 이동 (DetachDistance = BoundaryAttachRadius * 5)
@@ -141,20 +254,34 @@ void UpdateBoneDeltaAttachmentCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		{
 			// Detach! Distance exceeded threshold
 			attachment.BoundaryParticleIndex = BONE_DELTA_INVALID_INDEX;
-			attachment.Reserved = float3(0, 0, 0);
+			attachment.LocalNormal = float3(0, 0, 0);
+			attachment.LocalOffset = float3(0, 0, 0);
 			particle.Flags = ClearFlag(particle.Flags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY);
 		}
 	}
 
 	//=========================================================================
-	// Step 1.5: Update LocalOffset for attached particles
+	// Step 1.5: Update LocalOffset and LocalNormal for attached particles
 	// Physics simulation may have moved the particle - update LocalOffset to reflect this
 	// LocalOffset = CurrentPosition - BoundaryPosition
+	// LocalNormal = Surface normal from COLLIDER GEOMETRY (Sphere/Capsule/Box)
 	//=========================================================================
 	if (attachment.BoundaryParticleIndex >= 0 && attachment.BoundaryParticleIndex < WorldBoundaryParticleCount)
 	{
 		float3 boundaryPos = WorldBoundaryParticles[attachment.BoundaryParticleIndex].Position;
-		attachment.Reserved = pos - boundaryPos;  // LocalOffset = particle pos - boundary pos
+		attachment.LocalOffset = pos - boundaryPos;  // LocalOffset = particle pos - boundary pos
+
+		// DEBUG: Test if CapsuleCount is received by shader
+		// If CapsuleCount > 0, output (1, 0, 0) - red direction
+		// If CapsuleCount == 0, output (0, 1, 0) - green direction
+		if (CapsuleCount > 0)
+		{
+			attachment.LocalNormal = float3(1, 0, 0);  // RED = capsules exist
+		}
+		else
+		{
+			attachment.LocalNormal = float3(0, 1, 0);  // GREEN = no capsules
+		}
 	}
 
 	//=========================================================================
@@ -204,8 +331,7 @@ void UpdateBoneDeltaAttachmentCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 						FGPUBoundaryParticleWithBone boundary = SortedBoundaryParticles[bi];
 						float dist = length(pos - boundary.Position);
 
-						// Check if this is the nearest boundary with valid OriginalIndex
-						// OriginalIndex is used to reference the unsorted WorldBoundaryParticles buffer
+						// Track nearest boundary with valid OriginalIndex for attachment
 						if (dist < nearestDist && boundary.OriginalIndex >= 0 && boundary.OriginalIndex < WorldBoundaryParticleCount)
 						{
 							nearestDist = dist;
@@ -220,7 +346,15 @@ void UpdateBoneDeltaAttachmentCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		if (nearestOriginalIndex >= 0)
 		{
 			attachment.BoundaryParticleIndex = nearestOriginalIndex;
-			attachment.Reserved = float3(0, 0, 0);
+
+			// Initialize LocalOffset to zero (will be updated by physics)
+			attachment.LocalOffset = float3(0, 0, 0);
+
+			// Calculate surface normal from ACTUAL COLLIDER GEOMETRY (Sphere/Capsule/Box)
+			// This gives the precise contact normal at the particle's position
+			// Calculate surface normal from ACTUAL COLLIDER GEOMETRY (Sphere/Capsule/Box)
+			attachment.LocalNormal = GetClosestColliderNormal(pos, AttachRadius * 2.0f);
+
 			particle.Flags = SetFlag(particle.Flags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY);
 		}
 	}

@@ -3,6 +3,7 @@
 #include "/Engine/Private/Common.ush"
 #include "FluidSpatialHash.ush"
 #include "FluidMortonUtils.ush"
+#include "FluidCollisionPrimitives.ush"  // Contains FGPUParticleAttachment, FGPUCollisionSphere/Capsule/Box, quaternion utils
 
 //-----------------------------------------------------------------------------
 // Anisotropy Compute Shader
@@ -10,24 +11,16 @@
 // Based on NVIDIA FleX and Yu & Turk 2013
 //-----------------------------------------------------------------------------
 
-// GPU Particle Attachment Structure (must match FGPUParticleAttachment in C++)
-struct FGPUParticleAttachment
-{
-	int PrimitiveType;         // 4 bytes
-	int PrimitiveIndex;        // 4 bytes
-	int BoneIndex;             // 4 bytes
-	float AdhesionStrength;    // 4 bytes
-	float3 LocalOffset;        // 12 bytes
-	float AttachmentTime;      // 4 bytes
-	float3 RelativeVelocity;   // 12 bytes - Velocity relative to bone
-	float Padding;             // 4 bytes
-};
+// NOTE: FGPUParticleAttachment is now defined in FluidCollisionPrimitives.ush
 
-// Particle Flags (must match EGPUParticleFlags in C++)
+// Particle Flags (must match EGPUParticleFlags in C++ and FluidGPUPhysics.ush)
 #define FLAG_IS_ATTACHED (1 << 0)
 #define FLAG_IS_SURFACE (1 << 1)
-#define FLAG_IS_CORE (1 << 2)
-#define FLAG_JUST_DETACHED (1 << 3)
+#define FLAG_JUST_DETACHED (1 << 2)
+#define FLAG_NEAR_GROUND (1 << 3)
+#define FLAG_HAS_COLLIDED (1 << 4)
+#define FLAG_IS_SLEEPING (1 << 5)
+#define FLAG_NEAR_BOUNDARY (1 << 6)
 
 // Anisotropy Mode
 #define MODE_VELOCITY_BASED 0
@@ -116,6 +109,45 @@ float TemporalSmoothFactor;
 int bHasPreviousFrame;
 
 //-----------------------------------------------------------------------------
+// BoneDelta Attachment for NEAR_BOUNDARY particles (must match C++ FGPUBoneDeltaAttachment)
+// 64 bytes - matches GPUBoundaryAttachment.h and FluidBoneDeltaAttachment.ush
+//-----------------------------------------------------------------------------
+struct FGPUBoneDeltaAttachment
+{
+	int BoundaryParticleIndex;  // 4 bytes - Index into WorldBoundaryParticles (-1 = not attached)
+	float Padding1;             // 4 bytes (total: 8)
+
+	float3 LocalNormal;         // 12 bytes - Surface normal in world space (for anisotropy)
+	float Padding2;             // 4 bytes (total: 24)
+
+	float3 PreviousPosition;    // 12 bytes - Previous frame position (for detach check)
+	float Padding3;             // 4 bytes (total: 40)
+
+	float3 LocalOffset;         // 12 bytes - Offset from boundary position (physics drift)
+	float Padding4;             // 4 bytes (total: 56)
+
+	float Padding5;             // 4 bytes
+	float Padding6;             // 4 bytes (total: 64)
+};
+
+StructuredBuffer<FGPUBoneDeltaAttachment> InBoneDeltaAttachments;
+
+// Surface Normal Anisotropy enable flag
+int bEnableSurfaceNormalAnisotropy;  // 1 = use surface normal for NEAR_BOUNDARY particles
+
+//-----------------------------------------------------------------------------
+// Collision Primitives for direct surface normal calculation
+// NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
+//-----------------------------------------------------------------------------
+StructuredBuffer<FGPUCollisionSphere> CollisionSpheres;
+StructuredBuffer<FGPUCollisionCapsule> CollisionCapsules;
+StructuredBuffer<FGPUCollisionBox> CollisionBoxes;
+int SphereCount;
+int CapsuleCount;
+int BoxCount;
+float ColliderSearchRadius;
+
+//-----------------------------------------------------------------------------
 // Z-Order Cell ID Calculation (uses shader parameters)
 // Morton code functions are provided by FluidMortonUtils.ush
 //-----------------------------------------------------------------------------
@@ -186,6 +218,172 @@ void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
 		T = float3(1.0f - N.x * N.x * A, D, -N.x);
 		B = float3(D, 1.0f - N.y * N.y * A, -N.y);
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Collider Surface Normal Calculation
+// Finds the closest bone collider (Sphere/Capsule/Box) and returns surface normal
+// NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
+//-----------------------------------------------------------------------------
+
+float3 GetClosestColliderNormal(float3 pos, float searchRadius)
+{
+	float closestDist = searchRadius;
+	float3 closestNormal = float3(0, 0, 0);  // Zero = not found
+	bool foundCollider = false;
+
+	// Check spheres
+	for (int si = 0; si < SphereCount; ++si)
+	{
+		FGPUCollisionSphere sphere = CollisionSpheres[si];
+
+		float3 toPoint = pos - sphere.Center;
+		float dist = length(toPoint);
+		float signedDist = dist - sphere.Radius;
+
+		if (abs(signedDist) < closestDist)
+		{
+			closestDist = abs(signedDist);
+			closestNormal = (dist > 0.001f) ? (toPoint / dist) : float3(0, 0, 1);
+			foundCollider = true;
+		}
+	}
+
+	// Check capsules
+	for (int ci = 0; ci < CapsuleCount; ++ci)
+	{
+		FGPUCollisionCapsule capsule = CollisionCapsules[ci];
+
+		float3 ab = capsule.End - capsule.Start;
+		float abLenSq = dot(ab, ab);
+		float t = (abLenSq > 0.0001f) ? saturate(dot(pos - capsule.Start, ab) / abLenSq) : 0.0f;
+		float3 closestOnAxis = capsule.Start + t * ab;
+		float3 toPoint = pos - closestOnAxis;
+		float dist = length(toPoint);
+		float signedDist = dist - capsule.Radius;
+
+		if (abs(signedDist) < closestDist)
+		{
+			closestDist = abs(signedDist);
+			closestNormal = (dist > 0.001f) ? (toPoint / dist) : float3(0, 0, 1);
+			foundCollider = true;
+		}
+	}
+
+	// Check boxes
+	for (int bi = 0; bi < BoxCount; ++bi)
+	{
+		FGPUCollisionBox box = CollisionBoxes[bi];
+
+		// Transform to box local space
+		float3 localP = InverseRotateByQuat(pos - box.Center, box.Rotation);
+
+		// Clamp to box surface
+		float3 clamped = clamp(localP, -box.Extent, box.Extent);
+
+		// Find which face is closest
+		float3 localNormal = float3(0, 0, 1);
+		float3 diff = localP - clamped;
+		float diffLen = length(diff);
+
+		if (diffLen > 0.001f)
+		{
+			// Outside box: normal points from surface to point
+			localNormal = diff / diffLen;
+		}
+		else
+		{
+			// Inside box: find closest face
+			float3 distToFace = box.Extent - abs(localP);
+			if (distToFace.x <= distToFace.y && distToFace.x <= distToFace.z)
+				localNormal = float3(sign(localP.x), 0, 0);
+			else if (distToFace.y <= distToFace.z)
+				localNormal = float3(0, sign(localP.y), 0);
+			else
+				localNormal = float3(0, 0, sign(localP.z));
+		}
+
+		// Transform normal back to world space
+		float3 worldNormal = RotateByQuat(localNormal, box.Rotation);
+		float signedDist = diffLen;
+
+		if (signedDist < closestDist)
+		{
+			closestDist = signedDist;
+			closestNormal = worldNormal;
+			foundCollider = true;
+		}
+	}
+
+	return foundCollider ? normalize(closestNormal) : float3(0, 0, 0);
+}
+
+//-----------------------------------------------------------------------------
+// Surface Normal-Based Anisotropy for NEAR_BOUNDARY Particles
+// Creates a "pancake" shape flattened against the bone collider surface
+// Calculates surface normal directly from Collision Primitives (Sphere/Capsule/Box)
+//-----------------------------------------------------------------------------
+
+/**
+ * Calculate anisotropy for NEAR_BOUNDARY particles using bone collider surface normal
+ * Directly queries collision primitives instead of reading stored normal
+ *
+ * @param ParticleIndex - Particle index
+ * @param ParticlePos - Particle world position
+ * @param Axis1, Axis2, Axis3 - Output orthonormal basis
+ * @param Scale1, Scale2, Scale3 - Output ellipsoid scales (volume-preserving)
+ * @return true if successfully calculated, false if no collider found
+ */
+bool CalculateBoundaryAnisotropy(
+	uint ParticleIndex,
+	float3 ParticlePos,
+	out float3 Axis1, out float3 Axis2, out float3 Axis3,
+	out float Scale1, out float Scale2, out float Scale3)
+{
+	// Default: sphere (identity)
+	Axis1 = float3(1, 0, 0);
+	Axis2 = float3(0, 1, 0);
+	Axis3 = float3(0, 0, 1);
+	Scale1 = Scale2 = Scale3 = 1.0f;
+
+	// 콜라이더가 없으면 구형으로 fallback
+	if (SphereCount == 0 && CapsuleCount == 0 && BoxCount == 0)
+	{
+		return false;
+	}
+
+	// 가장 가까운 콜라이더의 surface normal 계산
+	float3 worldNormal = GetClosestColliderNormal(ParticlePos, ColliderSearchRadius);
+
+	// 노말을 못찾으면 (콜라이더가 범위 밖이면) fallback
+	if (length(worldNormal) < 0.001f)
+	{
+		return false;
+	}
+	worldNormal = normalize(worldNormal);
+
+	// Build orthonormal basis: Axis3 = surface normal (flatten direction)
+	Axis3 = worldNormal;
+	BuildOrthonormalBasis(Axis3, Axis1, Axis2);
+
+	// Pancake shape with custom aspect ratio and volume
+	// 가로:높이 = 4:1, 부피 = 3.0
+	float aspectRatio = 4.0f;   // 가로/높이 비율
+	float targetVolume = 3.0f;  // 목표 부피
+
+	// 계산: Scale1 = Scale2 = aspectRatio * Scale3
+	// Volume = aspectRatio² × Scale3³ = targetVolume
+	// Scale3 = (targetVolume / aspectRatio²)^(1/3)
+	Scale3 = pow(targetVolume / (aspectRatio * aspectRatio), 1.0f / 3.0f);
+	Scale1 = aspectRatio * Scale3;
+	Scale2 = Scale1;
+
+	// Clamp to valid range
+	Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+	Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+	Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+
+	return true;
 }
 
 //-----------------------------------------------------------------------------
@@ -1013,6 +1211,8 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	uint flags = InFlags[Idx];
 	float3 velocity = float3(InVelocities[idx3], InVelocities[idx3 + 1], InVelocities[idx3 + 2]);
 	bool bIsAttached = (flags & FLAG_IS_ATTACHED) != 0;
+	// Note: FLAG_NEAR_BOUNDARY from SoA_Flags may be stale (split before UpdateBoneDeltaAttachment)
+	// So we check BoneDeltaAttachment directly below
 
 	// Get effective velocity for anisotropy calculation
 	// For attached particles: use velocity relative to bone (excludes player movement)
@@ -1024,8 +1224,59 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		EffectiveVelocity = Attachment.RelativeVelocity;
 	}
 
-	// Select anisotropy calculation based on mode
-	if (AnisotropyMode == MODE_VELOCITY_BASED)
+	// =========================================================================
+	// Surface Normal Anisotropy for NEAR_BOUNDARY particles
+	// Creates "pancake" shape flattened against the bone collider surface
+	// Calculates surface normal directly from Collision Primitives (Capsule/Box)
+	// =========================================================================
+	bool bUsedSurfaceNormal = false;
+	if (bEnableSurfaceNormalAnisotropy)
+	{
+		// 파티클 위치 읽기
+		float3 particlePos = float3(InPositions[idx3], InPositions[idx3 + 1], InPositions[idx3 + 2]);
+
+		// NEAR_BOUNDARY 플래그 체크
+		bool bIsNearBoundary = (flags & FLAG_NEAR_BOUNDARY) != 0;
+
+		// NEAR_BOUNDARY 입자만 콜라이더 노말 계산 (모든 입자에 적용하면 비용이 큼)
+		if (bIsNearBoundary)
+		{
+			bUsedSurfaceNormal = CalculateBoundaryAnisotropy(Idx, particlePos, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3);
+		}
+	}
+
+	// Select anisotropy calculation based on mode (skip if surface normal was used)
+	if (bUsedSurfaceNormal)
+	{
+		// Surface normal anisotropy was used, now add subtle velocity-based stretch
+		// 속도 방향으로 살짝 늘어나게 (너무 강하지 않게)
+		float Speed = length(EffectiveVelocity);
+
+		if (Speed > 0.1f)  // 최소 속도 threshold
+		{
+			float3 VelDir = EffectiveVelocity / Speed;
+
+			// 약한 속도 stretch (0.2 = 기본의 20% 강도)
+			float BoundaryVelStretchFactor = 0.002f;  // 매우 약하게
+			float VelStretch = 1.0f + Speed * BoundaryVelStretchFactor;
+			VelStretch = clamp(VelStretch, 1.0f, 1.3f);  // 최대 30%까지만 늘어남
+
+			// 속도 방향으로 각 축에 projection해서 stretch 적용
+			float Proj1 = abs(dot(VelDir, Axis1));
+			float Proj2 = abs(dot(VelDir, Axis2));
+			float Proj3 = abs(dot(VelDir, Axis3));
+
+			Scale1 *= lerp(1.0f, VelStretch, Proj1);
+			Scale2 *= lerp(1.0f, VelStretch, Proj2);
+			Scale3 *= lerp(1.0f, VelStretch, Proj3);
+
+			// Clamp 적용
+			Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+			Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+			Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+		}
+	}
+	else if (AnisotropyMode == MODE_VELOCITY_BASED)
 	{
 		// Pure velocity-based: axes from velocity direction
 		CalculateVelocityBasedWithVelocity(EffectiveVelocity, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3);
