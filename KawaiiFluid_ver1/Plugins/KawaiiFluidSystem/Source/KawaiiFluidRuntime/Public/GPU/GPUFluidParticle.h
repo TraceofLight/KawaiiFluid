@@ -55,12 +55,11 @@ namespace EGPUParticleFlags
 	constexpr uint32 None = 0;
 	constexpr uint32 IsAttached = 1 << 0;        // Particle is attached to a surface (skips physics)
 	constexpr uint32 IsSurface = 1 << 1;         // Particle is on the fluid surface
-	constexpr uint32 IsCore = 1 << 2;            // Particle is a core particle (slime)
-	constexpr uint32 JustDetached = 1 << 3;      // Particle just detached this frame
-	constexpr uint32 NearGround = 1 << 4;        // Particle is near the ground
-	constexpr uint32 HasCollided = 1 << 5;       // Particle collided this frame
-	constexpr uint32 IsSleeping = 1 << 6;        // Particle is in sleep state (low velocity)
-	constexpr uint32 NearBoundary = 1 << 7;      // Particle is near boundary (for visualization, doesn't skip physics)
+	constexpr uint32 JustDetached = 1 << 2;      // Particle just detached this frame
+	constexpr uint32 NearGround = 1 << 3;        // Particle is near the ground
+	constexpr uint32 HasCollided = 1 << 4;       // Particle collided this frame
+	constexpr uint32 IsSleeping = 1 << 5;        // Particle is in sleep state (low velocity)
+	constexpr uint32 NearBoundary = 1 << 6;      // Particle is near boundary (for visualization, doesn't skip physics)
 }
 
 /**

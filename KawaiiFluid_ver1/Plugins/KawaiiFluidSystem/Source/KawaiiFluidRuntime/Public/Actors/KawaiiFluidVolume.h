@@ -78,14 +78,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Preset")
 	UKawaiiFluidPresetDataAsset* GetPreset() const;
 
-	/** Get fluid type (delegates to VolumeComponent) */
-	UFUNCTION(BlueprintPure, Category = "Collision")
-	EFluidType GetFluidType() const;
-
-	/** Set fluid type (delegates to VolumeComponent) */
-	UFUNCTION(BlueprintCallable, Category = "Collision")
-	void SetFluidType(EFluidType InFluidType);
-
 	/** Get particle spacing from preset (delegates to VolumeComponent) */
 	UFUNCTION(BlueprintPure, Category = "Preset")
 	float GetParticleSpacing() const;

@@ -490,20 +490,6 @@ void UKawaiiFluidVolumeComponent::DrawBoundsVisualization()
 // Preset & Simulation
 //========================================
 
-void UKawaiiFluidVolumeComponent::SetFluidType(EFluidType InFluidType)
-{
-	FluidType = InFluidType;
-
-	// Forward to all registered modules
-	for (TWeakObjectPtr<UKawaiiFluidSimulationModule>& WeakModule : RegisteredModules)
-	{
-		if (UKawaiiFluidSimulationModule* Module = WeakModule.Get())
-		{
-			Module->SetFluidType(InFluidType);
-		}
-	}
-}
-
 float UKawaiiFluidVolumeComponent::GetParticleSpacing() const
 {
 	if (Preset)

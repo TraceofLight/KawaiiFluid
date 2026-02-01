@@ -12,8 +12,6 @@ class UFluidCollider;
 class UMeshFluidCollider;
 class UKawaiiFluidPresetDataAsset;
 
-// EFluidType is now defined in KawaiiFluidSimulationTypes.h
-
 //========================================
 // GPU Collision Feedback Delegates (Particle -> Player Interaction)
 //========================================

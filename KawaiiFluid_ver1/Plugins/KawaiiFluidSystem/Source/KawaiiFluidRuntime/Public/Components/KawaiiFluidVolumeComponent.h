@@ -137,15 +137,6 @@ public:
 	// Simulation Settings
 	//========================================
 
-	/**
-	 * Fluid type (Water, Lava, Slime, etc.)
-	 * Used to identify which fluid in collision events.
-	 * FluidInteractionComponent's OnBoneParticleCollision receives this type.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision",
-	          meta = (ToolTip = "Fluid type for collision event identification."))
-	EFluidType FluidType = EFluidType::None;
-
 	/** Use world collision (floor, walls, static meshes) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Collision")
 	bool bUseWorldCollision = true;
@@ -431,14 +422,6 @@ public:
 	/** Get the preset */
 	UFUNCTION(BlueprintPure, Category = "Fluid Volume")
 	UKawaiiFluidPresetDataAsset* GetPreset() const { return Preset; }
-
-	/** Get fluid type */
-	UFUNCTION(BlueprintPure, Category = "Fluid Volume|Collision")
-	EFluidType GetFluidType() const { return FluidType; }
-
-	/** Set fluid type */
-	UFUNCTION(BlueprintCallable, Category = "Fluid Volume|Collision")
-	void SetFluidType(EFluidType InFluidType);
 
 	/** Get particle spacing from preset */
 	UFUNCTION(BlueprintPure, Category = "Fluid Volume")

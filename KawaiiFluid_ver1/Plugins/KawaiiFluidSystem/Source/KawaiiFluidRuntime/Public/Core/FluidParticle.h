@@ -79,22 +79,12 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 	UPROPERTY(BlueprintReadOnly, Category = "Particle")
 	int32 SourceID;
 
-	// Initial offset for Shape Matching (relative position from center)
-	FVector RestOffset;
-
-	// Whether this is a surface particle
-	UPROPERTY(BlueprintReadOnly, Category = "Particle|Slime")
+	// Whether this is a surface particle (used for surface-only rendering optimization)
+	UPROPERTY(BlueprintReadOnly, Category = "Particle")
 	bool bIsSurfaceParticle;
 
 	// Surface normal (for surface tension calculation)
 	FVector SurfaceNormal;
-
-	// Whether this is a core particle (acts as anchor for shape retention)
-	UPROPERTY(BlueprintReadOnly, Category = "Particle|Slime")
-	bool bIsCoreParticle;
-
-	// Distance ratio from core (0 = center, 1 = surface)
-	float DistanceFromCoreRatio;
 
 	// Trail spawned (prevents duplicate spawning)
 	bool bTrailSpawned;
@@ -115,11 +105,8 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 		, bNearBoundary(false)
 		, ParticleID(-1)
 		, SourceID(-1)
-		, RestOffset(FVector::ZeroVector)
 		, bIsSurfaceParticle(false)
 		, SurfaceNormal(FVector::ZeroVector)
-		, bIsCoreParticle(false)
-		, DistanceFromCoreRatio(1.0f)
 		, bTrailSpawned(false)
 	{
 	}
@@ -140,11 +127,8 @@ struct KAWAIIFLUIDRUNTIME_API FFluidParticle
 		, bNearBoundary(false)
 		, ParticleID(InID)
 		, SourceID(-1)
-		, RestOffset(FVector::ZeroVector)
 		, bIsSurfaceParticle(false)
 		, SurfaceNormal(FVector::ZeroVector)
-		, bIsCoreParticle(false)
-		, DistanceFromCoreRatio(1.0f)
 		, bTrailSpawned(false)
 	{
 	}

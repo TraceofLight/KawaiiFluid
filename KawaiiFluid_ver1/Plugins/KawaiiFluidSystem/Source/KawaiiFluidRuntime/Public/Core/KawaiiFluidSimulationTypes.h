@@ -156,25 +156,6 @@ namespace GridResolutionPresetHelper
 }
 
 /**
- * Fluid type for identifying different fluids in collision events
- */
-UENUM(BlueprintType)
-enum class EFluidType : uint8
-{
-	None		UMETA(DisplayName = "None"),
-	Water		UMETA(DisplayName = "Water"),
-	Lava		UMETA(DisplayName = "Lava"),
-	Slime		UMETA(DisplayName = "Slime"),
-	Oil			UMETA(DisplayName = "Oil"),
-	Acid		UMETA(DisplayName = "Acid"),
-	Blood		UMETA(DisplayName = "Blood"),
-	Honey		UMETA(DisplayName = "Honey"),
-	Custom1		UMETA(DisplayName = "Custom1"),
-	Custom2		UMETA(DisplayName = "Custom2"),
-	Custom3		UMETA(DisplayName = "Custom3"),
-};
-
-/**
  * Brush mode for adding or removing particles
  */
 UENUM(BlueprintType)
@@ -402,23 +383,7 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 	int32 SourceID = -1;
 
 	//========================================
-	// Shape Matching (Slime)
-	//========================================
-
-	/** Enable shape matching constraint */
-	bool bEnableShapeMatching = false;
-
-	/** Shape matching stiffness (0 = no restoration, 1 = rigid) */
-	float ShapeMatchingStiffness = 0.01f;
-
-	/** Core particle stiffness multiplier */
-	float ShapeMatchingCoreMultiplier = 1.0f;
-
-	/** Core density constraint reduction (0 = full density effect, 1 = no density effect for core) */
-	float CoreDensityConstraintReduction = 0.0f;
-
-	//========================================
-	// Surface Detection (Slime)
+	// Surface Detection (for surface-only rendering optimization)
 	//========================================
 
 	/** Neighbor count threshold for surface detection (fewer neighbors = surface particle) */

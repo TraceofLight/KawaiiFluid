@@ -2320,7 +2320,6 @@ FGPUFluidParticle FGPUFluidSimulator::ConvertToGPU(const FFluidParticle& CPUPart
 	uint32 Flags = 0;
 	if (CPUParticle.bIsAttached) Flags |= EGPUParticleFlags::IsAttached;
 	if (CPUParticle.bIsSurfaceParticle) Flags |= EGPUParticleFlags::IsSurface;
-	if (CPUParticle.bIsCoreParticle) Flags |= EGPUParticleFlags::IsCore;
 	if (CPUParticle.bJustDetached) Flags |= EGPUParticleFlags::JustDetached;
 	if (CPUParticle.bNearGround) Flags |= EGPUParticleFlags::NearGround;
 	GPUParticle.Flags = Flags;
@@ -2928,7 +2927,6 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FFluidParticle>& OutParti
 
 		OutParticle.bIsAttached = (GPUParticle.Flags & EGPUParticleFlags::IsAttached) != 0;
 		OutParticle.bIsSurfaceParticle = (GPUParticle.Flags & EGPUParticleFlags::IsSurface) != 0;
-		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
 		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
 		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
 		OutParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;
@@ -3051,7 +3049,6 @@ bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FFluidPar
 
 		OutParticle.bIsAttached = (GPUParticle.Flags & EGPUParticleFlags::IsAttached) != 0;
 		OutParticle.bIsSurfaceParticle = (GPUParticle.Flags & EGPUParticleFlags::IsSurface) != 0;
-		OutParticle.bIsCoreParticle = (GPUParticle.Flags & EGPUParticleFlags::IsCore) != 0;
 		OutParticle.bJustDetached = (GPUParticle.Flags & EGPUParticleFlags::JustDetached) != 0;
 		OutParticle.bNearGround = (GPUParticle.Flags & EGPUParticleFlags::NearGround) != 0;
 		OutParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;

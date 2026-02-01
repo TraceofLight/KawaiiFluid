@@ -696,25 +696,6 @@ UKawaiiFluidPresetDataAsset* AKawaiiFluidVolume::GetPreset() const
 	return VolumeComponent ? VolumeComponent->GetPreset() : nullptr;
 }
 
-EFluidType AKawaiiFluidVolume::GetFluidType() const
-{
-	return VolumeComponent ? VolumeComponent->GetFluidType() : EFluidType::None;
-}
-
-void AKawaiiFluidVolume::SetFluidType(EFluidType InFluidType)
-{
-	if (VolumeComponent)
-	{
-		VolumeComponent->SetFluidType(InFluidType);
-	}
-
-	// Also forward to SimulationModule if initialized
-	if (SimulationModule)
-	{
-		SimulationModule->SetFluidType(InFluidType);
-	}
-}
-
 float AKawaiiFluidVolume::GetParticleSpacing() const
 {
 	return VolumeComponent ? VolumeComponent->GetParticleSpacing() : 10.0f;
@@ -782,7 +763,6 @@ void AKawaiiFluidVolume::InitializeSimulation()
 	SimulationModule->Initialize(Preset);
 
 	// Forward VolumeComponent properties to SimulationModule
-	SimulationModule->FluidType = VolumeComponent->FluidType;
 	SimulationModule->bUseWorldCollision = VolumeComponent->bUseWorldCollision;
 	SimulationModule->bEnableCollisionEvents = VolumeComponent->bEnableCollisionEvents;
 	SimulationModule->MinVelocityForEvent = VolumeComponent->MinVelocityForEvent;

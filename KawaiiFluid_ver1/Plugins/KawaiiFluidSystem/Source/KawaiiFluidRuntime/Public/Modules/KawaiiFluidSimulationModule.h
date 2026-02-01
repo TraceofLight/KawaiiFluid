@@ -92,28 +92,6 @@ public:
 	virtual FKawaiiFluidSimulationParams BuildSimulationParams() const;
 
 	//========================================
-	// Fluid Identification (for collision filtering)
-	//========================================
-
-	/**
-	 * Fluid type (Water, Lava, Slime, etc.)
-	 * Used to identify which fluid in collision events
-	 * This type is passed in FluidInteractionComponent's OnBoneParticleCollision
-	 * Can branch in BP using Switch on EFluidType
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid|Identification",
-	          meta = (ToolTip = "Fluid type.\nUsed to distinguish which fluid collided in collision events.\nCan branch in BP using Switch on EFluidType."))
-	EFluidType FluidType = EFluidType::None;
-
-	/** Get fluid type */
-	UFUNCTION(BlueprintPure, Category = "Fluid|Identification")
-	EFluidType GetFluidType() const { return FluidType; }
-
-	/** Set fluid type */
-	UFUNCTION(BlueprintCallable, Category = "Fluid|Identification")
-	void SetFluidType(EFluidType InFluidType) { FluidType = InFluidType; }
-
-	//========================================
 	// Simulation Volume (Unified Volume System)
 	//========================================
 
