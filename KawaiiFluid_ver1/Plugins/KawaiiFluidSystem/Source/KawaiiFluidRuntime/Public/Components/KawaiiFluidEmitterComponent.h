@@ -144,10 +144,10 @@ public:
 		meta = (ClampMin = "0"))
 	int32 MaxParticleCount = 100000;
 
-	/** Recycle oldest particles when MaxParticleCount is exceeded (instead of stopping spawn)
+	/** Enable continuous spawning by recycling oldest particles when MaxParticleCount is exceeded
 	 *  Only applicable to Stream mode - Fill mode spawns once and doesn't need recycling */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Emitter|Limits",
-		meta = (EditCondition = "MaxParticleCount > 0 && EmitterMode == EKawaiiFluidEmitterMode::Stream", EditConditionHides))
+		meta = (DisplayName = "Continuous Spawn", EditCondition = "MaxParticleCount > 0 && EmitterMode == EKawaiiFluidEmitterMode::Stream", EditConditionHides))
 	bool bRecycleOldestParticles = true;
 
 	/** Whether to automatically start spawning on BeginPlay */
