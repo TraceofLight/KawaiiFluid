@@ -24,7 +24,6 @@ SamplerState BilinearMirrorSampler;
 Texture2D<float4> FoamTexture;
 Texture2D<float4> LayerTexture;
 Texture2D<float4> LayerNormalMap;
-Texture2D<float2> FlowMapTexture;
 Texture2D<float2> VelocityMapTexture;     // Screen-space velocity from Depth pass (RDG)
 Texture2D<float2> AccumulatedFlowTexture; // Accumulated flow offset in world units (velocity-based, RDG)
 Texture2D<float> OcclusionMaskTexture;    // Occlusion mask (R8: 1.0=visible, 0.0=occluded by scene geometry)
@@ -65,6 +64,14 @@ int bThicknessFoam;
 float FoamThicknessThreshold;
 float FoamThicknessStrength;
 
+// Foam - Jitter (UV animation)
+int bFoamJitterEnabled;
+float FoamJitterStrength;
+float FoamJitterSpeed;
+
+// Foam - Flow Animation
+int bFoamUseFlowAnimation;
+
 // Emissive (dynamic glow)
 int bEmissiveEnabled;
 float4 EmissiveColor;
@@ -91,6 +98,14 @@ float LayerFlowInfluence;
 float2 LayerScrollSpeed;
 int bLayerNormalMapEnabled;
 float LayerNormalStrength;
+
+// Layer - Jitter (UV animation)
+int bLayerJitterEnabled;
+float LayerJitterStrength;
+float LayerJitterSpeed;
+
+// Layer - Flow Animation
+int bLayerUseFlowAnimation;
 
 // Lighting parameters for texture shading
 int bApplyLightingToTextures;
@@ -155,24 +170,6 @@ float3 ReconstructWorldPosition(float2 UV, float LinearDepth)
 	return WorldPos.xyz;
 }
 
-// Sample flow direction (from velocity map or static flow map)
-float2 SampleFlowDirection(float2 UV)
-{
-	if (bFlowEnabled > 0)
-	{
-		// Try velocity map first (runtime generated)
-		float2 Velocity = VelocityMapTexture.SampleLevel(BilinearWrapSampler, UV, 0).xy;
-		if (length(Velocity) > 0.001)
-		{
-			return normalize(Velocity);
-		}
-
-		// Fallback to static flow map
-		return FlowMapTexture.SampleLevel(BilinearWrapSampler, UV, 0).xy * 2.0 - 1.0;
-	}
-	return float2(0, 0);
-}
-
 // Get accumulated flow offset (velocity-based, accumulated over time)
 // Returns the flow offset in world units (cm)
 // Still water: returns near-zero (no movement)
@@ -188,33 +185,6 @@ float2 GetAccumulatedFlowOffset(float2 SSFRTexcoord)
 		return AccumulatedFlowTexture.SampleLevel(BilinearClampSampler, SSFRTexcoord, 0).xy;
 	}
 	return float2(0, 0);
-}
-
-// Flow-based UV animation (two-phase blend to avoid seams)
-// When bUseAccumulatedFlow is true, uses accumulated flow instead of Time
-float2 FlowUV(float2 BaseUV, float2 FlowDir, float Phase, float2 AccumulatedOffset)
-{
-	if (bUseAccumulatedFlow > 0)
-	{
-		// Velocity-based flow: use accumulated offset directly
-		// The accumulated offset already encodes the flow amount over time
-		// For dual-phase, use different phases of the accumulated offset
-		float Progress = frac(length(AccumulatedOffset) * FlowSpeed + Phase);
-		return BaseUV + AccumulatedOffset * FlowDistortionStrength + FlowDir * Progress * FlowDistortionStrength * 0.1;
-	}
-	else
-	{
-		// Time-based flow (original behavior)
-		float Progress = frac(Time * FlowSpeed + Phase);
-		return BaseUV + FlowDir * Progress * FlowDistortionStrength;
-	}
-}
-
-// Legacy FlowUV for compatibility (used where accumulated flow is not needed)
-float2 FlowUV_Legacy(float2 BaseUV, float2 FlowDir, float Phase)
-{
-	float Progress = frac(Time * FlowSpeed + Phase);
-	return BaseUV + FlowDir * Progress * FlowDistortionStrength;
 }
 
 // Sample foam texture with addressing mode support
@@ -365,8 +335,9 @@ float3 ComputeTextureLighting(float3 Albedo, float3 WorldNormal, float3 WorldPos
 	return Diffuse + Ambient + Specular;
 }
 
-// Compute foam intensity based on various factors
-float ComputeFoamIntensity(float2 UV, float3 WorldNormal, float Depth, float2 DepthGradient, float VelocityMag, float Thickness)
+// Compute foam mask based on various factors
+// Returns normalized mask (0~1) - FoamIntensity is applied separately to final color
+float ComputeFoamMask(float2 UV, float3 WorldNormal, float Depth, float2 DepthGradient, float VelocityMag, float Thickness)
 {
 	float Foam = 0.0;
 
@@ -402,7 +373,8 @@ float ComputeFoamIntensity(float2 UV, float3 WorldNormal, float Depth, float2 De
 		Foam += ThicknessFoam * FoamThicknessStrength;
 	}
 
-	return saturate(Foam * FoamIntensity);
+	// Return pure mask (0~1), FoamIntensity controls brightness in final color calculation
+	return saturate(Foam);
 }
 
 // Compute emissive intensity (for lava, magic, etc.)
@@ -526,7 +498,6 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Sample velocity for flow and foam (use SSFR coordinates for screen-space textures)
 	float2 Velocity = VelocityMapTexture.SampleLevel(BilinearClampSampler, SSFRTexcoord, 0).xy;
 	float VelocityMag = length(Velocity);
-	float2 FlowDir = SampleFlowDirection(UV);
 	float2 AccumulatedFlow = GetAccumulatedFlowOffset(SSFRTexcoord);
 
 	// Compute depth gradient for wave crest detection (using SSFR coordinates)
@@ -549,13 +520,15 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	//-------------------------------------------------------------------------
 	if (bFoamEnabled > 0)
 	{
-		float FoamAmount = ComputeFoamIntensity(UV, WorldNormal, Depth, DepthGradient, VelocityMag, Thickness);
+		float FoamMaskValue = ComputeFoamMask(UV, WorldNormal, Depth, DepthGradient, VelocityMag, Thickness);
 
-		if (FoamAmount > FOAM_MIN_AMOUNT)
+		if (FoamMaskValue > FOAM_MIN_AMOUNT)
 		{
 			// Flow offset for foam (AccumulatedFlow is in world-space units cm)
+			// Only apply if both global flow and foam flow are enabled
 			float2 FoamFlowOffset = float2(0, 0);
-			if (bUseAccumulatedFlow > 0)
+			bool bApplyFoamFlow = (bFoamUseFlowAnimation > 0) && (bUseAccumulatedFlow > 0);
+			if (bApplyFoamFlow)
 			{
 				// Scale to UV space using FoamTilingScale
 				// AccumulatedFlow (cm) * TilingScale (1/cm-per-tile) = UV offset
@@ -571,13 +544,25 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			}
 
 			// Phase for dual-blend (use length of accumulated flow for phase cycling)
-			float Phase = (bUseAccumulatedFlow > 0) ? frac(length(AccumulatedFlow) * FoamTilingScale * FlowSpeed) : frac(Time * FlowSpeed);
+			float Phase = bApplyFoamFlow ? frac(length(AccumulatedFlow) * FoamTilingScale * FlowSpeed) : frac(Time * FlowSpeed);
 			float BlendPhase = abs(Phase * 2.0 - 1.0);
+
+			// Jitter offset for organic UV animation
+			float2 JitterOffset = float2(0.0, 0.0);
+			if (bFoamJitterEnabled > 0)
+			{
+				// Use sine waves with different frequencies for organic movement
+				// WorldUV adds spatial variation so adjacent areas don't move in sync
+				float JitterTime = Time * FoamJitterSpeed * 2.0 * PI;
+				JitterOffset.x = sin(JitterTime + WorldUV.x * 3.7) * FoamJitterStrength;
+				JitterOffset.y = cos(JitterTime * 1.3 + WorldUV.y * 2.9) * FoamJitterStrength;
+			}
 
 			// Z-axis projection UV (XY plane)
 			// Subtract flow offset so texture moves with flow direction
-			float2 FoamUV1 = WorldUV * FoamTilingScale - FoamFlowOffset;
-			float2 FoamUV2 = WorldUV * FoamTilingScale - FoamFlowOffset * 0.5;
+			// Add jitter for animated organic movement
+			float2 FoamUV1 = WorldUV * FoamTilingScale - FoamFlowOffset + JitterOffset;
+			float2 FoamUV2 = WorldUV * FoamTilingScale - FoamFlowOffset * 0.5 + JitterOffset * 0.7;
 
 			// Sample foam (single projection) with addressing mode support
 			float4 FoamSample1 = SampleFoamTexture(FoamUV1);
@@ -587,8 +572,9 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			float4 FoamSample = lerp(FoamSample1, FoamSample2, BlendPhase);
 
 			// Use texture RGB as color, grayscale (R) as mask
-			float3 FoamRGB = FoamSample.rgb * FoamColor.rgb;
-			float FoamMask = FoamSample.r * FoamAmount;
+			// FoamIntensity controls overall brightness (HDR capable)
+			float3 FoamRGB = FoamSample.rgb * FoamColor.rgb * FoamIntensity;
+			float FoamMask = FoamSample.r * FoamMaskValue;
 
 			DecorationColor += FoamRGB * FoamMask;
 			DecorationAlpha = max(DecorationAlpha, FoamMask * FoamColor.a);
@@ -619,40 +605,48 @@ void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	//-------------------------------------------------------------------------
 	// Layer (custom texture overlay) - Z-axis projection
-	// With normal map, flow animation, and lighting support
+	// With normal map, flow animation, jitter animation, and lighting support
 	//-------------------------------------------------------------------------
 	if (bLayerEnabled > 0)
 	{
 		// Flow offset (in UV space - scaled by TilingScale to match WorldUV scale)
 		// SUBTRACT flow offset so texture appears to move WITH the fluid direction
+		// Only apply if both global flow and layer flow are enabled
 		float2 FlowOffset = float2(0, 0);
-		if (LayerFlowInfluence > 0.0)
+		bool bApplyLayerFlow = (bLayerUseFlowAnimation > 0) && (bUseAccumulatedFlow > 0) && (LayerFlowInfluence > 0.0);
+		if (bApplyLayerFlow)
 		{
-			if (bUseAccumulatedFlow > 0)
-			{
-				// AccumulatedFlow is in world-space units (cm), scale to UV space
-				// FlowOffset = AccumulatedFlow (cm) * TilingScale (1/cm-per-tile) * Influence
-				FlowOffset = AccumulatedFlow * LayerTilingScale * LayerFlowInfluence;
+			// AccumulatedFlow is in world-space units (cm), scale to UV space
+			// FlowOffset = AccumulatedFlow (cm) * TilingScale (1/cm-per-tile) * Influence
+			FlowOffset = AccumulatedFlow * LayerTilingScale * LayerFlowInfluence;
 
-				// Debug fallback: if AccumulatedFlow is near zero but velocity is non-zero,
-				// use time-based flow as fallback (helps diagnose accumulation issues)
-				float AccumMag = length(AccumulatedFlow);
-				if (AccumMag < ACCUMULATED_FLOW_MIN_THRESHOLD && VelocityMag > VELOCITY_FALLBACK_THRESHOLD)
-				{
-					// Fallback to velocity-based instant flow (diagnostic mode)
-					FlowOffset = Velocity * LayerTilingScale * LayerFlowInfluence * 0.01;
-				}
-			}
-			else
+			// Debug fallback: if AccumulatedFlow is near zero but velocity is non-zero,
+			// use time-based flow as fallback (helps diagnose accumulation issues)
+			float AccumMag = length(AccumulatedFlow);
+			if (AccumMag < ACCUMULATED_FLOW_MIN_THRESHOLD && VelocityMag > VELOCITY_FALLBACK_THRESHOLD)
 			{
-				FlowOffset = FlowDir * Time * FlowSpeed * LayerFlowInfluence;
+				// Fallback to velocity-based instant flow (diagnostic mode)
+				FlowOffset = Velocity * LayerTilingScale * LayerFlowInfluence * 0.01;
 			}
 		}
+
 		float2 ScrollOffset = LayerScrollSpeed * Time;
+
+		// Jitter offset for organic UV animation
+		float2 LayerJitterOffset = float2(0.0, 0.0);
+		if (bLayerJitterEnabled > 0)
+		{
+			// Use sine waves with different frequencies for organic movement
+			// WorldUV adds spatial variation so adjacent areas don't move in sync
+			float JitterTime = Time * LayerJitterSpeed * 2.0 * PI;
+			LayerJitterOffset.x = sin(JitterTime + WorldUV.x * 4.1) * LayerJitterStrength;
+			LayerJitterOffset.y = cos(JitterTime * 1.2 + WorldUV.y * 3.3) * LayerJitterStrength;
+		}
 
 		// Z-axis projection UV (XY plane)
 		// Subtract FlowOffset so texture moves in the direction of flow
-		float2 LayerUV = WorldUV * LayerTilingScale - FlowOffset + ScrollOffset;
+		// Add jitter for animated organic movement
+		float2 LayerUV = WorldUV * LayerTilingScale - FlowOffset + ScrollOffset + LayerJitterOffset;
 
 		// Sample texture (single projection) with addressing mode support
 		float4 LayerSample = SampleLayerTexture(LayerUV);

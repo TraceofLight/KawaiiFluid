@@ -129,11 +129,38 @@ static bool GenerateIntermediateTextures(
 		SmoothedThicknessTexture = ThicknessTexture;  // Fallback to unsmoothed
 	}
 
+	// 6. Velocity Smoothing Pass (Separable Gaussian Blur)
+	// Softens foam boundaries between particles by smoothing the velocity texture.
+	// Without this, foam edges appear sharp at particle boundaries ("rice grain" pattern).
+	FRDGTextureRef FinalVelocityTexture = VelocityTexture;
+	const bool bShouldSmoothVelocity = RenderParams.SurfaceDecoration.bEnabled &&
+		RenderParams.SurfaceDecoration.Foam.bEnabled &&
+		RenderParams.SurfaceDecoration.Foam.bVelocitySmoothing &&
+		VelocityTexture != nullptr;
+
+	if (bShouldSmoothVelocity)
+	{
+		FRDGTextureRef SmoothedVelocityTexture = nullptr;
+		RenderFluidVelocitySmoothingPass(
+			GraphBuilder, View, VelocityTexture, SmoothedVelocityTexture,
+			RenderParams.SurfaceDecoration.Foam.VelocitySmoothingRadius,
+			RenderParams.SurfaceDecoration.Foam.VelocitySmoothingIterations);
+
+		if (SmoothedVelocityTexture)
+		{
+			FinalVelocityTexture = SmoothedVelocityTexture;
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Velocity smoothing pass failed, using raw velocity"));
+		}
+	}
+
 	// Build output
 	OutIntermediateTextures.SmoothedDepthTexture = SmoothedDepthTexture;
 	OutIntermediateTextures.NormalTexture = NormalTexture;
 	OutIntermediateTextures.ThicknessTexture = SmoothedThicknessTexture;
-	OutIntermediateTextures.VelocityTexture = VelocityTexture;
+	OutIntermediateTextures.VelocityTexture = FinalVelocityTexture;
 	OutIntermediateTextures.OcclusionMaskTexture = OcclusionMaskTexture;
 
 	return true;
@@ -164,10 +191,9 @@ void FKawaiiMetaballScreenSpacePipeline::PrepareRender(
 	// RDG textures are only valid within the same frame's RDG graph
 	CachedIntermediateTextures.AccumulatedFlowTexture = nullptr;
 
-	// Flow Accumulation Pass (if enabled and using particle velocity)
+	// Flow Accumulation Pass (if enabled)
 	const bool bShouldAccumulateFlow = RenderParams.SurfaceDecoration.bEnabled &&
 		RenderParams.SurfaceDecoration.FlowMap.bEnabled &&
-		RenderParams.SurfaceDecoration.FlowMap.bUseParticleVelocity &&
 		CachedIntermediateTextures.VelocityTexture != nullptr;
 
 	// Clear history when flow accumulation is disabled to prevent stale data and memory leak

@@ -223,6 +223,73 @@ IMPLEMENT_GLOBAL_SHADER(FFluidDepthUpsampleCS,
                         SF_Compute);
 
 //=============================================================================
+// Velocity Gaussian Blur (Separable - Horizontal Pass)
+// Smooths velocity texture to soften foam boundaries between particles.
+//=============================================================================
+
+class FFluidVelocityGaussianBlurHorizontalCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FFluidVelocityGaussianBlurHorizontalCS);
+	SHADER_USE_PARAMETER_STRUCT(FFluidVelocityGaussianBlurHorizontalCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters,)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float2>, VelocityInputTexture)
+		SHADER_PARAMETER(FVector2f, TextureSize)
+		SHADER_PARAMETER(float, BlurRadius)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float2>, VelocityOutputTexture)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters,
+	                                         FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZE"), 8);
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FFluidVelocityGaussianBlurHorizontalCS,
+                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "VelocityGaussianBlurHorizontalCS",
+                        SF_Compute);
+
+//=============================================================================
+// Velocity Gaussian Blur (Separable - Vertical Pass)
+//=============================================================================
+
+class FFluidVelocityGaussianBlurVerticalCS : public FGlobalShader
+{
+	DECLARE_GLOBAL_SHADER(FFluidVelocityGaussianBlurVerticalCS);
+	SHADER_USE_PARAMETER_STRUCT(FFluidVelocityGaussianBlurVerticalCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters,)
+		SHADER_PARAMETER_RDG_TEXTURE(Texture2D<float2>, VelocityInputTexture)
+		SHADER_PARAMETER(FVector2f, TextureSize)
+		SHADER_PARAMETER(float, BlurRadius)
+		SHADER_PARAMETER_RDG_TEXTURE_UAV(RWTexture2D<float2>, VelocityOutputTexture)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+
+	static void ModifyCompilationEnvironment(const FGlobalShaderPermutationParameters& Parameters,
+	                                         FShaderCompilerEnvironment& OutEnvironment)
+	{
+		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
+		OutEnvironment.SetDefine(TEXT("THREADGROUP_SIZE"), 8);
+	}
+};
+
+IMPLEMENT_GLOBAL_SHADER(FFluidVelocityGaussianBlurVerticalCS,
+                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "VelocityGaussianBlurVerticalCS",
+                        SF_Compute);
+
+//=============================================================================
 // Narrow-Range Filter Smoothing Pass (Truong & Yuksel 2018)
 // Uses Half-Resolution filtering for ~4x performance improvement
 //
@@ -435,4 +502,95 @@ void RenderFluidThicknessSmoothingPass(
 	}
 
 	OutSmoothedThicknessTexture = CurrentInput;
+}
+
+//=============================================================================
+// Velocity Smoothing Pass (Separable Gaussian Blur)
+//
+// Smooths the velocity texture to soften foam boundaries between particles.
+// Without smoothing, foam edges appear sharp because each particle sprite
+// has a constant velocity, creating abrupt transitions at particle borders.
+//
+// Uses Horizontal + Vertical passes for O(2n) instead of O(n²).
+//=============================================================================
+
+/**
+ * @brief Renders the velocity smoothing pass using separable Gaussian blur.
+ * @param GraphBuilder RDG builder
+ * @param View Scene view
+ * @param InputVelocityTexture Input velocity texture (RG16F or RG32F)
+ * @param OutSmoothedVelocityTexture Output smoothed velocity texture
+ * @param BlurRadius Blur kernel radius in pixels
+ * @param NumIterations Number of blur iterations (1-5)
+ */
+void RenderFluidVelocitySmoothingPass(
+	FRDGBuilder& GraphBuilder,
+	const FSceneView& View,
+	FRDGTextureRef InputVelocityTexture,
+	FRDGTextureRef& OutSmoothedVelocityTexture,
+	float BlurRadius,
+	int32 NumIterations)
+{
+	RDG_EVENT_SCOPE(GraphBuilder, "FluidVelocitySmoothing_Separable");
+	check(InputVelocityTexture);
+
+	NumIterations = FMath::Clamp(NumIterations, 1, 5);
+
+	FIntPoint TextureSize = InputVelocityTexture->Desc.Extent;
+
+	// Use same format as input velocity texture (typically RG16F)
+	FRDGTextureDesc IntermediateDesc = FRDGTextureDesc::Create2D(
+		TextureSize,
+		InputVelocityTexture->Desc.Format,
+		FClearValueBinding::None,
+		TexCreate_ShaderResource | TexCreate_UAV);
+
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FFluidVelocityGaussianBlurHorizontalCS> HorizontalShader(GlobalShaderMap);
+	TShaderMapRef<FFluidVelocityGaussianBlurVerticalCS> VerticalShader(GlobalShaderMap);
+
+	FRDGTextureRef CurrentInput = InputVelocityTexture;
+
+	for (int32 Iteration = 0; Iteration < NumIterations; ++Iteration)
+	{
+		// Pass 1: Horizontal blur
+		FRDGTextureRef HorizontalOutput = GraphBuilder.CreateTexture(
+			IntermediateDesc, TEXT("FluidVelocityBlur_H"));
+		{
+			auto* PassParameters = GraphBuilder.AllocParameters<FFluidVelocityGaussianBlurHorizontalCS::FParameters>();
+			PassParameters->VelocityInputTexture = CurrentInput;
+			PassParameters->TextureSize = FVector2f(TextureSize.X, TextureSize.Y);
+			PassParameters->BlurRadius = BlurRadius;
+			PassParameters->VelocityOutputTexture = GraphBuilder.CreateUAV(HorizontalOutput);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("VelocityBlur_H_Iter%d", Iteration),
+				HorizontalShader,
+				PassParameters,
+				FComputeShaderUtils::GetGroupCount(TextureSize, 8));
+		}
+
+		// Pass 2: Vertical blur
+		FRDGTextureRef VerticalOutput = GraphBuilder.CreateTexture(
+			IntermediateDesc, TEXT("FluidVelocityBlur_V"));
+		{
+			auto* PassParameters = GraphBuilder.AllocParameters<FFluidVelocityGaussianBlurVerticalCS::FParameters>();
+			PassParameters->VelocityInputTexture = HorizontalOutput;
+			PassParameters->TextureSize = FVector2f(TextureSize.X, TextureSize.Y);
+			PassParameters->BlurRadius = BlurRadius;
+			PassParameters->VelocityOutputTexture = GraphBuilder.CreateUAV(VerticalOutput);
+
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("VelocityBlur_V_Iter%d", Iteration),
+				VerticalShader,
+				PassParameters,
+				FComputeShaderUtils::GetGroupCount(TextureSize, 8));
+		}
+
+		CurrentInput = VerticalOutput;
+	}
+
+	OutSmoothedVelocityTexture = CurrentInput;
 }

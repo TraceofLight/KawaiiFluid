@@ -48,3 +48,23 @@ void RenderFluidThicknessSmoothingPass(
 	FRDGTextureRef& OutSmoothedThicknessTexture,
 	float BlurRadius = 5.0f,
 	int32 NumIterations = 2);
+
+/**
+ * Separable Gaussian Blur for Fluid Velocity Smoothing
+ *
+ * Smooths the velocity texture to soften foam boundaries between particles.
+ * Without smoothing, foam edges appear sharp because each particle sprite
+ * has a constant velocity, creating abrupt "rice grain" patterns at borders.
+ *
+ * Uses horizontal + vertical passes for O(2n) instead of O(n²).
+ *
+ * @param BlurRadius  Spatial filter radius in pixels (3~20 recommended)
+ * @param NumIterations  Number of blur iterations (1-5, typically 1-2 is sufficient)
+ */
+void RenderFluidVelocitySmoothingPass(
+	FRDGBuilder& GraphBuilder,
+	const FSceneView& View,
+	FRDGTextureRef InputVelocityTexture,
+	FRDGTextureRef& OutSmoothedVelocityTexture,
+	float BlurRadius = 8.0f,
+	int32 NumIterations = 1);

@@ -496,3 +496,83 @@ void DepthUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	OutputTexture[OutCoord] = OutDepth;
 }
+
+//=============================================================================
+// Separable Gaussian Blur for Velocity (float2)
+//
+// Smooths velocity texture to soften foam boundaries between particles.
+// Without smoothing, foam edges appear sharp at particle boundaries
+// because each particle has a constant velocity across its sprite.
+//
+// Uses same separable approach as thickness blur for O(2n) complexity.
+//=============================================================================
+
+// Velocity-specific resources (float2 instead of float)
+Texture2D<float2> VelocityInputTexture;
+RWTexture2D<float2> VelocityOutputTexture;
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void VelocityGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+	float2 CenterVelocity = VelocityInputTexture.Load(int3(CenterCoord, 0));
+
+	// Skip background pixels (zero velocity is valid, but we still process them)
+	// We use depth-aware weighting to avoid blurring across fluid boundaries
+
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 2.0f;
+
+	float TotalWeight = 0.0f;
+	float2 TotalWeightedVelocity = float2(0.0f, 0.0f);
+
+	// Horizontal 1D Gaussian blur
+	for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+	{
+		int SampleX = clamp(CenterCoord.x + OffsetX, 0, int(TextureSize.x) - 1);
+		float2 SampleVelocity = VelocityInputTexture.Load(int3(SampleX, CenterCoord.y, 0));
+
+		float Weight = GetGaussianWeight(abs(float(OffsetX)), Sigma);
+		TotalWeightedVelocity += SampleVelocity * Weight;
+		TotalWeight += Weight;
+	}
+
+	float2 Result = (TotalWeight > 0.0f) ? (TotalWeightedVelocity / TotalWeight) : float2(0.0f, 0.0f);
+	VelocityOutputTexture[CenterCoord] = Result;
+}
+
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void VelocityGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 2.0f;
+
+	float TotalWeight = 0.0f;
+	float2 TotalWeightedVelocity = float2(0.0f, 0.0f);
+
+	// Vertical 1D Gaussian blur
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
+	{
+		int SampleY = clamp(CenterCoord.y + OffsetY, 0, int(TextureSize.y) - 1);
+		float2 SampleVelocity = VelocityInputTexture.Load(int3(CenterCoord.x, SampleY, 0));
+
+		float Weight = GetGaussianWeight(abs(float(OffsetY)), Sigma);
+		TotalWeightedVelocity += SampleVelocity * Weight;
+		TotalWeight += Weight;
+	}
+
+	float2 Result = (TotalWeight > 0.0f) ? (TotalWeightedVelocity / TotalWeight) : float2(0.0f, 0.0f);
+	VelocityOutputTexture[CenterCoord] = Result;
+}

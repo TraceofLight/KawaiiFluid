@@ -54,7 +54,6 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		SHADER_PARAMETER_TEXTURE(Texture2D, FoamTexture)
 		SHADER_PARAMETER_TEXTURE(Texture2D, LayerTexture)
 		SHADER_PARAMETER_TEXTURE(Texture2D, LayerNormalMap)
-		SHADER_PARAMETER_TEXTURE(Texture2D, FlowMapTexture)
 
 		// Parameters
 		SHADER_PARAMETER(FVector2f, TextureSize)
@@ -88,6 +87,14 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		SHADER_PARAMETER(float, FoamThicknessThreshold)
 		SHADER_PARAMETER(float, FoamThicknessStrength)
 
+		// Foam - Jitter (UV animation)
+		SHADER_PARAMETER(int32, bFoamJitterEnabled)
+		SHADER_PARAMETER(float, FoamJitterStrength)
+		SHADER_PARAMETER(float, FoamJitterSpeed)
+
+		// Foam - Flow Animation
+		SHADER_PARAMETER(int32, bFoamUseFlowAnimation)
+
 		// Emissive
 		SHADER_PARAMETER(int32, bEmissiveEnabled)
 		SHADER_PARAMETER(FLinearColor, EmissiveColor)
@@ -116,6 +123,14 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 		// Layer Normal Map
 		SHADER_PARAMETER(int32, bLayerNormalMapEnabled)
 		SHADER_PARAMETER(float, LayerNormalStrength)
+
+		// Layer - Jitter (UV animation)
+		SHADER_PARAMETER(int32, bLayerJitterEnabled)
+		SHADER_PARAMETER(float, LayerJitterStrength)
+		SHADER_PARAMETER(float, LayerJitterSpeed)
+
+		// Layer - Flow Animation
+		SHADER_PARAMETER(int32, bLayerUseFlowAnimation)
 
 		// Texture Lighting
 		SHADER_PARAMETER(int32, bApplyLightingToTextures)
@@ -236,13 +251,10 @@ void RenderFluidSurfaceDecorationPass(
 	FRHITexture* BlackFallback = GBlackTexture->TextureRHI;
 	// For normal map fallback, use a flat normal (0.5, 0.5, 1.0) - white works as simple fallback
 	FRHITexture* NormalFallback = GWhiteTexture->TextureRHI;
-	// For flow map, black (0,0) means no flow
-	FRHITexture* FlowFallback = GBlackTexture->TextureRHI;
 
 	PassParameters->FoamTexture = GetTextureRHIOrDefault(Params.Foam.FoamTexture.Get(), WhiteFallback);
 	PassParameters->LayerTexture = GetTextureRHIOrDefault(Params.Layer.Texture.Get(), WhiteFallback);
 	PassParameters->LayerNormalMap = GetTextureRHIOrDefault(Params.Layer.NormalMap.Get(), NormalFallback);
-	PassParameters->FlowMapTexture = GetTextureRHIOrDefault(Params.FlowMap.FlowMapTexture.Get(), FlowFallback);
 
 	// Velocity and AccumulatedFlow textures (RDG)
 	// Create properly formatted dummy textures with producer pass when not provided
@@ -345,6 +357,14 @@ void RenderFluidSurfaceDecorationPass(
 	PassParameters->FoamThicknessThreshold = Params.Foam.ThicknessThreshold;
 	PassParameters->FoamThicknessStrength = Params.Foam.ThicknessFoamStrength;
 
+	// Foam - Jitter
+	PassParameters->bFoamJitterEnabled = Params.Foam.bJitterEnabled ? 1 : 0;
+	PassParameters->FoamJitterStrength = Params.Foam.JitterStrength;
+	PassParameters->FoamJitterSpeed = Params.Foam.JitterSpeed;
+
+	// Foam - Flow Animation
+	PassParameters->bFoamUseFlowAnimation = Params.Foam.bUseFlowAnimation ? 1 : 0;
+
 	// Emissive
 	PassParameters->bEmissiveEnabled = Params.Emissive.bEnabled ? 1 : 0;
 	PassParameters->EmissiveColor = Params.Emissive.EmissiveColor;
@@ -357,8 +377,8 @@ void RenderFluidSurfaceDecorationPass(
 
 	// Flow
 	PassParameters->bFlowEnabled = Params.FlowMap.bEnabled ? 1 : 0;
-	// Use accumulated flow if particle velocity is enabled and we have accumulated flow texture
-	PassParameters->bUseAccumulatedFlow = (Params.FlowMap.bUseParticleVelocity && AccumulatedFlowTexture != nullptr) ? 1 : 0;
+	// Use accumulated flow when flow is enabled and we have accumulated flow texture
+	PassParameters->bUseAccumulatedFlow = (Params.FlowMap.bEnabled && AccumulatedFlowTexture != nullptr) ? 1 : 0;
 	PassParameters->FlowSpeed = Params.FlowMap.FlowSpeed;
 	PassParameters->FlowDistortionStrength = Params.FlowMap.DistortionStrength;
 
@@ -375,6 +395,14 @@ void RenderFluidSurfaceDecorationPass(
 	const bool bLayerHasNormalMap = Params.Layer.NormalMap.Get() != nullptr;
 	PassParameters->bLayerNormalMapEnabled = bLayerHasNormalMap ? 1 : 0;
 	PassParameters->LayerNormalStrength = Params.Layer.NormalStrength;
+
+	// Layer - Jitter
+	PassParameters->bLayerJitterEnabled = Params.Layer.bJitterEnabled ? 1 : 0;
+	PassParameters->LayerJitterStrength = Params.Layer.JitterStrength;
+	PassParameters->LayerJitterSpeed = Params.Layer.JitterSpeed;
+
+	// Layer - Flow Animation
+	PassParameters->bLayerUseFlowAnimation = Params.Layer.bUseFlowAnimation ? 1 : 0;
 
 	// Layer Lighting
 	PassParameters->bApplyLightingToTextures = Params.bApplyLightingToLayer ? 1 : 0;
