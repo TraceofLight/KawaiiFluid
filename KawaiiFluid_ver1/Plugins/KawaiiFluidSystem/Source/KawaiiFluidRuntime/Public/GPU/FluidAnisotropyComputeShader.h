@@ -123,9 +123,9 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 	// false = raw eigenvalues (FleX reference style, larger ellipsoids)
 	bool bPreserveVolume = true;
 
-	// FleX style render scale (only used when bPreserveVolume = false)
-	// Controls overall ellipsoid size in FleX mode
-	float FlexRenderScale = 1.0f;
+	// Non-preserved render scale (only used when bPreserveVolume = false)
+	// Controls overall ellipsoid size when volume preservation is disabled
+	float NonPreservedRenderScale = 1.0f;
 };
 
 // Constants (must match FluidSpatialHash.ush and FluidAnisotropyCompute.usf)
@@ -232,8 +232,8 @@ public:
 		// 0 = FleX style (raw eigenvalues, no volume constraint)
 		SHADER_PARAMETER(int32, bPreserveVolume)
 
-		// FleX style render scale (only used when bPreserveVolume = 0)
-		SHADER_PARAMETER(float, FlexRenderScale)
+		// Non-preserved render scale (only used when bPreserveVolume = 0)
+		SHADER_PARAMETER(float, NonPreservedRenderScale)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 64;

@@ -328,7 +328,7 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 
 	// Volume Preservation mode (Yu & Turk vs FleX style)
 	PassParameters->bPreserveVolume = Params.bPreserveVolume ? 1 : 0;
-	PassParameters->FlexRenderScale = Params.FlexRenderScale;
+	PassParameters->NonPreservedRenderScale = Params.NonPreservedRenderScale;
 
 	const int32 ThreadGroupSize = FFluidAnisotropyCS::ThreadGroupSize;
 	const int32 NumGroups = FMath::DivideAndRoundUp(Params.ParticleCount, ThreadGroupSize);

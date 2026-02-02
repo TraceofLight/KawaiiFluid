@@ -118,9 +118,9 @@ int bHasPreviousFrame;
 // 0 = FleX style (raw eigenvalues, no volume constraint)
 int bPreserveVolume;
 
-// FleX style render scale (only used when bPreserveVolume = 0)
-// Controls overall ellipsoid size in FleX mode
-float FlexRenderScale;
+// Non-preserved render scale (only used when bPreserveVolume = 0)
+// Controls overall ellipsoid size when volume preservation is disabled
+float NonPreservedRenderScale;
 
 //-----------------------------------------------------------------------------
 // BoneDelta Attachment for NEAR_BOUNDARY particles (must match C++ FGPUBoneDeltaAttachment)
@@ -689,12 +689,12 @@ void CalculateVelocityBasedWithVelocity(
 		else
 		{
 			// =========================================================================
-			// FleX Style: No volume preservation
-			// Stretch along velocity direction, perpendicular axes scaled by FlexRenderScale
+			// Non-Preserved Style: No volume preservation
+			// Stretch along velocity direction, perpendicular axes scaled by NonPreservedRenderScale
 			// =========================================================================
-			Scale1 = clamp(RawScale1 * FlexRenderScale, AnisotropyMin, AnisotropyMax);
-			Scale2 = FlexRenderScale;
-			Scale3 = FlexRenderScale;
+			Scale1 = clamp(RawScale1 * NonPreservedRenderScale, AnisotropyMin, AnisotropyMax);
+			Scale2 = NonPreservedRenderScale;
+			Scale3 = NonPreservedRenderScale;
 		}
 	}
 }
@@ -1138,10 +1138,10 @@ void CalculateDensityBased(
 		Scale2 = SmoothingRadius / max(ClampedSigma1, Epsilon);
 		Scale3 = SmoothingRadius / max(ClampedSigma2, Epsilon);
 
-		// Step 3.5: Apply FlexRenderScale (overall ellipsoid size control)
-		Scale1 *= FlexRenderScale;
-		Scale2 *= FlexRenderScale;
-		Scale3 *= FlexRenderScale;
+		// Step 3.5: Apply NonPreservedRenderScale (overall ellipsoid size control)
+		Scale1 *= NonPreservedRenderScale;
+		Scale2 *= NonPreservedRenderScale;
+		Scale3 *= NonPreservedRenderScale;
 
 		// Step 4: Apply AnisotropyScale as intensity control
 		// Scale > 1: more anisotropic, Scale < 1: more spherical
@@ -1391,28 +1391,43 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		                                   VelocityAxis1, VelocityAxis2, VelocityAxis3,
 		                                   VelocityScale1, VelocityScale2, VelocityScale3);
 
-		// Blend scales in log space for volume preservation
-		float LogDens1 = log(max(DensityScale1, 0.001f));
-		float LogDens2 = log(max(DensityScale2, 0.001f));
-		float LogDens3 = log(max(DensityScale3, 0.001f));
-		float LogVel1 = log(max(VelocityScale1, 0.001f));
-		float LogVel2 = log(max(VelocityScale2, 0.001f));
-		float LogVel3 = log(max(VelocityScale3, 0.001f));
+		if (bPreserveVolume)
+		{
+			// Volume-preserving: Blend scales in log space
+			float LogDens1 = log(max(DensityScale1, 0.001f));
+			float LogDens2 = log(max(DensityScale2, 0.001f));
+			float LogDens3 = log(max(DensityScale3, 0.001f));
+			float LogVel1 = log(max(VelocityScale1, 0.001f));
+			float LogVel2 = log(max(VelocityScale2, 0.001f));
+			float LogVel3 = log(max(VelocityScale3, 0.001f));
 
-		float LogScale1 = lerp(LogVel1, LogDens1, DensityWeight);
-		float LogScale2 = lerp(LogVel2, LogDens2, DensityWeight);
-		float LogScale3 = lerp(LogVel3, LogDens3, DensityWeight);
+			float LogScale1 = lerp(LogVel1, LogDens1, DensityWeight);
+			float LogScale2 = lerp(LogVel2, LogDens2, DensityWeight);
+			float LogScale3 = lerp(LogVel3, LogDens3, DensityWeight);
 
-		// Final clamp in log space
-		float LogMin = log(max(AnisotropyMin, 0.001f));
-		float LogMax = log(max(AnisotropyMax, 0.001f));
-		LogScale1 = clamp(LogScale1, LogMin, LogMax);
-		LogScale2 = clamp(LogScale2, LogMin, LogMax);
-		LogScale3 = clamp(LogScale3, LogMin, LogMax);
+			// Final clamp in log space
+			float LogMin = log(max(AnisotropyMin, 0.001f));
+			float LogMax = log(max(AnisotropyMax, 0.001f));
+			LogScale1 = clamp(LogScale1, LogMin, LogMax);
+			LogScale2 = clamp(LogScale2, LogMin, LogMax);
+			LogScale3 = clamp(LogScale3, LogMin, LogMax);
 
-		Scale1 = exp(LogScale1);
-		Scale2 = exp(LogScale2);
-		Scale3 = exp(LogScale3);
+			Scale1 = exp(LogScale1);
+			Scale2 = exp(LogScale2);
+			Scale3 = exp(LogScale3);
+		}
+		else
+		{
+			// FleX style: Blend scales in linear space (no volume preservation)
+			Scale1 = lerp(VelocityScale1, DensityScale1, DensityWeight);
+			Scale2 = lerp(VelocityScale2, DensityScale2, DensityWeight);
+			Scale3 = lerp(VelocityScale3, DensityScale3, DensityWeight);
+
+			// Final clamp in linear space
+			Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+			Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+			Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+		}
 
 		// Blend axes: use density axes when DensityWeight > 0.5, velocity axes otherwise
 		// This provides a hard transition to avoid axis interpolation artifacts

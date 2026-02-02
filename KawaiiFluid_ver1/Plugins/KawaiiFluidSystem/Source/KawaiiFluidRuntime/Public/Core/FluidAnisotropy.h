@@ -54,6 +54,16 @@ struct KAWAIIFLUIDRUNTIME_API FFluidAnisotropyParams
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy", meta = (EditCondition = "bEnabled", ClampMin = "0", ClampMax = "5", UIMin = "0", UIMax = "5"))
 	float Strength = 1.0f;
 
+	/**
+	 * Preserve ellipsoid volume (Scale1 * Scale2 * Scale3 = 1.0).
+	 * When enabled, uses log-space processing to maintain unit volume (Yu & Turk style).
+	 * MinStretch/MaxStretch work in log space, producing balanced ellipsoids.
+	 * When disabled, uses raw eigenvalues from covariance matrix (NVIDIA FleX style).
+	 * May produce larger/smaller ellipsoids. Use NonPreservedRenderScale to adjust size.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy", meta = (EditCondition = "bEnabled"))
+	bool bPreserveVolume = true;
+
 	/** Shortest allowed axis ratio. Prevents extremely flat ellipsoids. (0.2 = can shrink to 20% of original) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy", meta = (EditCondition = "bEnabled", ClampMin = "0.1", ClampMax = "0.9", UIMin = "0.1", UIMax = "0.9"))
 	float MinStretch = 0.2f;
@@ -61,6 +71,15 @@ struct KAWAIIFLUIDRUNTIME_API FFluidAnisotropyParams
 	/** Longest allowed axis ratio. Limits maximum elongation. (2.0 = can stretch to 200% of original) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy", meta = (EditCondition = "bEnabled", ClampMin = "1.0", ClampMax = "5.0", UIMin = "1.0", UIMax = "5.0"))
 	float MaxStretch = 2.0f;
+
+	/**
+	 * Ellipsoid render scale when Preserve Volume is disabled.
+	 * Controls overall ellipsoid size: 1.0 = default, 0.5 = half size, 2.0 = double size.
+	 * Use this to match visual appearance with your particle radius.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy",
+		meta = (EditCondition = "bEnabled && !bPreserveVolume", ClampMin = "0.1", ClampMax = "4.0", UIMin = "0.1", UIMax = "4.0"))
+	float NonPreservedRenderScale = 1.0f;
 
 	/** How much particle velocity affects stretching. Higher = faster particles stretch more. Clamped by MaxStretch. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy", meta = (EditCondition = "bEnabled && (Mode == EFluidAnisotropyMode::VelocityBased || Mode == EFluidAnisotropyMode::Hybrid)", ClampMin = "0", ClampMax = "1.0", UIMin = "0", UIMax = "1.0"))
@@ -83,23 +102,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidAnisotropyParams
 		meta = (EditCondition = "bEnabled && bEnableTemporalSmoothing", ClampMin = "0", ClampMax = "1", UIMin = "0", UIMax = "1"))
 	float TemporalSmoothFactor = 0.8f;
 
-	/**
-	 * Preserve ellipsoid volume (Scale1 * Scale2 * Scale3 = 1.0).
-	 * When enabled, uses log-space processing to maintain unit volume (Yu & Turk style).
-	 * When disabled, uses raw eigenvalues from covariance matrix (NVIDIA FleX style).
-	 * FleX style may produce larger ellipsoids but matches the original FleX reference more closely.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy|Advanced", meta = (EditCondition = "bEnabled"))
-	bool bPreserveVolume = true;
-
-	/**
-	 * Ellipsoid render scale for FleX style (only active when Preserve Volume is disabled).
-	 * Controls overall ellipsoid size: 1.0 = default, 0.5 = half size, 2.0 = double size.
-	 * Use this to match visual appearance with your particle radius.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Rendering|Anisotropy|Advanced",
-		meta = (EditCondition = "bEnabled && !bPreserveVolume", ClampMin = "0.1", ClampMax = "4.0", UIMin = "0.1", UIMax = "4.0"))
-	float FlexRenderScale = 1.0f;
 };
 
 // FAnisotropyComputeParams is defined in GPU/FluidAnisotropyComputeShader.h
