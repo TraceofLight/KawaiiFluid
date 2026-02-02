@@ -173,6 +173,13 @@ public:
 	 */
 	void SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params);
 
+	/**
+	 * Run single initialization simulation step after uploading particles
+	 * Stabilizes particle positions without full frame lifecycle
+	 * @param Params - Simulation parameters
+	 */
+	void RunInitializationSimulation(const FGPUFluidSimulationParams& Params);
+
 	//=============================================================================
 	// Frame Lifecycle (called once per frame, used by Subsystem)
 	//=============================================================================

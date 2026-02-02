@@ -242,7 +242,10 @@ bool FFluidBrushEditorMode::UpdateBrushLocation(FEditorViewportClient* ViewportC
 		return false;
 	}
 
-	// Pre-calculate Volume box information
+	// Check if unlimited size mode is enabled
+	const bool bUnlimitedSize = TargetVolumeComponent.IsValid() && TargetVolumeComponent->bUseUnlimitedSize;
+
+	// Pre-calculate Volume box information (only needed if not unlimited size)
 	FBox VolumeBounds;
 	float tEntry = -1.0f;  // Entry point (camera→box)
 	float tExit = -1.0f;   // Exit point (far side of box)
@@ -253,7 +256,7 @@ bool FFluidBrushEditorMode::UpdateBrushLocation(FEditorViewportClient* ViewportC
 	bool bHasVolumeIntersection = false;
 	bool bCameraInsideBox = false;
 
-	if (TargetVolumeComponent.IsValid())
+	if (!bUnlimitedSize && TargetVolumeComponent.IsValid())
 	{
 		VolumeBounds = TargetVolumeComponent->Bounds.GetBox();
 		if (VolumeBounds.IsValid)
@@ -322,7 +325,16 @@ bool FFluidBrushEditorMode::UpdateBrushLocation(FEditorViewportClient* ViewportC
 
 	if (World->LineTraceSingleByChannel(Hit, Origin, Origin + Direction * 50000.0f, ECC_Visibility, QueryParams))
 	{
-		// Check if hit is inside the box
+		// Unlimited size mode: accept any world hit
+		if (bUnlimitedSize)
+		{
+			BrushLocation = Hit.Location;
+			BrushNormal = Hit.ImpactNormal;
+			bValidLocation = true;
+			return true;
+		}
+
+		// Limited size mode: check if hit is inside the box
 		if (bHasVolumeIntersection && VolumeBounds.IsInsideOrOn(Hit.Location))
 		{
 			BrushLocation = Hit.Location;
@@ -333,7 +345,14 @@ bool FFluidBrushEditorMode::UpdateBrushLocation(FEditorViewportClient* ViewportC
 		// If hit is outside box, fall through to use box face
 	}
 
-	// Position brush on box face
+	// Unlimited size mode: disable brush if no world hit
+	if (bUnlimitedSize)
+	{
+		bValidLocation = false;
+		return false;
+	}
+
+	// Limited size mode: position brush on box face
 	if (bHasVolumeIntersection)
 	{
 		float tHit;

@@ -1202,6 +1202,53 @@ void UKawaiiFluidSimulationContext::SimulateSubstep(
 	}
 }
 
+void UKawaiiFluidSimulationContext::RunInitializationSimulation(
+	const UKawaiiFluidPresetDataAsset* Preset,
+	const FKawaiiFluidSimulationParams& Params,
+	int32 ParticleCount)
+{
+	if (!Preset)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RunInitializationSimulation: No Preset provided"));
+		return;
+	}
+
+	if (!IsGPUSimulatorReady())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("RunInitializationSimulation: GPU Simulator not ready"));
+		return;
+	}
+
+	// Convert to GPU parameters (use full params with colliders/interactions)
+	const float SubstepDT = Preset->SubstepDeltaTime;
+	FGPUFluidSimulationParams GPUParams = BuildGPUSimParams(Preset, Params, SubstepDT);
+	GPUParams.ParticleCount = ParticleCount;
+	GPUParams.SubstepIndex = 0;
+	GPUParams.TotalSubsteps = 1;  // Single substep (triggers anisotropy: 0 == 1-1)
+
+	// Temporarily enable anisotropy for initialization (restore after simulation)
+	FFluidAnisotropyParams TempAnisotropyParams;
+	TempAnisotropyParams.bEnabled = true;
+	TempAnisotropyParams.Mode = EFluidAnisotropyMode::DensityBased;
+	TempAnisotropyParams.Strength = 1.0f;
+	TempAnisotropyParams.VelocityStretchFactor = 0.0f;  // No velocity stretch for initialization
+	TempAnisotropyParams.MinStretch = 0.5f;
+	TempAnisotropyParams.MaxStretch = 2.0f;
+	TempAnisotropyParams.DensityWeight = 1.0f;
+	TempAnisotropyParams.UpdateInterval = 1;
+
+	FFluidAnisotropyParams PreviousParams = GPUSimulator->GetAnisotropyParams();
+	GPUSimulator->SetAnisotropyParams(TempAnisotropyParams);
+
+	// Run one simulation step to stabilize particles
+	GPUSimulator->RunInitializationSimulation(GPUParams);
+
+	// Restore previous anisotropy parameters
+	GPUSimulator->SetAnisotropyParams(PreviousParams);
+
+	UE_LOG(LogTemp, Log, TEXT("RunInitializationSimulation: Completed for %d particles"), ParticleCount);
+}
+
 void UKawaiiFluidSimulationContext::PredictPositions(
 	TArray<FFluidParticle>& Particles,
 	const UKawaiiFluidPresetDataAsset* Preset,

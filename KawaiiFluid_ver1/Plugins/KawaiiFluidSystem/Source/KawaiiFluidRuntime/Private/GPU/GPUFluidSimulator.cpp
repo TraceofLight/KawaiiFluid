@@ -780,6 +780,28 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	ExtractPersistentBuffers(GraphBuilder, ParticleBuffer, SpatialData);
 }
 
+void FGPUFluidSimulator::RunInitializationSimulation(const FGPUFluidSimulationParams& Params)
+{
+	FGPUFluidSimulator* Self = this;
+	FGPUFluidSimulationParams ParamsCopy = Params;
+
+	ENQUEUE_RENDER_COMMAND(GPUFluidInitSimulation)(
+		[Self, ParamsCopy](FRHICommandListImmediate& RHICmdList)
+		{
+			SCOPED_DRAW_EVENT(RHICmdList, GPUFluid_InitializationSimulation);
+
+			FRDGBuilder GraphBuilder(RHICmdList);
+			Self->SimulateSubstep_RDG(GraphBuilder, ParamsCopy);
+			GraphBuilder.Execute();
+		}
+	);
+
+	// Wait for initialization simulation to complete
+	FlushRenderingCommands();
+
+	UE_LOG(LogGPUFluidSimulator, Log, TEXT("RunInitializationSimulation: Completed for %d particles"), CurrentParticleCount);
+}
+
 //=============================================================================
 // Frame Lifecycle Functions
 //=============================================================================

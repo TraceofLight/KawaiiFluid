@@ -1,6 +1,8 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Modules/KawaiiFluidSimulationModule.h"
+
+#include "KawaiiFluidSimulationContext.h"
 #include "Core/SpatialHash.h"
 #include "Collision/FluidCollider.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
@@ -172,6 +174,32 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 
 	// After all appends, create/update GPU buffer + reset SpawnManager state
 	GPUSim->FinalizeUpload();
+
+	// Run initialization simulation to stabilize particle positions (full simulation with colliders)
+	if (UKawaiiFluidSimulationContext* Context = GetSimulationContext())
+	{
+		FSpatialHash* Hash = GetSpatialHash();
+		if (!Hash)
+		{
+			// SpatialHash not initialized yet - initialize now
+			InitializeSpatialHash(Preset->SmoothingRadius);
+			Hash = GetSpatialHash();
+		}
+
+		if (Hash)
+		{
+			// Build full simulation params (same as normal simulation)
+			FKawaiiFluidSimulationParams Params = BuildSimulationParams();
+
+			// Prepare temporary variables for Simulate
+			TArray<FFluidParticle> EmptyParticles;  // GPU-only mode doesn't need CPU particles
+			float TempAccumulatedTime = 0.0f;
+
+			// Run one simulation frame (1 substep) to stabilize particles + calculate anisotropy
+			// DeltaTime = SubstepDeltaTime ensures exactly 1 substep is executed
+			Context->Simulate(EmptyParticles, Preset, Params, *Hash, Preset->SubstepDeltaTime, TempAccumulatedTime);
+		}
+	}
 
 	// Clear CPU array after uploading to GPU (prevent duplicate uploads + save memory)
 	Particles.Empty();

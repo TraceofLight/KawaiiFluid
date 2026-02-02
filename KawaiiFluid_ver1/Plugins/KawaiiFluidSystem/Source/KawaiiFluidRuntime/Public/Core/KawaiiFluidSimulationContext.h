@@ -171,6 +171,19 @@ public:
 		float SubstepDT
 	);
 
+	/**
+	 * Run single initialization simulation step after uploading particles
+	 * Stabilizes particle positions with full simulation parameters (colliders/interactions)
+	 * @param Preset - Fluid preset for physics parameters
+	 * @param Params - Full simulation parameters (same as normal simulation)
+	 * @param ParticleCount - Number of particles uploaded
+	 */
+	void RunInitializationSimulation(
+		const UKawaiiFluidPresetDataAsset* Preset,
+		const FKawaiiFluidSimulationParams& Params,
+		int32 ParticleCount
+	);
+
 protected:
 	//========================================
 	// Simulation Steps (Virtual - Override for custom behaviors)
