@@ -241,10 +241,15 @@ void FGPUFluidSimulator::ReleaseRHI()
 	PersistentCellStartBuffer.SafeRelease();
 	PersistentCellEndBuffer.SafeRelease();
 
-	// Release neighbor cache buffers
-	NeighborListBuffer.SafeRelease();
-	NeighborCountsBuffer.SafeRelease();
-	NeighborBufferParticleCapacity = 0;
+	// Release double buffered neighbor cache buffers (both slots)
+	for (int32 i = 0; i < 2; ++i)
+	{
+		NeighborListBuffers[i].SafeRelease();
+		NeighborCountsBuffers[i].SafeRelease();
+		NeighborBufferParticleCapacities[i] = 0;
+	}
+	CurrentNeighborBufferIndex = 0;
+	bPrevNeighborCacheValid = false;
 
 	// Release particle sleeping buffers
 	SleepCountersBuffer.SafeRelease();
@@ -1471,19 +1476,22 @@ void FGPUFluidSimulator::ExecuteConstraintSolverLoop(
 		return;
 	}
 
-	// Create/resize neighbor caching buffers
+	// Create/resize neighbor caching buffers for CURRENT frame (WriteIndex)
+	// Double Buffering: WriteIndex is used for UAV writes this frame
+	// ReadIndex (1 - WriteIndex) contains previous frame's data for PredictPositions SRV reads
 	const int32 NeighborListSize = CurrentParticleCount * GPU_MAX_NEIGHBORS_PER_PARTICLE;
+	const int32 WriteIndex = CurrentNeighborBufferIndex;
 
-	if (NeighborBufferParticleCapacity < CurrentParticleCount || !NeighborListBuffer.IsValid())
+	if (NeighborBufferParticleCapacities[WriteIndex] < CurrentParticleCount || !NeighborListBuffers[WriteIndex].IsValid())
 	{
 		SpatialData.NeighborListBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), NeighborListSize), TEXT("GPUFluidNeighborList"));
 		SpatialData.NeighborCountsBuffer = GraphBuilder.CreateBuffer(FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), CurrentParticleCount), TEXT("GPUFluidNeighborCounts"));
-		NeighborBufferParticleCapacity = CurrentParticleCount;
+		NeighborBufferParticleCapacities[WriteIndex] = CurrentParticleCount;
 	}
 	else
 	{
-		SpatialData.NeighborListBuffer = GraphBuilder.RegisterExternalBuffer(NeighborListBuffer, TEXT("GPUFluidNeighborList"));
-		SpatialData.NeighborCountsBuffer = GraphBuilder.RegisterExternalBuffer(NeighborCountsBuffer, TEXT("GPUFluidNeighborCounts"));
+		SpatialData.NeighborListBuffer = GraphBuilder.RegisterExternalBuffer(NeighborListBuffers[WriteIndex], TEXT("GPUFluidNeighborList"));
+		SpatialData.NeighborCountsBuffer = GraphBuilder.RegisterExternalBuffer(NeighborCountsBuffers[WriteIndex], TEXT("GPUFluidNeighborCounts"));
 	}
 
 	FRDGBufferUAVRef NeighborListUAVLocal = GraphBuilder.CreateUAV(SpatialData.NeighborListBuffer);
@@ -1519,9 +1527,9 @@ void FGPUFluidSimulator::ExecuteConstraintSolverLoop(
 	SpatialData.NeighborListSRV = GraphBuilder.CreateSRV(SpatialData.NeighborListBuffer);
 	SpatialData.NeighborCountsSRV = GraphBuilder.CreateSRV(SpatialData.NeighborCountsBuffer);
 
-	// Queue extraction
-	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborListBuffer, &NeighborListBuffer, ERHIAccess::UAVCompute);
-	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborCountsBuffer, &NeighborCountsBuffer, ERHIAccess::UAVCompute);
+	// Queue extraction to current frame's buffer slot (WriteIndex)
+	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborListBuffer, &NeighborListBuffers[CurrentNeighborBufferIndex], ERHIAccess::UAVCompute);
+	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborCountsBuffer, &NeighborCountsBuffers[CurrentNeighborBufferIndex], ERHIAccess::UAVCompute);
 }
 
 void FGPUFluidSimulator::ExecuteAdhesion(
@@ -2171,31 +2179,34 @@ void FGPUFluidSimulator::ExtractPersistentBuffers(
 void FGPUFluidSimulator::SwapNeighborCacheBuffers()
 {
 	// =====================================================
-	// Double Buffering for Cohesion Force in PredictPositions
+	// True Double Buffering for Cohesion Force (RAW Hazard Prevention)
 	// 
-	// Problem: PredictPositions runs BEFORE neighbor search, but Cohesion needs neighbors
-	// Solution: Use previous frame's neighbor cache (Double Buffering)
+	// Buffer[0] and Buffer[1] are physically separate buffers
+	// CurrentNeighborBufferIndex tracks which buffer was used for WRITING this frame
 	// 
 	// Timeline:
-	//   Frame N:   BuildNeighbors -> Solve -> Extract NeighborBuffer
-	//   EndFrame:  NeighborBuffer -> PrevNeighborBuffer (this function)
-	//   Frame N+1: PredictPositions uses PrevNeighborBuffer for Cohesion
+	//   Frame N:   WriteIndex=0, write to Buffer[0], PredictPositions reads Buffer[1]
+	//   EndFrame:  Toggle index (0->1)
+	//   Frame N+1: WriteIndex=1, write to Buffer[1], PredictPositions reads Buffer[0]
+	//   EndFrame:  Toggle index (1->0)
+	//
+	// This ensures SRV reads and UAV writes NEVER access the same physical buffer,
+	// preventing GPU pipeline stalls from RAW (Read After Write) hazards.
 	// =====================================================
 	
-	// Only swap if current frame's neighbor cache is valid
-	if (!NeighborListBuffer.IsValid() || !NeighborCountsBuffer.IsValid())
+	const int32 WriteIndex = CurrentNeighborBufferIndex;
+	
+	// Validate current frame's buffer was actually written
+	if (!NeighborListBuffers[WriteIndex].IsValid() || !NeighborCountsBuffers[WriteIndex].IsValid())
 	{
 		// No neighbor cache available (maybe no particles or first frame)
 		bPrevNeighborCacheValid = false;
 		return;
 	}
 	
-	// Move current neighbor cache to previous
-	// Note: We don't need to explicitly release old PrevNeighbor buffers
-	// TRefCountPtr handles reference counting automatically
-	PrevNeighborListBuffer = NeighborListBuffer;
-	PrevNeighborCountsBuffer = NeighborCountsBuffer;
-	PrevNeighborBufferParticleCount = CurrentParticleCount;
+	// Toggle buffer index for next frame
+	// Next frame: Write to [1-WriteIndex], Read from [WriteIndex]
+	CurrentNeighborBufferIndex = 1 - CurrentNeighborBufferIndex;
 	bPrevNeighborCacheValid = true;
 }
 

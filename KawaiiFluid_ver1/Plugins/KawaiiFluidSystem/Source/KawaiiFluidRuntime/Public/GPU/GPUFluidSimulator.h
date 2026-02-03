@@ -145,6 +145,10 @@ public:
 		bNeedsFullUpload = true;
 		InvalidatePreviousPositions();
 
+		// Reset double buffered neighbor cache state
+		CurrentNeighborBufferIndex = 0;
+		bPrevNeighborCacheValid = false;
+
 		// Also reset SpawnManager state (NextParticleID, AlreadyRequestedIDs, etc.)
 		if (SpawnManager)
 		{
@@ -1197,19 +1201,17 @@ private:
 	TRefCountPtr<FRDGPooledBuffer> PersistentCellStartBuffer;
 	TRefCountPtr<FRDGPooledBuffer> PersistentCellEndBuffer;
 
-	// Neighbor caching buffers - reuse neighbor list across solver iterations
-	// NeighborList: [ParticleCount * MAX_NEIGHBORS_PER_PARTICLE] - cached neighbor indices
-	// NeighborCounts: [ParticleCount] - number of neighbors per particle
-	TRefCountPtr<FRDGPooledBuffer> NeighborListBuffer;
-	TRefCountPtr<FRDGPooledBuffer> NeighborCountsBuffer;
-	int32 NeighborBufferParticleCapacity = 0;
-
-	// Previous frame neighbor cache buffers (for Cohesion Force in PredictPositions)
-	// Double buffering: Current frame builds new cache, PredictPositions uses previous frame's cache
-	// This allows Cohesion to be applied as a Force (Phase 2) rather than post-simulation velocity change
-	TRefCountPtr<FRDGPooledBuffer> PrevNeighborListBuffer;
-	TRefCountPtr<FRDGPooledBuffer> PrevNeighborCountsBuffer;
-	int32 PrevNeighborBufferParticleCount = 0;   // Particle count when prev cache was built
+	// Double Buffered Neighbor Cache (RAW Hazard Prevention)
+	// Buffer[0] and Buffer[1] are used alternately each frame to prevent GPU resource hazards.
+	// Problem: If we reuse the same buffer, PredictPositions (SRV read) and ConstraintSolverLoop
+	// (UAV write) access the same physical buffer, causing GPU pipeline stalls.
+	// Solution: True double buffering with physically separate buffers.
+	// CurrentNeighborBufferIndex: index used for WRITING this frame
+	// Read index = 1 - CurrentNeighborBufferIndex (previous frame's buffer for Cohesion Force)
+	TRefCountPtr<FRDGPooledBuffer> NeighborListBuffers[2];
+	TRefCountPtr<FRDGPooledBuffer> NeighborCountsBuffers[2];
+	int32 NeighborBufferParticleCapacities[2] = {0, 0};
+	int32 CurrentNeighborBufferIndex = 0;
 	bool bPrevNeighborCacheValid = false;        // False on first frame (skip Cohesion)
 
 	// Particle Sleeping (NVIDIA Flex stabilization)

@@ -56,26 +56,28 @@ void FGPUFluidSimulator::AddPredictPositionsPass(
 	PassParameters->ViscLaplacianCoeff = 45.0f / (PI * h6);
 
 	//=========================================================================
-	// Previous Frame Neighbor Cache (Double Buffering for Cohesion)
-	// Standard practice: use previous frame's neighbor list to avoid dependency
+	// Previous Frame Neighbor Cache (True Double Buffering for Cohesion)
+	// ReadIndex = 1 - CurrentNeighborBufferIndex (physically separate from WriteIndex)
+	// This prevents RAW hazards: SRV reads here, UAV writes in ConstraintSolverLoop
 	//=========================================================================
+	const int32 ReadIndex = 1 - CurrentNeighborBufferIndex;
 	const bool bCanUsePrevNeighborCache = bPrevNeighborCacheValid && 
-	                                       PrevNeighborListBuffer.IsValid() && 
-	                                       PrevNeighborCountsBuffer.IsValid() &&
-	                                       PrevNeighborBufferParticleCount > 0;
+	                                       NeighborListBuffers[ReadIndex].IsValid() && 
+	                                       NeighborCountsBuffers[ReadIndex].IsValid() &&
+	                                       NeighborBufferParticleCapacities[ReadIndex] > 0;
 
 	if (bCanUsePrevNeighborCache)
 	{
-		// Register previous frame's persistent neighbor cache buffers
+		// Register previous frame's neighbor cache buffers (ReadIndex - physically separate from WriteIndex)
 		FRDGBufferRef PrevNeighborListRDG = GraphBuilder.RegisterExternalBuffer(
-			PrevNeighborListBuffer, TEXT("GPUFluidPrevNeighborList"));
+			NeighborListBuffers[ReadIndex], TEXT("GPUFluidPrevNeighborList"));
 		FRDGBufferRef PrevNeighborCountsRDG = GraphBuilder.RegisterExternalBuffer(
-			PrevNeighborCountsBuffer, TEXT("GPUFluidPrevNeighborCounts"));
+			NeighborCountsBuffers[ReadIndex], TEXT("GPUFluidPrevNeighborCounts"));
 
 		PassParameters->PrevNeighborList = GraphBuilder.CreateSRV(PrevNeighborListRDG);
 		PassParameters->PrevNeighborCounts = GraphBuilder.CreateSRV(PrevNeighborCountsRDG);
 		PassParameters->bUsePrevNeighborCache = 1;
-		PassParameters->PrevParticleCount = PrevNeighborBufferParticleCount;
+		PassParameters->PrevParticleCount = NeighborBufferParticleCapacities[ReadIndex];
 	}
 	else
 	{
