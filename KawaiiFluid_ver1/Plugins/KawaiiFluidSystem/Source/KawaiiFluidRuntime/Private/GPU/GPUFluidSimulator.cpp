@@ -4,6 +4,7 @@
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "GPU/FluidAnisotropyComputeShader.h"
 #include "GPU/FluidStatsCompactShader.h"
+#include "GPU/FluidRecordZOrderIndicesShader.h"
 #include "GPU/Managers/GPUZOrderSortManager.h"
 #include "GPU/Managers/GPUBoundarySkinningManager.h"
 #include "GPU/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
@@ -183,6 +184,9 @@ void FGPUFluidSimulator::Release()
 
 	// Release Stats Readback objects
 	ReleaseStatsReadbackObjects();
+
+	// Release Debug Index Readback objects
+	ReleaseDebugIndexReadbackObjects();
 
 	bIsInitialized = false;
 	MaxParticleCount = 0;
@@ -864,6 +868,13 @@ void FGPUFluidSimulator::BeginFrame()
 				Self->ProcessAnisotropyReadback();
 			}
 
+			// Debug Z-Order index readback (for visualization)
+			if (Self->bDebugZOrderIndexEnabled.load())
+			{
+				SCOPED_DRAW_EVENT(RHICmdList, GPUFluid_BeginFrame_DebugIndex);
+				Self->ProcessDebugIndexReadback();
+			}
+
 			if (Self->SpawnManager.IsValid())
 			{
 				SCOPED_DRAW_EVENT(RHICmdList, GPUFluid_BeginFrame_SOURCECOUNT);
@@ -1054,6 +1065,14 @@ void FGPUFluidSimulator::EndFrame()
 
 					// Register PersistentParticleBuffer in RDG
 					FRDGBufferRef ParticleBuffer = GraphBuilder.RegisterExternalBuffer(Self->PersistentParticleBuffer);
+
+					// Debug Z-Order Index Recording (BEFORE ParticleID re-sort)
+					// ParticleBuffer is currently Z-Order sorted from previous Render pass
+					// Record each particle's array index: DebugIndices[ParticleID] = ArrayIndex
+					if (Self->bDebugZOrderIndexEnabled.load())
+					{
+						Self->AddRecordZOrderIndicesPass(GraphBuilder, ParticleBuffer, Self->CurrentParticleCount);
+					}
 
 					// Sort by ParticleID
 					FRDGBufferRef SortedBuffer = Self->ExecuteParticleIDSortPipeline(
@@ -4258,5 +4277,202 @@ bool FGPUFluidSimulator::GetShadowDataWithAnisotropy(
 		OutAnisotropyAxis3[i] = FVector4(ReadyShadowAnisotropyAxis3[i]);
 	}
 
+	return true;
+}
+
+//=============================================================================
+// Debug Z-Order Index Readback Implementation (Async GPU→CPU)
+//=============================================================================
+
+void FGPUFluidSimulator::AllocateDebugIndexReadbackObjects(FRHICommandListImmediate& RHICmdList)
+{
+	for (int32 i = 0; i < NUM_DEBUG_INDEX_READBACK_BUFFERS; ++i)
+	{
+		if (DebugIndexReadbacks[i] == nullptr)
+		{
+			DebugIndexReadbacks[i] = new FRHIGPUBufferReadback(*FString::Printf(TEXT("DebugIndexReadback_%d"), i));
+		}
+		DebugIndexReadbackFrameNumbers[i] = 0;
+		DebugIndexReadbackParticleCounts[i] = 0;
+	}
+
+	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Debug Z-Order index readback objects allocated (NumBuffers=%d)"), NUM_DEBUG_INDEX_READBACK_BUFFERS);
+}
+
+void FGPUFluidSimulator::ReleaseDebugIndexReadbackObjects()
+{
+	for (int32 i = 0; i < NUM_DEBUG_INDEX_READBACK_BUFFERS; ++i)
+	{
+		if (DebugIndexReadbacks[i] != nullptr)
+		{
+			delete DebugIndexReadbacks[i];
+			DebugIndexReadbacks[i] = nullptr;
+		}
+		DebugIndexReadbackFrameNumbers[i] = 0;
+		DebugIndexReadbackParticleCounts[i] = 0;
+	}
+	DebugIndexReadbackWriteIndex = 0;
+}
+
+void FGPUFluidSimulator::EnqueueDebugIndexReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount)
+{
+	if (ParticleCount <= 0 || SourceBuffer == nullptr)
+	{
+		return;
+	}
+
+	// Validate source buffer size (int32 per particle)
+	const uint32 SourceBufferSize = SourceBuffer->GetSize();
+	const uint32 ElementSize = sizeof(int32);
+	const uint32 RequiredSize = ParticleCount * ElementSize;
+	if (RequiredSize > SourceBufferSize)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning,
+			TEXT("EnqueueDebugIndexReadback: CopySize (%u) exceeds SourceBuffer size (%u). ParticleCount=%d, Skipping."),
+			RequiredSize, SourceBufferSize, ParticleCount);
+		return;
+	}
+
+	// Allocate readback objects if needed
+	if (DebugIndexReadbacks[0] == nullptr)
+	{
+		AllocateDebugIndexReadbackObjects(RHICmdList);
+	}
+
+	// Get current write index and advance for next frame
+	const int32 WriteIdx = DebugIndexReadbackWriteIndex;
+	DebugIndexReadbackWriteIndex = (DebugIndexReadbackWriteIndex + 1) % NUM_DEBUG_INDEX_READBACK_BUFFERS;
+
+	// Enqueue async copy (int32 per particle = 4 bytes)
+	const uint32 CopySize = ParticleCount * ElementSize;
+	RHICmdList.Transition(FRHITransitionInfo(SourceBuffer, ERHIAccess::UAVCompute, ERHIAccess::CopySrc));
+	DebugIndexReadbacks[WriteIdx]->EnqueueCopy(RHICmdList, SourceBuffer, CopySize);
+	RHICmdList.Transition(FRHITransitionInfo(SourceBuffer, ERHIAccess::CopySrc, ERHIAccess::UAVCompute));
+	DebugIndexReadbackFrameNumbers[WriteIdx] = GFrameCounterRenderThread;
+	DebugIndexReadbackParticleCounts[WriteIdx] = ParticleCount;
+}
+
+void FGPUFluidSimulator::ProcessDebugIndexReadback()
+{
+	if (DebugIndexReadbacks[0] == nullptr)
+	{
+		return;
+	}
+
+	// Search for oldest ready buffer
+	int32 ReadIdx = -1;
+	uint64 OldestFrame = UINT64_MAX;
+
+	for (int32 i = 0; i < NUM_DEBUG_INDEX_READBACK_BUFFERS; ++i)
+	{
+		if (DebugIndexReadbacks[i] != nullptr &&
+			DebugIndexReadbackFrameNumbers[i] > 0 &&
+			DebugIndexReadbacks[i]->IsReady())
+		{
+			if (DebugIndexReadbackFrameNumbers[i] < OldestFrame)
+			{
+				OldestFrame = DebugIndexReadbackFrameNumbers[i];
+				ReadIdx = i;
+			}
+		}
+	}
+
+	if (ReadIdx < 0)
+	{
+		return;  // No ready buffers
+	}
+
+	const int32 ParticleCount = DebugIndexReadbackParticleCounts[ReadIdx];
+	if (ParticleCount <= 0)
+	{
+		return;
+	}
+
+	// Lock buffer (int32 per particle)
+	const int32 BufferSize = ParticleCount * sizeof(int32);
+	const int32* IndexData = (const int32*)DebugIndexReadbacks[ReadIdx]->Lock(BufferSize);
+
+	if (IndexData == nullptr)
+	{
+		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("Debug Index Readback: Failed to lock buffer"));
+		return;
+	}
+
+	// Copy to cached array
+	CachedZOrderArrayIndices.SetNumUninitialized(ParticleCount);
+	FMemory::Memcpy(CachedZOrderArrayIndices.GetData(), IndexData, BufferSize);
+
+	// Unlock buffer
+	DebugIndexReadbacks[ReadIdx]->Unlock();
+
+	// Update frame counter
+	ReadyZOrderIndicesFrame.store(DebugIndexReadbackFrameNumbers[ReadIdx]);
+
+	// Mark buffer as available for next write cycle
+	DebugIndexReadbackFrameNumbers[ReadIdx] = 0;
+}
+
+void FGPUFluidSimulator::AddRecordZOrderIndicesPass(FRDGBuilder& GraphBuilder, FRDGBufferRef ParticleBuffer, int32 ParticleCount)
+{
+	// Allocate or register persistent debug index buffer
+	FRDGBufferRef DebugIndexBuffer = nullptr;
+	
+	if (!PersistentDebugZOrderIndexBuffer.IsValid() || PersistentDebugZOrderIndexBuffer->GetRHI()->GetSize() < (uint32)(ParticleCount * sizeof(int32)))
+	{
+		// Create new buffer
+		FRDGBufferDesc BufferDesc = FRDGBufferDesc::CreateBufferDesc(sizeof(int32), ParticleCount);
+		DebugIndexBuffer = GraphBuilder.CreateBuffer(BufferDesc, TEXT("DebugZOrderIndexBuffer"));
+		
+		// Convert to external buffer for persistence
+		PersistentDebugZOrderIndexBuffer = GraphBuilder.ConvertToExternalBuffer(DebugIndexBuffer);
+	}
+	else
+	{
+		// Register existing buffer
+		DebugIndexBuffer = GraphBuilder.RegisterExternalBuffer(PersistentDebugZOrderIndexBuffer);
+	}
+
+	// Get global shader map
+	FGlobalShaderMap* GlobalShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+	TShaderMapRef<FRecordZOrderIndicesCS> ComputeShader(GlobalShaderMap);
+
+	// Allocate shader parameters
+	FRecordZOrderIndicesCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FRecordZOrderIndicesCS::FParameters>();
+	PassParameters->Particles = GraphBuilder.CreateSRV(ParticleBuffer);
+	PassParameters->DebugZOrderIndices = GraphBuilder.CreateUAV(DebugIndexBuffer, PF_R32_SINT);
+	PassParameters->ParticleCount = ParticleCount;
+
+	// Calculate dispatch size
+	const int32 ThreadGroupSize = FRecordZOrderIndicesCS::ThreadGroupSize;
+	const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, ThreadGroupSize);
+
+	// Add compute pass
+	FComputeShaderUtils::AddPass(
+		GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::RecordZOrderIndices(%d)", ParticleCount),
+		ComputeShader,
+		PassParameters,
+		FIntVector(NumGroups, 1, 1));
+
+	// Enqueue readback
+	AddReadbackBufferPass(GraphBuilder,
+		RDG_EVENT_NAME("GPUFluid::DebugIndexReadback"),
+		DebugIndexBuffer,
+		[this, DebugIndexBuffer, ParticleCount](FRHICommandListImmediate& InRHICmdList)
+		{
+			this->EnqueueDebugIndexReadback(InRHICmdList, DebugIndexBuffer->GetRHI(), ParticleCount);
+		});
+}
+
+bool FGPUFluidSimulator::GetZOrderArrayIndices(TArray<int32>& OutIndices) const
+{
+	// Check if data is ready
+	if (ReadyZOrderIndicesFrame.load() == 0 || CachedZOrderArrayIndices.Num() == 0)
+	{
+		return false;
+	}
+
+	// Copy cached indices
+	OutIndices = CachedZOrderArrayIndices;
 	return true;
 }

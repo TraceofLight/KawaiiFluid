@@ -1399,6 +1399,38 @@ private:
 	/** Enable flag for anisotropy readback (requires bShadowReadbackEnabled) */
 	std::atomic<bool> bAnisotropyReadbackEnabled{false};
 
+	//=============================================================================
+	// Debug Z-Order Array Index Readback (Async GPU→CPU for debug visualization)
+	// Records each particle's array index after Z-Order sort (before ParticleID resort)
+	// Uses FRHIGPUBufferReadback for non-blocking readback (2-3 frame latency)
+	//=============================================================================
+
+	static constexpr int32 NUM_DEBUG_INDEX_READBACK_BUFFERS = 3;  // Triple buffering
+
+	/** Async readback objects for debug Z-Order array indices */
+	FRHIGPUBufferReadback* DebugIndexReadbacks[NUM_DEBUG_INDEX_READBACK_BUFFERS] = { nullptr };
+
+	/** Current write index for debug index readback ring buffer */
+	int32 DebugIndexReadbackWriteIndex = 0;
+
+	/** Frame number tracking for each debug index readback buffer */
+	uint64 DebugIndexReadbackFrameNumbers[NUM_DEBUG_INDEX_READBACK_BUFFERS] = { 0 };
+
+	/** Particle count for each debug index readback buffer */
+	int32 DebugIndexReadbackParticleCounts[NUM_DEBUG_INDEX_READBACK_BUFFERS] = { 0 };
+
+	/** Persistent GPU buffer for debug Z-Order array indices (int32 per particle) */
+	TRefCountPtr<FRDGPooledBuffer> PersistentDebugZOrderIndexBuffer;
+
+	/** Cached debug Z-Order array indices [ParticleID] → ZOrderArrayIndex */
+	TArray<int32> CachedZOrderArrayIndices;
+
+	/** Frame number of cached Z-Order indices */
+	std::atomic<uint64> ReadyZOrderIndicesFrame{0};
+
+	/** Enable flag for debug Z-Order index readback and recording */
+	std::atomic<bool> bDebugZOrderIndexEnabled{false};
+
 public:
 	//=============================================================================
 	// Shadow Position Readback API
@@ -1495,6 +1527,37 @@ public:
 	 */
 	bool GetShadowNeighborCounts(TArray<int32>& OutNeighborCounts) const;
 
+	//=============================================================================
+	// Debug Z-Order Array Index API (for visualization)
+	// Returns array indices after Z-Order sort, before ParticleID re-sort
+	//=============================================================================
+
+	/**
+	 * Enable or disable debug Z-Order array index recording and readback
+	 * When enabled, records each particle's array index after Z-Order sort
+	 * @param bEnabled - true to enable debug index recording
+	 */
+	void SetDebugZOrderIndexEnabled(bool bEnabled) { bDebugZOrderIndexEnabled.store(bEnabled); }
+
+	/**
+	 * Check if debug Z-Order index readback is enabled
+	 */
+	bool IsDebugZOrderIndexEnabled() const { return bDebugZOrderIndexEnabled.load(); }
+
+	/**
+	 * Check if debug Z-Order index data is ready for use
+	 * @return true if async readback has completed and indices are available
+	 */
+	bool HasReadyZOrderIndices() const { return ReadyZOrderIndicesFrame.load() > 0 && CachedZOrderArrayIndices.Num() > 0; }
+
+	/**
+	 * Get debug Z-Order array indices (non-blocking, returns previously completed readback)
+	 * Returns mapping: [ParticleID] → ZOrderArrayIndex
+	 * @param OutIndices - Output array of Z-Order array indices (indexed by ParticleID)
+	 * @return true if valid indices were retrieved
+	 */
+	bool GetZOrderArrayIndices(TArray<int32>& OutIndices) const;
+
 private:
 	/** Allocate anisotropy readback objects */
 	void AllocateAnisotropyReadbackObjects(FRHICommandListImmediate& RHICmdList);
@@ -1523,6 +1586,25 @@ void ReleaseAnisotropyReadbackObjects();
 
 	/** Process stats readback (check for completion, populate cached lightweight data) */
 	void ProcessStatsReadback(FRHICommandListImmediate& RHICmdList);
+
+	//=============================================================================
+	// Debug Z-Order Index Readback Internal Functions
+	//=============================================================================
+
+	/** Allocate debug Z-Order index readback objects */
+	void AllocateDebugIndexReadbackObjects(FRHICommandListImmediate& RHICmdList);
+
+	/** Release debug Z-Order index readback objects */
+	void ReleaseDebugIndexReadbackObjects();
+
+	/** Enqueue debug Z-Order index readback (int32 array: [ParticleID] → ZOrderArrayIndex) */
+	void EnqueueDebugIndexReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount);
+
+	/** Process debug Z-Order index readback (check for completion, populate CachedZOrderArrayIndices) */
+	void ProcessDebugIndexReadback();
+
+	/** Add RDG pass to record Z-Order array indices (call BEFORE ParticleID re-sort) */
+	void AddRecordZOrderIndicesPass(FRDGBuilder& GraphBuilder, FRDGBufferRef ParticleBuffer, int32 ParticleCount);
 };
 
 /**
