@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/FluidSceneViewExtension.h"
 
@@ -448,6 +448,11 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 					LitSceneColorCopy,
 					Output);
 			}
+
+			// Chained Rendering: Update LitSceneColorCopy with current Output
+			// This ensures the next batch reads the accumulated result (Scene + Previous Fluids) as background
+			// avoiding overwrite issues, especially when Surface Decoration uses explicit copy passes.
+			AddCopyTexturePass(GraphBuilder, Output.Texture, LitSceneColorCopy);
 
 			UE_LOG(LogTemp, Verbose,
 			       TEXT("KawaiiFluid: ScreenSpace Pipeline rendered %d renderers"),
