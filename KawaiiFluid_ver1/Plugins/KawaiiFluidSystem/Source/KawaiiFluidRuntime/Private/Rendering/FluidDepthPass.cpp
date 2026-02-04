@@ -50,7 +50,9 @@ void RenderFluidDepthPass(
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef& OutLinearDepthTexture,
 	FRDGTextureRef& OutVelocityTexture,
-	FRDGTextureRef& OutOcclusionMaskTexture)
+	FRDGTextureRef& OutOcclusionMaskTexture,
+	FRDGTextureRef& OutHardwareDepth,
+	bool bIncremental)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "FluidDepthPass_Batched");
 
@@ -59,9 +61,13 @@ void RenderFluidDepthPass(
 		return;
 	}
 
+	// Use the exact extent of the SceneDepthTexture for all intermediate textures
+	// to ensure compatibility during AddCopyTexturePass and sampling.
+	const FIntPoint TextureExtent = SceneDepthTexture->Desc.Extent;
+
 	// Create Depth Texture for smoothing
 	FRDGTextureDesc LinearDepthDesc = FRDGTextureDesc::Create2D(
-		View.UnscaledViewRect.Size(),
+		TextureExtent,
 		PF_R32_FLOAT,
 		FClearValueBinding(FLinearColor(MAX_flt, 0.0f, 0.0f, 0.0f)),
 		TexCreate_ShaderResource | TexCreate_RenderTargetable);
@@ -70,7 +76,7 @@ void RenderFluidDepthPass(
 
 	// Create Velocity Texture (for screen-space flow)
 	FRDGTextureDesc VelocityDesc = FRDGTextureDesc::Create2D(
-		View.UnscaledViewRect.Size(),
+		TextureExtent,
 		PF_G16R16F,  // RG16F for 2D screen velocity
 		FClearValueBinding(FLinearColor(0.0f, 0.0f, 0.0f, 0.0f)),
 		TexCreate_ShaderResource | TexCreate_RenderTargetable);
@@ -79,7 +85,7 @@ void RenderFluidDepthPass(
 
 	// Create OcclusionMask Texture (1.0 = visible, 0.0 = occluded by scene geometry)
 	FRDGTextureDesc OcclusionMaskDesc = FRDGTextureDesc::Create2D(
-		View.UnscaledViewRect.Size(),
+		TextureExtent,
 		PF_R8,  // Single channel, 8-bit is sufficient for mask
 		FClearValueBinding(FLinearColor(0.0f, 0.0f, 0.0f, 0.0f)),
 		TexCreate_ShaderResource | TexCreate_RenderTargetable);
@@ -88,7 +94,7 @@ void RenderFluidDepthPass(
 
 	// Create Depth Texture for Z-Test
 	FRDGTextureDesc HardwareDepthDesc = FRDGTextureDesc::Create2D(
-		View.UnscaledViewRect.Size(),
+		TextureExtent,
 		PF_DepthStencil,
 		FClearValueBinding::DepthFar,
 		TexCreate_DepthStencilTargetable | TexCreate_ShaderResource);
@@ -100,7 +106,19 @@ void RenderFluidDepthPass(
 	AddClearRenderTargetPass(GraphBuilder, OutLinearDepthTexture, FLinearColor(MAX_flt, 0, 0, 0));
 	AddClearRenderTargetPass(GraphBuilder, OutVelocityTexture, FLinearColor(0, 0, 0, 0));
 	AddClearRenderTargetPass(GraphBuilder, OutOcclusionMaskTexture, FLinearColor(0, 0, 0, 0));  // Default: occluded
-	AddClearDepthStencilPass(GraphBuilder, FluidDepthStencil, true, 0.0f, true, 0);
+	
+	if (bIncremental)
+	{
+		// [NEW] Incremental: Start with existing depth instead of clearing
+		AddCopyTexturePass(GraphBuilder, SceneDepthTexture, FluidDepthStencil);
+	}
+	else
+	{
+		AddClearDepthStencilPass(GraphBuilder, FluidDepthStencil, true, 0.0f, true, 0);
+	}
+
+	// Output hardware depth
+	OutHardwareDepth = FluidDepthStencil;
 
 	// Get ParticleRenderRadius from first renderer's LocalParameters
 	// (all renderers in batch have identical parameters - that's why they're batched)
@@ -265,11 +283,13 @@ void RenderFluidDepthPass(
 		TShaderMapRef<FFluidDepthVS> VertexShader(GlobalShaderMap, VSPermutationDomain);
 		TShaderMapRef<FFluidDepthPS> PixelShader(GlobalShaderMap, PSPermutationDomain);
 
+		const FIntRect ViewRect = ViewInfo.ViewRect;
+
 		GraphBuilder.AddPass(
 			RDG_EVENT_NAME("DepthDraw_Batched%s", bUseAnisotropy ? TEXT("_Anisotropic") : TEXT("")),
 			PassParameters,
 			ERDGPassFlags::Raster,
-			[VertexShader, PixelShader, PassParameters, ParticleCount](
+			[VertexShader, PixelShader, PassParameters, ParticleCount, ViewRect](
 			FRHICommandList& RHICmdList)
 			{
 				FGraphicsPipelineStateInitializer GraphicsPSOInit;
@@ -285,6 +305,12 @@ void RenderFluidDepthPass(
 					true, CF_Greater>::GetRHI();
 
 				RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
+
+				// Set Viewport to match the View's area within the texture extent.
+				// This fixes the diagonal clipping and alignment issues.
+				RHICmdList.SetViewport(
+					static_cast<float>(ViewRect.Min.X), static_cast<float>(ViewRect.Min.Y), 0.0f,
+					static_cast<float>(ViewRect.Max.X), static_cast<float>(ViewRect.Max.Y), 1.0f);
 
 				SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
 				SetShaderParameters(RHICmdList, VertexShader, VertexShader.GetVertexShader(),

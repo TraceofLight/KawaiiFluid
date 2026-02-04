@@ -34,7 +34,10 @@ public:
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture) override;
+		FRDGTextureRef SceneDepthTexture,
+		FRDGTextureRef& GlobalDepthTexture,
+		FRDGTextureRef GlobalVelocityTexture = nullptr,
+		FRDGTextureRef GlobalOcclusionMask = nullptr) override;
 
 	/** Execute rendering - applies PostProcess shading */
 	virtual void ExecuteRender(
@@ -43,6 +46,7 @@ public:
 		const FFluidRenderingParameters& RenderParams,
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
 		FRDGTextureRef SceneDepthTexture,
+		FRDGTextureRef GlobalDepthTexture,
 		FRDGTextureRef SceneColorTexture,
 		FScreenPassRenderTarget Output) override;
 

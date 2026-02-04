@@ -113,6 +113,24 @@ void KawaiiScreenSpaceShading::RenderPostProcessShading(
 	}
 	PassParameters->SceneUVScale = SceneUVScale;
 
+	// UV scaling and offset for Fluid textures (Depth, Normal, Thickness)
+	// These textures are sized to SceneDepth extent but only contain data in ViewRect.
+	FVector2f FluidUVScale(1.0f, 1.0f);
+	FVector2f FluidUVOffset(0.0f, 0.0f);
+	if (IntermediateTextures.SmoothedDepthTexture)
+	{
+		FIntPoint TextureSize = IntermediateTextures.SmoothedDepthTexture->Desc.Extent;
+		FluidUVScale = FVector2f(
+			(float)Output.ViewRect.Width() / (float)TextureSize.X,
+			(float)Output.ViewRect.Height() / (float)TextureSize.Y);
+		
+		FluidUVOffset = FVector2f(
+			(float)Output.ViewRect.Min.X / (float)TextureSize.X,
+			(float)Output.ViewRect.Min.Y / (float)TextureSize.Y);
+	}
+	PassParameters->FluidUVScale = FluidUVScale;
+	PassParameters->FluidUVOffset = FluidUVOffset;
+
 	// View matrices
 	PassParameters->InverseProjectionMatrix =
 		FMatrix44f(View.ViewMatrices.GetInvProjectionMatrix());

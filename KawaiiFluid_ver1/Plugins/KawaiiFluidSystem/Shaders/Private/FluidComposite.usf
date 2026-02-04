@@ -20,6 +20,8 @@ SamplerState PointClampSampler;  // Point sampling for depth textures to avoid e
 // UV scaling for SceneColor/SceneDepth (ViewRect / TextureSize)
 // Needed when texture size differs from ViewRect (e.g., Screen Percentage)
 float2 SceneUVScale;
+float2 FluidUVScale;
+float2 FluidUVOffset;
 
 float4x4 InverseProjectionMatrix;
 float4x4 ProjectionMatrix;
@@ -307,6 +309,7 @@ float2 CalculateRefractedFloorHit(float3 SurfacePos, float3 Normal, float3 ViewD
  */
 float CalculateCausticJacobian(
 	float2 ScreenUV,
+	float2 FluidUV,
 	float3 CenterNormal,
 	float FluidDepth,
 	float FloorDepth,
@@ -337,9 +340,11 @@ float CalculateCausticJacobian(
 	};
 
 	float2 SampleUVs[8];
+	float2 SampleFluidUVs[8];
 	for (int i = 0; i < 8; i++)
 	{
 		SampleUVs[i] = saturate(ScreenUV + Dirs[i] * Offset);
+		SampleFluidUVs[i] = SampleUVs[i] * FluidUVScale + FluidUVOffset;
 	}
 
 	// Bilinear sampling for smooth results
@@ -349,8 +354,8 @@ float CalculateCausticJacobian(
 
 	for (int j = 0; j < 8; j++)
 	{
-		Normals[j] = FluidNormalTexture.SampleLevel(InputSampler, SampleUVs[j], 0).xyz;
-		Depths[j] = FluidDepthTexture.SampleLevel(InputSampler, SampleUVs[j], 0).r;
+		Normals[j] = FluidNormalTexture.SampleLevel(InputSampler, SampleFluidUVs[j], 0).xyz;
+		Depths[j] = FluidDepthTexture.SampleLevel(InputSampler, SampleFluidUVs[j], 0).r;
 
 		if (Depths[j] < BACKGROUND_DEPTH_THRESH && length(Normals[j]) > 0.1)
 		{
@@ -419,12 +424,12 @@ float CalculateCausticJacobian(
 /**
  * Multi-scale caustic pattern using optical Jacobian.
  */
-float CausticPattern(float2 ScreenUV, float3 Normal, float FluidDepth, float FloorDepth,
+float CausticPattern(float2 ScreenUV, float2 FluidUV, float3 Normal, float FluidDepth, float FloorDepth,
                      float4x4 ViewMat, float IOR)
 {
-	float C1 = CalculateCausticJacobian(ScreenUV, Normal, FluidDepth, FloorDepth, ViewMat, IOR, 3.0);
-	float C2 = CalculateCausticJacobian(ScreenUV, Normal, FluidDepth, FloorDepth, ViewMat, IOR, 6.0);
-	float C3 = CalculateCausticJacobian(ScreenUV, Normal, FluidDepth, FloorDepth, ViewMat, IOR, 12.0);
+	float C1 = CalculateCausticJacobian(ScreenUV, FluidUV, Normal, FluidDepth, FloorDepth, ViewMat, IOR, 3.0);
+	float C2 = CalculateCausticJacobian(ScreenUV, FluidUV, Normal, FluidDepth, FloorDepth, ViewMat, IOR, 6.0);
+	float C3 = CalculateCausticJacobian(ScreenUV, FluidUV, Normal, FluidDepth, FloorDepth, ViewMat, IOR, 12.0);
 
 	float Combined = C1 * 0.25 + C2 * 0.35 + C3 * 0.4;
 
@@ -621,18 +626,19 @@ struct FReflectionResult
 
 /**
  * Sample fluid surface properties from intermediate textures.
- * @param UV Screen UV coordinate
+ * @param UV Original Screen UV coordinate (0-1)
+ * @param FluidUV Transformed UV for fluid textures (with scale/offset applied)
  * @param SceneUV Scene texture UV coordinate (with SceneUVScale applied)
  * @param OutSurface Output surface data
  * @return true if valid fluid pixel, false if background or occluded
  */
-bool SampleFluidSurface(float2 UV, float2 SceneUV, out FFluidSurfaceData OutSurface)
+bool SampleFluidSurface(float2 UV, float2 FluidUV, float2 SceneUV, out FFluidSurfaceData OutSurface)
 {
 	// Initialize output
 	OutSurface = (FFluidSurfaceData)0;
 
 	// Sample fluid depth (point sampling to avoid edge artifacts)
-	OutSurface.Depth = FluidDepthTexture.Sample(PointClampSampler, UV);
+	OutSurface.Depth = FluidDepthTexture.Sample(PointClampSampler, FluidUV);
 
 	// Discard background pixels (no fluid)
 	if (OutSurface.Depth > BACKGROUND_DEPTH_THRESH)
@@ -641,15 +647,15 @@ bool SampleFluidSurface(float2 UV, float2 SceneUV, out FFluidSurfaceData OutSurf
 	}
 
 	// Check occlusion mask (precomputed in FluidDepth pass)
-	OutSurface.OcclusionMask = OcclusionMaskTexture.SampleLevel(PointClampSampler, UV, 0).r;
+	OutSurface.OcclusionMask = OcclusionMaskTexture.SampleLevel(PointClampSampler, FluidUV, 0).r;
 	if (OutSurface.OcclusionMask < 0.5)
 	{
 		return false;
 	}
 
 	// Sample normal and thickness
-	OutSurface.Normal = FluidNormalTexture.Sample(PointClampSampler, UV).xyz;
-	OutSurface.Thickness = FluidThicknessTexture.Sample(PointClampSampler, UV).r;
+	OutSurface.Normal = FluidNormalTexture.Sample(PointClampSampler, FluidUV).xyz;
+	OutSurface.Thickness = FluidThicknessTexture.Sample(PointClampSampler, FluidUV).r;
 
 	// Apply thickness clamping if enabled
 	if (bEnableThicknessClamping > 0)
@@ -837,6 +843,7 @@ float3 CalculateVolumeScattering(FFluidSurfaceData Surface)
  */
 void CalculateRefraction(
 	float2 UV,
+	float2 FluidUV,
 	FFluidSurfaceData Surface,
 	float SceneLinearDepth,
 	float Fresnel,
@@ -939,9 +946,10 @@ void CalculateRefraction(
 		// Sample at neighbor position
 		float2 NeighborUV = UV + Directions[i] * PixelSize * SearchRadius;
 		NeighborUV = saturate(NeighborUV);
+		float2 NeighborFluidUV = NeighborUV * FluidUVScale + FluidUVOffset;
 
 		// Get neighbor's fluid depth
-		float NeighborFluidDepth = FluidDepthTexture.SampleLevel(PointClampSampler, NeighborUV, 0).r;
+		float NeighborFluidDepth = FluidDepthTexture.SampleLevel(PointClampSampler, NeighborFluidUV, 0).r;
 
 		// Skip if no fluid at neighbor
 		if (NeighborFluidDepth > BACKGROUND_DEPTH_THRESH)
@@ -950,7 +958,7 @@ void CalculateRefraction(
 		}
 
 		// Get neighbor's normal for refraction calculation
-		float3 NeighborNormal = FluidNormalTexture.SampleLevel(PointClampSampler, NeighborUV, 0).xyz;
+		float3 NeighborNormal = FluidNormalTexture.SampleLevel(PointClampSampler, NeighborFluidUV, 0).xyz;
 		if (length(NeighborNormal) < 0.1)
 		{
 			continue;
@@ -1025,12 +1033,13 @@ void CalculateRefraction(
 /**
  * Calculate caustic brightness multiplier.
  * @param UV Screen UV coordinate
+ * @param FluidUV Transformed fluid UV
  * @param Surface Fluid surface data
  * @param RefractedDepth Depth at refracted position
  * @param RefractionValidity Whether refraction was used
  * @return Caustic brightness multiplier (1.0 = no effect)
  */
-float CalculateCaustics(float2 UV, FFluidSurfaceData Surface, float RefractedDepth, float RefractionValidity)
+float CalculateCaustics(float2 UV, float2 FluidUV, FFluidSurfaceData Surface, float RefractedDepth, float RefractionValidity)
 {
 	// Caustics require refraction to be enabled (physically dependent)
 	// User's bEnableCaustics choice is preserved in data for when refraction is re-enabled
@@ -1039,7 +1048,7 @@ float CalculateCaustics(float2 UV, FFluidSurfaceData Surface, float RefractedDep
 		return 1.0;
 	}
 
-	float Pattern = CausticPattern(UV, Surface.Normal, Surface.Depth, RefractedDepth, ViewMatrix, RefractiveIndex);
+	float Pattern = CausticPattern(UV, FluidUV, Surface.Normal, Surface.Depth, RefractedDepth, ViewMatrix, RefractiveIndex);
 	float Brightness = 1.0 + Pattern * CausticIntensity;
 
 	// Fade based on fluid properties
@@ -1203,10 +1212,11 @@ void MainPS(
 {
 	float2 UV = Input.UV;
 	float2 SceneUV = UV * SceneUVScale;
+	float2 FluidUV = UV * FluidUVScale + FluidUVOffset;
 
 	// Sample fluid surface properties
 	FFluidSurfaceData Surface;
-	if (!SampleFluidSurface(UV, SceneUV, Surface))
+	if (!SampleFluidSurface(UV, FluidUV, SceneUV, Surface))
 	{
 		discard;
 		return;
@@ -1227,10 +1237,10 @@ void MainPS(
 	float3 RefractedBackground;
 	float RefractedDepth;
 	float RefractionValidity;
-	CalculateRefraction(UV, Surface, SceneLinearDepth, Lighting.Fresnel, RefractedBackground, RefractedDepth, RefractionValidity);
+	CalculateRefraction(UV, FluidUV, Surface, SceneLinearDepth, Lighting.Fresnel, RefractedBackground, RefractedDepth, RefractionValidity);
 
 	// Apply caustics
-	float CausticBrightness = CalculateCaustics(UV, Surface, RefractedDepth, RefractionValidity);
+	float CausticBrightness = CalculateCaustics(UV, FluidUV, Surface, RefractedDepth, RefractionValidity);
 	RefractedBackground *= CausticBrightness;
 
 	// Calculate transmittance and base color

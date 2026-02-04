@@ -33,12 +33,12 @@ void RenderFluidThicknessPass(
 		return;
 	}
 
-	// Create texture with viewport size
-	FIntPoint TextureSize = View.UnscaledViewRect.Size();
+	// Use the exact extent of the SceneDepthTexture for consistency across passes.
+	const FIntPoint TextureExtent = SceneDepthTexture->Desc.Extent;
 
 	// Create Thickness Texture
 	FRDGTextureDesc ThicknessDesc = FRDGTextureDesc::Create2D(
-		TextureSize,
+		TextureExtent,
 		PF_R16F,
 		FClearValueBinding::Black,
 		TexCreate_ShaderResource | TexCreate_RenderTargetable);
@@ -51,6 +51,10 @@ void RenderFluidThicknessPass(
 	// (all renderers in batch have identical parameters - that's why they're batched)
 	float ThicknessScale = Renderers[0]->GetLocalParameters().ThicknessScale;
 	float ParticleRadius = Renderers[0]->GetLocalParameters().ParticleRenderRadius;
+
+	// Pre-compute view parameters
+	const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
+	const FIntRect ViewRect = ViewInfo.ViewRect;
 
 	// Track processed RenderResources to prevent duplicate processing
 	TSet<FKawaiiFluidRenderResource*> ProcessedResources;
@@ -117,13 +121,12 @@ void RenderFluidThicknessPass(
 		PassParameters->SceneDepthSampler = TStaticSamplerState<SF_Point, AM_Clamp, AM_Clamp, AM_Clamp>::GetRHI();
 
 		// ViewRect and texture size for SceneDepth UV transformation
-		const FViewInfo& ViewInfo = static_cast<const FViewInfo&>(View);
 		PassParameters->SceneViewRect = FVector2f(
-			ViewInfo.ViewRect.Width(),
-			ViewInfo.ViewRect.Height());
+			static_cast<float>(ViewRect.Width()),
+			static_cast<float>(ViewRect.Height()));
 		PassParameters->SceneTextureSize = FVector2f(
-			SceneDepthTexture->Desc.Extent.X,
-			SceneDepthTexture->Desc.Extent.Y);
+			static_cast<float>(TextureExtent.X),
+			static_cast<float>(TextureExtent.Y));
 
 		PassParameters->RenderTargets[0] = FRenderTargetBinding(
 			OutThicknessTexture, ERenderTargetLoadAction::ELoad);
@@ -136,7 +139,7 @@ void RenderFluidThicknessPass(
 			RDG_EVENT_NAME("ThicknessDraw_Batched"),
 			PassParameters,
 			ERDGPassFlags::Raster,
-			[VertexShader, PixelShader, PassParameters, ParticleCount](
+			[VertexShader, PixelShader, PassParameters, ParticleCount, ViewRect](
 			FRHICommandList& RHICmdList)
 			{
 				FGraphicsPipelineStateInitializer GraphicsPSOInit;
@@ -156,6 +159,11 @@ void RenderFluidThicknessPass(
 					false, CF_Always>::GetRHI();
 
 				RHICmdList.ApplyCachedRenderTargets(GraphicsPSOInit);
+
+				// [FIX] Set Viewport to match the View's area within the texture extent.
+				RHICmdList.SetViewport(
+					static_cast<float>(ViewRect.Min.X), static_cast<float>(ViewRect.Min.Y), 0.0f,
+					static_cast<float>(ViewRect.Max.X), static_cast<float>(ViewRect.Max.Y), 1.0f);
 
 				SetGraphicsPipelineState(RHICmdList, GraphicsPSOInit, 0);
 				SetShaderParameters(RHICmdList, VertexShader, VertexShader.GetVertexShader(),

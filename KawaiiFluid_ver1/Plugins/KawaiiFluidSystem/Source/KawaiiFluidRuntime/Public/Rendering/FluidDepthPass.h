@@ -24,4 +24,6 @@ void RenderFluidDepthPass(
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef& OutLinearDepthTexture,
 	FRDGTextureRef& OutVelocityTexture,
-	FRDGTextureRef& OutOcclusionMaskTexture);
+	FRDGTextureRef& OutOcclusionMaskTexture,
+	FRDGTextureRef& OutHardwareDepth,
+	bool bIncremental = false);

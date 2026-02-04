@@ -27,6 +27,7 @@ static bool GenerateIntermediateTextures(
 	const FFluidRenderingParameters& RenderParams,
 	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
+	FRDGTextureRef& GlobalDepthTexture, // Reference to allow updating the accumulated hardware depth
 	FMetaballIntermediateTextures& OutIntermediateTextures)
 {
 	// Calculate average particle radius for this batch
@@ -46,29 +47,34 @@ static bool GenerateIntermediateTextures(
 	}
 
 	// Calculate DepthFalloff considering anisotropy
-	// When anisotropy is enabled, ellipsoids become flat and create larger depth jumps at edges
-	// We need to increase DepthFalloff to accommodate these larger depth differences
 	float DepthFalloff = AverageParticleRadius * 0.7f;
 	if (RenderParams.AnisotropyParams.bEnabled)
 	{
-		// Anisotropy can stretch particles up to AnisotropyMax (default 2.5) ratio
-		// This creates depth jumps proportional to the stretch, so multiply DepthFalloff accordingly
 		float AnisotropyMultiplier = FMath::Max(1.0f, RenderParams.AnisotropyParams.MaxStretch);
 		DepthFalloff *= AnisotropyMultiplier * 2.0f;
 	}
 	const int32 NumIterations = RenderParams.SmoothingIterations;
 
-	// 1. Depth Pass (outputs linear depth + screen-space velocity + occlusion mask)
+	// 1. Depth Pass (outputs linear depth + screen-space velocity + occlusion mask for THIS BATCH)
+	// IMPORTANT: Use GlobalDepthTexture (Hardware Depth: Scene + Previous Fluids) as the depth reference.
+	// We use bIncremental=true to ensure RenderFluidDepthPass starts with this existing depth.
 	FRDGTextureRef DepthTexture = nullptr;
 	FRDGTextureRef VelocityTexture = nullptr;
 	FRDGTextureRef OcclusionMaskTexture = nullptr;
-	RenderFluidDepthPass(GraphBuilder, View, Renderers, SceneDepthTexture, DepthTexture, VelocityTexture, OcclusionMaskTexture);
+	FRDGTextureRef HardwareDepthTexture = nullptr;
+	
+	RenderFluidDepthPass(GraphBuilder, View, Renderers, GlobalDepthTexture, 
+		DepthTexture, VelocityTexture, OcclusionMaskTexture, HardwareDepthTexture, true);
 
 	if (!DepthTexture)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Depth pass failed"));
 		return false;
 	}
+
+	// [IMPORTANT] Update GlobalDepthTexture with the NEW hardware depth.
+	// This ensures the next batch knows about this batch's surface.
+	GlobalDepthTexture = HardwareDepthTexture;
 
 	// 2. Smoothing Pass - Narrow-Range Filter (Truong & Yuksel 2018)
 	FRDGTextureRef SmoothedDepthTexture = nullptr;
@@ -86,7 +92,7 @@ static bool GenerateIntermediateTextures(
 	DistanceBasedParams.WorldScale = RenderParams.SmoothingWorldScale;
 	DistanceBasedParams.MinRadius = RenderParams.SmoothingMinRadius;
 	DistanceBasedParams.MaxRadius = RenderParams.SmoothingMaxRadius;
-
+	
 	RenderFluidNarrowRangeSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
 	                                    AdjustedParticleRadius,
 	                                    RenderParams.NarrowRangeThresholdRatio,
@@ -122,7 +128,6 @@ static bool GenerateIntermediateTextures(
 	}
 
 	// 5. Thickness Smoothing Pass (Separable Gaussian Blur)
-	// Smooths out individual particle contributions for cleaner Beer's Law absorption
 	FRDGTextureRef SmoothedThicknessTexture = nullptr;
 	const float ThicknessBlurRadius = static_cast<float>(RenderParams.SmoothingMaxRadius);
 	RenderFluidThicknessSmoothingPass(GraphBuilder, View, ThicknessTexture, SmoothedThicknessTexture,
@@ -135,8 +140,6 @@ static bool GenerateIntermediateTextures(
 	}
 
 	// 6. Velocity Smoothing Pass (Separable Gaussian Blur)
-	// Softens foam boundaries between particles by smoothing the velocity texture.
-	// Without this, foam edges appear sharp at particle boundaries ("rice grain" pattern).
 	FRDGTextureRef FinalVelocityTexture = VelocityTexture;
 	const bool bShouldSmoothVelocity = RenderParams.SurfaceDecoration.bEnabled &&
 		RenderParams.SurfaceDecoration.Foam.bEnabled &&
@@ -154,10 +157,6 @@ static bool GenerateIntermediateTextures(
 		if (SmoothedVelocityTexture)
 		{
 			FinalVelocityTexture = SmoothedVelocityTexture;
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Velocity smoothing pass failed, using raw velocity"));
 		}
 	}
 
@@ -177,7 +176,10 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 	const FSceneView& View,
 	const FFluidRenderingParameters& RenderParams,
 	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-	FRDGTextureRef SceneDepthTexture)
+	FRDGTextureRef SceneDepthTexture,
+	FRDGTextureRef& GlobalDepthTexture,
+	FRDGTextureRef GlobalVelocityTexture,
+	FRDGTextureRef GlobalOcclusionMask)
 {
 	if (Renderers.Num() == 0)
 	{
@@ -186,8 +188,9 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 
 	RDG_EVENT_SCOPE(GraphBuilder, "MetaballPipeline_ScreenSpace_PrepareForTonemap");
 
-	// Generate and cache intermediate textures for ExecuteTonemap
-	if (!GenerateIntermediateTextures(GraphBuilder, View, RenderParams, Renderers, SceneDepthTexture, CachedIntermediateTextures))
+	// Generate and cache intermediate textures using hardware depth updates
+	if (!GenerateIntermediateTextures(GraphBuilder, View, RenderParams, Renderers, SceneDepthTexture, 
+		GlobalDepthTexture, CachedIntermediateTextures))
 	{
 		return;
 	}
@@ -275,6 +278,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	const FFluidRenderingParameters& RenderParams,
 	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
+	FRDGTextureRef GlobalDepthTexture,
 	FRDGTextureRef SceneColorTexture,
 	FScreenPassRenderTarget Output)
 {
@@ -299,12 +303,12 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	if (bUseSurfaceDecoration)
 	{
 		// Surface Decoration enabled: render to intermediate texture first
-		// Use same size as Output.Texture to avoid copy issues
-		FIntPoint OutputTextureSize = Output.Texture->Desc.Extent;
+		// Use same size as SceneDepthTexture to ensure consistent alignment with other passes
+		FIntPoint TextureExtent = SceneDepthTexture->Desc.Extent;
 
-		// Create intermediate composite result texture (same size as output)
+		// Create intermediate composite result texture
 		FRDGTextureDesc CompositeDesc = FRDGTextureDesc::Create2D(
-			OutputTextureSize,
+			TextureExtent,
 			PF_FloatRGBA,
 			FClearValueBinding::Black,
 			TexCreate_ShaderResource | TexCreate_RenderTargetable | TexCreate_UAV);
@@ -321,12 +325,13 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 		AddCopyTexturePass(GraphBuilder, SceneColorTexture, CompositeResultTexture);
 
 		// Render fluid composite to intermediate texture
+		// Use GlobalDepthTexture (Hardware) which now contains 벽 + 이전 유체 + 현재 유체 정보
 		KawaiiScreenSpaceShading::RenderPostProcessShading(
 			GraphBuilder,
 			View,
 			RenderParams,
 			CachedIntermediateTextures,
-			SceneDepthTexture,
+			GlobalDepthTexture,
 			SceneColorTexture,
 			IntermediateOutput);
 
@@ -352,12 +357,13 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	else
 	{
 		// Surface Decoration disabled: render directly to output (no overhead)
+		// Use GlobalDepthTexture (Hardware) which now contains 벽 + 이전 유체 + 현재 유체 정보
 		KawaiiScreenSpaceShading::RenderPostProcessShading(
 			GraphBuilder,
 			View,
 			RenderParams,
 			CachedIntermediateTextures,
-			SceneDepthTexture,
+			GlobalDepthTexture,
 			SceneColorTexture,
 			Output);
 	}

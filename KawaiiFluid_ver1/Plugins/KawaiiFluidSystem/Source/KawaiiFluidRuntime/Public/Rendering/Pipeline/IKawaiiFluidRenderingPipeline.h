@@ -41,13 +41,19 @@ public:
 	 * @param RenderParams     Fluid rendering parameters
 	 * @param Renderers        Array of renderers to process
 	 * @param SceneDepthTexture Scene depth texture
+	 * @param GlobalDepthTexture Unified depth texture for all batches
+	 * @param GlobalVelocityTexture Unified velocity texture for all batches (Optional)
+	 * @param GlobalOcclusionMask Unified occlusion mask for all batches (Optional)
 	 */
 	virtual void PrepareRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FFluidRenderingParameters& RenderParams,
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
-		FRDGTextureRef SceneDepthTexture) = 0;
+		FRDGTextureRef SceneDepthTexture,
+		FRDGTextureRef& GlobalDepthTexture,
+		FRDGTextureRef GlobalVelocityTexture = nullptr,
+		FRDGTextureRef GlobalOcclusionMask = nullptr) = 0;
 
 	/**
 	 * Execute rendering (called at PrePostProcess timing)
@@ -62,6 +68,7 @@ public:
 	 * @param RenderParams     Fluid rendering parameters
 	 * @param Renderers        Array of renderers to process
 	 * @param SceneDepthTexture Scene depth texture
+	 * @param GlobalDepthTexture Unified depth texture for all batches
 	 * @param SceneColorTexture Scene color texture
 	 * @param Output           Final render target
 	 */
@@ -71,6 +78,7 @@ public:
 		const FFluidRenderingParameters& RenderParams,
 		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
 		FRDGTextureRef SceneDepthTexture,
+		FRDGTextureRef GlobalDepthTexture,
 		FRDGTextureRef SceneColorTexture,
 		FScreenPassRenderTarget Output) = 0;
 

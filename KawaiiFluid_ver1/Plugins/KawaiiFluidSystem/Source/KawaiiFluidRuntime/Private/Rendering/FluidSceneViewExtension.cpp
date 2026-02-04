@@ -28,6 +28,7 @@
 #include "Core/KawaiiRenderParticle.h"
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "Rendering/FluidDepthPass.h"
 
 // ==============================================================================
 // Class Implementation
@@ -329,6 +330,7 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 
 	// Collect all renderers for PrePostProcess (before TSR)
 	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
+	TArray<UKawaiiFluidMetaballRenderer*> AllActiveRenderers;
 
 	const TArray<TObjectPtr<UKawaiiFluidRenderingModule>>& Modules = SubsystemPtr->GetAllRenderingModules();
 	for (UKawaiiFluidRenderingModule* Module : Modules)
@@ -349,6 +351,7 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 			FContextCacheKey BatchKey(Preset);
 
 			ScreenSpaceBatches.FindOrAdd(BatchKey).Add(MetaballRenderer);
+			AllActiveRenderers.Add(MetaballRenderer);
 		}
 	}
 
@@ -380,15 +383,14 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		return;
 	}
 
+	// ============================================
+	// 1. Unified Hardware Depth (for Shading & Depth Pass Occlusion)
+	// This texture tracks (Environment + All Fluid Surfaces rendered so far) in Hardware Depth format.
+	// ============================================
+	FRDGTextureDesc CombinedDepthDesc = SceneDepthTexture->Desc;
+	FRDGTextureRef CombinedHardwareDepth = GraphBuilder.CreateTexture(CombinedDepthDesc, TEXT("KawaiiFluid_CombinedHardwareDepth"));
+	AddCopyTexturePass(GraphBuilder, SceneDepthTexture, CombinedHardwareDepth);
 
-	// Debug log - all should be at internal resolution now
-	//UE_LOG(LogTemp, Warning, TEXT("=== PrePostProcess TransparencyPass ==="));
-	//UE_LOG(LogTemp, Warning, TEXT("ViewRect: Min(%d,%d) Size(%d,%d)"),
-	//       ViewRect.Min.X, ViewRect.Min.Y, ViewRect.Width(), ViewRect.Height());
-	//UE_LOG(LogTemp, Warning, TEXT("SceneColor Size: (%d,%d)"),
-	//       SceneColorTexture->Desc.Extent.X, SceneColorTexture->Desc.Extent.Y);
-	//UE_LOG(LogTemp, Warning, TEXT("GBufferA Size: (%d,%d)"),
-	//       GBufferATexture->Desc.Extent.X, GBufferATexture->Desc.Extent.Y);
 
 	// Create output render target from SceneColor
 	FScreenPassRenderTarget Output(
@@ -405,27 +407,58 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	// Copy SceneColor
 	AddCopyTexturePass(GraphBuilder, SceneColorTexture, LitSceneColorCopy);
 
+	// ============================================
+	// 2. Sort Batches by MAX Distance (Back-to-Front)
+	// ============================================
+	struct FSortableBatch
+	{
+		FContextCacheKey Key;
+		TArray<UKawaiiFluidMetaballRenderer*> Renderers;
+		float MaxDistanceToCamera;
+	};
+
+	TArray<FSortableBatch> SortedBatches;
+	FVector CameraLocation = View.ViewMatrices.GetViewOrigin();
+
+	for (auto& Pair : ScreenSpaceBatches)
+	{
+		FSortableBatch NewBatch;
+		NewBatch.Key = Pair.Key;
+		NewBatch.Renderers = Pair.Value;
+
+		float MaxDist = 0.0f;
+		for (UKawaiiFluidMetaballRenderer* Renderer : NewBatch.Renderers)
+		{
+			float Dist = FVector::Distance(CameraLocation, Renderer->GetSpawnPositionHint());
+			MaxDist = FMath::Max(MaxDist, Dist);
+		}
+		NewBatch.MaxDistanceToCamera = MaxDist;
+
+		SortedBatches.Add(NewBatch);
+	}
+
+	SortedBatches.Sort([](const FSortableBatch& A, const FSortableBatch& B) {
+		return A.MaxDistanceToCamera > B.MaxDistanceToCamera;
+	});
 
 	// ============================================
-	// ScreenSpace Pipeline Rendering (before TSR)
-	// Batched by (Preset + GPUMode) - same context renders only once
+	// 3. Incremental Rendering Loop
 	// ============================================
-	for (auto& Batch : ScreenSpaceBatches)
+	for (auto& Batch : SortedBatches)
 	{
 		const FContextCacheKey& CacheKey = Batch.Key;
 		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Value;
+		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Renderers;
 
-		// Get rendering params directly from preset
 		const FFluidRenderingParameters& BatchParams = Preset->RenderingParameters;
 
-		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_ScreenSpace(%d)", Renderers.Num());
+		RDG_EVENT_SCOPE(GraphBuilder, "FluidBatch_Incremental(%d)", Renderers.Num());
 
 		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
 		{
 			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
 
-			// 1. PrepareRender - generate and cache intermediate textures
+			// 1. PrepareRender - CombinedHardwareDepth is passed as REFERENCE to be updated
 			{
 				RDG_EVENT_SCOPE(GraphBuilder, "PrepareRender");
 				Pipeline->PrepareRender(
@@ -433,10 +466,11 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 					View,
 					BatchParams,
 					Renderers,
-					SceneDepthTexture);
+					SceneDepthTexture,       // Original Scene Depth
+					CombinedHardwareDepth);  // Incremental Hardware Depth (Updated by Pipeline)
 			}
 
-			// 2. ExecuteRender - apply shading
+			// 2. ExecuteRender - uses the LATEST CombinedHardwareDepth for shading occlusion
 			{
 				RDG_EVENT_SCOPE(GraphBuilder, "ExecuteRender");
 				Pipeline->ExecuteRender(
@@ -445,22 +479,13 @@ void FFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 					BatchParams,
 					Renderers,
 					SceneDepthTexture,
+					CombinedHardwareDepth, // SHADER READS THIS: contains 벽 + 모든 이전 유체 + 현재 유체
 					LitSceneColorCopy,
 					Output);
 			}
 
 			// Chained Rendering: Update LitSceneColorCopy with current Output
-			// This ensures the next batch reads the accumulated result (Scene + Previous Fluids) as background
-			// avoiding overwrite issues, especially when Surface Decoration uses explicit copy passes.
 			AddCopyTexturePass(GraphBuilder, Output.Texture, LitSceneColorCopy);
-
-			UE_LOG(LogTemp, Verbose,
-			       TEXT("KawaiiFluid: ScreenSpace Pipeline rendered %d renderers"),
-			       Renderers.Num());
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid: No Pipeline found for ScreenSpace batch"));
 		}
 	}
 }
