@@ -7,6 +7,7 @@
 #include "KawaiiFluidEmitterTrigger.generated.h"
 
 class AKawaiiFluidEmitter;
+class AKawaiiFluidVolume;
 class UBoxComponent;
 class UBillboardComponent;
 
@@ -73,6 +74,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger",
 		meta = (EditCondition = "TriggerAction == EKawaiiFluidTriggerAction::Start", EditConditionHides))
 	bool bStopOnExit = true;
+
+	/** If true, clear all particles when the actor exits the trigger.
+	 *  Useful for demo maps where you want particles to disappear when leaving the area. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger",
+		meta = (EditCondition = "TriggerAction == EKawaiiFluidTriggerAction::Start", EditConditionHides))
+	bool bClearParticlesOnExit = false;
 
 	/** If true, only the player pawn can trigger this.
 	 *  If false, any actor with collision can trigger. */

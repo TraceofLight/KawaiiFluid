@@ -342,8 +342,8 @@ void FFluidPreviewScene::SpawnParticles(float DeltaTime)
 
 	// === Stream mode: velocity-based layer spawning (matches EmitterComponent::ProcessStreamEmitter) ===
 
-	// Calculate effective spacing
-	float EffectiveSpacing = CurrentPreset->SmoothingRadius * 0.5f;
+	// Calculate effective spacing from ParticleSpacing (matches Mass calculation)
+	float EffectiveSpacing = CurrentPreset->ParticleSpacing;
 	if (EffectiveSpacing <= 0.0f)
 	{
 		EffectiveSpacing = 10.0f;

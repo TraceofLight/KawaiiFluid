@@ -6,6 +6,7 @@
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
+#include "GPU/GPUFluidSimulator.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "DrawDebugHelpers.h"
 #include "Components/ArrowComponent.h"
@@ -463,7 +464,7 @@ void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
 		Count = FMath::Min(Count, MaxParticleCount - SpawnedParticleCount);
 	}
 
-	// Get effective spacing (0.56 matches Fill mode's HCP compensation)
+	// Get effective spacing from ParticleSpacing (matches Mass calculation)
 	float EffectiveSpacing = StreamParticleSpacing;
 	if (EffectiveSpacing <= 0.0f)
 	{
@@ -471,7 +472,7 @@ void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
 		{
 			if (UKawaiiFluidPresetDataAsset* Pst = Vol->GetPreset())
 			{
-				EffectiveSpacing = Pst->SmoothingRadius * 0.6f;
+				EffectiveSpacing = Pst->ParticleSpacing;
 			}
 		}
 	}
@@ -544,16 +545,16 @@ void UKawaiiFluidEmitterComponent::ProcessContinuousSpawn(float DeltaTime)
 
 void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 {
-	// Get EffectiveSpacing from Preset
+	// Get EffectiveSpacing from ParticleSpacing (matches Mass calculation)
 	float EffectiveSpacing = StreamParticleSpacing;
-	
+
 	if (AKawaiiFluidVolume* Vol = GetTargetVolume())
 	{
 		if (UKawaiiFluidPresetDataAsset* Pst = Vol->GetPreset())
 		{
 			if (EffectiveSpacing <= 0.0f)
 			{
-				EffectiveSpacing = Pst->SmoothingRadius * 0.56f;
+				EffectiveSpacing = Pst->ParticleSpacing;
 			}
 		}
 	}
@@ -1195,6 +1196,37 @@ UKawaiiFluidSimulationModule* UKawaiiFluidEmitterComponent::GetSimulationModule(
 		return Volume->GetSimulationModule();
 	}
 	return nullptr;
+}
+
+void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
+{
+	// Get the simulation module from target volume
+	UKawaiiFluidSimulationModule* Module = GetSimulationModule();
+	if (!Module)
+	{
+		return;
+	}
+
+	// Get the GPU simulator
+	FGPUFluidSimulator* GPUSim = Module->GetGPUSimulator();
+	if (!GPUSim)
+	{
+		return;
+	}
+
+	// Get particle IDs for this emitter's SourceID
+	const TArray<int32>* MyParticleIDsPtr = GPUSim->GetParticleIDsBySourceID(CachedSourceID);
+	if (MyParticleIDsPtr && MyParticleIDsPtr->Num() > 0)
+	{
+		// Request despawn of this emitter's particles
+		GPUSim->AddDespawnByIDRequests(*MyParticleIDsPtr);
+		UE_LOG(LogTemp, Log, TEXT("EmitterComponent [%s]: Clearing %d particles (SourceID=%d)"),
+			*GetName(), MyParticleIDsPtr->Num(), CachedSourceID);
+	}
+
+	// Reset spawned count and allow re-spawning
+	SpawnedParticleCount = 0;
+	bAutoSpawnExecuted = false;
 }
 
 //========================================

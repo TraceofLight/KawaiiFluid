@@ -2,6 +2,7 @@
 
 #include "Actors/KawaiiFluidEmitterTrigger.h"
 #include "Actors/KawaiiFluidEmitter.h"
+#include "Actors/KawaiiFluidVolume.h"
 #include "Components/BoxComponent.h"
 #include "Components/BillboardComponent.h"
 #include "GameFramework/Pawn.h"
@@ -96,10 +97,22 @@ void AKawaiiFluidEmitterTrigger::ExecuteExitAction()
 		return;
 	}
 
-	// Only stop if configured to do so
-	if (bStopOnExit && TriggerAction == EKawaiiFluidTriggerAction::Start)
+	// Only process exit actions when TriggerAction is Start
+	if (TriggerAction != EKawaiiFluidTriggerAction::Start)
+	{
+		return;
+	}
+
+	// Stop spawning if configured
+	if (bStopOnExit)
 	{
 		TargetEmitter->StopSpawn();
+	}
+
+	// Clear all particles spawned by this emitter (useful for demo maps)
+	if (bClearParticlesOnExit)
+	{
+		TargetEmitter->ClearSpawnedParticles();
 	}
 }
 

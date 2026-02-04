@@ -300,67 +300,98 @@ void UKawaiiFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 		return;
 	}
 
-	// Get feedback from GPUSimulator (from first GPU mode module)
-	FGPUFluidSimulator* GPUSimulator = nullptr;
-	UKawaiiFluidSimulationModule* SourceModule = nullptr;
+	// =====================================================
+	// Multi-Volume Support: Iterate all modules and aggregate per-FluidTag
+	// =====================================================
+	CurrentFluidTagCounts.Empty();
+	CurrentContactCount = 0;
+
+	TArray<FGPUCollisionFeedback> AllFeedback;
+	int32 TotalFeedbackCount = 0;
+	FGPUFluidSimulator* PrimaryGPUSimulator = nullptr;  // For force calculation
+	UKawaiiFluidSimulationModule* PrimarySourceModule = nullptr;
+
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
-		if (Module && Module->GetGPUSimulator())
+		if (!Module)
 		{
-			GPUSimulator = Module->GetGPUSimulator();
-			SourceModule = Module;
-			break;
+			continue;
+		}
+
+		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		if (!GPUSimulator)
+		{
+			continue;
+		}
+
+		// Get contact count for this owner from this Volume's GPUSimulator
+		const int32 ModuleContactCount = GPUSimulator->GetContactCountForOwner(MyOwnerID);
+
+		if (ModuleContactCount > 0)
+		{
+			// Get FluidName from this Module's Preset
+			FName FluidTag = NAME_None;
+			if (UKawaiiFluidPresetDataAsset* Preset = Module->GetPreset())
+			{
+				FluidTag = Preset->GetFluidName();
+
+				// Debug: Log FluidTag resolution
+				static int32 FluidTagDebugCounter = 0;
+				if (++FluidTagDebugCounter % 120 == 0)
+				{
+					UE_LOG(LogTemp, Warning, TEXT("[FluidInteraction] Module=%s, Preset=%s, FluidName=%s, ContactCount=%d"),
+						*Module->GetName(),
+						*Preset->GetName(),
+						*FluidTag.ToString(),
+						ModuleContactCount);
+				}
+			}
+
+			// Aggregate by FluidTag
+			CurrentFluidTagCounts.FindOrAdd(FluidTag) += ModuleContactCount;
+			CurrentContactCount += ModuleContactCount;
+		}
+
+		// Collect feedback from all modules (for force calculation)
+		if (GPUSimulator->IsCollisionFeedbackEnabled())
+		{
+			TArray<FGPUCollisionFeedback> ModuleFeedback;
+			int32 ModuleFeedbackCount = 0;
+			GPUSimulator->GetAllCollisionFeedback(ModuleFeedback, ModuleFeedbackCount);
+
+			if (ModuleFeedbackCount > 0)
+			{
+				AllFeedback.Append(ModuleFeedback);
+				TotalFeedbackCount += ModuleFeedbackCount;
+
+				// Use first module with feedback as primary for force calculation
+				if (!PrimaryGPUSimulator)
+				{
+					PrimaryGPUSimulator = GPUSimulator;
+					PrimarySourceModule = Module;
+				}
+			}
 		}
 	}
 
-	if (!GPUSimulator)
+	// Alias for compatibility with existing code below
+	FGPUFluidSimulator* GPUSimulator = PrimaryGPUSimulator;
+	UKawaiiFluidSimulationModule* SourceModule = PrimarySourceModule;
+	int32 FeedbackCount = TotalFeedbackCount;
+
+	if (!GPUSimulator && CurrentContactCount == 0)
 	{
-		// No GPUSimulator → decay force
+		// No contact → decay force
 		SmoothedForce = FMath::VInterpTo(SmoothedForce, FVector::ZeroVector, DeltaTime, ForceSmoothingSpeed);
 		CurrentFluidForce = SmoothedForce;
-		CurrentContactCount = 0;
 		CurrentAveragePressure = 0.0f;
-		// Gradual decay (prevents sudden changes)
 		EstimatedBuoyancyCenterOffset = FMath::VInterpTo(
 			EstimatedBuoyancyCenterOffset, FVector::ZeroVector, DeltaTime, 2.0f);
 		return;
 	}
 
-	// =====================================================
-	// New approach: use per-collider count buffer
-	// GPU aggregates collision counts per collider index,
-	// then filters by OwnerID to get particles colliding with this actor's colliders
-	// =====================================================
-	const int32 OwnerContactCount = GPUSimulator->GetContactCountForOwner(MyOwnerID);
-
-	// Debug: log collider counts
-	static int32 DebugLogCounter = 0;
-	if (++DebugLogCounter % 60 == 0)  // Log once every 60 frames
+	if (GPUSimulator && GPUSimulator->IsCollisionFeedbackEnabled() && FeedbackCount > 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FluidInteraction: OwnerID=%d, ContactCount=%d, TotalColliders=%d"),
-			MyOwnerID, OwnerContactCount, GPUSimulator->GetTotalColliderCount());
-	}
-
-	// Initialize and set per-fluid-tag counts
-	CurrentFluidTagCounts.Empty();
-	if (OwnerContactCount > 0)
-	{
-		// Currently processed with default tag (tag system can be expanded later)
-		CurrentFluidTagCounts.FindOrAdd(NAME_None) = OwnerContactCount;
-	}
-
-	// Trigger events with collider contact count
-	CurrentContactCount = OwnerContactCount;
-
-	// =====================================================
-	// Force calculation: only process when detailed feedback is needed
-	// (Count-based events work even when feedback is disabled)
-	// =====================================================
-	if (GPUSimulator->IsCollisionFeedbackEnabled())
-	{
-		TArray<FGPUCollisionFeedback> AllFeedback;
-		int32 FeedbackCount = 0;
-		GPUSimulator->GetAllCollisionFeedback(AllFeedback, FeedbackCount);
 
 		// Debug: Verify feedback reception + ColliderOwnerID sample
 		static int32 FeedbackDebugCounter = 0;

@@ -143,3 +143,11 @@ bool AKawaiiFluidEmitter::IsEnabled() const
 {
 	return EmitterComponent ? EmitterComponent->bEnabled : false;
 }
+
+void AKawaiiFluidEmitter::ClearSpawnedParticles()
+{
+	if (EmitterComponent)
+	{
+		EmitterComponent->ClearSpawnedParticles();
+	}
+}

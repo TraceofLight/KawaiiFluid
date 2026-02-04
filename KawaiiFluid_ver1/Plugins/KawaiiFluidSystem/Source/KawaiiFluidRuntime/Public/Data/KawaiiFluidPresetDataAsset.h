@@ -46,8 +46,8 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Material", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Viscosity = 0.5f;
 
-	/** Density (kg/m³) - Water: 1000, Slime: 1200, Honey: 1400 */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Material", meta = (ClampMin = "500.0", ClampMax = "3000.0"))
+	/** Density (kg/m³) - Water: 1000, Slime: 1200, Honey: 1400, Mercury: 13546 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics|Material", meta = (ClampMin = "100.0"))
 	float Density = 1200.0f;
 
 	/** Compressibility - lower = more incompressible, higher = softer */

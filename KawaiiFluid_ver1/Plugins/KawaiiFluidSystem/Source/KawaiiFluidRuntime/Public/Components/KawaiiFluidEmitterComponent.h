@@ -243,6 +243,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Emitter")
 	int32 GetSpawnedParticleCount() const { return SpawnedParticleCount; }
 
+	/** Clear all particles spawned by this emitter.
+	 *  Only removes particles with this emitter's SourceID, not all particles in the volume. */
+	UFUNCTION(BlueprintCallable, Category = "Emitter")
+	void ClearSpawnedParticles();
+
 	/** Check if the emitter has reached its particle limit */
 	UFUNCTION(BlueprintPure, Category = "Emitter")
 	bool HasReachedParticleLimit() const;

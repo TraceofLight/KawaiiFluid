@@ -1319,10 +1319,10 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayerBatch(FVecto
 		Dir = FVector(0, 0, -1);  // Default: downward direction
 	}
 
-	// Auto-calculate spacing (SmoothingRadius * 0.5)
+	// Auto-calculate spacing from ParticleSpacing (matches Mass calculation)
 	if (Spacing <= 0.0f)
 	{
-		Spacing = Preset ? Preset->SmoothingRadius * 0.5f : 10.0f;
+		Spacing = Preset ? Preset->ParticleSpacing : 10.0f;
 	}
 
 	// Limit jitter range (0 ~ 0.5)

@@ -105,6 +105,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Emitter|Control")
 	bool IsEnabled() const;
 
+	/** Clear all particles spawned by this emitter.
+	 *  Only removes particles with this emitter's SourceID, not all particles in the volume. */
+	UFUNCTION(BlueprintCallable, Category = "Emitter|Control")
+	void ClearSpawnedParticles();
+
 protected:
 	//========================================
 	// Components
