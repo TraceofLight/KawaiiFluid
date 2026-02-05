@@ -289,6 +289,9 @@ protected:
 	/** Whether stream is currently spawning (Stream mode) */
 	bool bStreamSpawning = false;
 
+	/** Flag to track if particles were just cleared (allows immediate re-spawn before GPU readback updates) */
+	bool bJustCleared = false;
+
 	/** Whether we need to search for volume in next tick (deferred search for BeginPlay order issues) */
 	bool bPendingVolumeSearch = false;
 

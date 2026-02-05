@@ -182,6 +182,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Spawn")
 	void ClearPendingSpawnRequests() { PendingSpawnRequests.Empty(); }
 
+	/** Clear pending spawn requests for a specific SourceID */
+	UFUNCTION(BlueprintCallable, Category = "Spawn")
+	void ClearPendingSpawnRequestsForSource(int32 SourceID)
+	{
+		PendingSpawnRequests.RemoveAll([SourceID](const FGPUSpawnRequest& Request)
+		{
+			return Request.SourceID == SourceID;
+		});
+	}
+
 	/** Process pending spawn requests (called automatically during simulation) */
 	void ProcessPendingSpawnRequests();
 

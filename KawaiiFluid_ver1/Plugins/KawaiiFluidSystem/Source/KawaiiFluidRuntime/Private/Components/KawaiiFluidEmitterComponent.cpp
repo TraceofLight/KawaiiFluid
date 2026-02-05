@@ -508,13 +508,19 @@ bool UKawaiiFluidEmitterComponent::HasReachedParticleLimit() const
 	{
 		return false;  // No limit set
 	}
-	
+
+	// Just cleared: allow spawning immediately (GPU readback takes several frames to update)
+	if (bJustCleared)
+	{
+		return false;
+	}
+
 	// Recycle mode (Stream only): don't block spawning, let recycle handle overflow
 	if (bRecycleOldestParticles && IsStreamMode())
 	{
 		return false;
 	}
-	
+
 	// Use actual per-source particle count from GPU readback
 	UKawaiiFluidSimulationModule* Module = GetSimulationModule();
 	if (Module && CachedSourceID >= 0)
@@ -525,7 +531,7 @@ bool UKawaiiFluidEmitterComponent::HasReachedParticleLimit() const
 			return ActualCount >= MaxParticleCount;
 		}
 	}
-	
+
 	// If readback not ready, allow spawning (don't block based on SpawnedParticleCount)
 	// SpawnedParticleCount only goes up and doesn't account for particle deaths
 	return false;
@@ -1187,6 +1193,10 @@ void UKawaiiFluidEmitterComponent::QueueSpawnRequest(const TArray<FVector>& Posi
 	Volume->QueueSpawnRequests(Positions, Velocities, CachedSourceID);
 
 	SpawnedParticleCount += Positions.Num();
+
+	// Clear the "just cleared" flag now that spawning has started
+	// This re-enables normal limit checking once GPU readback updates
+	bJustCleared = false;
 }
 
 UKawaiiFluidSimulationModule* UKawaiiFluidEmitterComponent::GetSimulationModule() const
@@ -1200,6 +1210,13 @@ UKawaiiFluidSimulationModule* UKawaiiFluidEmitterComponent::GetSimulationModule(
 
 void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 {
+	// First, clear any pending spawn requests for this emitter (prevents last-frame spawn leak)
+	// This clears Volume's PendingSpawnRequests queue
+	if (TargetVolume && CachedSourceID >= 0)
+	{
+		TargetVolume->ClearPendingSpawnRequestsForSource(CachedSourceID);
+	}
+
 	// Get the simulation module from target volume
 	UKawaiiFluidSimulationModule* Module = GetSimulationModule();
 	if (!Module)
@@ -1212,6 +1229,17 @@ void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 	if (!GPUSim)
 	{
 		return;
+	}
+
+	// Also clear GPUSpawnManager's pending queue (requests may have been transferred there)
+	if (FGPUSpawnManager* SpawnMgr = GPUSim->GetSpawnManager())
+	{
+		const int32 CancelledCount = SpawnMgr->CancelPendingSpawnsForSource(CachedSourceID);
+		if (CancelledCount > 0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("EmitterComponent [%s]: Cancelled %d pending spawns from GPUSpawnManager (SourceID=%d)"),
+				*GetName(), CancelledCount, CachedSourceID);
+		}
 	}
 
 	// Get particle IDs for this emitter's SourceID
@@ -1227,6 +1255,7 @@ void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 	// Reset spawned count and allow re-spawning
 	SpawnedParticleCount = 0;
 	bAutoSpawnExecuted = false;
+	bJustCleared = true;  // Allow immediate re-spawn before GPU readback updates
 }
 
 //========================================
