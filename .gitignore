@@ -1,0 +1,42 @@
+# Unreal Engine - Basic Folders
+Binaries/
+Build/
+DerivedDataCache/
+Intermediate/
+Saved/
+Content/
+
+# Plugins - Binaries and Intermediate folders within plugins
+Plugins/*/Binaries/
+Plugins/*/Intermediate/
+
+# IDE and Editor Settings
+.vs/
+**/.vs/
+.idea/
+**/.idea/
+.claude/
+**/.claude/
+*.sln
+*.vcxproj
+*.filters
+*.user
+*.suo
+*.userosscache
+*.sln.doccache
+.vsconfig
+
+# Compiled Files & Logs
+*.log
+*.pdb
+*.obj
+*.exe
+*.dll
+
+# AI Assistant Documents & Temp Files
+CLAUDE.md
+GEMINI.md
+nul
+*.bak
+tmpclaude*
+**/tmpclaude*
