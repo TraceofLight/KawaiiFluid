@@ -27,6 +27,11 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
+  - Easy Start Rules: easy-start-rules.md
+  - User Guides:
+      - Volume & Emitter Guide: volume-emitter-guide.md
+      - Brush Tool: brush.md
+      - Interaction Examples: interaction-bp-example.md
 
 markdown_extensions:
   - admonition
@@ -35,3 +40,5 @@ markdown_extensions:
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
+  - attr_list
+  - md_in_html
