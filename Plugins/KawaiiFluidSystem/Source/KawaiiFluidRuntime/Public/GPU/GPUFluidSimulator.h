@@ -149,6 +149,10 @@ public:
 		CurrentNeighborBufferIndex = 0;
 		bPrevNeighborCacheValid = false;
 
+		// Reset indirect dispatch state
+		bEverHadParticles = false;
+		PersistentParticleCountBuffer = nullptr;
+
 		// Also reset SpawnManager state (NextParticleID, AlreadyRequestedIDs, etc.)
 		if (SpawnManager)
 		{
@@ -1283,6 +1287,35 @@ private:
 
 	// GPU Counter buffer for atomic particle count (used during spawn pass)
 	TRefCountPtr<FRDGPooledBuffer> ParticleCounterBuffer;
+
+	//=============================================================================
+	// Indirect Dispatch Infrastructure
+	// PersistentParticleCountBuffer: 28 bytes (7 x uint32)
+	//   [0-2]: IndirectArgs for TG=256 (GroupX, 1, 1)
+	//   [3-5]: IndirectArgs for TG=512 (GroupX, 1, 1)
+	//   [6]:   Raw particle count
+	//=============================================================================
+
+	/** GPU-authoritative particle count buffer for DispatchIndirect */
+	TRefCountPtr<FRDGPooledBuffer> PersistentParticleCountBuffer;
+
+	/** Async readback for GPU particle count → CPU CurrentParticleCount */
+	FRHIGPUBufferReadback* ParticleCountReadback = nullptr;
+
+	/** True once particles have ever existed (replaces CurrentParticleCount==0 early-out) */
+	bool bEverHadParticles = false;
+
+	/** Transient: IndirectArgs buffer valid only during SimulateSubstep_RDG scope */
+	FRDGBufferRef CurrentIndirectArgsBuffer = nullptr;
+
+	/** Register PersistentParticleCountBuffer as RDG external buffer, creating if needed */
+	FRDGBufferRef RegisterParticleCountBuffer(FRDGBuilder& GraphBuilder);
+
+	/** Enqueue async readback of PersistentParticleCountBuffer */
+	void EnqueueParticleCountReadback(FRHICommandListImmediate& RHICmdList);
+
+	/** Process completed readback → update CurrentParticleCount */
+	void ProcessParticleCountReadback();
 
 	//=============================================================================
 	// Collision System (Delegated to FGPUCollisionManager)

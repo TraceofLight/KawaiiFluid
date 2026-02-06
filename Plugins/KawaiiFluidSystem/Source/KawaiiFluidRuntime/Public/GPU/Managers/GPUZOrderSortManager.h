@@ -133,7 +133,8 @@ public:
 		int32 AllocParticleCount = 0,
 		// Optional: BoneDeltaAttachment buffer to reorder along with particles
 		FRDGBufferRef InAttachmentBuffer = nullptr,
-		FRDGBufferRef* OutSortedAttachmentBuffer = nullptr);
+		FRDGBufferRef* OutSortedAttachmentBuffer = nullptr,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 private:
 	//=========================================================================
@@ -147,7 +148,8 @@ private:
 		FRDGBufferUAVRef MortonCodesUAV,
 		FRDGBufferUAVRef InParticleIndicesUAV,
 		int32 CurrentParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	/** Step 2: GPU Radix Sort (sorts Morton codes + particle indices) */
 	void AddRadixSortPasses(
@@ -166,7 +168,8 @@ private:
 		int32 CurrentParticleCount,
 		// Optional: BoneDeltaAttachment reordering
 		FRDGBufferSRVRef OldAttachmentsSRV = nullptr,
-		FRDGBufferUAVRef SortedAttachmentsUAV = nullptr);
+		FRDGBufferUAVRef SortedAttachmentsUAV = nullptr,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	/** Step 4: Compute Cell Start/End indices from sorted Morton codes */
 	void AddComputeCellStartEndPass(
@@ -174,7 +177,8 @@ private:
 		FRDGBufferSRVRef SortedMortonCodesSRV,
 		FRDGBufferUAVRef CellStartUAV,
 		FRDGBufferUAVRef CellEndUAV,
-		int32 CurrentParticleCount);
+		int32 CurrentParticleCount,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	//=========================================================================
 	// State

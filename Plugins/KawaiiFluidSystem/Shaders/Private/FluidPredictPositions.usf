@@ -23,6 +23,7 @@
 
 RWStructuredBuffer<FGPUFluidParticle> Particles;
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float DeltaTime;
 float3 Gravity;
 float3 ExternalForce;
@@ -60,7 +61,7 @@ void PredictPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
     // Bounds check - this one branch is unavoidable (prevents out-of-bounds write)
     // Writing to invalid indices could corrupt memory or crash
-    if (idx >= (uint)ParticleCount)
+    if (idx >= ParticleCountBuffer[6])
     {
         return;
     }

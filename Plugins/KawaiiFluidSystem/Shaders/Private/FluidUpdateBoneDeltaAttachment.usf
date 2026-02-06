@@ -51,6 +51,7 @@ struct FGPUBoundaryParticleWithBone
 // Fluid particles
 RWStructuredBuffer<FGPUFluidParticle> Particles;
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 
 // Bone Delta Attachment buffer (read/write)
 RWStructuredBuffer<FGPUBoneDeltaAttachment> BoneDeltaAttachments;
@@ -225,7 +226,7 @@ int3 WorldToCell_Update(float3 worldPos)
 void UpdateBoneDeltaAttachmentCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}

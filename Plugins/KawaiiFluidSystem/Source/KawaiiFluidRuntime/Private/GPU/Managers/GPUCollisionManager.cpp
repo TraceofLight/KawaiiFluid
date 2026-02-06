@@ -3,6 +3,7 @@
 
 #include "GPU/Managers/GPUCollisionManager.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "GPU/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "RHIGPUReadback.h"
@@ -121,7 +122,8 @@ void FGPUCollisionManager::AddBoundsCollisionPass(
 	FRDGBuilder& GraphBuilder,
 	const FSimulationSpatialData& SpatialData,
 	int32 ParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FBoundsCollisionCS> ComputeShader(ShaderMap);
@@ -133,6 +135,7 @@ void FGPUCollisionManager::AddBoundsCollisionPass(
 	PassParameters->PackedVelocities = GraphBuilder.CreateUAV(SpatialData.SoA_PackedVelocities, PF_R32G32_UINT);  // B plan
 	PassParameters->Flags = GraphBuilder.CreateUAV(SpatialData.SoA_Flags, PF_R32_UINT);
 	PassParameters->ParticleCount = ParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	PassParameters->ParticleRadius = Params.ParticleRadius;
 
 	// OBB parameters
@@ -149,15 +152,20 @@ void FGPUCollisionManager::AddBoundsCollisionPass(
 	PassParameters->Restitution = Params.BoundsRestitution;
 	PassParameters->Friction = Params.BoundsFriction;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FBoundsCollisionCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::BoundsCollision"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::BoundsCollision"),
+			ComputeShader, PassParameters, IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FBoundsCollisionCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::BoundsCollision"),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 //=============================================================================
@@ -168,7 +176,8 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 	FRDGBuilder& GraphBuilder,
 	const FSimulationSpatialData& SpatialData,
 	int32 ParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	// Skip if no collision primitives
 	if (!bCollisionPrimitivesValid || GetCollisionPrimitiveCount() == 0)
@@ -347,6 +356,7 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 	PassParameters->SourceIDs = GraphBuilder.CreateSRV(SpatialData.SoA_SourceIDs, PF_R32_SINT);
 	PassParameters->Flags = GraphBuilder.CreateUAV(SpatialData.SoA_Flags, PF_R32_UINT);
 	PassParameters->ParticleCount = ParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	PassParameters->ParticleRadius = Params.ParticleRadius;
 	PassParameters->CollisionThreshold = PrimitiveCollisionThreshold;
 
@@ -374,17 +384,25 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 	PassParameters->ColliderContactCounts = GraphBuilder.CreateUAV(ContactCountBuffer);
 	PassParameters->MaxColliderCount = FGPUCollisionFeedbackManager::MAX_COLLIDER_COUNT;
 
-	const int32 ThreadGroupSize = FPrimitiveCollisionCS::ThreadGroupSize;
-	const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::PrimitiveCollision(%d particles, %d primitives, feedback=%s)",
-			ParticleCount, CachedSpheres.Num() + CachedCapsules.Num() + CachedBoxes.Num() + CachedConvexHeaders.Num(),
-			bFeedbackEnabled ? TEXT("ON") : TEXT("OFF")),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1));
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::PrimitiveCollision(%d primitives, feedback=%s)",
+				CachedSpheres.Num() + CachedCapsules.Num() + CachedBoxes.Num() + CachedConvexHeaders.Num(),
+				bFeedbackEnabled ? TEXT("ON") : TEXT("OFF")),
+			ComputeShader, PassParameters, IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const int32 ThreadGroupSize = FPrimitiveCollisionCS::ThreadGroupSize;
+		const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::PrimitiveCollision(%d particles, %d primitives, feedback=%s)",
+				ParticleCount, CachedSpheres.Num() + CachedCapsules.Num() + CachedBoxes.Num() + CachedConvexHeaders.Num(),
+				bFeedbackEnabled ? TEXT("ON") : TEXT("OFF")),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 
 	// Single unified buffer extraction (replaces 6 separate extractions)
 	if (bFeedbackEnabled && FeedbackManager.IsValid())
@@ -688,7 +706,8 @@ void FGPUCollisionManager::AddHeightmapCollisionPass(
 	FRDGBuilder& GraphBuilder,
 	const FSimulationSpatialData& SpatialData,
 	int32 ParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	// Skip if heightmap collision is not enabled or no valid data
 	if (!HeightmapParams.bEnabled || !bHeightmapDataValid || !HeightmapTextureRHI.IsValid())
@@ -710,6 +729,7 @@ void FGPUCollisionManager::AddHeightmapCollisionPass(
 	PassParameters->PackedVelocities = GraphBuilder.CreateUAV(SpatialData.SoA_PackedVelocities, PF_R32G32_UINT);  // B plan
 	PassParameters->Flags = GraphBuilder.CreateUAV(SpatialData.SoA_Flags, PF_R32_UINT);
 	PassParameters->ParticleCount = ParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	PassParameters->ParticleRadius = HeightmapParams.ParticleRadius > 0 ? HeightmapParams.ParticleRadius : Params.ParticleRadius;
 
 	// Heightmap texture
@@ -731,13 +751,18 @@ void FGPUCollisionManager::AddHeightmapCollisionPass(
 	PassParameters->NormalStrength = HeightmapParams.NormalStrength;
 	PassParameters->CollisionOffset = HeightmapParams.CollisionOffset;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FHeightmapCollisionCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::HeightmapCollision(%dx%d)", HeightmapParams.TextureWidth, HeightmapParams.TextureHeight),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::HeightmapCollision(%dx%d)", HeightmapParams.TextureWidth, HeightmapParams.TextureHeight),
+			ComputeShader, PassParameters, IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FHeightmapCollisionCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::HeightmapCollision(%dx%d)", HeightmapParams.TextureWidth, HeightmapParams.TextureHeight),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }

@@ -2,6 +2,7 @@
 
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "GPU/GPUIndirectDispatchUtils.h"
 #include "GPU/FluidAnisotropyComputeShader.h"
 #include "GPU/FluidStatsCompactShader.h"
 #include "GPU/FluidRecordZOrderIndicesShader.h"
@@ -190,6 +191,15 @@ void FGPUFluidSimulator::Release()
 
 	// Release Particle Bounds Readback objects
 	ReleaseParticleBoundsReadbackObjects();
+
+	// Release Indirect Dispatch resources
+	PersistentParticleCountBuffer = nullptr;
+	if (ParticleCountReadback)
+	{
+		delete ParticleCountReadback;
+		ParticleCountReadback = nullptr;
+	}
+	bEverHadParticles = false;
 
 	bIsInitialized = false;
 	MaxParticleCount = 0;
@@ -475,8 +485,8 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 {
 	// Spawn/despawn handled in BeginFrame - this is physics only
 
-	// Skip if no particles
-	if (CurrentParticleCount == 0)
+	// Skip if no particles have ever existed
+	if (!bEverHadParticles)
 	{
 		return;
 	}
@@ -491,6 +501,9 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	CachedCellSize = Params.CellSize;
 
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluidSimulation (Particles: %d)", CurrentParticleCount);
+
+	// Register IndirectArgs buffer for DispatchIndirect
+	CurrentIndirectArgsBuffer = RegisterParticleCountBuffer(GraphBuilder);
 
 	// Pre-allocate transient buffers to MaxParticleCount to avoid D3D12 pool allocation hitches
 	const int32 AllocParticleCount = MaxParticleCount > 0 ? MaxParticleCount : CurrentParticleCount;
@@ -670,14 +683,22 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		PassParams->OutParticleIDs = GraphBuilder.CreateUAV(SpatialData.SoA_ParticleIDs, PF_R32_SINT);
 		PassParams->OutSourceIDs = GraphBuilder.CreateUAV(SpatialData.SoA_SourceIDs, PF_R32_SINT);
 		PassParams->SplitParticleCount = CurrentParticleCount;
+		if (CurrentIndirectArgsBuffer) PassParams->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("SplitAoSToSoA"),
-			ComputeShader,
-			PassParams,
-			FComputeShaderUtils::GetGroupCount(CurrentParticleCount, FSplitAoSToSoACS::ThreadGroupSize)
-		);
+		if (CurrentIndirectArgsBuffer)
+		{
+			GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+				RDG_EVENT_NAME("SplitAoSToSoA"),
+				ComputeShader, PassParams, CurrentIndirectArgsBuffer,
+				GPUIndirectDispatch::IndirectArgsOffset_TG256);
+		}
+		else
+		{
+			FComputeShaderUtils::AddPass(GraphBuilder,
+				RDG_EVENT_NAME("SplitAoSToSoA"),
+				ComputeShader, PassParams,
+				FComputeShaderUtils::GetGroupCount(CurrentParticleCount, FSplitAoSToSoACS::ThreadGroupSize));
+		}
 	}
 
 	// =====================================================
@@ -718,14 +739,22 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		PassParams->MergeUniformParticleMass = Params.ParticleMass;
 		PassParams->TargetParticles = ParticlesUAVLocal;
 		PassParams->MergeParticleCount = CurrentParticleCount;
+		if (CurrentIndirectArgsBuffer) PassParams->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("MergeSoAToAoS"),
-			ComputeShader,
-			PassParams,
-			FComputeShaderUtils::GetGroupCount(CurrentParticleCount, FMergeSoAToAoSCS::ThreadGroupSize)
-		);
+		if (CurrentIndirectArgsBuffer)
+		{
+			GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+				RDG_EVENT_NAME("MergeSoAToAoS"),
+				ComputeShader, PassParams, CurrentIndirectArgsBuffer,
+				GPUIndirectDispatch::IndirectArgsOffset_TG256);
+		}
+		else
+		{
+			FComputeShaderUtils::AddPass(GraphBuilder,
+				RDG_EVENT_NAME("MergeSoAToAoS"),
+				ComputeShader, PassParams,
+				FComputeShaderUtils::GetGroupCount(CurrentParticleCount, FMergeSoAToAoSCS::ThreadGroupSize));
+		}
 	}
 
 	// =====================================================
@@ -897,6 +926,11 @@ void FGPUFluidSimulator::BeginFrame()
 			}
 
 			// =====================================================
+			// Step 1.5: Process Particle Count Readback (GPU → CPU)
+			// =====================================================
+			Self->ProcessParticleCountReadback();
+
+			// =====================================================
 			// Step 2: Process Spawn/Despawn Operations
 			// =====================================================
 			if (!bHasPendingSpawns && !bHasPendingDespawns)
@@ -906,7 +940,7 @@ void FGPUFluidSimulator::BeginFrame()
 
 			FRDGBuilder GraphBuilder(RHICmdList);
 			FRDGBufferRef ParticleBuffer = nullptr;
-			int32 PostOpCount = Self->CurrentParticleCount;
+			FRDGBufferRef ParticleCountBuffer = nullptr;
 
 			// Swap buffers first
 			if (Self->SpawnManager.IsValid())
@@ -926,15 +960,39 @@ void FGPUFluidSimulator::BeginFrame()
 				}
 				if (DespawnCount > 0)
 				{
+					int32 PreDespawnCount = Self->CurrentParticleCount;
 					{
 						RDG_EVENT_SCOPE(GraphBuilder, "Despawn_RegisterBuffer");
 						ParticleBuffer = GraphBuilder.RegisterExternalBuffer(Self->PersistentParticleBuffer, TEXT("GPUFluidParticlesForDespawn"));
 					}
 					{
 						RDG_EVENT_SCOPE(GraphBuilder, "Despawn_AddPass");
-						Self->SpawnManager->AddDespawnByIDPass(GraphBuilder, ParticleBuffer, PostOpCount);
+						Self->SpawnManager->AddDespawnByIDPass(GraphBuilder, ParticleBuffer, PreDespawnCount);
 					}
-					PostOpCount = FMath::Max(0, PostOpCount - DespawnCount);
+
+					// GPU: Write exact alive count after compaction
+					{
+						RDG_EVENT_SCOPE(GraphBuilder, "Despawn_WriteAliveCount");
+						ParticleCountBuffer = Self->RegisterParticleCountBuffer(GraphBuilder);
+
+						FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+						TShaderMapRef<FWriteAliveCountAfterCompactionCS> WriteCountShader(ShaderMap);
+
+						FWriteAliveCountAfterCompactionCS::FParameters* WriteCountParams =
+							GraphBuilder.AllocParameters<FWriteAliveCountAfterCompactionCS::FParameters>();
+						WriteCountParams->PrefixSums = Self->SpawnManager->GetLastPrefixSumsSRV(GraphBuilder);
+						WriteCountParams->AliveMask = Self->SpawnManager->GetLastAliveMaskSRV(GraphBuilder);
+						WriteCountParams->ParticleCountBuffer = GraphBuilder.CreateUAV(ParticleCountBuffer);
+						WriteCountParams->OldParticleCount = PreDespawnCount;
+
+						FComputeShaderUtils::AddPass(GraphBuilder,
+							RDG_EVENT_NAME("GPUFluid::WriteAliveCountAfterCompaction"),
+							WriteCountShader, WriteCountParams, FIntVector(1, 1, 1));
+					}
+
+					// CPU estimate: approximate alive count for ParticleCount uniform
+					// (exact value comes via readback next frame, but Phase 1 shaders still need the uniform)
+					Self->CurrentParticleCount = FMath::Max(0, PreDespawnCount - DespawnCount);
 				}
 			}
 
@@ -944,7 +1002,7 @@ void FGPUFluidSimulator::BeginFrame()
 			{
 				SCOPED_DRAW_EVENT(RHICmdList, GPUFluid_BeginFrame_Spawn);
 
-				const bool bFirstSpawn = (PostOpCount == 0) && !ParticleBuffer;
+				const bool bFirstSpawn = !Self->bEverHadParticles && !ParticleBuffer;
 
 				if (bFirstSpawn)
 				{
@@ -960,13 +1018,35 @@ void FGPUFluidSimulator::BeginFrame()
 					FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(ParticleBuffer);
 
 					Self->SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, Self->MaxParticleCount);
-					PostOpCount = FMath::Min(SpawnCount, Self->MaxParticleCount);
-					Self->SpawnManager->OnSpawnComplete(PostOpCount);
+
+					// GPU: Update count from atomic spawn counter
+					{
+						RDG_EVENT_SCOPE(GraphBuilder, "Spawn_UpdateCount");
+						if (!ParticleCountBuffer)
+						{
+							ParticleCountBuffer = Self->RegisterParticleCountBuffer(GraphBuilder);
+						}
+
+						FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+						TShaderMapRef<FUpdateCountAfterSpawnCS> UpdateCountShader(ShaderMap);
+						FUpdateCountAfterSpawnCS::FParameters* UpdateCountParams =
+							GraphBuilder.AllocParameters<FUpdateCountAfterSpawnCS::FParameters>();
+						UpdateCountParams->SpawnCounter = GraphBuilder.CreateSRV(CounterBuffer);
+						UpdateCountParams->SpawnParticleCountBuffer = GraphBuilder.CreateUAV(ParticleCountBuffer);
+						FComputeShaderUtils::AddPass(GraphBuilder,
+							RDG_EVENT_NAME("GPUFluid::UpdateCountAfterSpawn"),
+							UpdateCountShader, UpdateCountParams, FIntVector(1, 1, 1));
+					}
+
+					// Estimate for CPU side (will be corrected by readback next frame)
+					Self->CurrentParticleCount = FMath::Min(SpawnCount, Self->MaxParticleCount);
+					Self->SpawnManager->OnSpawnComplete(Self->CurrentParticleCount);
 				}
 				else
 				{
 					// PATH 2: Append spawn - copy existing + spawn new (pre-allocate to MaxParticleCount)
-					const int32 TotalCount = PostOpCount + SpawnCount;
+					const int32 EstimatedExisting = Self->CurrentParticleCount;
+					const int32 TotalCount = EstimatedExisting + SpawnCount;
 					const int32 BufferCapacity = Self->MaxParticleCount > 0 ? Self->MaxParticleCount : FMath::Min(TotalCount, Self->MaxParticleCount);
 					FRDGBufferDesc NewBufferDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FGPUFluidParticle), BufferCapacity);
 					FRDGBufferRef NewParticleBuffer = GraphBuilder.CreateBuffer(NewBufferDesc, TEXT("GPUFluidParticles"));
@@ -974,28 +1054,69 @@ void FGPUFluidSimulator::BeginFrame()
 					FRDGBufferRef ExistingBuffer = ParticleBuffer ? ParticleBuffer :
 						GraphBuilder.RegisterExternalBuffer(Self->PersistentParticleBuffer, TEXT("GPUFluidParticlesOld"));
 
-					if (PostOpCount > 0)
+					// Ensure ParticleCountBuffer is available (from despawn or previous frame)
+					if (!ParticleCountBuffer)
+					{
+						ParticleCountBuffer = Self->RegisterParticleCountBuffer(GraphBuilder);
+					}
+
+					// Copy existing particles using indirect dispatch (GPU knows exact count)
+					if (EstimatedExisting > 0)
 					{
 						FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 						TShaderMapRef<FCopyParticlesCS> CopyShader(ShaderMap);
 						FCopyParticlesCS::FParameters* CopyParams = GraphBuilder.AllocParameters<FCopyParticlesCS::FParameters>();
 						CopyParams->SourceParticles = GraphBuilder.CreateSRV(ExistingBuffer);
 						CopyParams->DestParticles = GraphBuilder.CreateUAV(NewParticleBuffer);
+						CopyParams->ParticleCountBuffer = GraphBuilder.CreateSRV(ParticleCountBuffer);
 						CopyParams->SourceOffset = 0;
 						CopyParams->DestOffset = 0;
-						CopyParams->CopyCount = PostOpCount;
-						FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("GPUFluid::CopyForSpawn(%d)", PostOpCount),
-							CopyShader, CopyParams, FIntVector(FMath::DivideAndRoundUp(PostOpCount, FCopyParticlesCS::ThreadGroupSize), 1, 1));
+						CopyParams->CopyCount = EstimatedExisting;
+						CopyParams->bReadCountFromGPU = 1;
+
+						GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+							RDG_EVENT_NAME("GPUFluid::CopyForSpawn(Indirect)"),
+							CopyShader, CopyParams, ParticleCountBuffer,
+							GPUIndirectDispatch::IndirectArgsOffset_TG256);
 					}
 
-					TArray<uint32> InitialCounterData;
-					InitialCounterData.Add(static_cast<uint32>(PostOpCount));
-					FRDGBufferRef CounterBuffer = CreateStructuredBuffer(GraphBuilder, TEXT("GPUFluidParticleCounter"), sizeof(uint32), 1, InitialCounterData.GetData(), sizeof(uint32), ERDGInitialDataFlags::None);
+					// GPU→GPU: Copy particle count to spawn counter (replaces CPU InitialCounterData upload)
+					FRDGBufferDesc CounterDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), 1);
+					FRDGBufferRef CounterBuffer = GraphBuilder.CreateBuffer(CounterDesc, TEXT("GPUFluidParticleCounter"));
+					{
+
+						FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+						TShaderMapRef<FCopyCountToSpawnCounterCS> CopyCountShader(ShaderMap);
+						FCopyCountToSpawnCounterCS::FParameters* CopyCountParams =
+							GraphBuilder.AllocParameters<FCopyCountToSpawnCounterCS::FParameters>();
+						CopyCountParams->SourceParticleCountBuffer = GraphBuilder.CreateSRV(ParticleCountBuffer);
+						CopyCountParams->DestSpawnCounter = GraphBuilder.CreateUAV(CounterBuffer);
+						FComputeShaderUtils::AddPass(GraphBuilder,
+							RDG_EVENT_NAME("GPUFluid::CopyCountToSpawnCounter"),
+							CopyCountShader, CopyCountParams, FIntVector(1, 1, 1));
+					}
+
 					FRDGBufferUAVRef CounterUAV = GraphBuilder.CreateUAV(CounterBuffer);
 					FRDGBufferUAVRef ParticleUAVForSpawn = GraphBuilder.CreateUAV(NewParticleBuffer);
 
 					Self->SpawnManager->AddSpawnParticlesPass(GraphBuilder, ParticleUAVForSpawn, CounterUAV, Self->MaxParticleCount);
-					PostOpCount = FMath::Min(TotalCount, Self->MaxParticleCount);
+
+					// GPU: Update count from atomic spawn counter
+					{
+						RDG_EVENT_SCOPE(GraphBuilder, "Spawn_UpdateCount");
+						FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
+						TShaderMapRef<FUpdateCountAfterSpawnCS> UpdateCountShader(ShaderMap);
+						FUpdateCountAfterSpawnCS::FParameters* UpdateCountParams =
+							GraphBuilder.AllocParameters<FUpdateCountAfterSpawnCS::FParameters>();
+						UpdateCountParams->SpawnCounter = GraphBuilder.CreateSRV(CounterBuffer);
+						UpdateCountParams->SpawnParticleCountBuffer = GraphBuilder.CreateUAV(ParticleCountBuffer);
+						FComputeShaderUtils::AddPass(GraphBuilder,
+							RDG_EVENT_NAME("GPUFluid::UpdateCountAfterSpawn"),
+							UpdateCountShader, UpdateCountParams, FIntVector(1, 1, 1));
+					}
+
+					// Estimate for CPU side (will be corrected by readback next frame)
+					Self->CurrentParticleCount = FMath::Min(TotalCount, Self->MaxParticleCount);
 					Self->SpawnManager->OnSpawnComplete(SpawnCount);
 					ParticleBuffer = NewParticleBuffer;
 				}
@@ -1013,10 +1134,14 @@ void FGPUFluidSimulator::BeginFrame()
 			{
 				GraphBuilder.QueueBufferExtraction(ParticleBuffer, &Self->PersistentParticleBuffer, ERHIAccess::UAVCompute);
 			}
+			if (ParticleCountBuffer)
+			{
+				GraphBuilder.QueueBufferExtraction(ParticleCountBuffer, &Self->PersistentParticleCountBuffer, ERHIAccess::UAVCompute);
+			}
 
-			// Update counts
-			Self->CurrentParticleCount = PostOpCount;
-			Self->PreviousParticleCount = PostOpCount;
+			// Update state
+			Self->bEverHadParticles = true;
+			Self->PreviousParticleCount = Self->CurrentParticleCount;
 			Self->bNeedsFullUpload = false;
 
 			GraphBuilder.Execute();
@@ -1177,6 +1302,12 @@ void FGPUFluidSimulator::EndFrame()
 
 			Self->bHasValidGPUResults.store(true);
 
+			// Enqueue particle count readback (GPU → CPU for next frame)
+			{
+				SCOPED_DRAW_EVENT(RHICmdList, EndFrame_ParticleCountReadback);
+				Self->EnqueueParticleCountReadback(RHICmdList);
+			}
+
 			// Swap Neighbor Cache Buffers
 			{
 				SCOPED_DRAW_EVENT(RHICmdList, EndFrame_SwapNeighborCache);
@@ -1186,6 +1317,60 @@ void FGPUFluidSimulator::EndFrame()
 	);
 
 	bFrameActive = false;
+}
+
+//=============================================================================
+// Indirect Dispatch Particle Count Buffer
+//=============================================================================
+
+FRDGBufferRef FGPUFluidSimulator::RegisterParticleCountBuffer(FRDGBuilder& GraphBuilder)
+{
+	if (PersistentParticleCountBuffer.IsValid())
+	{
+		return GraphBuilder.RegisterExternalBuffer(PersistentParticleCountBuffer, TEXT("PersistentParticleCountBuffer"));
+	}
+
+	// Create new buffer with current count
+	FRDGBufferDesc Desc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPUIndirectDispatch::BufferSizeElements);
+	Desc.Usage = EBufferUsageFlags::UnorderedAccess | EBufferUsageFlags::ShaderResource | EBufferUsageFlags::DrawIndirect;
+	FRDGBufferRef Buffer = GraphBuilder.CreateBuffer(Desc, TEXT("PersistentParticleCountBuffer"));
+
+	uint32 InitData[GPUIndirectDispatch::BufferSizeElements];
+	GPUIndirectDispatch::BuildInitData(static_cast<uint32>(CurrentParticleCount), InitData);
+	GraphBuilder.QueueBufferUpload(Buffer, InitData, sizeof(InitData));
+
+	return Buffer;
+}
+
+void FGPUFluidSimulator::EnqueueParticleCountReadback(FRHICommandListImmediate& RHICmdList)
+{
+	if (!PersistentParticleCountBuffer.IsValid())
+	{
+		return;
+	}
+
+	if (!ParticleCountReadback)
+	{
+		ParticleCountReadback = new FRHIGPUBufferReadback(TEXT("ParticleCountReadback"));
+	}
+
+	ParticleCountReadback->EnqueueCopy(RHICmdList, PersistentParticleCountBuffer->GetRHI(), GPUIndirectDispatch::BufferSizeBytes);
+}
+
+void FGPUFluidSimulator::ProcessParticleCountReadback()
+{
+	if (!ParticleCountReadback || !ParticleCountReadback->IsReady())
+	{
+		return;
+	}
+
+	const uint32* Data = static_cast<const uint32*>(ParticleCountReadback->Lock(GPUIndirectDispatch::BufferSizeBytes));
+	if (Data)
+	{
+		const int32 GPUCount = static_cast<int32>(Data[GPUIndirectDispatch::ParticleCountElementIndex]);
+		CurrentParticleCount = GPUCount;
+	}
+	ParticleCountReadback->Unlock();
 }
 
 FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
@@ -1301,7 +1486,7 @@ FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStructures(
 	FSimulationSpatialData SpatialData;
 
 	// Skip when no particles (avoid unnecessary GPU work)
-	if (CurrentParticleCount == 0)
+	if (!bEverHadParticles)
 	{
 		return SpatialData;
 	}
@@ -1403,11 +1588,22 @@ FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStructures(
 			FBuildSpatialHashSimpleCS::FParameters* BuildParams = GraphBuilder.AllocParameters<FBuildSpatialHashSimpleCS::FParameters>();
 			BuildParams->ParticlePositions = OutPositionsSRV;
 			BuildParams->ParticleCount = CurrentParticleCount;
+			if (CurrentIndirectArgsBuffer) BuildParams->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 			BuildParams->ParticleRadius = Params.ParticleRadius;
 			BuildParams->CellSize = Params.CellSize;
 			BuildParams->CellCounts = CellCountsUAVLocal;
 			BuildParams->ParticleIndices = ParticleIndicesUAVLocal;
-			FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("SpatialHash::GPUBuild"), BuildShader, BuildParams, FIntVector(FMath::DivideAndRoundUp<uint32>(CurrentParticleCount, SPATIAL_HASH_THREAD_GROUP_SIZE), 1, 1));
+			if (CurrentIndirectArgsBuffer)
+			{
+				GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+					RDG_EVENT_NAME("SpatialHash::GPUBuild"),
+					BuildShader, BuildParams, CurrentIndirectArgsBuffer,
+					GPUIndirectDispatch::IndirectArgsOffset_TG256);
+			}
+			else
+			{
+				FComputeShaderUtils::AddPass(GraphBuilder, RDG_EVENT_NAME("SpatialHash::GPUBuild"), BuildShader, BuildParams, FIntVector(FMath::DivideAndRoundUp<uint32>(CurrentParticleCount, SPATIAL_HASH_THREAD_GROUP_SIZE), 1, 1));
+			}
 		}
 
 		// Dummy CellStart/End for validation
@@ -1506,7 +1702,7 @@ void FGPUFluidSimulator::ExecuteConstraintSolverLoop(
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_ConstraintSolverLoop");
 
 	// Skip constraint solver when no particles (avoid 0-size buffer creation)
-	if (CurrentParticleCount == 0)
+	if (!bEverHadParticles)
 	{
 		return;
 	}
@@ -1580,7 +1776,7 @@ void FGPUFluidSimulator::ExecuteAdhesion(
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_Adhesion");
 
 	// Skip when no particles
-	if (CurrentParticleCount == 0)
+	if (!bEverHadParticles)
 	{
 		return;
 	}
@@ -1631,7 +1827,7 @@ void FGPUFluidSimulator::ExecuteAdhesion(
 		}
 
 		FRDGBufferUAVRef AttachmentUAV = GraphBuilder.CreateUAV(AttachmentBuffer);
-		AdhesionManager->AddAdhesionPass(GraphBuilder, SpatialData, AttachmentUAV, CollisionManager.Get(), CurrentParticleCount, Params);
+		AdhesionManager->AddAdhesionPass(GraphBuilder, SpatialData, AttachmentUAV, CollisionManager.Get(), CurrentParticleCount, Params, CurrentIndirectArgsBuffer);
 		GraphBuilder.QueueBufferExtraction(AttachmentBuffer, &PersistentAttachmentBuffer, ERHIAccess::UAVCompute);
 	}
 }
@@ -1646,7 +1842,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_PostSimulation");
 
 	// Skip when no particles (SpatialData buffers may be invalid)
-	if (CurrentParticleCount == 0)
+	if (!bEverHadParticles)
 	{
 		return;
 	}
@@ -1693,13 +1889,13 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 		{
 			FRDGBufferRef AttachmentBufferForStackPressure = GraphBuilder.RegisterExternalBuffer(PersistentAttachmentBuffer, TEXT("GPUFluidAttachmentsStackPressure"));
 			FRDGBufferSRVRef AttachmentSRVForStackPressure = GraphBuilder.CreateSRV(AttachmentBufferForStackPressure);
-			AdhesionManager->AddStackPressurePass(GraphBuilder, SpatialData, AttachmentSRVForStackPressure, SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV, CollisionManager.Get(), CurrentParticleCount, Params);
+			AdhesionManager->AddStackPressurePass(GraphBuilder, SpatialData, AttachmentSRVForStackPressure, SpatialData.CellCountsSRV, SpatialData.ParticleIndicesSRV, CollisionManager.Get(), CurrentParticleCount, Params, CurrentIndirectArgsBuffer);
 		}
 	}
 
 	if (AdhesionManager.IsValid() && AdhesionManager->IsAdhesionEnabled())
 	{
-		AdhesionManager->AddClearDetachedFlagPass(GraphBuilder, SpatialData, CurrentParticleCount);
+		AdhesionManager->AddClearDetachedFlagPass(GraphBuilder, SpatialData, CurrentParticleCount, CurrentIndirectArgsBuffer);
 	}
 
 	if (IsBoundaryAdhesionEnabled())
@@ -2155,6 +2351,11 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteParticleIDSortPipeline(
 		Params->SortedBoneDeltaAttachments = GraphBuilder.CreateUAV(DummyAttachmentBuffer);
 		Params->bReorderAttachments = 0;  // Do not actually reorder
 		Params->ParticleCount = ParticleCount;
+		if (PersistentParticleCountBuffer.IsValid())
+		{
+			FRDGBufferRef ParticleCountBuffer = GraphBuilder.RegisterExternalBuffer(PersistentParticleCountBuffer);
+			Params->ParticleCountBuffer = GraphBuilder.CreateSRV(ParticleCountBuffer);
+		}
 
 		const int32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FReorderParticlesCS::ThreadGroupSize);
 
@@ -2177,8 +2378,15 @@ void FGPUFluidSimulator::ExtractPersistentBuffers(
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_ExtractPersistentBuffers");
 
-	// Extract Z-Order buffers (for debug/rendering)
+	// Extract particle buffer
 	GraphBuilder.QueueBufferExtraction(ParticleBuffer, &PersistentParticleBuffer, ERHIAccess::UAVCompute);
+
+	// Extract IndirectArgs / ParticleCount buffer
+	if (CurrentIndirectArgsBuffer)
+	{
+		GraphBuilder.QueueBufferExtraction(CurrentIndirectArgsBuffer, &PersistentParticleCountBuffer, ERHIAccess::IndirectArgs);
+		CurrentIndirectArgsBuffer = nullptr;  // Clear transient ref
+	}
 
 	// Only extract legacy hash table buffers when Z-Order sorting is NOT enabled
 	// When Z-Order is enabled, CellCountsBuffer/ParticleIndicesBuffer are dummy buffers that weren't produced
@@ -2679,7 +2887,8 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
 		OutCellStartUAV, OutCellStartSRV, OutCellEndUAV, OutCellEndSRV,
 		OutCellStartBuffer, OutCellEndBuffer,
 		CurrentParticleCount, Params, SortAllocCount,
-		InAttachmentBuffer, OutSortedAttachmentBuffer);
+		InAttachmentBuffer, OutSortedAttachmentBuffer,
+		CurrentIndirectArgsBuffer);
 }
 
 //=============================================================================
@@ -2928,6 +3137,30 @@ void FGPUFluidSimulator::FinalizeUpload()
 	// Create GPU buffer (using copy, no lock needed)
 	CreateImmediatePersistentBufferFromCopy(ParticlesCopy, ParticleCount);
 
+	// Initialize PersistentParticleCountBuffer with upload count
+	{
+		FGPUFluidSimulator* Self = this;
+		const int32 UploadCount = ParticleCount;
+		ENQUEUE_RENDER_COMMAND(InitParticleCountBuffer)(
+			[Self, UploadCount](FRHICommandListImmediate& RHICmdList)
+			{
+				FRDGBuilder GraphBuilder(RHICmdList, RDG_EVENT_NAME("InitParticleCountBuffer"));
+				FRDGBufferDesc Desc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), GPUIndirectDispatch::BufferSizeElements);
+				Desc.Usage = EBufferUsageFlags::UnorderedAccess | EBufferUsageFlags::ShaderResource | EBufferUsageFlags::DrawIndirect;
+				FRDGBufferRef Buffer = GraphBuilder.CreateBuffer(Desc, TEXT("PersistentParticleCountBuffer"));
+
+				uint32 InitData[GPUIndirectDispatch::BufferSizeElements];
+				GPUIndirectDispatch::BuildInitData(static_cast<uint32>(UploadCount), InitData);
+				GraphBuilder.QueueBufferUpload(Buffer, InitData, sizeof(InitData));
+
+				GraphBuilder.QueueBufferExtraction(Buffer, &Self->PersistentParticleCountBuffer, ERHIAccess::SRVMask);
+				GraphBuilder.Execute();
+
+				Self->bEverHadParticles = (UploadCount > 0);
+			}
+		);
+	}
+
 	// Clear only despawn tracking state (uploaded particles have new IDs, old tracking is invalid)
 	// NextParticleID is managed atomically in AllocateParticleIDs, so don't touch it
 	if (SpawnManager.IsValid())
@@ -2942,6 +3175,8 @@ void FGPUFluidSimulator::ClearCachedParticles()
 
 	CachedGPUParticles.Empty();
 	CurrentParticleCount = 0;
+	bEverHadParticles = false;
+	PersistentParticleCountBuffer = nullptr;
 
 	UE_LOG(LogGPUFluidSimulator, Log, TEXT("ClearCachedParticles: Cleared cached particles"));
 }
@@ -3466,7 +3701,7 @@ void FGPUFluidSimulator::AddBoundsCollisionPass(
 
 	if (CollisionManager.IsValid())
 	{
-		CollisionManager->AddBoundsCollisionPass(GraphBuilder, SpatialData, CurrentParticleCount, Params);
+		CollisionManager->AddBoundsCollisionPass(GraphBuilder, SpatialData, CurrentParticleCount, Params, CurrentIndirectArgsBuffer);
 	}
 }
 
@@ -3477,7 +3712,7 @@ void FGPUFluidSimulator::AddPrimitiveCollisionPass(
 {
 	if (CollisionManager.IsValid())
 	{
-		CollisionManager->AddPrimitiveCollisionPass(GraphBuilder, SpatialData, CurrentParticleCount, Params);
+		CollisionManager->AddPrimitiveCollisionPass(GraphBuilder, SpatialData, CurrentParticleCount, Params, CurrentIndirectArgsBuffer);
 	}
 }
 
@@ -3488,7 +3723,7 @@ void FGPUFluidSimulator::AddHeightmapCollisionPass(
 {
 	if (CollisionManager.IsValid())
 	{
-		CollisionManager->AddHeightmapCollisionPass(GraphBuilder, SpatialData, CurrentParticleCount, Params);
+		CollisionManager->AddHeightmapCollisionPass(GraphBuilder, SpatialData, CurrentParticleCount, Params, CurrentIndirectArgsBuffer);
 	}
 }
 

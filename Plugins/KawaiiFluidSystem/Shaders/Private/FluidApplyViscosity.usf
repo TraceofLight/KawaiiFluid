@@ -40,6 +40,7 @@ StructuredBuffer<uint> NeighborList;
 StructuredBuffer<uint> NeighborCounts;
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float SmoothingRadius;
 float CellSize;
 float DeltaTime;
@@ -108,7 +109,7 @@ uint GetMortonCellIDFromCellCoord(int3 cellCoord)
 void ApplyViscosityCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}
@@ -216,7 +217,7 @@ void ApplyViscosityCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 					for (uint i = 0; i < count; ++i)
 					{
 						uint neighborIdx = ParticleIndices[startIdx + i];
-						if (neighborIdx == idx || neighborIdx >= (uint)ParticleCount) continue;
+						if (neighborIdx == idx || neighborIdx >= ParticleCountBuffer[6]) continue;
 
 						FGPUFluidParticle neighbor = Particles[neighborIdx];
 						if (HasFlag(neighbor.Flags, GPU_PARTICLE_FLAG_IS_ATTACHED)) continue;

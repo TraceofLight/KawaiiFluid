@@ -4,6 +4,7 @@
 #include "GPU/Managers/GPUZOrderSortManager.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "GPU/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
+#include "GPU/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
@@ -59,7 +60,8 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 	const FGPUFluidSimulationParams& Params,
 	int32 AllocParticleCount,
 	FRDGBufferRef InAttachmentBuffer,
-	FRDGBufferRef* OutSortedAttachmentBuffer)
+	FRDGBufferRef* OutSortedAttachmentBuffer,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid::ZOrderSorting");
 
@@ -117,7 +119,7 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 		FRDGBufferUAVRef MortonCodesUAV = GraphBuilder.CreateUAV(MortonCodesRDG);
 		FRDGBufferUAVRef IndicesUAV = GraphBuilder.CreateUAV(SortIndicesRDG);
 
-		AddComputeMortonCodesPass(GraphBuilder, ParticlesSRV, MortonCodesUAV, IndicesUAV, CurrentParticleCount, Params);
+		AddComputeMortonCodesPass(GraphBuilder, ParticlesSRV, MortonCodesUAV, IndicesUAV, CurrentParticleCount, Params, IndirectArgsBuffer);
 	}
 
 	//=========================================================================
@@ -151,7 +153,7 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 		}
 
 		AddReorderParticlesPass(GraphBuilder, OldParticlesSRV, SortedIndicesSRV, SortedParticlesUAV, CurrentParticleCount,
-			OldAttachmentsSRV, SortedAttachmentsUAV);
+			OldAttachmentsSRV, SortedAttachmentsUAV, IndirectArgsBuffer);
 
 		// Output sorted attachment buffer if requested
 		if (OutSortedAttachmentBuffer && SortedAttachmentBuffer)
@@ -168,7 +170,7 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
 		OutCellStartUAV = GraphBuilder.CreateUAV(CellStartRDG);
 		OutCellEndUAV = GraphBuilder.CreateUAV(CellEndRDG);
 
-		AddComputeCellStartEndPass(GraphBuilder, SortedMortonSRV, OutCellStartUAV, OutCellEndUAV, CurrentParticleCount);
+		AddComputeCellStartEndPass(GraphBuilder, SortedMortonSRV, OutCellStartUAV, OutCellEndUAV, CurrentParticleCount, IndirectArgsBuffer);
 
 		OutCellStartSRV = GraphBuilder.CreateSRV(CellStartRDG);
 		OutCellEndSRV = GraphBuilder.CreateSRV(CellEndRDG);
@@ -189,7 +191,8 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
 	FRDGBufferUAVRef MortonCodesUAV,
 	FRDGBufferUAVRef InParticleIndicesUAV,
 	int32 CurrentParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	// Validate CellSize
 	if (Params.CellSize <= 0.0f)
@@ -243,20 +246,33 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
 	PassParameters->MortonCodes = MortonCodesUAV;
 	PassParameters->ParticleIndices = InParticleIndicesUAV;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	PassParameters->BoundsMin = SimulationBoundsMin;
 	PassParameters->BoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
 	PassParameters->CellSize = Params.CellSize;
 	PassParameters->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 
-	const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FComputeMortonCodesCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ComputeMortonCodes(%d,Preset=%d,Hybrid=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset), bUseHybridTiledZOrder ? 1 : 0),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ComputeMortonCodes(%d,Preset=%d,Hybrid=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset), bUseHybridTiledZOrder ? 1 : 0),
+			ComputeShader,
+			PassParameters,
+			IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FComputeMortonCodesCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ComputeMortonCodes(%d,Preset=%d,Hybrid=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset), bUseHybridTiledZOrder ? 1 : 0),
+			ComputeShader,
+			PassParameters,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
 }
 
 void FGPUZOrderSortManager::AddRadixSortPasses(
@@ -395,7 +411,8 @@ void FGPUZOrderSortManager::AddReorderParticlesPass(
 	FRDGBufferUAVRef SortedParticlesUAV,
 	int32 CurrentParticleCount,
 	FRDGBufferSRVRef OldAttachmentsSRV,
-	FRDGBufferUAVRef SortedAttachmentsUAV)
+	FRDGBufferUAVRef SortedAttachmentsUAV,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FReorderParticlesCS> ComputeShader(ShaderMap);
@@ -426,17 +443,31 @@ void FGPUZOrderSortManager::AddReorderParticlesPass(
 	PassParameters->SortedBoneDeltaAttachments = AttachmentsUAV;
 	PassParameters->bReorderAttachments = bReorderAttachments ? 1 : 0;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 
-	const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FReorderParticlesCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ReorderParticles(%d)%s", CurrentParticleCount,
-			bReorderAttachments ? TEXT("+Attachments") : TEXT("")),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ReorderParticles(%d)%s", CurrentParticleCount,
+				bReorderAttachments ? TEXT("+Attachments") : TEXT("")),
+			ComputeShader,
+			PassParameters,
+			IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FReorderParticlesCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ReorderParticles(%d)%s", CurrentParticleCount,
+				bReorderAttachments ? TEXT("+Attachments") : TEXT("")),
+			ComputeShader,
+			PassParameters,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
 }
 
 void FGPUZOrderSortManager::AddComputeCellStartEndPass(
@@ -444,7 +475,8 @@ void FGPUZOrderSortManager::AddComputeCellStartEndPass(
 	FRDGBufferSRVRef SortedMortonCodesSRV,
 	FRDGBufferUAVRef CellStartUAV,
 	FRDGBufferUAVRef CellEndUAV,
-	int32 CurrentParticleCount)
+	int32 CurrentParticleCount,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 
@@ -486,15 +518,28 @@ void FGPUZOrderSortManager::AddComputeCellStartEndPass(
 		PassParameters->CellStart = CellStartUAV;
 		PassParameters->CellEnd = CellEndUAV;
 		PassParameters->ParticleCount = CurrentParticleCount;
+		if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 
-		const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FComputeCellStartEndCS::ThreadGroupSize);
-
-		FComputeShaderUtils::AddPass(
-			GraphBuilder,
-			RDG_EVENT_NAME("GPUFluid::ComputeCellStartEnd(%d,Preset=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset)),
-			ComputeShader,
-			PassParameters,
-			FIntVector(NumGroups, 1, 1)
-		);
+		if (IndirectArgsBuffer)
+		{
+			GPUIndirectDispatch::AddIndirectComputePass(
+				GraphBuilder,
+				RDG_EVENT_NAME("GPUFluid::ComputeCellStartEnd(%d,Preset=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset)),
+				ComputeShader,
+				PassParameters,
+				IndirectArgsBuffer,
+				GPUIndirectDispatch::IndirectArgsOffset_TG512);
+		}
+		else
+		{
+			const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FComputeCellStartEndCS::ThreadGroupSize);
+			FComputeShaderUtils::AddPass(
+				GraphBuilder,
+				RDG_EVENT_NAME("GPUFluid::ComputeCellStartEnd(%d,Preset=%d)", CurrentParticleCount, static_cast<int32>(EffectivePreset)),
+				ComputeShader,
+				PassParameters,
+				FIntVector(NumGroups, 1, 1)
+			);
+		}
 	}
 }

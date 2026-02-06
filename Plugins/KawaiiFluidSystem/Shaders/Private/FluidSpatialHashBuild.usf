@@ -22,6 +22,7 @@
 // Input: Particle positions (shared by all passes)
 StructuredBuffer<float3> ParticlePositions;
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float ParticleRadius;
 float CellSize;
 
@@ -54,7 +55,7 @@ RWStructuredBuffer<uint> PrefixSumBuffer;       // Prefix sum workspace
 void CountParticlesPerCellCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint ParticleIdx = DispatchThreadId.x;
-    if (ParticleIdx >= (uint)ParticleCount)
+    if (ParticleIdx >= ParticleCountBuffer[6])
         return;
 
     float3 Pos = ParticlePositions[ParticleIdx];
@@ -94,7 +95,7 @@ void PrefixSumCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 void ScatterParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint ParticleIdx = DispatchThreadId.x;
-    if (ParticleIdx >= (uint)ParticleCount)
+    if (ParticleIdx >= ParticleCountBuffer[6])
         return;
 
     uint Hash = ParticleCellHashes[ParticleIdx];
@@ -139,7 +140,7 @@ void FinalizeCellDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 void BuildSpatialHashSimpleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint ParticleIdx = DispatchThreadId.x;
-    if (ParticleIdx >= (uint)ParticleCount)
+    if (ParticleIdx >= ParticleCountBuffer[6])
         return;
 
     float3 Pos = ParticlePositions[ParticleIdx];

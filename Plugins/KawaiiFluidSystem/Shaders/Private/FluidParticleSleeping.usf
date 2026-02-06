@@ -20,6 +20,7 @@ RWStructuredBuffer<FGPUFluidParticle> Particles;
 RWBuffer<uint> SleepCounters;  // Per-particle sleep frame counter
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float SleepVelocityThreshold;    // cm/s, velocity below which particles may sleep
 int SleepFrameThreshold;         // Frames of low velocity before sleeping
 float WakeVelocityThreshold;     // cm/s, velocity for wake-up
@@ -39,7 +40,7 @@ StructuredBuffer<uint> NeighborCounts;
 void UpdateParticleSleepingCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}
@@ -90,7 +91,7 @@ void UpdateParticleSleepingCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 			for (uint n = 0; n < neighborCount && n < MAX_NEIGHBORS_PER_PARTICLE; ++n)
 			{
 				uint neighborIdx = NeighborList[baseIdx + n];
-				if (neighborIdx < (uint)ParticleCount && neighborIdx != idx)
+				if (neighborIdx < ParticleCountBuffer[6] && neighborIdx != idx)
 				{
 					FGPUFluidParticle neighbor = Particles[neighborIdx];
 

@@ -75,6 +75,7 @@ public:
         SHADER_PARAMETER(float, CellSize)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, CellCounts)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, ParticleIndices)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -160,6 +161,7 @@ public:
         SHADER_PARAMETER(float, CellSize)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, CellCounters)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, ParticleCellHashes)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -215,6 +217,7 @@ public:
         SHADER_PARAMETER(int32, ParticleCount)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, CellCounters)
         SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, ParticleIndices)
+        SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
     END_SHADER_PARAMETER_STRUCT()
 
     static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
@@ -403,7 +406,8 @@ public:
         FRDGBufferSRVRef ParticlePositionsSRV,
         int32 ParticleCount,
         float ParticleRadius,
-        FSpatialHashGPUResources& Resources);
+        FSpatialHashGPUResources& Resources,
+        FRDGBufferRef IndirectArgsBuffer = nullptr);
 
     /**
      * RECOMMENDED: Atomically create resources and build hash.
@@ -419,7 +423,8 @@ public:
         int32 ParticleCount,
         float ParticleRadius,
         float CellSize,
-        FSpatialHashGPUResources& OutResources);
+        FSpatialHashGPUResources& OutResources,
+        FRDGBufferRef IndirectArgsBuffer = nullptr);
 
     // Multi-pass version (dynamic array, no particle limit per cell)
     static bool CreateAndBuildHashMultipass(
@@ -427,7 +432,8 @@ public:
         FRDGBufferSRVRef ParticlePositionsSRV,
         int32 ParticleCount,
         float CellSize,
-        FSpatialHashMultipassResources& OutResources);
+        FSpatialHashMultipassResources& OutResources,
+        FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 private:
     static void ClearBuffers(

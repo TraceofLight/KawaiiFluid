@@ -96,7 +96,8 @@ bool FSpatialHashBuilder::BuildHash(
     FRDGBufferSRVRef ParticlePositionsSRV,
     int32 ParticleCount,
     float ParticleRadius,
-    FSpatialHashGPUResources& Resources)
+    FSpatialHashGPUResources& Resources,
+    FRDGBufferRef IndirectArgsBuffer)
 {
     // WARNING: Resources must already be created. If this function fails,
     // the caller is responsible for handling orphan buffers.
@@ -156,6 +157,10 @@ bool FSpatialHashBuilder::BuildHash(
 
         PassParameters->ParticlePositions = ParticlePositionsSRV;
         PassParameters->ParticleCount = ParticleCount;
+        if (IndirectArgsBuffer)
+        {
+            PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
+        }
         PassParameters->ParticleRadius = ParticleRadius;
         PassParameters->CellSize = Resources.CellSize;
         PassParameters->CellCounts = Resources.CellCountsUAV;
@@ -182,7 +187,8 @@ bool FSpatialHashBuilder::CreateAndBuildHash(
     int32 ParticleCount,
     float ParticleRadius,
     float CellSize,
-    FSpatialHashGPUResources& OutResources)
+    FSpatialHashGPUResources& OutResources,
+    FRDGBufferRef IndirectArgsBuffer)
 {
     
     OutResources = FSpatialHashGPUResources();
@@ -255,6 +261,10 @@ bool FSpatialHashBuilder::CreateAndBuildHash(
 
         PassParameters->ParticlePositions = ParticlePositionsSRV;
         PassParameters->ParticleCount = ParticleCount;
+        if (IndirectArgsBuffer)
+        {
+            PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
+        }
         PassParameters->ParticleRadius = ParticleRadius;
         PassParameters->CellSize = CellSize;
         PassParameters->CellCounts = OutResources.CellCountsUAV;
@@ -284,7 +294,8 @@ bool FSpatialHashBuilder::CreateAndBuildHashMultipass(
     FRDGBufferSRVRef ParticlePositionsSRV,
     int32 ParticleCount,
     float CellSize,
-    FSpatialHashMultipassResources& OutResources)
+    FSpatialHashMultipassResources& OutResources,
+    FRDGBufferRef IndirectArgsBuffer)
 {
     OutResources.Reset();
 
@@ -400,6 +411,10 @@ bool FSpatialHashBuilder::CreateAndBuildHashMultipass(
             GraphBuilder.AllocParameters<FCountParticlesPerCellCS::FParameters>();
         CountParams->ParticlePositions = ParticlePositionsSRV;
         CountParams->ParticleCount = ParticleCount;
+        if (IndirectArgsBuffer)
+        {
+            CountParams->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
+        }
         CountParams->CellSize = CellSize;
         CountParams->CellCounters = OutResources.CellCountersUAV;
         CountParams->ParticleCellHashes = OutResources.ParticleCellHashesUAV;
@@ -443,6 +458,10 @@ bool FSpatialHashBuilder::CreateAndBuildHashMultipass(
         ScatterParams->ParticleCellHashes = OutResources.ParticleCellHashesUAV;
         ScatterParams->PrefixSumBuffer = OutResources.PrefixSumUAV;
         ScatterParams->ParticleCount = ParticleCount;
+        if (IndirectArgsBuffer)
+        {
+            ScatterParams->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
+        }
         ScatterParams->CellCounters = OutResources.CellCountersUAV;
         ScatterParams->ParticleIndices = OutResources.ParticleIndicesUAV;
 

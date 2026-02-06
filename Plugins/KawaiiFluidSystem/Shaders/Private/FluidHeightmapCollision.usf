@@ -18,6 +18,7 @@ RWBuffer<uint2> PackedVelocities;  // B plan: half3 packed
 RWBuffer<uint> Flags;
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float ParticleRadius;
 
 // Heightmap texture
@@ -106,7 +107,7 @@ float3 CalculateTerrainNormal(float2 uv)
 void HeightmapCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}

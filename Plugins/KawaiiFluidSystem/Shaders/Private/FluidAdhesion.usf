@@ -17,6 +17,7 @@ RWBuffer<float> PredictedPositions;
 RWBuffer<uint2> PackedVelocities;  // B plan: half3 packed
 RWBuffer<uint> Flags;
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float ParticleRadius;
 
 // Attachment buffer (one per particle)
@@ -214,7 +215,7 @@ float ComputeAttachmentSurfaceDistance(float3 pos, FGPUParticleAttachment attach
 void AdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount || bEnableAdhesion == 0)
+	if (idx >= ParticleCountBuffer[6] || bEnableAdhesion == 0)
 	{
 		return;
 	}
@@ -361,7 +362,7 @@ void AdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 void UpdateAttachedPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}
@@ -562,7 +563,7 @@ void UpdateAttachedPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 void ClearDetachedFlagCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}

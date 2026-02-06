@@ -25,6 +25,7 @@ RWStructuredBuffer<uint> MortonCodes;    // Output: Morton codes for sorting
 RWStructuredBuffer<uint> ParticleIndices; // Output: Particle indices (0, 1, 2, ... N-1)
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float3 BoundsMin;      // Simulation bounds minimum
 float3 BoundsExtent;   // Simulation bounds extent (Max - Min)
 float CellSize;        // Grid cell size (= SmoothingRadius)
@@ -66,7 +67,7 @@ uint Morton3DFromCell(int3 CellCoord, int3 GridMin)
 void ComputeMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint idx = DispatchThreadId.x;
-    if (idx >= (uint)ParticleCount)
+    if (idx >= ParticleCountBuffer[6])
     {
         return;
     }
@@ -102,7 +103,7 @@ void ComputeMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 void ComputeMortonCodesCellBasedCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint idx = DispatchThreadId.x;
-    if (idx >= (uint)ParticleCount)
+    if (idx >= ParticleCountBuffer[6])
     {
         return;
     }

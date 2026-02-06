@@ -13,6 +13,7 @@
 StructuredBuffer<FGPUFluidParticle> Particles;
 RWStructuredBuffer<float3> Positions;
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 int bUsePredictedPosition;
 
 //=============================================================================
@@ -23,7 +24,7 @@ int bUsePredictedPosition;
 void ExtractPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}

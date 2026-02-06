@@ -13,9 +13,11 @@
 
 StructuredBuffer<FGPUFluidParticle> SourceParticles;
 RWStructuredBuffer<FGPUFluidParticle> DestParticles;
+StructuredBuffer<uint> ParticleCountBuffer;
 int SourceOffset;
 int DestOffset;
 int CopyCount;
+int bReadCountFromGPU;
 
 //=============================================================================
 // Main Compute Shader
@@ -25,7 +27,11 @@ int CopyCount;
 void CopyParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)CopyCount)
+
+	// Read count from GPU buffer (element index 6 = raw particle count) or CPU uniform
+	uint EffectiveCopyCount = bReadCountFromGPU ? ParticleCountBuffer[6] : (uint)CopyCount;
+
+	if (idx >= EffectiveCopyCount)
 	{
 		return;
 	}

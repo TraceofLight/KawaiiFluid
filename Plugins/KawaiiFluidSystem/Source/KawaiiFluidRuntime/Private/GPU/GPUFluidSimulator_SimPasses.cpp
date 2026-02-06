@@ -3,6 +3,7 @@
 
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "GPU/GPUIndirectDispatchUtils.h"
 #include "GPU/Managers/GPUBoundarySkinningManager.h"
 #include "GPU/Managers/GPUZOrderSortManager.h"
 #include "GPU/Managers/GPUCollisionManager.h"
@@ -18,7 +19,7 @@ void FGPUFluidSimulator::AddPredictPositionsPass(
 	FRDGBufferUAVRef ParticlesUAV,
 	const FGPUFluidSimulationParams& Params)
 {
-	if (CurrentParticleCount <= 0) return;
+	if (!bEverHadParticles) return;
 
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FPredictPositionsCS> ComputeShader(ShaderMap);
@@ -26,6 +27,7 @@ void FGPUFluidSimulator::AddPredictPositionsPass(
 	FPredictPositionsCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FPredictPositionsCS::FParameters>();
 	PassParameters->Particles = ParticlesUAV;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->DeltaTime = Params.DeltaTime;
 	PassParameters->Gravity = Params.Gravity;
 	PassParameters->ExternalForce = ExternalForce;
@@ -99,15 +101,20 @@ void FGPUFluidSimulator::AddPredictPositionsPass(
 		PassParameters->PrevParticleCount = 0;
 	}
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FPredictPositionsCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::PredictPositions (Cohesion=%s)", bCanUsePrevNeighborCache ? TEXT("ON") : TEXT("OFF")),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::PredictPositions (Cohesion=%s)", bCanUsePrevNeighborCache ? TEXT("ON") : TEXT("OFF")),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FPredictPositionsCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::PredictPositions (Cohesion=%s)", bCanUsePrevNeighborCache ? TEXT("ON") : TEXT("OFF")),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 //=============================================================================
@@ -121,7 +128,7 @@ void FGPUFluidSimulator::AddExtractPositionsPass(
 	int32 ParticleCount,
 	bool bUsePredictedPosition)
 {
-	if (ParticleCount <= 0) return;
+	if (!bEverHadParticles || ParticleCount <= 0) return;
 
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FExtractPositionsCS> ComputeShader(ShaderMap);
@@ -130,17 +137,23 @@ void FGPUFluidSimulator::AddExtractPositionsPass(
 	PassParameters->Particles = ParticlesSRV;
 	PassParameters->Positions = PositionsUAV;
 	PassParameters->ParticleCount = ParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->bUsePredictedPosition = bUsePredictedPosition ? 1 : 0;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FExtractPositionsCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ExtractPositions"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ExtractPositions"),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(ParticleCount, FExtractPositionsCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ExtractPositions"),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 //=============================================================================
@@ -160,7 +173,7 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	const FGPUFluidSimulationParams& Params,
 	const FSimulationSpatialData& SpatialData)
 {
-	if (CurrentParticleCount <= 0)
+	if (!bEverHadParticles)
 	{
 		return;
 	}
@@ -215,6 +228,7 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	PassParameters->NeighborList = InNeighborListUAV;
 	PassParameters->NeighborCounts = InNeighborCountsUAV;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
 	PassParameters->RestDensity = Params.RestDensity;
 	PassParameters->Poly6Coeff = Params.Poly6Coeff;
@@ -365,15 +379,20 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	// 		BoundaryPath, ZOrderPath, PassParameters->BoundaryParticleCount, PassParameters->bUseBoundaryDensity, PassParameters->bUseBoundaryZOrder);
 	// }
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FSolveDensityPressureCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::SolveDensityPressure (Iter %d)", IterationIndex),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::SolveDensityPressure (Iter %d)", IterationIndex),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FSolveDensityPressureCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::SolveDensityPressure (Iter %d)", IterationIndex),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 //=============================================================================
@@ -396,7 +415,7 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	const FGPUFluidSimulationParams& Params,
 	const FSimulationSpatialData& SpatialData)
 {
-	if (CurrentParticleCount <= 0) return;
+	if (!bEverHadParticles) return;
 
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FApplyViscosityCS> ComputeShader(ShaderMap);
@@ -408,6 +427,7 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	PassParameters->NeighborList = InNeighborListSRV;
 	PassParameters->NeighborCounts = InNeighborCountsSRV;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
 	PassParameters->ViscosityCoefficient = Params.ViscosityCoefficient;
 	PassParameters->Poly6Coeff = Params.Poly6Coeff;
@@ -545,15 +565,20 @@ void FGPUFluidSimulator::AddApplyViscosityPass(
 	// 		PassParameters->AdhesionRadius);
 	// }
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FApplyViscosityCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ApplyViscosity"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ApplyViscosity"),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FApplyViscosityCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ApplyViscosity"),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 //=============================================================================
@@ -568,7 +593,7 @@ void FGPUFluidSimulator::AddParticleSleepingPass(
 	FRDGBufferSRVRef InNeighborCountsSRV,
 	const FGPUFluidSimulationParams& Params)
 {
-	if (CurrentParticleCount <= 0) return;
+	if (!bEverHadParticles) return;
 	if (!Params.bEnableParticleSleeping) return;
 
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
@@ -580,19 +605,25 @@ void FGPUFluidSimulator::AddParticleSleepingPass(
 	PassParameters->NeighborList = InNeighborListSRV;
 	PassParameters->NeighborCounts = InNeighborCountsSRV;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->SleepVelocityThreshold = Params.SleepVelocityThreshold;
 	PassParameters->SleepFrameThreshold = Params.SleepFrameThreshold;
 	PassParameters->WakeVelocityThreshold = Params.WakeVelocityThreshold;
 
-	const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FParticleSleepingCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("FluidParticleSleeping"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("FluidParticleSleeping"),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const int32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FParticleSleepingCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("FluidParticleSleeping"),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 //=============================================================================
@@ -604,7 +635,7 @@ void FGPUFluidSimulator::AddFinalizePositionsPass(
 	const FSimulationSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
-	if (CurrentParticleCount <= 0) return;
+	if (!bEverHadParticles) return;
 
 	FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
 	TShaderMapRef<FFinalizePositionsCS> ComputeShader(ShaderMap);
@@ -615,19 +646,25 @@ void FGPUFluidSimulator::AddFinalizePositionsPass(
 	PassParameters->PackedVelocities = GraphBuilder.CreateUAV(SpatialData.SoA_PackedVelocities, PF_R32G32_UINT);  // B plan
 	PassParameters->Flags = GraphBuilder.CreateUAV(SpatialData.SoA_Flags, PF_R32_UINT);
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->DeltaTime = Params.DeltaTime;
 	PassParameters->MaxVelocity = MaxVelocity;  // Safety clamp (50000 cm/s = 500 m/s)
 	PassParameters->GlobalDamping = Params.GlobalDamping;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FFinalizePositionsCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::FinalizePositions"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::FinalizePositions"),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FFinalizePositionsCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::FinalizePositions"),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 //=============================================================================
@@ -645,7 +682,7 @@ void FGPUFluidSimulator::AddApplyBoneTransformPass(
 	const FMatrix44f& ComponentTransform,
 	float DeltaTime)
 {
-	if (CurrentParticleCount <= 0 || !BoneDeltaAttachmentSRV || !LocalBoundaryParticlesSRV || BoundaryParticleCount <= 0)
+	if (!bEverHadParticles || !BoneDeltaAttachmentSRV || !LocalBoundaryParticlesSRV || BoundaryParticleCount <= 0)
 	{
 		return;
 	}
@@ -658,6 +695,7 @@ void FGPUFluidSimulator::AddApplyBoneTransformPass(
 	FApplyBoneTransformCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FApplyBoneTransformCS::FParameters>();
 	PassParameters->Particles = ParticlesUAV;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->BoneDeltaAttachments = BoneDeltaAttachmentSRV;
 	PassParameters->LocalBoundaryParticles = LocalBoundaryParticlesSRV;
 	PassParameters->BoundaryParticleCount = BoundaryParticleCount;
@@ -666,16 +704,21 @@ void FGPUFluidSimulator::AddApplyBoneTransformPass(
 	PassParameters->ComponentTransform = ComponentTransform;
 	PassParameters->DeltaTime = DeltaTime;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FApplyBoneTransformCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ApplyBoneTransform(%d particles, %d boundary, %d bones)",
-			CurrentParticleCount, BoundaryParticleCount, BoneCount),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ApplyBoneTransform(%d boundary, %d bones)", BoundaryParticleCount, BoneCount),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FApplyBoneTransformCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ApplyBoneTransform(%d particles, %d boundary, %d bones)",
+				CurrentParticleCount, BoundaryParticleCount, BoneCount),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 
 void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
@@ -690,7 +733,7 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 	int32 WorldBoundaryParticleCount,
 	const FGPUFluidSimulationParams& Params)
 {
-	if (CurrentParticleCount <= 0 || !BoneDeltaAttachmentUAV)
+	if (!bEverHadParticles || !BoneDeltaAttachmentUAV)
 	{
 		return;
 	}
@@ -713,6 +756,7 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 	FUpdateBoneDeltaAttachmentCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FUpdateBoneDeltaAttachmentCS::FParameters>();
 	PassParameters->Particles = ParticlesUAV;
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (CurrentIndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
 	PassParameters->BoneDeltaAttachments = BoneDeltaAttachmentUAV;
 
 	// Boundary particles for attachment search (Z-Order sorted, contains OriginalIndex)
@@ -806,14 +850,19 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 	PassParameters->BoneTransforms = GraphBuilder.CreateSRV(BoneTransformsBuffer);
 	PassParameters->BoneCount = CachedBoneTransforms.Num();
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateBoneDeltaAttachmentCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::UpdateBoneDeltaAttachment(%d particles)", CurrentParticleCount),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (CurrentIndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::UpdateBoneDeltaAttachment"),
+			ComputeShader, PassParameters, CurrentIndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateBoneDeltaAttachmentCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::UpdateBoneDeltaAttachment(%d particles)", CurrentParticleCount),
+			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
+	}
 }
 

@@ -36,12 +36,13 @@ RWBuffer<int> OutParticleIDs;              // int
 RWBuffer<int> OutSourceIDs;                // int
 
 int SplitParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 
 [numthreads(256, 1, 1)]
 void SplitAoSToSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)SplitParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 		return;
 
 	FGPUFluidParticle p = SourceParticles[idx];
@@ -96,7 +97,7 @@ int MergeParticleCount;
 void MergeSoAToAoSCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)MergeParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 		return;
 
 	// Read from separate field buffers

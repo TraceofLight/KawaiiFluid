@@ -118,6 +118,7 @@ RWStructuredBuffer<uint> NeighborList;    // [ParticleCount * MAX_NEIGHBORS_PER_
 RWStructuredBuffer<uint> NeighborCounts;  // [ParticleCount]
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float SmoothingRadius;
 float RestDensity;
 float Poly6Coeff;
@@ -267,7 +268,7 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	float lambda_i_prev = 0.0f;
 	float3 vel = float3(0.0f, 0.0f, 0.0f);
 
-	if (idx < (uint)ParticleCount)
+	if (idx < ParticleCountBuffer[6])
 	{
 		pos = float3(PredictedPositions[idx3], PredictedPositions[idx3 + 1], PredictedPositions[idx3 + 2]);
 		flags = Flags[idx];
@@ -286,7 +287,7 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	//=========================================================================
 	// PHASE 2: Early returns (AFTER barrier - safe to diverge now)
 	//=========================================================================
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}
@@ -392,7 +393,7 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 						// CRITICAL: Check BOTH cellStart AND cellEnd to prevent infinite loop
 						if (cellStart == INVALID_INDEX || cellEnd == INVALID_INDEX) continue;
 
-						uint maxNeighborIdx = min(cellEnd, (uint)(ParticleCount - 1));
+						uint maxNeighborIdx = min(cellEnd, ParticleCountBuffer[6] - 1);
 						for (uint neighborIdx = cellStart; neighborIdx <= maxNeighborIdx; ++neighborIdx)
 						{
 							// Get neighbor data: LDS first, then Global Memory
@@ -504,7 +505,7 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 						for (uint i = 0; i < count; ++i)
 						{
 							uint neighborIdx = ParticleIndices[startIdx + i];
-							if (neighborIdx >= (uint)ParticleCount)
+							if (neighborIdx >= ParticleCountBuffer[6])
 							{
 								continue;
 							}

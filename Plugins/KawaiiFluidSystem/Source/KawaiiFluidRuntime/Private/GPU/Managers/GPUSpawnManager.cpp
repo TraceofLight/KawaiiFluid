@@ -885,3 +885,21 @@ void FGPUSpawnManager::EnsureStreamCompactionBuffers(FRDGBuilder& GraphBuilder, 
 	UE_LOG(LogGPUSpawnManager, Log, TEXT("EnsureStreamCompactionBuffers: Allocated %d capacity (%d KB total)"),
 		Capacity, (Capacity * 2 * 4 + BlockCount * 4 + CompactedSize) / 1024);
 }
+
+//=============================================================================
+// Stream Compaction Buffer Accessors
+//=============================================================================
+
+FRDGBufferSRVRef FGPUSpawnManager::GetLastPrefixSumsSRV(FRDGBuilder& GraphBuilder) const
+{
+	check(PersistentPrefixSumsBuffer.IsValid());
+	FRDGBufferRef Buffer = GraphBuilder.RegisterExternalBuffer(PersistentPrefixSumsBuffer, TEXT("DespawnPrefixSums"));
+	return GraphBuilder.CreateSRV(Buffer);
+}
+
+FRDGBufferSRVRef FGPUSpawnManager::GetLastAliveMaskSRV(FRDGBuilder& GraphBuilder) const
+{
+	check(PersistentAliveMaskBuffer.IsValid());
+	FRDGBufferRef Buffer = GraphBuilder.RegisterExternalBuffer(PersistentAliveMaskBuffer, TEXT("DespawnAliveMask"));
+	return GraphBuilder.CreateSRV(Buffer);
+}

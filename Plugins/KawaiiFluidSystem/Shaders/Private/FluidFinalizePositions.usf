@@ -16,6 +16,7 @@ RWBuffer<uint2> PackedVelocities;       // half3 packed as uint2 (B plan optimiz
 RWBuffer<uint> Flags;
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float DeltaTime;
 float MaxVelocity;      // Safety clamp to prevent divergence
 float GlobalDamping;    // Velocity damping per substep (1.0 = no damping)
@@ -28,7 +29,7 @@ float GlobalDamping;    // Velocity damping per substep (1.0 = no damping)
 void FinalizePositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}

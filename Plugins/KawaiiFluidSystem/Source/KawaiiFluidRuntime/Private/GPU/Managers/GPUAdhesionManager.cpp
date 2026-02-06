@@ -3,6 +3,7 @@
 #include "GPU/Managers/GPUAdhesionManager.h"
 #include "GPU/Managers/GPUCollisionManager.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
+#include "GPU/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "GlobalShader.h"
@@ -69,7 +70,8 @@ void FGPUAdhesionManager::AddAdhesionPass(
 	FRDGBufferUAVRef AttachmentUAV,
 	FGPUCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	if (!IsAdhesionEnabled() || !CollisionManager || !CollisionManager->AreBoneTransformsValid() || CollisionManager->GetCachedBoneTransforms().Num() == 0 || CurrentParticleCount <= 0)
 	{
@@ -160,6 +162,7 @@ void FGPUAdhesionManager::AddAdhesionPass(
 	PassParameters->PackedVelocities = GraphBuilder.CreateUAV(SpatialData.SoA_PackedVelocities, PF_R32G32_UINT);  // B plan
 	PassParameters->Flags = GraphBuilder.CreateUAV(SpatialData.SoA_Flags, PF_R32_UINT);
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	PassParameters->ParticleRadius = Params.ParticleRadius;
 	PassParameters->Attachments = AttachmentUAV;
 	PassParameters->BoneTransforms = BoneTransformsSRVLocal;
@@ -184,15 +187,27 @@ void FGPUAdhesionManager::AddAdhesionPass(
 	PassParameters->DeltaTime = Params.DeltaTime;
 	PassParameters->bEnableAdhesion = AdhesionParams.bEnableAdhesion;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FAdhesionCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::Adhesion"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::Adhesion"),
+			ComputeShader,
+			PassParameters,
+			IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FAdhesionCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::Adhesion"),
+			ComputeShader,
+			PassParameters,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
 }
 
 //=============================================================================
@@ -205,7 +220,8 @@ void FGPUAdhesionManager::AddUpdateAttachedPositionsPass(
 	FRDGBufferUAVRef AttachmentUAV,
 	FGPUCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	if (!IsAdhesionEnabled() || !CollisionManager || !CollisionManager->AreBoneTransformsValid() || CollisionManager->GetCachedBoneTransforms().Num() == 0)
 	{
@@ -296,6 +312,7 @@ void FGPUAdhesionManager::AddUpdateAttachedPositionsPass(
 	PassParameters->PackedVelocities = GraphBuilder.CreateUAV(SpatialData.SoA_PackedVelocities, PF_R32G32_UINT);
 	PassParameters->Flags = GraphBuilder.CreateUAV(SpatialData.SoA_Flags, PF_R32_UINT);
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	PassParameters->Attachments = AttachmentUAV;
 	PassParameters->BoneTransforms = BoneTransformsSRVLocal;
 	PassParameters->BoneCount = BoneTransforms.Num();
@@ -319,15 +336,27 @@ void FGPUAdhesionManager::AddUpdateAttachedPositionsPass(
 	PassParameters->Gravity = AdhesionParams.Gravity;
 	PassParameters->GravitySlidingScale = AdhesionParams.GravitySlidingScale;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateAttachedPositionsCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::UpdateAttachedPositions"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::UpdateAttachedPositions"),
+			ComputeShader,
+			PassParameters,
+			IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FUpdateAttachedPositionsCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::UpdateAttachedPositions"),
+			ComputeShader,
+			PassParameters,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
 }
 
 //=============================================================================
@@ -337,7 +366,8 @@ void FGPUAdhesionManager::AddUpdateAttachedPositionsPass(
 void FGPUAdhesionManager::AddClearDetachedFlagPass(
 	FRDGBuilder& GraphBuilder,
 	const FSimulationSpatialData& SpatialData,
-	int32 CurrentParticleCount)
+	int32 CurrentParticleCount,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	if (!IsAdhesionEnabled())
 	{
@@ -350,16 +380,29 @@ void FGPUAdhesionManager::AddClearDetachedFlagPass(
 	FClearDetachedFlagCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FClearDetachedFlagCS::FParameters>();
 	PassParameters->Flags = GraphBuilder.CreateUAV(SpatialData.SoA_Flags, PF_R32_UINT);
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FClearDetachedFlagCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::ClearDetachedFlag"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ClearDetachedFlag"),
+			ComputeShader,
+			PassParameters,
+			IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FClearDetachedFlagCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::ClearDetachedFlag"),
+			ComputeShader,
+			PassParameters,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
 }
 
 //=============================================================================
@@ -374,7 +417,8 @@ void FGPUAdhesionManager::AddStackPressurePass(
 	FRDGBufferSRVRef InParticleIndicesSRV,
 	FGPUCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
-	const FGPUFluidSimulationParams& Params)
+	const FGPUFluidSimulationParams& Params,
+	FRDGBufferRef IndirectArgsBuffer)
 {
 	// Skip if stack pressure is disabled or no attachments
 	if (Params.StackPressureScale <= 0.0f || !InAttachmentSRV)
@@ -446,19 +490,32 @@ void FGPUAdhesionManager::AddStackPressurePass(
 
 	// Parameters
 	PassParameters->ParticleCount = CurrentParticleCount;
+	if (IndirectArgsBuffer) PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	PassParameters->SmoothingRadius = Params.SmoothingRadius;
 	PassParameters->StackPressureScale = Params.StackPressureScale;
 	PassParameters->CellSize = Params.CellSize;
 	PassParameters->Gravity = FVector3f(Params.Gravity);
 	PassParameters->DeltaTime = Params.DeltaTime;
 
-	const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FStackPressureCS::ThreadGroupSize);
-
-	FComputeShaderUtils::AddPass(
-		GraphBuilder,
-		RDG_EVENT_NAME("GPUFluid::StackPressure"),
-		ComputeShader,
-		PassParameters,
-		FIntVector(NumGroups, 1, 1)
-	);
+	if (IndirectArgsBuffer)
+	{
+		GPUIndirectDispatch::AddIndirectComputePass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::StackPressure"),
+			ComputeShader,
+			PassParameters,
+			IndirectArgsBuffer,
+			GPUIndirectDispatch::IndirectArgsOffset_TG256);
+	}
+	else
+	{
+		const uint32 NumGroups = FMath::DivideAndRoundUp(CurrentParticleCount, FStackPressureCS::ThreadGroupSize);
+		FComputeShaderUtils::AddPass(
+			GraphBuilder,
+			RDG_EVENT_NAME("GPUFluid::StackPressure"),
+			ComputeShader,
+			PassParameters,
+			FIntVector(NumGroups, 1, 1)
+		);
+	}
 }

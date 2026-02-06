@@ -116,6 +116,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, PrevNeighborCounts)
 		SHADER_PARAMETER(int32, bUsePrevNeighborCache)   // 0 = skip forces (first frame)
 		SHADER_PARAMETER(int32, PrevParticleCount)       // Safety: bounds check
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -334,6 +335,7 @@ public:
 		SHADER_PARAMETER(float, SurfaceTensionTolerance)         // cm, dead zone around activation (prevents oscillation)
 		// Surface Tension max correction
 		SHADER_PARAMETER(float, MaxSurfaceTensionCorrection)        // cm per iteration
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -416,6 +418,7 @@ public:
 		SHADER_PARAMETER(float, BoundaryVelocityTransferStrength)
 		SHADER_PARAMETER(float, BoundaryDetachSpeedThreshold)
 		SHADER_PARAMETER(float, BoundaryMaxDetachSpeed)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -458,6 +461,7 @@ public:
 		SHADER_PARAMETER(float, SleepVelocityThreshold)
 		SHADER_PARAMETER(int32, SleepFrameThreshold)
 		SHADER_PARAMETER(float, WakeVelocityThreshold)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -507,6 +511,7 @@ public:
 		// Collision response
 		SHADER_PARAMETER(float, Restitution)
 		SHADER_PARAMETER(float, Friction)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -564,6 +569,7 @@ public:
 		SHADER_PARAMETER(float, Restitution)
 		SHADER_PARAMETER(float, NormalStrength)
 		SHADER_PARAMETER(float, CollisionOffset)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -633,6 +639,7 @@ public:
 		// Collider Contact Counts (for simple collision counting, unchanged)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, ColliderContactCounts)
 		SHADER_PARAMETER(int32, MaxColliderCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -671,6 +678,7 @@ public:
 		SHADER_PARAMETER(float, DeltaTime)
 		SHADER_PARAMETER(float, MaxVelocity)      // Safety clamp (high value, e.g., 50000 cm/s)
 		SHADER_PARAMETER(float, GlobalDamping)    // Velocity damping per substep (1.0 = no damping)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -831,9 +839,11 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, SourceParticles)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, DestParticles)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 		SHADER_PARAMETER(int32, SourceOffset)
 		SHADER_PARAMETER(int32, DestOffset)
 		SHADER_PARAMETER(int32, CopyCount)
+		SHADER_PARAMETER(int32, bReadCountFromGPU)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -1112,6 +1122,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float3>, Positions)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(int32, bUsePredictedPosition)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -1235,6 +1246,7 @@ public:
 		SHADER_PARAMETER(float, CurrentTime)
 		SHADER_PARAMETER(float, DeltaTime)
 		SHADER_PARAMETER(int32, bEnableAdhesion)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -1296,6 +1308,7 @@ public:
 		// Gravity sliding parameters
 		SHADER_PARAMETER(FVector3f, Gravity)
 		SHADER_PARAMETER(float, GravitySlidingScale)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -1327,6 +1340,7 @@ public:
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, Flags)
 		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -1651,6 +1665,7 @@ public:
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(FVector3f, Gravity)
 		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -1740,6 +1755,7 @@ public:
 		SHADER_PARAMETER(float, CellSize)
 		// Hybrid Tiled Z-Order mode: 1 = enabled (32-bit keys, unlimited range), 0 = disabled (classic Morton)
 		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -2067,6 +2083,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUBoneDeltaAttachment>, SortedBoneDeltaAttachments)
 		SHADER_PARAMETER(int32, bReorderAttachments)
 		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -2099,6 +2116,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, SortedIndices)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, OldToNewMapping)
 		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -2180,6 +2198,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, CellStart)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, CellEnd)
 		SHADER_PARAMETER(int32, ParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	// Increased to 512 to match FluidCellStartEnd.usf
@@ -2424,6 +2443,7 @@ public:
 
 		// Time parameter for velocity calculation
 		SHADER_PARAMETER(float, DeltaTime)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -2495,6 +2515,7 @@ public:
 		SHADER_PARAMETER(int32, CapsuleCount)
 		SHADER_PARAMETER(int32, BoxCount)
 		SHADER_PARAMETER(int32, BoneCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -2545,6 +2566,7 @@ class FSplitAoSToSoACS : public FGlobalShader
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<int>, OutParticleIDs)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<int>, OutSourceIDs)
 		SHADER_PARAMETER(int32, SplitParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr uint32 ThreadGroupSize = 256;
@@ -2582,6 +2604,7 @@ class FMergeSoAToAoSCS : public FGlobalShader
 		SHADER_PARAMETER(float, MergeUniformParticleMass)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, TargetParticles)
 		SHADER_PARAMETER(int32, MergeParticleCount)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr uint32 ThreadGroupSize = 256;
@@ -2595,5 +2618,63 @@ class FMergeSoAToAoSCS : public FGlobalShader
 	{
 		FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
 		OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
+	}
+};
+
+//=============================================================================
+// Indirect Dispatch Particle Count Shaders
+// GPU-driven particle count management for DispatchIndirect
+//=============================================================================
+
+class FWriteAliveCountAfterCompactionCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FWriteAliveCountAfterCompactionCS);
+	SHADER_USE_PARAMETER_STRUCT(FWriteAliveCountAfterCompactionCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, PrefixSums)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, AliveMask)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, ParticleCountBuffer)
+		SHADER_PARAMETER(int32, OldParticleCount)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
+
+class FUpdateCountAfterSpawnCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FUpdateCountAfterSpawnCS);
+	SHADER_USE_PARAMETER_STRUCT(FUpdateCountAfterSpawnCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, SpawnCounter)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, SpawnParticleCountBuffer)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
+	}
+};
+
+class FCopyCountToSpawnCounterCS : public FGlobalShader
+{
+public:
+	DECLARE_GLOBAL_SHADER(FCopyCountToSpawnCounterCS);
+	SHADER_USE_PARAMETER_STRUCT(FCopyCountToSpawnCounterCS, FGlobalShader);
+
+	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, SourceParticleCountBuffer)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, DestSpawnCounter)
+	END_SHADER_PARAMETER_STRUCT()
+
+	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
+	{
+		return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
 	}
 };

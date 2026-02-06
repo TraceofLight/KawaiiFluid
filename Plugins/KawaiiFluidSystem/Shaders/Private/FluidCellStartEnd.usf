@@ -51,6 +51,7 @@ RWStructuredBuffer<uint> CellStart;  // CellStart[cellID] = first particle index
 RWStructuredBuffer<uint> CellEnd;    // CellEnd[cellID] = last particle index
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 
 //=============================================================================
 // Clear Cell Indices
@@ -81,7 +82,7 @@ void ClearCellIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 void ComputeCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint idx = DispatchThreadId.x;
-    if (idx >= (uint)ParticleCount)
+    if (idx >= ParticleCountBuffer[6])
     {
         return;
     }
@@ -113,7 +114,7 @@ void ComputeCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     }
 
     // Check if this is the last particle
-    if (idx == (uint)(ParticleCount - 1))
+    if (idx == ParticleCountBuffer[6] - 1)
     {
         // Last particle always ends its cell
         CellEnd[cellID] = idx;
@@ -138,7 +139,7 @@ void ComputeCellStartEndMortonCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     // This function remains for backward compatibility only
 
     uint idx = DispatchThreadId.x;
-    if (idx >= (uint)ParticleCount)
+    if (idx >= ParticleCountBuffer[6])
     {
         return;
     }
@@ -163,7 +164,7 @@ void ComputeCellStartEndMortonCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         }
     }
 
-    if (idx == (uint)(ParticleCount - 1))
+    if (idx == ParticleCountBuffer[6] - 1)
     {
         CellEnd[cellID] = idx;
     }
@@ -182,7 +183,7 @@ StructuredBuffer<uint> SortedCellIDs;
 void ComputeCellStartEndGridCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint idx = DispatchThreadId.x;
-    if (idx >= (uint)ParticleCount)
+    if (idx >= ParticleCountBuffer[6])
     {
         return;
     }
@@ -208,7 +209,7 @@ void ComputeCellStartEndGridCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         }
     }
 
-    if (idx == (uint)(ParticleCount - 1))
+    if (idx == ParticleCountBuffer[6] - 1)
     {
         CellEnd[cellIdx] = idx;
     }

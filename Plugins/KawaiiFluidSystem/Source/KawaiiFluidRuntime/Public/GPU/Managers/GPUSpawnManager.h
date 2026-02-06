@@ -362,4 +362,11 @@ private:
 
 	/** Ensure stream compaction buffers are allocated with sufficient capacity */
 	void EnsureStreamCompactionBuffers(FRDGBuilder& GraphBuilder, int32 RequiredCapacity);
+
+public:
+	/** Get SRV for the last PrefixSums buffer (after despawn compaction) */
+	FRDGBufferSRVRef GetLastPrefixSumsSRV(FRDGBuilder& GraphBuilder) const;
+
+	/** Get SRV for the last AliveMask buffer (after despawn marking) */
+	FRDGBufferSRVRef GetLastAliveMaskSRV(FRDGBuilder& GraphBuilder) const;
 };

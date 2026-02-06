@@ -108,21 +108,24 @@ public:
 		FRDGBuilder& GraphBuilder,
 		const FSimulationSpatialData& SpatialData,
 		int32 ParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	/** Add primitive collision pass (spheres, capsules, boxes, convexes) */
 	void AddPrimitiveCollisionPass(
 		FRDGBuilder& GraphBuilder,
 		const FSimulationSpatialData& SpatialData,
 		int32 ParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	/** Add heightmap collision pass (Landscape terrain) */
 	void AddHeightmapCollisionPass(
 		FRDGBuilder& GraphBuilder,
 		const FSimulationSpatialData& SpatialData,
 		int32 ParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	//=========================================================================
 	// Collision Feedback

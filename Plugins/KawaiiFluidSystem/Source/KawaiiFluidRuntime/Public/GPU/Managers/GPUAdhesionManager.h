@@ -92,7 +92,8 @@ public:
 		FRDGBufferUAVRef AttachmentUAV,
 		FGPUCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	/**
 	 * Add update attached positions pass (move attached particles with bones)
@@ -109,7 +110,8 @@ public:
 		FRDGBufferUAVRef AttachmentUAV,
 		FGPUCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	/**
 	 * Add clear detached flag pass (clear just-detached flag at end of frame)
@@ -120,7 +122,8 @@ public:
 	void AddClearDetachedFlagPass(
 		FRDGBuilder& GraphBuilder,
 		const FSimulationSpatialData& SpatialData,
-		int32 CurrentParticleCount);
+		int32 CurrentParticleCount,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	/**
 	 * Add stack pressure pass (weight transfer from stacked attached particles)
@@ -141,7 +144,8 @@ public:
 		FRDGBufferSRVRef ParticleIndicesSRV,
 		FGPUCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
-		const FGPUFluidSimulationParams& Params);
+		const FGPUFluidSimulationParams& Params,
+		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 private:
 	//=========================================================================

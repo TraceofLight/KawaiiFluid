@@ -430,3 +430,19 @@ void FGPUFluidSimulatorPassBuilder::AddExtractRenderDataSoAPass(
 
 IMPLEMENT_GLOBAL_SHADER(FSplitAoSToSoACS, "/Plugin/KawaiiFluidSystem/Private/FluidParticleSoA.usf", "SplitAoSToSoACS", SF_Compute);
 IMPLEMENT_GLOBAL_SHADER(FMergeSoAToAoSCS, "/Plugin/KawaiiFluidSystem/Private/FluidParticleSoA.usf", "MergeSoAToAoSCS", SF_Compute);
+
+//=============================================================================
+// Indirect Dispatch Particle Count Shaders
+//=============================================================================
+
+IMPLEMENT_GLOBAL_SHADER(FWriteAliveCountAfterCompactionCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidUpdateParticleCount.usf",
+	"WriteAliveCountAfterCompactionCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FUpdateCountAfterSpawnCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidUpdateParticleCount.usf",
+	"UpdateCountAfterSpawnCS", SF_Compute);
+
+IMPLEMENT_GLOBAL_SHADER(FCopyCountToSpawnCounterCS,
+	"/Plugin/KawaiiFluidSystem/Private/FluidCopyParticleCount.usf",
+	"CopyCountToSpawnCounterCS", SF_Compute);

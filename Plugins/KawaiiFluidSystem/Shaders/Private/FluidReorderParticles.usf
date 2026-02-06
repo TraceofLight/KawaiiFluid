@@ -34,6 +34,7 @@ RWStructuredBuffer<FGPUBoneDeltaAttachment> SortedBoneDeltaAttachments;
 int bReorderAttachments;  // 1 = reorder attachments, 0 = skip
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 
 //=============================================================================
 // Main Compute Shader: Reorder Particles
@@ -46,7 +47,7 @@ int ParticleCount;
 void ReorderParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint newIdx = DispatchThreadId.x;
-    if (newIdx >= (uint)ParticleCount)
+    if (newIdx >= ParticleCountBuffer[6])
     {
         return;
     }
@@ -73,7 +74,7 @@ void ReorderParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 void BuildReverseMappingCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint newIdx = DispatchThreadId.x;
-    if (newIdx >= (uint)ParticleCount)
+    if (newIdx >= ParticleCountBuffer[6])
     {
         return;
     }
@@ -103,7 +104,7 @@ RWStructuredBuffer<float4> SortedDynamics;
 void ReorderParticlesSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
     uint newIdx = DispatchThreadId.x;
-    if (newIdx >= (uint)ParticleCount)
+    if (newIdx >= ParticleCountBuffer[6])
     {
         return;
     }
@@ -117,67 +118,3 @@ void ReorderParticlesSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
     SortedDynamics[newIdx] = OldDynamics[oldIdx];
 }
 
-//=============================================================================
-// Combined: Reorder + Extract SoA in Single Pass
-// More efficient than separate reorder + extract passes
-//=============================================================================
-
-RWStructuredBuffer<FGPUParticlePositionSoA> SortedPositionsSoA;
-RWStructuredBuffer<FGPUParticleDynamicsSoA> SortedDynamicsSoA;
-RWStructuredBuffer<FGPUParticleVelocitySoA> SortedVelocitiesSoA;
-
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void ReorderAndExtractSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
-{
-    uint newIdx = DispatchThreadId.x;
-    if (newIdx >= (uint)ParticleCount)
-    {
-        return;
-    }
-
-    // Get the old index for this new position
-    uint oldIdx = SortedIndices[newIdx];
-
-    // Read from old position
-    FGPUFluidParticle particle = OldParticles[oldIdx];
-
-    // Write reordered full particle
-    SortedParticles[newIdx] = particle;
-
-    // Also extract to SoA buffers for cache-efficient neighbor access
-    FGPUParticlePositionSoA posSoA;
-    posSoA.PredictedPosition = particle.PredictedPosition;
-    posSoA.Mass = particle.Mass;
-    SortedPositionsSoA[newIdx] = posSoA;
-
-    FGPUParticleDynamicsSoA dynSoA;
-    dynSoA.Lambda = particle.Lambda;
-    dynSoA.Density = particle.Density;
-    dynSoA.Flags = particle.Flags;
-    dynSoA.NeighborCount = particle.NeighborCount;
-    SortedDynamicsSoA[newIdx] = dynSoA;
-
-    FGPUParticleVelocitySoA velSoA;
-    velSoA.Velocity = particle.Velocity;
-    velSoA.Padding = 0.0f;
-    SortedVelocitiesSoA[newIdx] = velSoA;
-}
-
-//=============================================================================
-// Update Particle IDs after Reordering
-// Fixes ParticleID field to match new array position
-//=============================================================================
-
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void UpdateParticleIDsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
-{
-    uint idx = DispatchThreadId.x;
-    if (idx >= (uint)ParticleCount)
-    {
-        return;
-    }
-
-    // Keep old ParticleID for external reference, but could optionally update
-    // SortedParticles[idx].ParticleID remains the original ID
-    // This allows tracking which particle is which after sorting
-}

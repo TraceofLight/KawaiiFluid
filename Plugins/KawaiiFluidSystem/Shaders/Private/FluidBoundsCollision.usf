@@ -16,6 +16,7 @@ RWBuffer<uint2> PackedVelocities;  // B plan: half3 packed
 RWBuffer<uint> Flags;
 
 int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
 float ParticleRadius;
 
 // OBB parameters
@@ -258,7 +259,7 @@ void ApplyOBBCollision(inout float3 pos, float3 originalPos, inout float3 vel, i
 void BoundsCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)ParticleCount)
+	if (idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}
