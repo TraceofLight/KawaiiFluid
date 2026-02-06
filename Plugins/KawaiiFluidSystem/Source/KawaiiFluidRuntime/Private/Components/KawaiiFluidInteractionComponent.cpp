@@ -333,6 +333,12 @@ void UKawaiiFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 			continue;
 		}
 
+		// Skip modules with no active particles (readback data is stale after despawn)
+		if (GPUSimulator->GetParticleCount() <= 0)
+		{
+			continue;
+		}
+
 		// Get contact count for this owner from this Volume's GPUSimulator
 		const int32 ModuleContactCount = GPUSimulator->GetContactCountForOwner(MyOwnerID);
 
