@@ -192,6 +192,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Rendering", meta = (EditCondition = "bEnableShadow", ClampMin = "0"))
 	float ShadowCullDistance = 0.0f;
 
+	/** Shadow radius offset (cm) - adjust shadow sphere size (+/-).
+	 *  Positive values enlarge the shadow spheres to fill gaps, negative values shrink them to reduce overlap artifacts. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Volume|Rendering", meta = (EditCondition = "bEnableShadow", ClampMin = "-50.0", ClampMax = "50.0"))
+	float ShadowRadiusOffset = 0.0f;
+
 	//========================================
 	// Splash VFX
 	//========================================

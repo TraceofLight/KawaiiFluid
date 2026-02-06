@@ -134,6 +134,26 @@ Surface Decoration adds visual layers like foam, glow, and custom textures on to
 
 ---
 
+## 8. Shadow Configuration
+
+Shadows for the fluid are not part of the global rendering parameters; instead, they are managed directly within each **Kawaii Fluid Volume** component. This allows you to fine-tune shadow quality and performance per volume.
+
+![Shadow Configuration Guide](media/shadow-config-guide.png)
+
+| Setting | Description |
+| --- | --- |
+| **Enable Shadow** | Toggles shadow casting for this volume using an ISM (Instanced Static Mesh) proxy. |
+| **Shadow Mesh Quality** | Controls the polygon count of the shadow proxy spheres (Low, Medium, High). |
+| **Shadow Cull Distance** | Distance from the camera at which shadows stop being rendered. |
+| **Shadow Radius Offset** | Adjusts the size of the shadow spheres. Positive values fill gaps, while negative values reduce overlap artifacts. |
+
+### Key Shadow Tips:
+*   **Two-Sided Shadows:** The system automatically enables `bCastShadowAsTwoSided` on the shadow proxy to ensure stable projection from small particle geometry.
+*   **Bounds Update:** The ISM proxy automatically updates its bounds every frame to ensure Virtual Shadow Maps (VSM) and Cascaded Shadows cover the correct area as fluid moves.
+*   **Shadow Bias:** If shadows appear "hollow" or only as outlines, try lowering the **Shadow Bias** and **Slope Bias** in your scene's **Directional Light** settings.
+
+---
+
 ## Detailed Explanations
 
 ### Anisotropy Mode: Density vs. Velocity

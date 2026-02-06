@@ -206,7 +206,8 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 		}
 	}
 
-	// Update render state - single call is sufficient in UE5
+	// Update bounds and render state - essential for Virtual Shadow Maps (VSM) and Cascaded Shadow coverage
+	ISMComponent->UpdateBounds();
 	ISMComponent->MarkRenderStateDirty();
 }
 
@@ -263,6 +264,7 @@ void UKawaiiFluidISMRenderer::InitializeISM()
 	// Set properties before registration
 	ISMComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ISMComponent->SetCastShadow(bCastShadow);
+	ISMComponent->bCastShadowAsTwoSided = true; // Improve shadow stability for small spheres
 	ISMComponent->SetCullDistances(0, CullDistance);
 	ISMComponent->SetVisibility(true);
 	ISMComponent->SetHiddenInGame(false);
