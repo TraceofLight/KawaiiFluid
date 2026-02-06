@@ -105,10 +105,10 @@ public:
 	 * Set GPU simulator reference (called from game thread)
 	 * Allows render thread to directly access simulator buffers in GPU mode
 	 * @param InSimulator GPU simulator reference (nullptr for CPU mode)
-	 * @param InParticleCount GPU particle count
+	 * @param InMaxParticleCount Maximum particle capacity (for buffer sizing)
 	 * @param InParticleRadius Particle radius
 	 */
-	void SetGPUSimulatorReference(FGPUFluidSimulator* InSimulator, int32 InParticleCount, float InParticleRadius);
+	void SetGPUSimulatorReference(FGPUFluidSimulator* InSimulator, int32 InMaxParticleCount, float InParticleRadius);
 
 	/** Clear GPU simulator reference (switch to CPU mode) */
 	void ClearGPUSimulatorReference();
@@ -118,13 +118,6 @@ public:
 
 	/** Check if in GPU simulator mode */
 	bool HasGPUSimulator() const { return CachedGPUSimulator != nullptr; }
-
-	/**
-	 * Get unified particle count (called from render thread)
-	 * GPU mode: GPU simulator's particle count
-	 * CPU mode: Cached particle count
-	 */
-	int32 GetUnifiedParticleCount() const;
 
 	/**
 	 * Get unified particle radius
@@ -288,9 +281,6 @@ private:
 
 	/** GPU simulator reference (for direct buffer access from render thread) */
 	std::atomic<FGPUFluidSimulator*> CachedGPUSimulator{nullptr};
-
-	/** Cached particle count */
-	std::atomic<int32> CachedGPUParticleCount{0};
 
 	/** Cached particle radius */
 	std::atomic<float> CachedParticleRadius{10.0f};
