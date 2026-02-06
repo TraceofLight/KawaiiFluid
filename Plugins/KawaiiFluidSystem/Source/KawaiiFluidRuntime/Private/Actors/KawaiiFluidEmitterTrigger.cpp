@@ -12,7 +12,8 @@
 
 AKawaiiFluidEmitterTrigger::AKawaiiFluidEmitterTrigger()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	// Create root component
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
@@ -65,6 +66,28 @@ void AKawaiiFluidEmitterTrigger::BeginPlay()
 	}
 }
 
+void AKawaiiFluidEmitterTrigger::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (ClearFramesRemaining > 0 && TargetEmitter)
+	{
+		TargetEmitter->ClearSpawnedParticles();
+		--ClearFramesRemaining;
+
+		if (ClearFramesRemaining <= 0)
+		{
+			SetActorTickEnabled(false);
+		}
+	}
+	else
+	{
+		// Safety: disable tick if no work
+		ClearFramesRemaining = 0;
+		SetActorTickEnabled(false);
+	}
+}
+
 //========================================
 // Manual Trigger API
 //========================================
@@ -109,10 +132,16 @@ void AKawaiiFluidEmitterTrigger::ExecuteExitAction()
 		TargetEmitter->StopSpawn();
 	}
 
-	// Clear all particles spawned by this emitter (useful for demo maps)
+	// TODO: Multi-frame Tick clear is a workaround for GPU readback latency.
+	// Replace with GPU-side SourceID bulk despawn or despawn completion callback.
 	if (bClearParticlesOnExit)
 	{
 		TargetEmitter->ClearSpawnedParticles();
+		ClearFramesRemaining = ClearParticleFrameCount - 1;
+		if (ClearFramesRemaining > 0)
+		{
+			SetActorTickEnabled(true);
+		}
 	}
 }
 
