@@ -1979,6 +1979,10 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 				AnisotropyParams.OutAxis2UAV = GraphBuilder.CreateUAV(Axis2Buffer);
 				AnisotropyParams.OutAxis3UAV = GraphBuilder.CreateUAV(Axis3Buffer);
 				AnisotropyParams.ParticleCount = CurrentParticleCount;
+			if (CurrentIndirectArgsBuffer)
+			{
+				AnisotropyParams.ParticleCountBufferSRV = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
+			}
 
 				// Render offset for surface particles (pulled toward neighbors)
 				FRDGBufferRef RenderOffsetBuffer = GraphBuilder.CreateBuffer(

@@ -53,6 +53,7 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 
 	// Parameters
 	int32 ParticleCount = 0;
+	FRDGBufferSRVRef ParticleCountBufferSRV = nullptr;  // GPU-accurate count (ParticleCountBuffer[6])
 	EGPUAnisotropyMode Mode = EGPUAnisotropyMode::DensityBased;
 
 	// Velocity-based params
@@ -175,8 +176,8 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FVector3f>, OutRenderOffset)
 		SHADER_PARAMETER(float, ParticleRadius)
 
-		// Parameters
-		SHADER_PARAMETER(uint32, ParticleCount)
+		// Parameters (GPU-accurate count via ParticleCountBuffer[6])
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 		SHADER_PARAMETER(uint32, AnisotropyMode)  // 0=Velocity, 1=Density, 2=Hybrid
 		SHADER_PARAMETER(float, VelocityStretchFactor)
 		SHADER_PARAMETER(float, AnisotropyScale)

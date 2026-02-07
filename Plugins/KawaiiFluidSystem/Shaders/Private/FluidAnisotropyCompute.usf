@@ -57,8 +57,8 @@ RWStructuredBuffer<float4> OutAnisotropyAxis3;
 RWStructuredBuffer<float3> OutRenderOffset;
 float ParticleRadius;
 
-// Parameters
-uint ParticleCount;
+// Parameters (GPU-accurate particle count from ParticleCountBuffer[6])
+StructuredBuffer<uint> ParticleCountBuffer;
 uint AnisotropyMode;  // 0=Velocity, 1=Density, 2=Hybrid
 float VelocityStretchFactor;
 float AnisotropyScale;
@@ -776,11 +776,11 @@ void CalculateDensityBased(
 						continue;
 					}
 
-					End = min(End, (uint)(ParticleCount - 1));
+					End = min(End, (uint)(ParticleCountBuffer[6] - 1));
 
 					for (uint NeighborIdx = Start; NeighborIdx <= End; ++NeighborIdx)
 					{
-						if (NeighborIdx >= ParticleCount)
+						if (NeighborIdx >= ParticleCountBuffer[6])
 						{
 							continue;
 						}
@@ -832,7 +832,7 @@ void CalculateDensityBased(
 					for (uint i = 0; i < Count; ++i)
 					{
 						uint NeighborIdx = ParticleIndices[BaseIdx + i];
-						if (NeighborIdx >= ParticleCount)
+						if (NeighborIdx >= ParticleCountBuffer[6])
 						{
 							continue;
 						}
@@ -1281,7 +1281,7 @@ void CalculateAttachedAnisotropy(
 void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
 	uint Idx = DispatchThreadId.x;
-	if (Idx >= ParticleCount)
+	if (Idx >= ParticleCountBuffer[6])
 	{
 		return;
 	}

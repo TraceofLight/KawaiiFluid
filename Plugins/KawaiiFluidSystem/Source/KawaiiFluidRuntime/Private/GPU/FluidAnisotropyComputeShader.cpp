@@ -223,8 +223,8 @@ void FFluidAnisotropyPassBuilder::AddAnisotropyPass(
 	PassParameters->OutRenderOffset = OutRenderOffsetUAV;
 	PassParameters->ParticleRadius = Params.ParticleRadius;
 
-	// Parameters
-	PassParameters->ParticleCount = static_cast<uint32>(Params.ParticleCount);
+	// Parameters (GPU-accurate count via ParticleCountBuffer[6])
+	PassParameters->ParticleCountBuffer = Params.ParticleCountBufferSRV;
 	PassParameters->AnisotropyMode = static_cast<uint32>(Params.Mode);
 	PassParameters->VelocityStretchFactor = Params.VelocityStretchFactor;
 	PassParameters->AnisotropyScale = Params.Strength;
