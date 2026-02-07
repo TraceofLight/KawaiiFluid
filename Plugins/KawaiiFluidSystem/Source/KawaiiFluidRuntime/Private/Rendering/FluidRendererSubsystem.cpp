@@ -455,6 +455,7 @@ UInstancedStaticMeshComponent* UFluidRendererSubsystem::GetOrCreateShadowISM(EFl
 	ISM->CastShadow = true;
 	ISM->bCastDynamicShadow = true;
 	ISM->bCastStaticShadow = false;
+	ISM->bCastShadowAsTwoSided = true; // Essential for preventing hollow shadows on small sphere geometry
 	ISM->bAffectDynamicIndirectLighting = false;
 	ISM->bAffectDistanceFieldLighting = false;
 
@@ -599,18 +600,17 @@ void UFluidRendererSubsystem::FlushShadowInstances()
 
 		// Update ISM
 		const int32 CurrentCount = ISM->GetInstanceCount();
-		if (CurrentCount == NumInstances)
-		{
-			// Fast path: batch update
-			ISM->BatchUpdateInstancesTransforms(0, CachedInstanceTransforms, false, true, false);
-		}
-		else
-		{
-			// Rebuild
-			ISM->ClearInstances();
-			ISM->AddInstances(CachedInstanceTransforms, false, true);
-		}
-	}
+				if (CurrentCount == NumInstances)
+				{
+					// Fast path: Update existing instances (Always update bounds to ensure correct shadow frustum/VSM pages)
+					ISM->BatchUpdateInstancesTransforms(0, CachedInstanceTransforms, true, true, false);
+				}
+				else
+				{
+					// Rebuild: Clear and add new instances with bounds update
+					ISM->ClearInstances();
+					ISM->AddInstances(CachedInstanceTransforms, true, true);
+				}	}
 }
 
 /**

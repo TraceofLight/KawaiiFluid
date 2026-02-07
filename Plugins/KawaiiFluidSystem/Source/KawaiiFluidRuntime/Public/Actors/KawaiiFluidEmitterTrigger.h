@@ -55,15 +55,16 @@ public:
 	//========================================
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaTime) override;
 
 	//========================================
 	// Trigger Settings
 	//========================================
 
-	/** The emitter to control when triggered.
-	 *  Assign this in the editor by selecting an emitter from the world. */
+	/** The emitters to control when triggered.
+	 *  Assign these in the editor by selecting emitters from the world. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger")
-	TObjectPtr<AKawaiiFluidEmitter> TargetEmitter;
+	TArray<TObjectPtr<AKawaiiFluidEmitter>> TargetEmitters;
 
 	/** Action to perform when an actor enters the trigger */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger")
@@ -76,10 +77,17 @@ public:
 	bool bStopOnExit = true;
 
 	/** If true, clear all particles when the actor exits the trigger.
-	 *  Useful for demo maps where you want particles to disappear when leaving the area. */
+	 *  Useful for demo maps where you want particles to disappear when leaving the area.
+	 *  Sends clear requests over multiple frames to handle GPU readback latency. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger",
 		meta = (EditCondition = "TriggerAction == EKawaiiFluidTriggerAction::Start", EditConditionHides))
 	bool bClearParticlesOnExit = false;
+
+	/** Number of frames to repeat the clear request on exit.
+	 *  GPU despawn is async, so repeating ensures all particles are caught. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Trigger",
+		meta = (EditCondition = "bClearParticlesOnExit", EditConditionHides, ClampMin = "1", ClampMax = "30"))
+	int32 ClearParticleFrameCount = 5;
 
 	/** If true, only the player pawn can trigger this.
 	 *  If false, any actor with collision can trigger. */
@@ -150,6 +158,9 @@ protected:
 
 	/** Check if the overlapping actor should trigger */
 	bool ShouldTriggerFor(AActor* OtherActor) const;
+
+	/** Remaining frames to send clear requests */
+	int32 ClearFramesRemaining = 0;
 
 	/** Update trigger box extent when property changes */
 #if WITH_EDITOR

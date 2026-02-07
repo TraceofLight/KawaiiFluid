@@ -484,6 +484,9 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 						}
 					}
 
+					// Apply user-defined radius offset to fine-tune shadow coverage
+					ShadowParticleRadius = FMath::Max(0.1f, ShadowParticleRadius + VolumeComponent->ShadowRadiusOffset);
+					
 					// Register shadow particles for aggregation (will be rendered in Subsystem Tick)
 					RendererSubsystem->RegisterShadowParticles(
 						Positions.GetData(),
