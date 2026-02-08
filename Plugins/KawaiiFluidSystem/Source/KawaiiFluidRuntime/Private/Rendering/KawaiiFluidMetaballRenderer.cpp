@@ -179,9 +179,9 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 
 	// Update stats (stale CPU count is fine for UI display)
 	LastRenderedParticleCount = FMath::Min(Simulator->GetParticleCount(), MaxRenderParticles);
-	// Use bEverHadParticles instead of stale CPU count — GPU DrawPrimitiveIndirect
-	// handles zero-particle case via InstanceCount=0, no rendering artifacts
-	bIsRenderingActive = Simulator->HasEverHadParticles();
+	// Skip full-screen post-process passes when no particles remain
+	// Despawn is CPU-initiated, so GetParticleCount() is already 0 by this point
+	bIsRenderingActive = Simulator->HasEverHadParticles() && Simulator->GetParticleCount() > 0;
 
 	// Cache radius for shader parameters
 	CachedParticleRadius = RenderRadius;
