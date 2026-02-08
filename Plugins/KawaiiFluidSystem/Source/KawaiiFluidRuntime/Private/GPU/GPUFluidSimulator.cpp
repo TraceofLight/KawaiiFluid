@@ -986,25 +986,8 @@ void FGPUFluidSimulator::BeginFrame()
 						Self->SpawnManager->AddGPUDespawnPass(GraphBuilder, ParticleBuffer, PreDespawnCount,
 							NextParticleIDHint, ParticleCountBuffer);
 					}
-
-					// GPU: Write exact alive count after compaction
-					{
-						RDG_EVENT_SCOPE(GraphBuilder, "Despawn_WriteAliveCount");
-
-						FGlobalShaderMap* ShaderMap = GetGlobalShaderMap(GMaxRHIFeatureLevel);
-						TShaderMapRef<FWriteAliveCountAfterCompactionCS> WriteCountShader(ShaderMap);
-
-						FWriteAliveCountAfterCompactionCS::FParameters* WriteCountParams =
-							GraphBuilder.AllocParameters<FWriteAliveCountAfterCompactionCS::FParameters>();
-						WriteCountParams->PrefixSums = Self->SpawnManager->GetLastPrefixSumsSRV(GraphBuilder);
-						WriteCountParams->AliveMask = Self->SpawnManager->GetLastAliveMaskSRV(GraphBuilder);
-						WriteCountParams->ParticleCountBuffer = GraphBuilder.CreateUAV(ParticleCountBuffer);
-						WriteCountParams->OldParticleCount = Self->MaxParticleCount;
-
-						FComputeShaderUtils::AddPass(GraphBuilder,
-							RDG_EVENT_NAME("GPUFluid::WriteAliveCountAfterCompaction"),
-							WriteCountShader, WriteCountParams, FIntVector(1, 1, 1));
-					}
+					// WriteAliveCountAfterCompactionCS is now inside AddGPUDespawnPass
+					// (runs only when compaction actually executes, preventing stale PrefixSums overwrite)
 
 				}
 			}
