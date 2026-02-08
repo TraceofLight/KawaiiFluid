@@ -1,10 +1,10 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "KawaiiFluidEditor.h"
-#include "Style/FluidEditorStyle.h"
-#include "AssetTypeActions/AssetTypeActions_FluidPreset.h"
-#include "Brush/FluidBrushEditorMode.h"
-#include "Details/FluidVolumeComponentDetails.h"
+#include "Style/KawaiiFluidEditorStyle.h"
+#include "AssetTypeActions/AssetTypeActions_KawaiiFluidPreset.h"
+#include "Brush/KawaiiFluidBrushEditorMode.h"
+#include "Details/KawaiiFluidVolumeComponentDetails.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 
 #include "IAssetTools.h"
@@ -20,10 +20,13 @@
 
 #define LOCTEXT_NAMESPACE "FKawaiiFluidEditorModule"
 
+/**
+ * @brief Initializes the editor module, registers styles, asset tools, and editor modes.
+ */
 void FKawaiiFluidEditorModule::StartupModule()
 {
 	// Initialize editor style
-	FFluidEditorStyle::Initialize();
+	FKawaiiFluidEditorStyle::Initialize();
 
 	// Register custom asset category
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
@@ -38,8 +41,8 @@ void FKawaiiFluidEditorModule::StartupModule()
 	RegisterPropertyCustomizations();
 
 	// Register Fluid Brush Editor Mode
-	FEditorModeRegistry::Get().RegisterMode<FFluidBrushEditorMode>(
-		FFluidBrushEditorMode::EM_FluidBrush,
+	FEditorModeRegistry::Get().RegisterMode<FKawaiiFluidBrushEditorMode>(
+		FKawaiiFluidBrushEditorMode::EM_FluidBrush,
 		LOCTEXT("FluidBrushModeName", "Fluid Brush"),
 		FSlateIcon(),
 		false  // Do not show in toolbar
@@ -54,6 +57,9 @@ void FKawaiiFluidEditorModule::StartupModule()
 	UPackage::PreSavePackageWithContextEvent.AddRaw(this, &FKawaiiFluidEditorModule::HandleAssetPreSave);
 }
 
+/**
+ * @brief Cleans up registered tools, styles, and delegates on module shutdown.
+ */
 void FKawaiiFluidEditorModule::ShutdownModule()
 {
 	// Unbind event
@@ -65,7 +71,7 @@ void FKawaiiFluidEditorModule::ShutdownModule()
 	}
 	
 	// Unregister Fluid Brush Editor Mode
-	FEditorModeRegistry::Get().UnregisterMode(FFluidBrushEditorMode::EM_FluidBrush);
+	FEditorModeRegistry::Get().UnregisterMode(FKawaiiFluidBrushEditorMode::EM_FluidBrush);
 
 	// Unregister property customizations
 	UnregisterPropertyCustomizations();
@@ -74,17 +80,29 @@ void FKawaiiFluidEditorModule::ShutdownModule()
 	UnregisterAssetTypeActions();
 
 	// Shutdown editor style
-	FFluidEditorStyle::Shutdown();
+	FKawaiiFluidEditorStyle::Shutdown();
 }
 
+/**
+ * @brief Static getter for the module instance.
+ * @return Reference to the editor module instance
+ */
 FKawaiiFluidEditorModule& FKawaiiFluidEditorModule::Get()
 {
 	return FModuleManager::LoadModuleChecked<FKawaiiFluidEditorModule>("KawaiiFluidEditor");
 }
 
+/**
+ * @brief Handles automatic thumbnail generation when a fluid preset asset is about to be saved.
+ * @param InPackage The package being saved
+ * @param InContext Pre-save context information
+ */
 void FKawaiiFluidEditorModule::HandleAssetPreSave(UPackage* InPackage, FObjectPreSaveContext InContext)
 {
-	if (!InPackage) return;
+	if (!InPackage)
+	{
+		return;
+	}
 
 	// Check if our preset asset exists inside the package
 	TArray<UObject*> ObjectsInPackage;
@@ -101,16 +119,22 @@ void FKawaiiFluidEditorModule::HandleAssetPreSave(UPackage* InPackage, FObjectPr
 	}
 }
 
+/**
+ * @brief Registers asset type actions for fluid presets.
+ */
 void FKawaiiFluidEditorModule::RegisterAssetTypeActions()
 {
 	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools").Get();
 
 	// Register Fluid Preset asset type
-	TSharedPtr<FAssetTypeActions_FluidPreset> FluidPresetActions = MakeShared<FAssetTypeActions_FluidPreset>();
+	TSharedPtr<FAssetTypeActions_KawaiiFluidPreset> FluidPresetActions = MakeShared<FAssetTypeActions_KawaiiFluidPreset>();
 	AssetTools.RegisterAssetTypeActions(FluidPresetActions.ToSharedRef());
 	RegisteredAssetTypeActions.Add(FluidPresetActions);
 }
 
+/**
+ * @brief Unregisters all previously registered asset type actions.
+ */
 void FKawaiiFluidEditorModule::UnregisterAssetTypeActions()
 {
 	if (FModuleManager::Get().IsModuleLoaded("AssetTools"))
@@ -129,6 +153,9 @@ void FKawaiiFluidEditorModule::UnregisterAssetTypeActions()
 	RegisteredAssetTypeActions.Empty();
 }
 
+/**
+ * @brief Registers custom detail layouts for fluid-related classes.
+ */
 void FKawaiiFluidEditorModule::RegisterPropertyCustomizations()
 {
 	FPropertyEditorModule& PropertyModule = FModuleManager::LoadModuleChecked<FPropertyEditorModule>("PropertyEditor");
@@ -136,10 +163,13 @@ void FKawaiiFluidEditorModule::RegisterPropertyCustomizations()
 	// Register KawaiiFluidVolumeComponent detail customization
 	PropertyModule.RegisterCustomClassLayout(
 		UKawaiiFluidVolumeComponent::StaticClass()->GetFName(),
-		FOnGetDetailCustomizationInstance::CreateStatic(&FFluidVolumeComponentDetails::MakeInstance)
+		FOnGetDetailCustomizationInstance::CreateStatic(&FKawaiiFluidVolumeComponentDetails::MakeInstance)
 	);
 }
 
+/**
+ * @brief Unregisters all property customizations registered by this module.
+ */
 void FKawaiiFluidEditorModule::UnregisterPropertyCustomizations()
 {
 	if (FModuleManager::Get().IsModuleLoaded("PropertyEditor"))

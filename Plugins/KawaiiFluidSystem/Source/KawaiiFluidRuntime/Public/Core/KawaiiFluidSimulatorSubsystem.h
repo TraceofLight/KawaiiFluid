@@ -16,16 +16,13 @@ class UKawaiiFluidPresetDataAsset;
 class UKawaiiFluidVolumeComponent;
 class AKawaiiFluidVolume;
 class AKawaiiFluidEmitter;
-class UFluidCollider;
+class UKawaiiFluidCollider;
 class UKawaiiFluidInteractionComponent;
 class AActor;
 class ULevel;
 class FSpatialHash;
 struct FFluidParticle;
 class FGPUFluidSimulator;
-
-// Legacy typedef for backward compatibility
-using UKawaiiFluidSimulationVolumeComponent = UKawaiiFluidVolumeComponent;
 
 /**
  * Cache key for Context lookup
@@ -150,14 +147,14 @@ public:
 
 	/** Register global collider (affects all fluids) */
 	UFUNCTION(BlueprintCallable, Category = "KawaiiFluid")
-	void RegisterGlobalCollider(UFluidCollider* Collider);
+	void RegisterGlobalCollider(UKawaiiFluidCollider* Collider);
 
 	/** Unregister global collider */
 	UFUNCTION(BlueprintCallable, Category = "KawaiiFluid")
-	void UnregisterGlobalCollider(UFluidCollider* Collider);
+	void UnregisterGlobalCollider(UKawaiiFluidCollider* Collider);
 
 	/** Get all global colliders */
-	const TArray<TObjectPtr<UFluidCollider>>& GetGlobalColliders() const { return GlobalColliders; }
+	const TArray<TObjectPtr<UKawaiiFluidCollider>>& GetGlobalColliders() const { return GlobalColliders; }
 
 	//========================================
 	// Global Interaction Components
@@ -266,7 +263,7 @@ private:
 
 	/** Global colliders */
 	UPROPERTY()
-	TArray<TObjectPtr<UFluidCollider>> GlobalColliders;
+	TArray<TObjectPtr<UKawaiiFluidCollider>> GlobalColliders;
 
 	/** Global interaction components */
 	UPROPERTY()

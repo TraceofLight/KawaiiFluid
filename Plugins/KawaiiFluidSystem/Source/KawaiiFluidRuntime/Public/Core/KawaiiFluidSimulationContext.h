@@ -214,7 +214,7 @@ protected:
 	/** 4. Handle collisions with registered colliders */
 	virtual void HandleCollisions(
 		TArray<FFluidParticle>& Particles,
-		const TArray<TObjectPtr<UFluidCollider>>& Colliders,
+		const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders,
 		float SubstepDT
 	);
 
@@ -267,7 +267,7 @@ protected:
 	virtual void ApplyAdhesion(
 		TArray<FFluidParticle>& Particles,
 		const UKawaiiFluidPresetDataAsset* Preset,
-		const TArray<TObjectPtr<UFluidCollider>>& Colliders
+		const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders
 	);
 
 	/** 9. Apply cohesion (surface tension between particles) */
@@ -298,7 +298,7 @@ protected:
 	);
 
 	/** Cache collider shapes (once per frame) */
-	virtual void CacheColliderShapes(const TArray<TObjectPtr<UFluidCollider>>& Colliders);
+	virtual void CacheColliderShapes(const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders);
 
 	/** Append cached world-collision primitives (GPU) using channel-filtered world query */
 	void AppendGPUWorldCollisionPrimitives(

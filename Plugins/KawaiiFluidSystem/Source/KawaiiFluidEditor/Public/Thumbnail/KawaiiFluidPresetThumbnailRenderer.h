@@ -10,7 +10,11 @@ class UMaterialInstanceDynamic;
 class FKawaiiFluidPresetThumbnailScene;
 
 /**
+ * @brief UKawaiiFluidPresetThumbnailRenderer
+ * 
  * Renders a thumbnail for UKawaiiFluidPresetDataAsset as a sphere with fluid material properties.
+ * 
+ * @param ThumbnailScene Specialized scene for 3D thumbnail rendering
  */
 UCLASS()
 class KAWAIIFLUIDEDITOR_API UKawaiiFluidPresetThumbnailRenderer : public UDefaultSizedThumbnailRenderer
@@ -33,6 +37,5 @@ public:
 	virtual void BeginDestroy() override;
 
 private:
-	/** Preview scene for 3D rendering */
 	FKawaiiFluidPresetThumbnailScene* ThumbnailScene;
 };

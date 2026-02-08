@@ -1,12 +1,12 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Editor/KawaiiFluidPresetAssetEditor.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
-#include "Preview/FluidPreviewScene.h"
-#include "Preview/FluidPreviewSettings.h"
-#include "Viewport/SFluidPresetEditorViewport.h"
-#include "Widgets/SFluidPreviewPlaybackControls.h"
-#include "Style/FluidEditorStyle.h"
+#include "Preview/KawaiiFluidPreviewScene.h"
+#include "Preview/KawaiiFluidPreviewSettings.h"
+#include "Viewport/SKawaiiFluidPresetEditorViewport.h"
+#include "Widgets/SKawaiiFluidPreviewPlaybackControls.h"
+#include "Style/KawaiiFluidEditorStyle.h"
 #include "Components/InstancedStaticMeshComponent.h"
 
 #include "Widgets/Docking/SDockTab.h"
@@ -25,6 +25,9 @@ const FName FKawaiiFluidPresetAssetEditor::DetailsTabId(TEXT("FluidPresetEditor_
 const FName FKawaiiFluidPresetAssetEditor::PreviewSettingsTabId(TEXT("FluidPresetEditor_PreviewSettings"));
 const FName FKawaiiFluidPresetAssetEditor::AppIdentifier(TEXT("FluidPresetEditorApp"));
 
+/**
+ * @brief Default constructor initializing playback state and speed.
+ */
 FKawaiiFluidPresetAssetEditor::FKawaiiFluidPresetAssetEditor()
 	: EditingPreset(nullptr)
 	, bIsPlaying(true)
@@ -45,6 +48,12 @@ FKawaiiFluidPresetAssetEditor::~FKawaiiFluidPresetAssetEditor()
 	GEditor->UnregisterForUndo(this);
 }
 
+/**
+ * @brief Configures the editor layout, creates the preview scene, and initializes UI components.
+ * @param Mode The toolkit mode (Standalone or WorldCentric)
+ * @param InitToolkitHost The host for the toolkit
+ * @param InPreset The fluid preset asset to edit
+ */
 void FKawaiiFluidPresetAssetEditor::InitFluidPresetEditor(
 	const EToolkitMode::Type Mode,
 	const TSharedPtr<IToolkitHost>& InitToolkitHost,
@@ -60,7 +69,7 @@ void FKawaiiFluidPresetAssetEditor::InitFluidPresetEditor(
 	CVS.bCreatePhysicsScene = false;
 	CVS.LightBrightness = 3;
 	CVS.SkyBrightness = 1;
-	PreviewScene = MakeShared<FFluidPreviewScene>(CVS);
+	PreviewScene = MakeShared<FKawaiiFluidPreviewScene>(CVS);
 	PreviewScene->SetPreset(EditingPreset);
 
 	// Start simulation immediately (bIsPlaying defaults to true)
@@ -123,26 +132,46 @@ void FKawaiiFluidPresetAssetEditor::InitFluidPresetEditor(
 	RegenerateMenusAndToolbars();
 }
 
+/**
+ * @brief Returns the unique toolkit name for this editor.
+ * @return FName of the toolkit
+ */
 FName FKawaiiFluidPresetAssetEditor::GetToolkitFName() const
 {
 	return FName("FluidPresetEditor");
 }
 
+/**
+ * @brief Returns the human-readable name for the toolkit.
+ * @return Localized text of the toolkit name
+ */
 FText FKawaiiFluidPresetAssetEditor::GetBaseToolkitName() const
 {
 	return LOCTEXT("ToolkitName", "Fluid Preset Editor");
 }
 
+/**
+ * @brief Returns the prefix for tabs spawned in world-centric mode.
+ * @return Tab prefix string
+ */
 FString FKawaiiFluidPresetAssetEditor::GetWorldCentricTabPrefix() const
 {
 	return LOCTEXT("WorldCentricTabPrefix", "FluidPreset ").ToString();
 }
 
+/**
+ * @brief Returns the color scale for world-centric tabs.
+ * @return Tab color scale
+ */
 FLinearColor FKawaiiFluidPresetAssetEditor::GetWorldCentricTabColorScale() const
 {
 	return FLinearColor(0.2f, 0.4f, 0.8f, 0.5f);
 }
 
+/**
+ * @brief Registers the tab spawners for the preset editor.
+ * @param InTabManager The tab manager to register spawners with
+ */
 void FKawaiiFluidPresetAssetEditor::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
 {
 	WorkspaceMenuCategory = InTabManager->AddLocalWorkspaceMenuCategory(LOCTEXT("WorkspaceMenuCategory", "Fluid Preset Editor"));
@@ -169,6 +198,10 @@ void FKawaiiFluidPresetAssetEditor::RegisterTabSpawners(const TSharedRef<FTabMan
 		.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.WorldSettings"));
 }
 
+/**
+ * @brief Unregisters the tab spawners for the preset editor.
+ * @param InTabManager The tab manager to unregister spawners from
+ */
 void FKawaiiFluidPresetAssetEditor::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
 {
 	FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
@@ -178,11 +211,16 @@ void FKawaiiFluidPresetAssetEditor::UnregisterTabSpawners(const TSharedRef<FTabM
 	InTabManager->UnregisterTabSpawner(PreviewSettingsTabId);
 }
 
+/**
+ * @brief Spawns the viewport tab.
+ * @param Args The spawn tab arguments
+ * @return The spawned dock tab
+ */
 TSharedRef<SDockTab> FKawaiiFluidPresetAssetEditor::SpawnTab_Viewport(const FSpawnTabArgs& Args)
 {
 	check(Args.GetTabId() == ViewportTabId);
 
-	ViewportWidget = SNew(SFluidPresetEditorViewport, PreviewScene, SharedThis(this));
+	ViewportWidget = SNew(SKawaiiFluidPresetEditorViewport, PreviewScene, SharedThis(this));
 
 	return SNew(SDockTab)
 		.Label(LOCTEXT("ViewportTabLabel", "Viewport"))
@@ -191,6 +229,11 @@ TSharedRef<SDockTab> FKawaiiFluidPresetAssetEditor::SpawnTab_Viewport(const FSpa
 		];
 }
 
+/**
+ * @brief Spawns the details tab for the asset.
+ * @param Args The spawn tab arguments
+ * @return The spawned dock tab
+ */
 TSharedRef<SDockTab> FKawaiiFluidPresetAssetEditor::SpawnTab_Details(const FSpawnTabArgs& Args)
 {
 	check(Args.GetTabId() == DetailsTabId);
@@ -215,6 +258,11 @@ TSharedRef<SDockTab> FKawaiiFluidPresetAssetEditor::SpawnTab_Details(const FSpaw
 		];
 }
 
+/**
+ * @brief Spawns the preview settings tab.
+ * @param Args The spawn tab arguments
+ * @return The spawned dock tab
+ */
 TSharedRef<SDockTab> FKawaiiFluidPresetAssetEditor::SpawnTab_PreviewSettings(const FSpawnTabArgs& Args)
 {
 	check(Args.GetTabId() == PreviewSettingsTabId);
@@ -243,9 +291,12 @@ TSharedRef<SDockTab> FKawaiiFluidPresetAssetEditor::SpawnTab_PreviewSettings(con
 		];
 }
 
+/**
+ * @brief Extends the toolbar with custom playback controls.
+ */
 void FKawaiiFluidPresetAssetEditor::ExtendToolbar()
 {
-	TSharedPtr<FExtender> ToolbarExtender = MakeShareable(new FExtender);
+	TSharedPtr<FExtender> ToolbarExtender = MakeShared<FExtender>();
 
 	ToolbarExtender->AddToolBarExtension(
 		"Asset",
@@ -253,12 +304,16 @@ void FKawaiiFluidPresetAssetEditor::ExtendToolbar()
 		GetToolkitCommands(),
 		FToolBarExtensionDelegate::CreateLambda([this](FToolBarBuilder& ToolbarBuilder)
 		{
-			ToolbarBuilder.AddWidget(SNew(SFluidPreviewPlaybackControls, SharedThis(this)));
+			ToolbarBuilder.AddWidget(SNew(SKawaiiFluidPreviewPlaybackControls, SharedThis(this)));
 		}));
 
 	AddToolbarExtender(ToolbarExtender);
 }
 
+/**
+ * @brief Refreshes the preview when an undo operation is performed.
+ * @param bSuccess Whether the undo was successful
+ */
 void FKawaiiFluidPresetAssetEditor::PostUndo(bool bSuccess)
 {
 	if (bSuccess)
@@ -267,6 +322,10 @@ void FKawaiiFluidPresetAssetEditor::PostUndo(bool bSuccess)
 	}
 }
 
+/**
+ * @brief Refreshes the preview when a redo operation is performed.
+ * @param bSuccess Whether the redo was successful
+ */
 void FKawaiiFluidPresetAssetEditor::PostRedo(bool bSuccess)
 {
 	if (bSuccess)
@@ -275,16 +334,27 @@ void FKawaiiFluidPresetAssetEditor::PostRedo(bool bSuccess)
 	}
 }
 
+/**
+ * @brief Updates the simulation state every frame.
+ * @param DeltaTime The time passed since the last frame
+ */
 void FKawaiiFluidPresetAssetEditor::Tick(float DeltaTime)
 {
 	UpdateSimulation(DeltaTime);
 }
 
+/**
+ * @brief Returns the stat ID for performance profiling.
+ * @return The stat ID
+ */
 TStatId FKawaiiFluidPresetAssetEditor::GetStatId() const
 {
 	RETURN_QUICK_DECLARE_CYCLE_STAT(FKawaiiFluidPresetAssetEditor, STATGROUP_Tickables);
 }
 
+/**
+ * @brief Resumes simulation playback.
+ */
 void FKawaiiFluidPresetAssetEditor::Play()
 {
 	bIsPlaying = true;
@@ -294,6 +364,9 @@ void FKawaiiFluidPresetAssetEditor::Play()
 	}
 }
 
+/**
+ * @brief Pauses simulation playback.
+ */
 void FKawaiiFluidPresetAssetEditor::Pause()
 {
 	bIsPlaying = false;
@@ -303,6 +376,9 @@ void FKawaiiFluidPresetAssetEditor::Pause()
 	}
 }
 
+/**
+ * @brief Stops simulation and resets particle state.
+ */
 void FKawaiiFluidPresetAssetEditor::Stop()
 {
 	bIsPlaying = false;
@@ -313,6 +389,9 @@ void FKawaiiFluidPresetAssetEditor::Stop()
 	}
 }
 
+/**
+ * @brief Resets particles to initial state.
+ */
 void FKawaiiFluidPresetAssetEditor::Reset()
 {
 	if (PreviewScene.IsValid())
@@ -325,16 +404,28 @@ void FKawaiiFluidPresetAssetEditor::Reset()
 	}
 }
 
+/**
+ * @brief Sets the simulation speed multiplier.
+ * @param Speed The new speed multiplier
+ */
 void FKawaiiFluidPresetAssetEditor::SetSimulationSpeed(float Speed)
 {
 	SimulationSpeed = FMath::Clamp(Speed, 0.0f, 4.0f);
 }
 
+/**
+ * @brief Handler for property changes in the Details panel.
+ * @param PropertyChangedEvent Information about the property change
+ */
 void FKawaiiFluidPresetAssetEditor::OnPresetPropertyChanged(const FPropertyChangedEvent& PropertyChangedEvent)
 {
 	RefreshPreview();
 }
 
+/**
+ * @brief Handler for property changes in the Preview Settings panel.
+ * @param PropertyChangedEvent Information about the property change
+ */
 void FKawaiiFluidPresetAssetEditor::OnPreviewSettingsPropertyChanged(const FPropertyChangedEvent& PropertyChangedEvent)
 {
 	if (!PreviewScene.IsValid())
@@ -368,6 +459,9 @@ void FKawaiiFluidPresetAssetEditor::OnPreviewSettingsPropertyChanged(const FProp
 	}
 }
 
+/**
+ * @brief Synchronizes the preview scene with the current asset data.
+ */
 void FKawaiiFluidPresetAssetEditor::RefreshPreview()
 {
 	if (PreviewScene.IsValid())
@@ -381,6 +475,10 @@ void FKawaiiFluidPresetAssetEditor::RefreshPreview()
 	}
 }
 
+/**
+ * @brief Internal tick handler that advances the simulation.
+ * @param DeltaTime The time step for the simulation update
+ */
 void FKawaiiFluidPresetAssetEditor::UpdateSimulation(float DeltaTime)
 {
 	if (!bIsPlaying || !PreviewScene.IsValid() || !ViewportWidget.IsValid())

@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -7,13 +7,24 @@
 #include "EditorUndoClient.h"
 
 class UKawaiiFluidPresetDataAsset;
-class SFluidPresetEditorViewport;
-class FFluidPreviewScene;
+class SKawaiiFluidPresetEditorViewport;
+class FKawaiiFluidPreviewScene;
 class UFluidPreviewSettingsObject;
 
 /**
- * Main asset editor toolkit for KawaiiFluidPresetDataAsset
- * Provides 3D viewport preview with real-time simulation
+ * @brief FKawaiiFluidPresetAssetEditor
+ * 
+ * Main asset editor toolkit for KawaiiFluidPresetDataAsset.
+ * Provides a dedicated workspace with a 3D viewport, real-time simulation, 
+ * property details, and preview settings.
+ * 
+ * @param EditingPreset Pointer to the preset asset being edited
+ * @param PreviewScene Shared pointer to the 3D preview world
+ * @param ViewportWidget Shared pointer to the viewport UI widget
+ * @param DetailsView Property editor for the preset asset
+ * @param PreviewSettingsView Property editor for the simulation settings
+ * @param bIsPlaying Current state of the simulation playback
+ * @param SimulationSpeed Multiplier for the simulation time step
  */
 class KAWAIIFLUIDEDITOR_API FKawaiiFluidPresetAssetEditor : public FAssetEditorToolkit,
                                                             public FEditorUndoClient,
@@ -23,9 +34,6 @@ public:
 	FKawaiiFluidPresetAssetEditor();
 	virtual ~FKawaiiFluidPresetAssetEditor() override;
 
-	/**
-	 * Initialize the editor with a preset asset
-	 */
 	void InitFluidPresetEditor(
 		const EToolkitMode::Type Mode,
 		const TSharedPtr<IToolkitHost>& InitToolkitHost,
@@ -56,45 +64,34 @@ public:
 	// Playback Control
 	//========================================
 
-	/** Start simulation playback */
 	void Play();
 
-	/** Pause simulation */
 	void Pause();
 
-	/** Stop simulation and reset */
 	void Stop();
 
-	/** Reset particles only (keep playing state) */
 	void Reset();
 
-	/** Is simulation playing */
 	bool IsPlaying() const { return bIsPlaying; }
 
-	/** Set simulation speed multiplier */
 	void SetSimulationSpeed(float Speed);
 
-	/** Get current simulation speed */
 	float GetSimulationSpeed() const { return SimulationSpeed; }
 
 	//========================================
 	// Accessors
 	//========================================
 
-	/** Get the preset being edited */
 	UKawaiiFluidPresetDataAsset* GetEditingPreset() const { return EditingPreset; }
 
-	/** Get preview scene */
-	TSharedPtr<FFluidPreviewScene> GetPreviewScene() const { return PreviewScene; }
+	TSharedPtr<FKawaiiFluidPreviewScene> GetPreviewScene() const { return PreviewScene; }
 
 	//========================================
 	// Property Change Handling
 	//========================================
 
-	/** Called when preset property changes */
 	void OnPresetPropertyChanged(const FPropertyChangedEvent& PropertyChangedEvent);
 
-	/** Called when preview settings property changes */
 	void OnPreviewSettingsPropertyChanged(const FPropertyChangedEvent& PropertyChangedEvent);
 
 private:
@@ -122,26 +119,14 @@ private:
 	void UnbindEditorDelegates();
 
 private:
-	//========================================
-	// Edited Asset
-	//========================================
-
 	/** Preset being edited */
 	UKawaiiFluidPresetDataAsset* EditingPreset;
 
-	//========================================
-	// Preview System
-	//========================================
-
 	/** Preview scene */
-	TSharedPtr<FFluidPreviewScene> PreviewScene;
+	TSharedPtr<FKawaiiFluidPreviewScene> PreviewScene;
 
 	/** Viewport widget */
-	TSharedPtr<SFluidPresetEditorViewport> ViewportWidget;
-
-	//========================================
-	// Details Views
-	//========================================
+	TSharedPtr<SKawaiiFluidPresetEditorViewport> ViewportWidget;
 
 	/** Details view for preset properties */
 	TSharedPtr<IDetailsView> DetailsView;
@@ -149,20 +134,13 @@ private:
 	/** Details view for preview settings */
 	TSharedPtr<IDetailsView> PreviewSettingsView;
 
-	//========================================
-	// Playback State
-	//========================================
-
 	/** Is simulation playing */
 	bool bIsPlaying;
 
 	/** Simulation speed multiplier */
 	float SimulationSpeed;
 
-	//========================================
-	// Tab IDs
-	//========================================
-
+	/** Tab IDs and App Identifier */
 	static const FName ViewportTabId;
 	static const FName DetailsTabId;
 	static const FName PreviewSettingsTabId;

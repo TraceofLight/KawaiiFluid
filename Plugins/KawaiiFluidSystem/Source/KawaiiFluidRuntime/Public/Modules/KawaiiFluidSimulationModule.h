@@ -16,7 +16,7 @@ DECLARE_DELEGATE_OneParam(FOnModuleCollisionEvent, const FKawaiiFluidCollisionEv
 
 class FSpatialHash;
 class UKawaiiFluidPresetDataAsset;
-class UFluidCollider;
+class UKawaiiFluidCollider;
 class UKawaiiFluidInteractionComponent;
 class UKawaiiFluidSimulationContext;
 class UKawaiiFluidVolumeComponent;
@@ -512,17 +512,17 @@ public:
 
 	/** Register collider */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
-	void RegisterCollider(UFluidCollider* Collider);
+	void RegisterCollider(UKawaiiFluidCollider* Collider);
 
 	/** Unregister collider */
 	UFUNCTION(BlueprintCallable, Category = "Fluid")
-	void UnregisterCollider(UFluidCollider* Collider);
+	void UnregisterCollider(UKawaiiFluidCollider* Collider);
 
 	/** Clear all colliders */
 	void ClearColliders() { Colliders.Empty(); }
 
 	/** Get registered collider list */
-	const TArray<TObjectPtr<UFluidCollider>>& GetColliders() const { return Colliders; }
+	const TArray<TObjectPtr<UKawaiiFluidCollider>>& GetColliders() const { return Colliders; }
 
 	//========================================
 	// SpatialHash (for Independent mode)
@@ -705,7 +705,7 @@ private:
 
 	/** Registered colliders */
 	UPROPERTY()
-	TArray<TObjectPtr<UFluidCollider>> Colliders;
+	TArray<TObjectPtr<UKawaiiFluidCollider>> Colliders;
 
 	/** Accumulated external force */
 	FVector AccumulatedExternalForce = FVector::ZeroVector;

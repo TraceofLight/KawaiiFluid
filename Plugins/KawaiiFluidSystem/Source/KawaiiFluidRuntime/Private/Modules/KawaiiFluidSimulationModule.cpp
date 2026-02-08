@@ -4,7 +4,7 @@
 
 #include "KawaiiFluidSimulationContext.h"
 #include "Core/SpatialHash.h"
-#include "Collision/FluidCollider.h"
+#include "Collision/KawaiiFluidCollider.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Actors/KawaiiFluidVolume.h"
@@ -1488,7 +1488,7 @@ void UKawaiiFluidSimulationModule::ApplyForceToParticle(int32 ParticleIndex, FVe
 	}
 }
 
-void UKawaiiFluidSimulationModule::RegisterCollider(UFluidCollider* Collider)
+void UKawaiiFluidSimulationModule::RegisterCollider(UKawaiiFluidCollider* Collider)
 {
 	if (Collider && !Colliders.Contains(Collider))
 	{
@@ -1496,7 +1496,7 @@ void UKawaiiFluidSimulationModule::RegisterCollider(UFluidCollider* Collider)
 	}
 }
 
-void UKawaiiFluidSimulationModule::UnregisterCollider(UFluidCollider* Collider)
+void UKawaiiFluidSimulationModule::UnregisterCollider(UKawaiiFluidCollider* Collider)
 {
 	Colliders.Remove(Collider);
 }

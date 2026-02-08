@@ -8,7 +8,7 @@
 #include "Core/KawaiiFluidRenderingTypes.h"
 #include "KawaiiFluidSimulationTypes.generated.h"
 
-class UFluidCollider;
+class UKawaiiFluidCollider;
 class UKawaiiFluidInteractionComponent;
 class UKawaiiFluidSimulationModule;
 
@@ -274,7 +274,7 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulationParams
 
 	/** Registered colliders */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
-	TArray<TObjectPtr<UFluidCollider>> Colliders;
+	TArray<TObjectPtr<UKawaiiFluidCollider>> Colliders;
 
 	/** Registered interaction components */
 	UPROPERTY(BlueprintReadWrite, Category = "Simulation")
