@@ -9,8 +9,16 @@
 class FKawaiiFluidPreviewScene;
 
 /**
- * Stats overlay widget for fluid preview viewport
- * Displays particle count, FPS, density, etc.
+ * @brief SKawaiiFluidPreviewStatsOverlay
+ * 
+ * Stats overlay widget for the fluid preview viewport.
+ * Displays real-time information like particle count, FPS, and simulation time.
+ * 
+ * @param PreviewScenePtr Weak pointer back to the preview scene for data polling
+ * @param CachedFPS Average frames per second
+ * @param FPSAccumulator Sum of frame times for averaging
+ * @param FrameCount Number of frames since last FPS update
+ * @param CachedParticleCount Number of particles in the simulation
  */
 class KAWAIIFLUIDEDITOR_API SKawaiiFluidPreviewStatsOverlay : public SCompoundWidget
 {
@@ -23,16 +31,13 @@ public:
 	virtual void Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime) override;
 
 private:
-	/** Get text for each stat */
 	FText GetParticleCountText() const;
 	FText GetSimulationTimeText() const;
 	FText GetFPSText() const;
 
 private:
-	/** Preview scene reference */
 	TWeakPtr<FKawaiiFluidPreviewScene> PreviewScenePtr;
 
-	/** Cached values */
 	float CachedFPS{};
 	float FPSAccumulator{};
 	int32 FrameCount{};

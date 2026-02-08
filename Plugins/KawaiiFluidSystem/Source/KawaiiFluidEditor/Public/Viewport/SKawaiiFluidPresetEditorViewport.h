@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -11,8 +11,15 @@ class FKawaiiFluidPresetAssetEditor;
 class FKawaiiFluidPresetEditorViewportClient;
 
 /**
- * Viewport widget for fluid preset editor
- * Displays 3D preview of fluid simulation
+ * @brief SKawaiiFluidPresetEditorViewport
+ * 
+ * Viewport widget for the fluid preset editor.
+ * Displays the 3D preview of the fluid simulation and handles viewport-specific
+ * interactions and stats overlays.
+ * 
+ * @param ViewportClient Shared pointer to the viewport client for camera/input logic
+ * @param PreviewScene Reference to the preview world being displayed
+ * @param AssetEditorPtr Weak pointer back to the parent asset editor
  */
 class KAWAIIFLUIDEDITOR_API SKawaiiFluidPresetEditorViewport : public SEditorViewport,
                                                           public FGCObject,
@@ -39,19 +46,14 @@ public:
 	virtual void OnFloatingButtonClicked() override;
 	//~ End ICommonEditorViewportToolbarInfoProvider Interface
 
-	/** Refresh the viewport */
 	void RefreshViewport();
 
-	/** Focus camera on particles */
 	void FocusOnParticles();
 
-	/** Reset camera to default position */
 	void ResetCamera();
 
-	/** Get viewport client */
 	TSharedPtr<FKawaiiFluidPresetEditorViewportClient> GetViewportClient() const { return ViewportClient; }
 
-	/** Get preview scene */
 	TSharedPtr<FKawaiiFluidPreviewScene> GetPreviewScene() const { return PreviewScene; }
 
 protected:

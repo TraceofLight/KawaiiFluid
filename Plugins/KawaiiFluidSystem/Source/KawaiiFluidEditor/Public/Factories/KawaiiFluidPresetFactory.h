@@ -7,7 +7,9 @@
 #include "KawaiiFluidPresetFactory.generated.h"
 
 /**
- * Factory for creating KawaiiFluidPresetDataAsset in Content Browser
+ * @brief UKawaiiFluidPresetFactory
+ * 
+ * Factory for creating UKawaiiFluidPresetDataAsset in the Content Browser.
  */
 UCLASS()
 class KAWAIIFLUIDEDITOR_API UKawaiiFluidPresetFactory : public UFactory

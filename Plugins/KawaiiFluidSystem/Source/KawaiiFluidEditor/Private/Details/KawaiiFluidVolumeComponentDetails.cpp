@@ -16,11 +16,19 @@
 
 #define LOCTEXT_NAMESPACE "KawaiiFluidVolumeComponentDetails"
 
+/**
+ * @brief Factory method to create a new instance of the detail customization.
+ * @return Shared reference to the created detail customization
+ */
 TSharedRef<IDetailCustomization> FKawaiiFluidVolumeComponentDetails::MakeInstance()
 {
 	return MakeShared<FKawaiiFluidVolumeComponentDetails>();
 }
 
+/**
+ * @brief Builds the custom details layout for the volume component.
+ * @param DetailBuilder The layout builder
+ */
 void FKawaiiFluidVolumeComponentDetails::CustomizeDetails(IDetailLayoutBuilder& DetailBuilder)
 {
 	TArray<TWeakObjectPtr<UObject>> Objects;
@@ -129,6 +137,10 @@ void FKawaiiFluidVolumeComponentDetails::CustomizeDetails(IDetailLayoutBuilder& 
 	];
 }
 
+/**
+ * @brief Handler for the Start Brush button.
+ * @return FReply::Handled
+ */
 FReply FKawaiiFluidVolumeComponentDetails::OnStartBrushClicked()
 {
 	if (!TargetComponent.IsValid() || !TargetVolume.IsValid())
@@ -154,6 +166,10 @@ FReply FKawaiiFluidVolumeComponentDetails::OnStartBrushClicked()
 	return FReply::Handled();
 }
 
+/**
+ * @brief Handler for the Stop Brush button.
+ * @return FReply::Handled
+ */
 FReply FKawaiiFluidVolumeComponentDetails::OnStopBrushClicked()
 {
 	FLevelEditorModule& LevelEditor = FModuleManager::GetModuleChecked<FLevelEditorModule>("LevelEditor");
@@ -171,6 +187,10 @@ FReply FKawaiiFluidVolumeComponentDetails::OnStopBrushClicked()
 	return FReply::Handled();
 }
 
+/**
+ * @brief Handler for the Clear All button.
+ * @return FReply::Handled
+ */
 FReply FKawaiiFluidVolumeComponentDetails::OnClearParticlesClicked()
 {
 	if (TargetVolume.IsValid())
@@ -183,6 +203,10 @@ FReply FKawaiiFluidVolumeComponentDetails::OnClearParticlesClicked()
 	return FReply::Handled(); 
 }
 
+/**
+ * @brief Checks if the fluid brush mode is currently active.
+ * @return True if active
+ */
 bool FKawaiiFluidVolumeComponentDetails::IsBrushActive() const
 {
 	FLevelEditorModule& LevelEditor = FModuleManager::GetModuleChecked<FLevelEditorModule>("LevelEditor");
@@ -195,11 +219,19 @@ bool FKawaiiFluidVolumeComponentDetails::IsBrushActive() const
 	return false;
 }
 
+/**
+ * @brief Visibility helper for the Start button.
+ * @return Visible if brush mode is inactive
+ */
 EVisibility FKawaiiFluidVolumeComponentDetails::GetStartVisibility() const
 {
 	return IsBrushActive() ? EVisibility::Collapsed : EVisibility::Visible;
 }
 
+/**
+ * @brief Visibility helper for the Stop button.
+ * @return Visible if brush mode is active
+ */
 EVisibility FKawaiiFluidVolumeComponentDetails::GetStopVisibility() const
 {
 	return IsBrushActive() ? EVisibility::Visible : EVisibility::Collapsed;

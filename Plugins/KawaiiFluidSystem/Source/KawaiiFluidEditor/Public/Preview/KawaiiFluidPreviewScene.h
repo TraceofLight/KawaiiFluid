@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -14,11 +14,19 @@ class UKawaiiFluidRenderingModule;
 struct FFluidParticle;
 
 /**
- * Preview scene for fluid simulation in asset editor
- * Contains preview world, simulation logic, and visualization
- *
- * Implements IKawaiiFluidDataProvider to share data with RenderingModule
- * (same architecture as runtime for consistent preview)
+ * @brief FKawaiiFluidPreviewScene
+ * 
+ * A specialized preview world for fluid simulation.
+ * Manages the GPU simulator, simulation module, and rendering module 
+ * in a lightweight environment for asset editing.
+ * 
+ * @param CurrentPreset The fluid preset currently being previewed
+ * @param PreviewSettingsObject Wrapper object for simulation settings in Details Panel
+ * @param SimulationContext Physics solver with GPU simulator integration
+ * @param SimulationModule Module handling particle spawn and update logic
+ * @param RenderingModule Module handling visualization (ISM/Metaball)
+ * @param PreviewActor Transient actor hosting simulation components
+ * @param FloorMeshComponent Visual floor mesh for the preview
  */
 class KAWAIIFLUIDEDITOR_API FKawaiiFluidPreviewScene : public FAdvancedPreviewScene,
                                                   public IKawaiiFluidDataProvider
@@ -27,7 +35,6 @@ public:
 	FKawaiiFluidPreviewScene(FPreviewScene::ConstructionValues CVS);
 	virtual ~FKawaiiFluidPreviewScene() override;
 
-	/** Prevent GC */
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override;
 
 	//========================================
@@ -40,106 +47,79 @@ public:
 	virtual bool IsDataValid() const override;
 	virtual FString GetDebugName() const override { return TEXT("FluidPreviewScene"); }
 
-	// GPU Simulation Interface (required for Metaball rendering)
 	virtual bool IsGPUSimulationActive() const override;
+
 	virtual int32 GetGPUParticleCount() const override;
+
 	virtual FGPUFluidSimulator* GetGPUSimulator() const override;
 
-	/** Get rendering module */
 	UKawaiiFluidRenderingModule* GetRenderingModule() const { return RenderingModule; }
 
 	//========================================
 	// Preset Management
 	//========================================
 
-	/** Set the preset to preview */
 	void SetPreset(UKawaiiFluidPresetDataAsset* InPreset);
 
-	/** Get current preset */
 	UKawaiiFluidPresetDataAsset* GetPreset() const { return CurrentPreset; }
 
-	/** Refresh simulation from preset changes */
 	void RefreshFromPreset();
 
 	//========================================
 	// Simulation Control
 	//========================================
 
-	/** Start simulation playback */
 	void StartSimulation();
 
-	/** Stop/pause simulation */
 	void StopSimulation();
 
-	/** Reset simulation to initial state */
 	void ResetSimulation();
 
-	/** Tick simulation forward */
 	void TickSimulation(float DeltaTime);
 
-	/** Is simulation currently running */
 	bool IsSimulationActive() const { return bSimulationActive; }
 
 	//========================================
 	// Preview Settings
 	//========================================
 
-	/** Get preview settings struct */
 	FFluidPreviewSettings& GetPreviewSettings();
 
-	/** Get preview settings object for Details Panel */
 	UFluidPreviewSettingsObject* GetPreviewSettingsObject() const { return PreviewSettingsObject; }
 
-	/** Apply preview settings changes */
 	void ApplyPreviewSettings();
 
 	//========================================
 	// Environment
 	//========================================
 
-	/** Setup floor mesh */
 	void SetupFloor();
 
-	/** Update environment from settings */
 	void UpdateEnvironment();
 
 	//========================================
 	// Particle Access (GPU mode - limited)
 	//========================================
 
-	/** Get mutable particles array (not available in GPU mode) */
 	TArray<FFluidParticle>& GetParticlesMutable();
 
-	/** Get simulation time */
 	float GetSimulationTime() const;
 
 private:
-	/** Continuous spawn particles */
 	void SpawnParticles(float DeltaTime);
 
-	/** Create visualization components */
 	void CreateVisualizationComponents();
 
-	/** Update instanced mesh transforms */
 	void UpdateInstancedMesh();
 
-	/** Simple floor collision */
 	void HandleFloorCollision();
 
 private:
-	//========================================
-	// Preset & Settings
-	//========================================
-
 	/** Current preset being previewed */
 	TObjectPtr<UKawaiiFluidPresetDataAsset> CurrentPreset;
 
 	/** Preview settings object (for Details Panel) */
 	TObjectPtr<UFluidPreviewSettingsObject> PreviewSettingsObject;
-
-	//========================================
-	// Simulation Data (GPU-based)
-	//========================================
 
 	/** Simulation context - physics solver with GPU simulator */
 	TObjectPtr<UKawaiiFluidSimulationContext> SimulationContext;
@@ -155,10 +135,6 @@ private:
 
 	/** Is simulation running */
 	bool bSimulationActive;
-
-	//========================================
-	// Rendering (same as runtime)
-	//========================================
 
 	/** Rendering module - same as runtime! (ISM + SSFR) */
 	TObjectPtr<UKawaiiFluidRenderingModule> RenderingModule;

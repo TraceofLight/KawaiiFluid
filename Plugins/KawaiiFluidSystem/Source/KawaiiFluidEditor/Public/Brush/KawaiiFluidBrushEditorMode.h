@@ -10,8 +10,17 @@ class AKawaiiFluidVolume;
 class UKawaiiFluidVolumeComponent;
 
 /**
- * Fluid particle brush editor mode
- * Activated by detail panel button and operates on a specific FluidComponent target
+ * @brief FKawaiiFluidBrushEditorMode
+ * 
+ * Fluid particle brush editor mode.
+ * Activated by detail panel button and operates on a specific FluidComponent target.
+ * 
+ * @param TargetVolume The volume actor being painted on
+ * @param TargetVolumeComponent The simulation component of the target volume
+ * @param BrushLocation Current 3D world position of the brush
+ * @param BrushNormal Surface normal at the brush location
+ * @param bValidLocation Whether the brush is currently over a valid target
+ * @param bPainting Whether the user is currently holding the paint button
  */
 class FKawaiiFluidBrushEditorMode : public FEdMode
 {
@@ -45,55 +54,38 @@ public:
 	virtual void Tick(FEditorViewportClient* ViewportClient, float DeltaTime) override;
 	//~ End FEdMode Interface
 
-	/** Set target volume (for KawaiiFluidVolume) */
 	void SetTargetVolume(AKawaiiFluidVolume* Volume);
 
-	/** Get target volume */
 	AKawaiiFluidVolume* GetTargetVolume() const { return TargetVolume.Get(); }
 
-	/** Check if currently targeting Volume */
 	bool IsTargetingVolume() const { return TargetVolume.IsValid(); }
 
 private:
-	/** Target volume (KawaiiFluidVolume mode) */
 	TWeakObjectPtr<AKawaiiFluidVolume> TargetVolume;
 
-	/** Target volume component (for BrushSettings access) */
 	TWeakObjectPtr<UKawaiiFluidVolumeComponent> TargetVolumeComponent;
 
-	/** Current brush location */
 	FVector BrushLocation {};
 
-	/** Brush hit normal (surface direction) */
 	FVector BrushNormal { FVector::UpVector };
 
-	/** Whether brush location is valid */
 	bool bValidLocation = false;
 
-	/** Whether currently painting */
 	bool bPainting = false;
 
-	/** Last stroke time */
 	double LastStrokeTime = 0.0;
 
-	/** Selection changed delegate handle */
 	FDelegateHandle SelectionChangedHandle;
 
-	/** Called on selection change */
 	void OnSelectionChanged(UObject* Object);
 
-	/** Target component owner actor (for selection change detection) */
 	TWeakObjectPtr<AActor> TargetOwnerActor;
 
-	/** Update brush location */
 	bool UpdateBrushLocation(FEditorViewportClient* ViewportClient, int32 MouseX, int32 MouseY);
 
-	/** Apply brush */
 	void ApplyBrush();
 
-	/** Draw brush preview */
 	void DrawBrushPreview(FPrimitiveDrawInterface* PDI);
 
-	/** Get brush color by mode */
 	FLinearColor GetBrushColor() const;
 };

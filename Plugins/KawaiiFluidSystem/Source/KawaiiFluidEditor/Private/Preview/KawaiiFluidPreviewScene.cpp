@@ -17,6 +17,10 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 
+/**
+ * @brief Constructor: Sets up the preview settings, simulation context, and rendering infrastructure.
+ * @param CVS Construction values for the preview scene (lights, sky, etc.)
+ */
 FKawaiiFluidPreviewScene::FKawaiiFluidPreviewScene(FPreviewScene::ConstructionValues CVS)
 	: FAdvancedPreviewScene(CVS)
 	, CurrentPreset(nullptr)
@@ -108,6 +112,10 @@ FKawaiiFluidPreviewScene::~FKawaiiFluidPreviewScene()
 	}
 }
 
+/**
+ * @brief Ensures all internal UObjects used for simulation and rendering are kept alive.
+ * @param Collector The reference collector
+ */
 void FKawaiiFluidPreviewScene::AddReferencedObjects(FReferenceCollector& Collector)
 {
 	FAdvancedPreviewScene::AddReferencedObjects(Collector);
@@ -122,6 +130,9 @@ void FKawaiiFluidPreviewScene::AddReferencedObjects(FReferenceCollector& Collect
 	Collector.AddReferencedObjects(WallMeshComponents);
 }
 
+/**
+ * @brief Spawns a transient actor to host the simulation's root component and visualization meshes.
+ */
 void FKawaiiFluidPreviewScene::CreateVisualizationComponents()
 {
 	// Spawn preview actor
@@ -165,6 +176,10 @@ void FKawaiiFluidPreviewScene::CreateVisualizationComponents()
 	AddComponent(FloorMeshComponent, FTransform::Identity);
 }
 
+/**
+ * @brief Initializes the GPU simulator and physics solvers using the provided preset.
+ * @param InPreset The fluid preset to preview
+ */
 void FKawaiiFluidPreviewScene::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
 {
 	CurrentPreset = InPreset;
@@ -207,6 +222,9 @@ void FKawaiiFluidPreviewScene::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
 	ResetSimulation();
 }
 
+/**
+ * @brief Updates simulation parameters from the current preset when a property is edited.
+ */
 void FKawaiiFluidPreviewScene::RefreshFromPreset()
 {
 	if (!CurrentPreset)
@@ -249,16 +267,25 @@ void FKawaiiFluidPreviewScene::RefreshFromPreset()
 	ApplyPreviewSettings();
 }
 
+/**
+ * @brief Enables the simulation tick.
+ */
 void FKawaiiFluidPreviewScene::StartSimulation()
 {
 	bSimulationActive = true;
 }
 
+/**
+ * @brief Disables the simulation tick.
+ */
 void FKawaiiFluidPreviewScene::StopSimulation()
 {
 	bSimulationActive = false;
 }
 
+/**
+ * @brief Clears GPU particle buffers and resets timers.
+ */
 void FKawaiiFluidPreviewScene::ResetSimulation()
 {
 	// Clear GPU particles
@@ -309,6 +336,10 @@ void FKawaiiFluidPreviewScene::ResetSimulation()
 	}
 }
 
+/**
+ * @brief Handles continuous particle emission for Stream mode.
+ * @param DeltaTime The time passed since the last frame
+ */
 void FKawaiiFluidPreviewScene::SpawnParticles(float DeltaTime)
 {
 	if (!SimulationModule || !CurrentPreset || !PreviewSettingsObject)
@@ -399,6 +430,10 @@ void FKawaiiFluidPreviewScene::SpawnParticles(float DeltaTime)
 
 }
 
+/**
+ * @brief Main simulation step coordinating spawning, physics, and rendering.
+ * @param DeltaTime The simulation time step
+ */
 void FKawaiiFluidPreviewScene::TickSimulation(float DeltaTime)
 {
 	if (!bSimulationActive || !CurrentPreset || !SimulationContext)
@@ -454,29 +489,42 @@ void FKawaiiFluidPreviewScene::TickSimulation(float DeltaTime)
 	}
 }
 
+/**
+ * @brief Floor collision logic (currently handled by GPU bounds).
+ */
 void FKawaiiFluidPreviewScene::HandleFloorCollision()
 {
 	// Floor collision is handled by GPU bounds collision
-	// See TickSimulation() -> Params.WorldBounds
 }
 
+/**
+ * @brief Returns the simulation settings.
+ * @return Reference to the preview settings
+ */
 FFluidPreviewSettings& FKawaiiFluidPreviewScene::GetPreviewSettings()
 {
 	return PreviewSettingsObject->Settings;
 }
 
+/**
+ * @brief Applies environment and rendering settings.
+ */
 void FKawaiiFluidPreviewScene::ApplyPreviewSettings()
 {
 	UpdateEnvironment();
-
-	// Metaball settings come from Preset->RenderingParameters (set in SetPreset/RefreshFromPreset)
 }
 
+/**
+ * @brief Creates the default floor.
+ */
 void FKawaiiFluidPreviewScene::SetupFloor()
 {
 	UpdateEnvironment();
 }
 
+/**
+ * @brief Updates visibility and scale of environment meshes.
+ */
 void FKawaiiFluidPreviewScene::UpdateEnvironment()
 {
 	if (!FloorMeshComponent)
@@ -498,41 +546,57 @@ void FKawaiiFluidPreviewScene::UpdateEnvironment()
 // IKawaiiFluidDataProvider Interface
 //========================================
 
+/**
+ * @brief Returns CPU particles (empty in GPU mode).
+ * @return Empty particle array
+ */
 const TArray<FFluidParticle>& FKawaiiFluidPreviewScene::GetParticles() const
 {
-	// GPU mode - no CPU particles available
 	static TArray<FFluidParticle> EmptyArray;
 	return EmptyArray;
 }
 
+/**
+ * @brief Returns the particle count from GPU.
+ * @return Current particle count
+ */
 int32 FKawaiiFluidPreviewScene::GetParticleCount() const
 {
-	// Return GPU particle count
 	return GetGPUParticleCount();
 }
 
+/**
+ * @brief Returns the particle radius.
+ * @return Particle radius
+ */
 float FKawaiiFluidPreviewScene::GetParticleRadius() const
 {
 	return CachedParticleRadius;
 }
 
+/**
+ * @brief Checks if simulation data is valid.
+ * @return True if valid
+ */
 bool FKawaiiFluidPreviewScene::IsDataValid() const
 {
-	// Valid if GPU simulation is active (particles may be 0 but still valid for rendering)
 	return IsGPUSimulationActive();
 }
 
-//========================================
-// Particle Access (GPU mode - limited access)
-//========================================
-
+/**
+ * @brief Returns mutable CPU particles (empty in GPU mode).
+ * @return Empty particle array
+ */
 TArray<FFluidParticle>& FKawaiiFluidPreviewScene::GetParticlesMutable()
 {
-	// GPU mode - no mutable CPU particles available
 	static TArray<FFluidParticle> EmptyArray;
 	return EmptyArray;
 }
 
+/**
+ * @brief Returns the total simulation time.
+ * @return Accumulated time in seconds
+ */
 float FKawaiiFluidPreviewScene::GetSimulationTime() const
 {
 	return TotalSimulationTime;
@@ -542,11 +606,19 @@ float FKawaiiFluidPreviewScene::GetSimulationTime() const
 // GPU Simulation Interface
 //========================================
 
+/**
+ * @brief Checks if GPU simulation is ready.
+ * @return True if active
+ */
 bool FKawaiiFluidPreviewScene::IsGPUSimulationActive() const
 {
 	return SimulationContext && SimulationContext->IsGPUSimulatorReady();
 }
 
+/**
+ * @brief Returns the particle count from GPU simulator.
+ * @return Current particle count
+ */
 int32 FKawaiiFluidPreviewScene::GetGPUParticleCount() const
 {
 	if (SimulationContext)
@@ -560,6 +632,10 @@ int32 FKawaiiFluidPreviewScene::GetGPUParticleCount() const
 	return 0;
 }
 
+/**
+ * @brief Returns the GPU simulator instance.
+ * @return Pointer to GPU simulator
+ */
 FGPUFluidSimulator* FKawaiiFluidPreviewScene::GetGPUSimulator() const
 {
 	return SimulationContext ? SimulationContext->GetGPUSimulator() : nullptr;

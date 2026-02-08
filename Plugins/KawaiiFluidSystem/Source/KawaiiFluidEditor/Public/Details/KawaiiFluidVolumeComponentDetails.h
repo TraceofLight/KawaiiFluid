@@ -10,13 +10,17 @@ class UKawaiiFluidVolumeComponent;
 class AKawaiiFluidVolume;
 
 /**
- * KawaiiFluidVolumeComponent detail panel customization
- * Adds brush mode start/stop buttons and particle count display
+ * @brief FKawaiiFluidVolumeComponentDetails
+ * 
+ * Custom details panel for UKawaiiFluidVolumeComponent.
+ * Adds interactive buttons for brush mode and particle management.
+ * 
+ * @param TargetComponent The simulation component being customized
+ * @param TargetVolume The owning volume actor
  */
 class FKawaiiFluidVolumeComponentDetails : public IDetailCustomization
 {
 public:
-	/** IDetailCustomization factory */
 	static TSharedRef<IDetailCustomization> MakeInstance();
 
 	//~ Begin IDetailCustomization Interface
@@ -24,27 +28,19 @@ public:
 	//~ End IDetailCustomization Interface
 
 private:
-	/** Target volume component */
 	TWeakObjectPtr<UKawaiiFluidVolumeComponent> TargetComponent;
 
-	/** Target volume actor (for Brush API access) */
 	TWeakObjectPtr<AKawaiiFluidVolume> TargetVolume;
 
-	/** Brush start button clicked */
 	FReply OnStartBrushClicked();
 
-	/** Brush stop button clicked */
 	FReply OnStopBrushClicked();
 
-	/** Clear all particles button clicked */
 	FReply OnClearParticlesClicked();
 
-	/** Start button visibility */
 	EVisibility GetStartVisibility() const;
 
-	/** Stop button visibility */
 	EVisibility GetStopVisibility() const;
 
-	/** Check if brush mode is active */
 	bool IsBrushActive() const;
 };

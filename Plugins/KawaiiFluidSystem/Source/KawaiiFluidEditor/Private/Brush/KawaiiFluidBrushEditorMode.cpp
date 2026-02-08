@@ -21,6 +21,9 @@
 
 const FEditorModeID FKawaiiFluidBrushEditorMode::EM_FluidBrush = TEXT("EM_FluidBrush");
 
+/**
+ * @brief Default constructor for the brush editor mode.
+ */
 FKawaiiFluidBrushEditorMode::FKawaiiFluidBrushEditorMode()
 {
 	// Explicit FEdMode member reference
@@ -36,6 +39,9 @@ FKawaiiFluidBrushEditorMode::~FKawaiiFluidBrushEditorMode()
 {
 }
 
+/**
+ * @brief Called when the editor mode is activated.
+ */
 void FKawaiiFluidBrushEditorMode::Enter()
 {
 	FEdMode::Enter();
@@ -50,6 +56,9 @@ void FKawaiiFluidBrushEditorMode::Enter()
 	UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode Entered"));
 }
 
+/**
+ * @brief Called when the editor mode is deactivated.
+ */
 void FKawaiiFluidBrushEditorMode::Exit()
 {
 	// Unbind selection changed delegate
@@ -74,6 +83,10 @@ void FKawaiiFluidBrushEditorMode::Exit()
 	UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode Exited"));
 }
 
+/**
+ * @brief Sets the target volume actor for particle painting.
+ * @param Volume The volume actor to target
+ */
 void FKawaiiFluidBrushEditorMode::SetTargetVolume(AKawaiiFluidVolume* Volume)
 {
 	TargetVolume = Volume;
@@ -93,6 +106,14 @@ void FKawaiiFluidBrushEditorMode::SetTargetVolume(AKawaiiFluidVolume* Volume)
 	}
 }
 
+/**
+ * @brief Processes keyboard input for brush shortcuts (mode switch, size adjustment).
+ * @param ViewportClient The viewport client receiving input
+ * @param Viewport The active viewport
+ * @param Key The key being pressed/released
+ * @param Event The input event type
+ * @return True if input was handled
+ */
 bool FKawaiiFluidBrushEditorMode::InputKey(FEditorViewportClient* ViewportClient, FViewport* Viewport,
                                       FKey Key, EInputEvent Event)
 {
@@ -167,6 +188,13 @@ bool FKawaiiFluidBrushEditorMode::InputKey(FEditorViewportClient* ViewportClient
 	return false;
 }
 
+/**
+ * @brief Overrides click handling to prevent selection changes during painting.
+ * @param InViewportClient The viewport client
+ * @param HitProxy The hit proxy under the mouse
+ * @param Click The click information
+ * @return True if click was handled
+ */
 bool FKawaiiFluidBrushEditorMode::HandleClick(FEditorViewportClient* InViewportClient, HHitProxy* HitProxy,
                                          const FViewportClick& Click)
 {
@@ -178,17 +206,33 @@ bool FKawaiiFluidBrushEditorMode::HandleClick(FEditorViewportClient* InViewportC
 	return false;
 }
 
+/**
+ * @brief Not used - handled in InputKey.
+ * @return False
+ */
 bool FKawaiiFluidBrushEditorMode::StartTracking(FEditorViewportClient* ViewportClient, FViewport* Viewport)
 {
 	// Tracking mode not used - handled directly in InputKey
 	return false;
 }
 
+/**
+ * @brief Not used.
+ * @return False
+ */
 bool FKawaiiFluidBrushEditorMode::EndTracking(FEditorViewportClient* ViewportClient, FViewport* Viewport)
 {
 	return false;
 }
 
+/**
+ * @brief Updates brush location and applies paint during mouse movement.
+ * @param ViewportClient The viewport client
+ * @param Viewport The active viewport
+ * @param x Mouse X coordinate
+ * @param y Mouse Y coordinate
+ * @return False
+ */
 bool FKawaiiFluidBrushEditorMode::MouseMove(FEditorViewportClient* ViewportClient, FViewport* Viewport,
                                        int32 x, int32 y)
 {
@@ -203,6 +247,14 @@ bool FKawaiiFluidBrushEditorMode::MouseMove(FEditorViewportClient* ViewportClien
 	return false;
 }
 
+/**
+ * @brief Same as MouseMove but for captured mouse movement during drag.
+ * @param ViewportClient The viewport client
+ * @param Viewport The active viewport
+ * @param InMouseX Mouse X coordinate
+ * @param InMouseY Mouse Y coordinate
+ * @return True if painting
+ */
 bool FKawaiiFluidBrushEditorMode::CapturedMouseMove(FEditorViewportClient* ViewportClient, FViewport* Viewport,
                                                int32 InMouseX, int32 InMouseY)
 {
@@ -216,6 +268,13 @@ bool FKawaiiFluidBrushEditorMode::CapturedMouseMove(FEditorViewportClient* Viewp
 	return bPainting;
 }
 
+/**
+ * @brief Ray-casts into the scene to find the brush's world location.
+ * @param ViewportClient The viewport client
+ * @param MouseX Mouse X coordinate
+ * @param MouseY Mouse Y coordinate
+ * @return True if a valid location was found
+ */
 bool FKawaiiFluidBrushEditorMode::UpdateBrushLocation(FEditorViewportClient* ViewportClient,
                                                  int32 MouseX, int32 MouseY)
 {
@@ -404,6 +463,9 @@ bool FKawaiiFluidBrushEditorMode::UpdateBrushLocation(FEditorViewportClient* Vie
 	return false;
 }
 
+/**
+ * @brief Applies the brush effect (Add/Remove particles) to the target volume.
+ */
 void FKawaiiFluidBrushEditorMode::ApplyBrush()
 {
 	if (!bValidLocation || !TargetVolume.IsValid() || !TargetVolumeComponent.IsValid())
@@ -441,6 +503,12 @@ void FKawaiiFluidBrushEditorMode::ApplyBrush()
 	}
 }
 
+/**
+ * @brief Renders the editor mode's visual elements.
+ * @param View The scene view
+ * @param Viewport The active viewport
+ * @param PDI The primitive draw interface
+ */
 void FKawaiiFluidBrushEditorMode::Render(const FSceneView* View, FViewport* Viewport, FPrimitiveDrawInterface* PDI)
 {
 	FEdMode::Render(View, Viewport, PDI);
@@ -451,6 +519,10 @@ void FKawaiiFluidBrushEditorMode::Render(const FSceneView* View, FViewport* View
 	}
 }
 
+/**
+ * @brief Draws the brush preview (circle, arrow, center point) in the viewport.
+ * @param PDI The primitive draw interface
+ */
 void FKawaiiFluidBrushEditorMode::DrawBrushPreview(FPrimitiveDrawInterface* PDI)
 {
 	if (!TargetVolume.IsValid() || !TargetVolumeComponent.IsValid())
@@ -480,6 +552,10 @@ void FKawaiiFluidBrushEditorMode::DrawBrushPreview(FPrimitiveDrawInterface* PDI)
 	PDI->DrawPoint(BrushLocation, Color, 8.0f, SDPG_Foreground);
 }
 
+/**
+ * @brief Returns the color of the brush based on the current mode (Add/Remove).
+ * @return FLinearColor of the brush
+ */
 FLinearColor FKawaiiFluidBrushEditorMode::GetBrushColor() const
 {
 	if (!TargetVolume.IsValid() || !TargetVolumeComponent.IsValid())
@@ -500,6 +576,13 @@ FLinearColor FKawaiiFluidBrushEditorMode::GetBrushColor() const
 	}
 }
 
+/**
+ * @brief Renders the brush information HUD.
+ * @param ViewportClient The viewport client
+ * @param Viewport The active viewport
+ * @param View The scene view
+ * @param Canvas The HUD canvas
+ */
 void FKawaiiFluidBrushEditorMode::DrawHUD(FEditorViewportClient* ViewportClient, FViewport* Viewport,
                                      const FSceneView* View, FCanvas* Canvas)
 {
@@ -528,6 +611,10 @@ void FKawaiiFluidBrushEditorMode::DrawHUD(FEditorViewportClient* ViewportClient,
 	Canvas->DrawItem(Text);
 }
 
+/**
+ * @brief Disables mouse delta tracking during painting to allow custom input logic.
+ * @return True if mouse delta tracking should be disallowed
+ */
 bool FKawaiiFluidBrushEditorMode::DisallowMouseDeltaTracking() const
 {
 	if (!TargetVolume.IsValid() || !TargetVolumeComponent.IsValid())
@@ -552,6 +639,11 @@ bool FKawaiiFluidBrushEditorMode::DisallowMouseDeltaTracking() const
 	return true;
 }
 
+/**
+ * @brief Advances the editor mode's state each frame.
+ * @param ViewportClient The viewport client
+ * @param DeltaTime Time passed since last frame
+ */
 void FKawaiiFluidBrushEditorMode::Tick(FEditorViewportClient* ViewportClient, float DeltaTime)
 {
 	FEdMode::Tick(ViewportClient, DeltaTime);
@@ -563,16 +655,12 @@ void FKawaiiFluidBrushEditorMode::Tick(FEditorViewportClient* ViewportClient, fl
 		GetModeManager()->DeactivateMode(EM_FluidBrush);
 		return;
 	}
-
-	// Condition 5: Check viewport focus loss
-	if (ViewportClient && !ViewportClient->Viewport->HasFocus())
-	{
-		// Exit only when focus moves to another window (ignore brief focus loss)
-		// Currently omitted as it's only important for viewport switching
-		// Can implement with timer to exit after certain duration without focus
-	}
 }
 
+/**
+ * @brief Exits the brush mode if the target actor is deselected.
+ * @param Object The object whose selection state changed
+ */
 void FKawaiiFluidBrushEditorMode::OnSelectionChanged(UObject* Object)
 {
 	// Ignore selection changes while painting

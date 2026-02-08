@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -9,8 +9,13 @@
 class IAssetTypeActions;
 
 /**
- * KawaiiFluid Editor Module
- * Provides custom asset editors and tools for the fluid system
+ * @brief FKawaiiFluidEditorModule
+ * 
+ * Main editor module for the KawaiiFluid system.
+ * Handles registration of asset tools, property customizations, and editor modes.
+ * 
+ * @param RegisteredAssetTypeActions List of registered asset actions for cleanup
+ * @param FluidAssetCategory The custom asset category for fluid assets
  */
 class FKawaiiFluidEditorModule : public IModuleInterface
 {
@@ -20,26 +25,19 @@ public:
 	virtual void ShutdownModule() override;
 	//~ End IModuleInterface
 
-	/** Get the module instance */
 	static FKawaiiFluidEditorModule& Get();
 
-	/** Get custom asset type category */
 	EAssetTypeCategories::Type GetAssetCategory() const { return FluidAssetCategory; }
 
 private:
-	/** Register asset type actions */
 	void RegisterAssetTypeActions();
 
-	/** Unregister asset type actions */
 	void UnregisterAssetTypeActions();
 
-	/** Register custom property type customizations */
 	void RegisterPropertyCustomizations();
 
-	/** Unregister property customizations */
 	void UnregisterPropertyCustomizations();
 
-	/** Handle asset pre-save event to generate thumbnail */
 	void HandleAssetPreSave(UPackage* InPackage, FObjectPreSaveContext InContext);
 
 private:

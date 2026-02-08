@@ -8,6 +8,11 @@
 
 #define LOCTEXT_NAMESPACE "SKawaiiFluidPreviewStatsOverlay"
 
+/**
+ * @brief Constructs the stats overlay widget.
+ * @param InArgs Slate arguments
+ * @param InPreviewScene Shared pointer to the preview scene
+ */
 void SKawaiiFluidPreviewStatsOverlay::Construct(const FArguments& InArgs, TSharedPtr<FKawaiiFluidPreviewScene> InPreviewScene)
 {
 	PreviewScenePtr = InPreviewScene;
@@ -63,6 +68,12 @@ void SKawaiiFluidPreviewStatsOverlay::Construct(const FArguments& InArgs, TShare
 	];
 }
 
+/**
+ * @brief Updates the cached stats each frame.
+ * @param AllottedGeometry Geometry assigned to the widget
+ * @param InCurrentTime Current world time
+ * @param InDeltaTime Time passed since last tick
+ */
 void SKawaiiFluidPreviewStatsOverlay::Tick(const FGeometry& AllottedGeometry, const double InCurrentTime, const float InDeltaTime)
 {
 	SCompoundWidget::Tick(AllottedGeometry, InCurrentTime, InDeltaTime);
@@ -89,11 +100,19 @@ void SKawaiiFluidPreviewStatsOverlay::Tick(const FGeometry& AllottedGeometry, co
 	}
 }
 
+/**
+ * @brief Returns the formatted particle count text.
+ * @return Localized particle count string
+ */
 FText SKawaiiFluidPreviewStatsOverlay::GetParticleCountText() const
 {
 	return FText::Format(LOCTEXT("ParticleCount", "Particles: {0}"), FText::AsNumber(CachedParticleCount));
 }
 
+/**
+ * @brief Returns the formatted simulation time text.
+ * @return Localized simulation time string
+ */
 FText SKawaiiFluidPreviewStatsOverlay::GetSimulationTimeText() const
 {
 	TSharedPtr<FKawaiiFluidPreviewScene> PreviewScene = PreviewScenePtr.Pin();
@@ -103,6 +122,10 @@ FText SKawaiiFluidPreviewStatsOverlay::GetSimulationTimeText() const
 	return FText::Format(LOCTEXT("SimulationTime", "Time: {0}s"), FText::AsNumber(SimTime, &Options));
 }
 
+/**
+ * @brief Returns the formatted FPS text.
+ * @return Localized FPS string
+ */
 FText SKawaiiFluidPreviewStatsOverlay::GetFPSText() const
 {
 	return FText::Format(LOCTEXT("FPS", "FPS: {0}"), FText::AsNumber(FMath::RoundToInt(CachedFPS)));

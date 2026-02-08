@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Thumbnail/KawaiiFluidPresetThumbnailRenderer.h"
 
@@ -20,11 +20,14 @@
 #include "LegacyScreenPercentageDriver.h"
 
 /**
- * Internal helper class for 3D thumbnail preview
+ * @brief Internal helper class for 3D thumbnail preview
  */
 class FKawaiiFluidPresetThumbnailScene : public FThumbnailPreviewScene
 {
 public:
+	/**
+	 * @brief Constructor: Sets up the mesh, material, and lighting for the thumbnail scene.
+	 */
 	FKawaiiFluidPresetThumbnailScene()
 		: FThumbnailPreviewScene()
 	{
@@ -68,14 +71,16 @@ public:
 		}
 	}
 	
+	/**
+	 * @brief Updates the material parameters based on the fluid preset.
+	 * @param Preset The preset to apply
+	 */
 	void SetFluidParameters(UKawaiiFluidPresetDataAsset* Preset)
 	{
 		if (ThumbnailMID && Preset)
 		{
 			// 1. Set fluid color
 			ThumbnailMID->SetVectorParameterValue(TEXT("Base Color"), Preset->RenderingParameters.FluidColor);
-
-			//ThumbnailMID->SetScalarParameterValue(TEXT("Opacity"), Preset->RenderingParameters.ThicknessScale / 10.f);
 
 			// 2. Set texture (if available from SurfaceDecoration Layer)
 			if (UTexture2D* TargetTex = Preset->RenderingParameters.SurfaceDecoration.Layer.Texture)
@@ -92,7 +97,9 @@ public:
 		PreviewMeshComponent->MarkRenderStateDirty();
 	}
 	
-	// FThumbnailPreviewScene interface implementation (required)
+	/**
+	 * @brief Implementation of FThumbnailPreviewScene interface.
+	 */
 	virtual void GetViewMatrixParameters(const float InFOVDegrees, FVector& OutOrigin, float& OutOrbitPitch, float& OutOrbitYaw, float& OutOrbitZoom) const override
 	{
 		OutOrigin = FVector::ZeroVector;
@@ -101,12 +108,17 @@ public:
 		OutOrbitZoom = PreviewMeshComponent ? (PreviewMeshComponent->Bounds.SphereRadius * 2.5f) : 0.0f;
 	}
 
+	/**
+	 * @brief Renders the scene to the thumbnail canvas.
+	 * @param Canvas HUD canvas
+	 * @param Rect Target rectangle
+	 */
 	void Draw(FCanvas* Canvas, const FIntRect& Rect)
 	{
 		if (!PreviewMeshComponent || !PreviewMeshComponent->GetStaticMesh())
-	{
-		return;
-	}
+		{
+			return;
+		}
 
 		// Create FGameTime (UE 5.7 compatible)
 		FGameTime GameTime = FGameTime::CreateUndilated(FApp::GetCurrentTime(), FApp::GetDeltaTime());
@@ -161,6 +173,10 @@ public:
 		RendererModule.BeginRenderingViewFamily(Canvas, &ViewFamily);
 	}
 
+	/**
+	 * @brief Garbage collection handling for internal objects.
+	 * @param Collector The reference collector
+	 */
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override
 	{
 		FThumbnailPreviewScene::AddReferencedObjects(Collector);
@@ -173,12 +189,26 @@ private:
 	TObjectPtr<UMaterialInstanceDynamic> ThumbnailMID;
 };
 
+/**
+ * @brief Default constructor for the thumbnail renderer.
+ */
 UKawaiiFluidPresetThumbnailRenderer::UKawaiiFluidPresetThumbnailRenderer()
 	: Super()
 	, ThumbnailScene(nullptr)
 {
 }
 
+/**
+ * @brief Main drawing logic for the asset thumbnail.
+ * @param Object The object to render
+ * @param X Screen X coordinate
+ * @param Y Mouse Y coordinate
+ * @param Width Thumbnail width
+ * @param Height Thumbnail height
+ * @param RenderTarget Target for rendering
+ * @param Canvas HUD canvas
+ * @param bAdditionalContext Additional rendering flags
+ */
 void UKawaiiFluidPresetThumbnailRenderer::Draw(UObject* Object, int32 X, int32 Y, uint32 Width, uint32 Height, FRenderTarget* RenderTarget, FCanvas* Canvas, bool bAdditionalContext)
 {
 	UKawaiiFluidPresetDataAsset* Preset = Cast<UKawaiiFluidPresetDataAsset>(Object);
@@ -197,6 +227,9 @@ void UKawaiiFluidPresetThumbnailRenderer::Draw(UObject* Object, int32 X, int32 Y
 	FlushRenderingCommands();
 }
 
+/**
+ * @brief Cleanup on destruction.
+ */
 void UKawaiiFluidPresetThumbnailRenderer::BeginDestroy()
 {
 	if (ThumbnailScene)
