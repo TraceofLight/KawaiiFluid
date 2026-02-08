@@ -17,6 +17,9 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 
+/**
+ * @brief Default constructor for UKawaiiFluidEmitterComponent.
+ */
 UKawaiiFluidEmitterComponent::UKawaiiFluidEmitterComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -24,6 +27,9 @@ UKawaiiFluidEmitterComponent::UKawaiiFluidEmitterComponent()
 	bTickInEditor = true;  // Enable tick in editor for wireframe visualization
 }
 
+/**
+ * @brief Called when the component is registered. Sets up editor-only visualization components.
+ */
 void UKawaiiFluidEmitterComponent::OnRegister()
 {
 	Super::OnRegister();
@@ -87,6 +93,9 @@ void UKawaiiFluidEmitterComponent::OnRegister()
 #endif
 }
 
+/**
+ * @brief Called when the component is unregistered.
+ */
 void UKawaiiFluidEmitterComponent::OnUnregister()
 {
 #if WITH_EDITORONLY_DATA
@@ -106,6 +115,9 @@ void UKawaiiFluidEmitterComponent::OnUnregister()
 	Super::OnUnregister();
 }
 
+/**
+ * @brief Called when the game starts. Allocates SourceID and handles initial auto-start logic.
+ */
 void UKawaiiFluidEmitterComponent::BeginPlay()
 {
 	Super::BeginPlay();
@@ -221,6 +233,10 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 	}
 }
 
+/**
+ * @brief Called when the component is destroyed. Releases allocated SourceID.
+ * @param EndPlayReason Reason for ending play
+ */
 void UKawaiiFluidEmitterComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	// Clear per-source emitter max before unregistering (stop GPU recycling for this source)
@@ -256,6 +272,12 @@ void UKawaiiFluidEmitterComponent::EndPlay(const EEndPlayReason::Type EndPlayRea
 	Super::EndPlay(EndPlayReason);
 }
 
+/**
+ * @brief Main update loop for the emitter. Handles distance optimization and continuous spawning.
+ * @param DeltaTime Time passed since last frame
+ * @param TickType Type of tick
+ * @param ThisTickFunction Tick function reference
+ */
 void UKawaiiFluidEmitterComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
@@ -362,11 +384,19 @@ void UKawaiiFluidEmitterComponent::TickComponent(float DeltaTime, ELevelTick Tic
 	}
 }
 
+/**
+ * @brief Returns the owning emitter actor.
+ * @return AKawaiiFluidEmitter pointer
+ */
 AKawaiiFluidEmitter* UKawaiiFluidEmitterComponent::GetOwnerEmitter() const
 {
 	return Cast<AKawaiiFluidEmitter>(GetOwner());
 }
 
+/**
+ * @brief Sets a new target volume and updates registration.
+ * @param NewVolume The new target volume
+ */
 void UKawaiiFluidEmitterComponent::SetTargetVolume(AKawaiiFluidVolume* NewVolume)
 {
 	if (TargetVolume != NewVolume)
@@ -377,6 +407,10 @@ void UKawaiiFluidEmitterComponent::SetTargetVolume(AKawaiiFluidVolume* NewVolume
 	}
 }
 
+/**
+ * @brief Retrieves the particle spacing from the target volume's preset.
+ * @return Particle spacing value
+ */
 float UKawaiiFluidEmitterComponent::GetParticleSpacing() const
 {
 	if (AKawaiiFluidVolume* Volume = GetTargetVolume())
@@ -386,6 +420,9 @@ float UKawaiiFluidEmitterComponent::GetParticleSpacing() const
 	return 10.0f; // Default fallback
 }
 
+/**
+ * @brief Starts continuous particle emission in Stream mode.
+ */
 void UKawaiiFluidEmitterComponent::StartStreamSpawn()
 {
 	if (!IsStreamMode())
@@ -404,11 +441,17 @@ void UKawaiiFluidEmitterComponent::StartStreamSpawn()
 	bStreamSpawning = true;
 }
 
+/**
+ * @brief Stops continuous particle emission.
+ */
 void UKawaiiFluidEmitterComponent::StopStreamSpawn()
 {
 	bStreamSpawning = false;
 }
 
+/**
+ * @brief Executes a one-time fill spawn using the configured shape.
+ */
 void UKawaiiFluidEmitterComponent::SpawnFill()
 {
 	if (!bEnabled)
@@ -472,6 +515,10 @@ void UKawaiiFluidEmitterComponent::SpawnFill()
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::SpawnFill - Spawned %d particles"), SpawnedCount);
 }
 
+/**
+ * @brief Spawns a fixed number of particles immediately.
+ * @param Count Number of particles to spawn
+ */
 void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
 {
 	if (!bEnabled)
@@ -528,6 +575,10 @@ void UKawaiiFluidEmitterComponent::BurstSpawn(int32 Count)
 	}
 }
 
+/**
+ * @brief Checks if the emitter has reached its particle limit.
+ * @return True if limit reached
+ */
 bool UKawaiiFluidEmitterComponent::HasReachedParticleLimit() const
 {
 	if (MaxParticleCount <= 0)
@@ -563,6 +614,10 @@ bool UKawaiiFluidEmitterComponent::HasReachedParticleLimit() const
 	return false;
 }
 
+/**
+ * @brief Internal helper to advance continuous spawn logic.
+ * @param DeltaTime Time step
+ */
 void UKawaiiFluidEmitterComponent::ProcessContinuousSpawn(float DeltaTime)
 {
 	// Check per-emitter particle limit (MaxParticleCount)
@@ -575,6 +630,10 @@ void UKawaiiFluidEmitterComponent::ProcessContinuousSpawn(float DeltaTime)
 	ProcessStreamEmitter(DeltaTime);
 }
 
+/**
+ * @brief Handles stream emission logic using rate-based layer spawning.
+ * @param DeltaTime Time step
+ */
 void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 {
 	// Get EffectiveSpacing from ParticleSpacing (matches Mass calculation)
@@ -678,6 +737,15 @@ void UKawaiiFluidEmitterComponent::ProcessStreamEmitter(float DeltaTime)
 	// No readback dependency, no per-frame CPU logic needed here.
 }
 
+/**
+ * @brief Spawns particles in a sphere using HCP packing.
+ * @param Center Spawn origin
+ * @param Rotation Orientation
+ * @param Radius Sphere radius
+ * @param Spacing Distance between particles
+ * @param InInitialVelocity Initial velocity vector
+ * @return Number of spawned particles
+ */
 int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center, FQuat Rotation, float Radius, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
@@ -780,6 +848,15 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesSphereHexagonal(FVector Center
 	return Positions.Num();
 }
 
+/**
+ * @brief Spawns particles in a cube using HCP packing.
+ * @param Center Center position
+ * @param Rotation Orientation
+ * @param HalfSize Box half-extent
+ * @param Spacing Particle distance
+ * @param InInitialVelocity Initial velocity
+ * @return Spawned count
+ */
 int32 UKawaiiFluidEmitterComponent::SpawnParticlesCubeHexagonal(FVector Center, FQuat Rotation, FVector HalfSize, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
@@ -892,6 +969,16 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCubeHexagonal(FVector Center, 
 	return Positions.Num();
 }
 
+/**
+ * @brief Spawns particles in a cylinder shape.
+ * @param Center Origin
+ * @param Rotation Orientation
+ * @param Radius Cylinder radius
+ * @param HalfHeight Cylinder half-height
+ * @param Spacing Density spacing
+ * @param InInitialVelocity Initial velocity
+ * @return Spawned count
+ */
 int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Center, FQuat Rotation, float Radius, float HalfHeight, float Spacing, FVector InInitialVelocity)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
@@ -1001,6 +1088,15 @@ int32 UKawaiiFluidEmitterComponent::SpawnParticlesCylinderHexagonal(FVector Cent
 	return Positions.Num();
 }
 
+/**
+ * @brief Spawns a 2D hexagonal layer of particles for a stream.
+ * @param Position World position
+ * @param LayerDirection Direction of the layer plane normal
+ * @param VelocityDirection Particle velocity direction
+ * @param Speed Particle speed
+ * @param Radius Stream radius
+ * @param Spacing Particle density spacing
+ */
 void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector LayerDirection, FVector VelocityDirection, float Speed, float Radius, float Spacing)
 {
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
@@ -1087,6 +1183,17 @@ void UKawaiiFluidEmitterComponent::SpawnStreamLayer(FVector Position, FVector La
 	QueueSpawnRequest(Positions, Velocities);
 }
 
+/**
+ * @brief Helper to batch collect stream layer particles without immediate submission.
+ * @param Position Position
+ * @param LayerDirection Orientation
+ * @param VelocityDirection Velocity
+ * @param Speed Speed
+ * @param Radius Radius
+ * @param Spacing Spacing
+ * @param OutPositions Output position array
+ * @param OutVelocities Output velocity array
+ */
 void UKawaiiFluidEmitterComponent::SpawnStreamLayerBatch(FVector Position, FVector LayerDirection, 
 	FVector VelocityDirection, float Speed, float Radius, float Spacing,
 	TArray<FVector>& OutPositions, TArray<FVector>& OutVelocities)
@@ -1164,6 +1271,11 @@ void UKawaiiFluidEmitterComponent::SpawnStreamLayerBatch(FVector Position, FVect
 	}
 }
 
+/**
+ * @brief Queues spawn requests to the target volume.
+ * @param Positions Array of particle positions
+ * @param Velocities Array of particle velocities
+ */
 void UKawaiiFluidEmitterComponent::QueueSpawnRequest(const TArray<FVector>& Positions, const TArray<FVector>& Velocities)
 {
 	if (!bEnabled)
@@ -1188,6 +1300,10 @@ void UKawaiiFluidEmitterComponent::QueueSpawnRequest(const TArray<FVector>& Posi
 	bJustCleared = false;
 }
 
+/**
+ * @brief Retrieves the simulation module from the target volume.
+ * @return UKawaiiFluidSimulationModule pointer
+ */
 UKawaiiFluidSimulationModule* UKawaiiFluidEmitterComponent::GetSimulationModule() const
 {
 	if (AKawaiiFluidVolume* Volume = GetTargetVolume())
@@ -1197,6 +1313,9 @@ UKawaiiFluidSimulationModule* UKawaiiFluidEmitterComponent::GetSimulationModule(
 	return nullptr;
 }
 
+/**
+ * @brief Removes all particles spawned by this emitter from the simulation.
+ */
 void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 {
 	// First, clear any pending spawn requests for this emitter (prevents last-frame spawn leak)
@@ -1242,10 +1361,9 @@ void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 	bJustCleared = true;  // Allow immediate re-spawn before GPU readback updates
 }
 
-//========================================
-// Volume Registration
-//========================================
-
+/**
+ * @brief Registers this emitter to its target volume.
+ */
 void UKawaiiFluidEmitterComponent::RegisterToVolume()
 {
 	if (TargetVolume)
@@ -1257,6 +1375,9 @@ void UKawaiiFluidEmitterComponent::RegisterToVolume()
 	}
 }
 
+/**
+ * @brief Unregisters this emitter from its target volume.
+ */
 void UKawaiiFluidEmitterComponent::UnregisterFromVolume()
 {
 	if (TargetVolume)
@@ -1268,6 +1389,10 @@ void UKawaiiFluidEmitterComponent::UnregisterFromVolume()
 	}
 }
 
+/**
+ * @brief Automatically finds the nearest volume in the level.
+ * @return Pointer to nearest volume
+ */
 AKawaiiFluidVolume* UKawaiiFluidEmitterComponent::FindNearestVolume() const
 {
 	UWorld* World = GetWorld();
@@ -1323,10 +1448,10 @@ AKawaiiFluidVolume* UKawaiiFluidEmitterComponent::FindNearestVolume() const
 	return NearestVolume;
 }
 
-//========================================
-// Distance Optimization (Emitter Distance Culling)
-//========================================
-
+/**
+ * @brief Periodically checks distance to player for optimization.
+ * @param DeltaTime Time step
+ */
 void UKawaiiFluidEmitterComponent::UpdateDistanceOptimization(float DeltaTime)
 {
 	// Throttle: 10Hz
@@ -1377,6 +1502,10 @@ void UKawaiiFluidEmitterComponent::UpdateDistanceOptimization(float DeltaTime)
 	}
 }
 
+/**
+ * @brief Handles activation state changes based on distance optimization.
+ * @param bNewState New activation state
+ */
 void UKawaiiFluidEmitterComponent::OnDistanceActivationChanged(bool bNewState)
 {
 	bDistanceActivated = bNewState;
@@ -1431,6 +1560,9 @@ void UKawaiiFluidEmitterComponent::OnDistanceActivationChanged(bool bNewState)
 	}
 }
 
+/**
+ * @brief Removes all particles spawned by this emitter immediately.
+ */
 void UKawaiiFluidEmitterComponent::DespawnAllParticles()
 {
 	if (CachedSourceID < 0)
@@ -1458,6 +1590,10 @@ void UKawaiiFluidEmitterComponent::DespawnAllParticles()
 		*GetName(), CachedSourceID);
 }
 
+/**
+ * @brief Retrieves the local player pawn.
+ * @return APawn pointer
+ */
 APawn* UKawaiiFluidEmitterComponent::GetPlayerPawn()
 {
 	// Return cached pawn if still valid
@@ -1489,6 +1625,10 @@ APawn* UKawaiiFluidEmitterComponent::GetPlayerPawn()
 }
 
 #if WITH_EDITOR
+/**
+ * @brief Updates visualizations when properties change in the editor.
+ * @param PropertyChangedEvent Property change information
+ */
 void UKawaiiFluidEmitterComponent::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
@@ -1516,6 +1656,9 @@ void UKawaiiFluidEmitterComponent::PostEditChangeProperty(FPropertyChangedEvent&
 	}
 }
 
+/**
+ * @brief Renders wireframe visualization for spawn volumes.
+ */
 void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 {
 	UWorld* World = GetWorld();
@@ -1630,6 +1773,9 @@ void UKawaiiFluidEmitterComponent::DrawSpawnVolumeVisualization()
 	}
 }
 
+/**
+ * @brief Updates the arrow component representing velocity direction.
+ */
 void UKawaiiFluidEmitterComponent::UpdateVelocityArrowVisualization()
 {
 #if WITH_EDITORONLY_DATA
@@ -1659,6 +1805,9 @@ void UKawaiiFluidEmitterComponent::UpdateVelocityArrowVisualization()
 #endif
 }
 
+/**
+ * @brief Renders activation distance visualization in the editor.
+ */
 void UKawaiiFluidEmitterComponent::DrawDistanceVisualization()
 {
 	if (!bUseDistanceOptimization)
