@@ -194,11 +194,15 @@ void FGPUFluidSimulator::Release()
 
 	// Release Indirect Dispatch resources
 	PersistentParticleCountBuffer = nullptr;
-	if (ParticleCountReadback)
+	for (int32 i = 0; i < NUM_COUNT_READBACK_BUFFERS; ++i)
 	{
-		delete ParticleCountReadback;
-		ParticleCountReadback = nullptr;
+		if (CountReadbacks[i])
+		{
+			delete CountReadbacks[i];
+			CountReadbacks[i] = nullptr;
+		}
 	}
+	CountReadbackWriteIndex = 0;
 	bEverHadParticles = false;
 
 	bIsInitialized = false;
@@ -903,7 +907,8 @@ void FGPUFluidSimulator::BeginFrame()
 			// Process stats readback - also extracts shadow data if bShadowReadbackEnabled
 			const bool bNeedStatsReadback = GetFluidStatsCollector().IsAnyReadbackNeeded();
 			const bool bNeedShadowReadback = Self->bShadowReadbackEnabled.load();
-			if (bNeedStatsReadback || bNeedShadowReadback)
+			const bool bNeedFullReadback = Self->bFullReadbackEnabled.load();
+			if (bNeedStatsReadback || bNeedShadowReadback || bNeedFullReadback)
 			{
 				SCOPED_DRAW_EVENT(RHICmdList, GPUFluid_BeginFrame_ProcessStatsReadback);
 				Self->ProcessStatsReadback(RHICmdList);
@@ -1343,28 +1348,41 @@ void FGPUFluidSimulator::EnqueueParticleCountReadback(FRHICommandListImmediate& 
 		return;
 	}
 
-	if (!ParticleCountReadback)
+	const int32 WriteIdx = CountReadbackWriteIndex;
+	CountReadbackWriteIndex = (CountReadbackWriteIndex + 1) % NUM_COUNT_READBACK_BUFFERS;
+
+	if (!CountReadbacks[WriteIdx])
 	{
-		ParticleCountReadback = new FRHIGPUBufferReadback(TEXT("ParticleCountReadback"));
+		CountReadbacks[WriteIdx] = new FRHIGPUBufferReadback(*FString::Printf(TEXT("ParticleCountReadback_%d"), WriteIdx));
 	}
 
-	ParticleCountReadback->EnqueueCopy(RHICmdList, PersistentParticleCountBuffer->GetRHI(), GPUIndirectDispatch::BufferSizeBytes);
+	CountReadbacks[WriteIdx]->EnqueueCopy(RHICmdList, PersistentParticleCountBuffer->GetRHI(), GPUIndirectDispatch::BufferSizeBytes);
 }
 
 void FGPUFluidSimulator::ProcessParticleCountReadback()
 {
-	if (!ParticleCountReadback || !ParticleCountReadback->IsReady())
+	// Find newest ready readback (most up-to-date GPU count)
+	int32 ReadIdx = -1;
+	for (int32 i = 0; i < NUM_COUNT_READBACK_BUFFERS; ++i)
+	{
+		if (CountReadbacks[i] && CountReadbacks[i]->IsReady())
+		{
+			ReadIdx = i;
+		}
+	}
+
+	if (ReadIdx < 0)
 	{
 		return;
 	}
 
-	const uint32* Data = static_cast<const uint32*>(ParticleCountReadback->Lock(GPUIndirectDispatch::BufferSizeBytes));
+	const uint32* Data = static_cast<const uint32*>(CountReadbacks[ReadIdx]->Lock(GPUIndirectDispatch::BufferSizeBytes));
 	if (Data)
 	{
 		const int32 GPUCount = static_cast<int32>(Data[GPUIndirectDispatch::ParticleCountElementIndex]);
 		CurrentParticleCount = GPUCount;
 	}
-	ParticleCountReadback->Unlock();
+	CountReadbacks[ReadIdx]->Unlock();
 }
 
 FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
@@ -2384,35 +2402,6 @@ void FGPUFluidSimulator::ClearSpawnRequests()
 int32 FGPUFluidSimulator::GetPendingSpawnCount() const
 {
 	return SpawnManager.IsValid() ? SpawnManager->GetPendingSpawnCount() : 0;
-}
-
-//=============================================================================
-// FGPUFluidSimulationTask Implementation
-//=============================================================================
-
-void FGPUFluidSimulationTask::Execute(
-	FGPUFluidSimulator* Simulator,
-	const FGPUFluidSimulationParams& Params,
-	int32 NumSubsteps)
-{
-	if (!Simulator || !Simulator->IsReady()) { return; }
-
-	FGPUFluidSimulationParams SubstepParams = Params;
-	SubstepParams.DeltaTime = Params.DeltaTime / FMath::Max(1, NumSubsteps);
-	SubstepParams.DeltaTimeSq = SubstepParams.DeltaTime * SubstepParams.DeltaTime;
-	SubstepParams.TotalSubsteps = NumSubsteps;
-
-	// Frame lifecycle: BeginFrame
-	Simulator->BeginFrame();
-
-	for (int32 i = 0; i < NumSubsteps; ++i)
-	{
-		SubstepParams.SubstepIndex = i;
-		Simulator->SimulateSubstep(SubstepParams);
-	}
-
-	// Frame lifecycle: EndFrame
-	Simulator->EndFrame();
 }
 
 //=============================================================================
@@ -3929,9 +3918,34 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 		return;
 	}
 
-	// Search for oldest ready buffer
+	// If particle count is zero, clear all caches and discard pending readbacks
+	if (CurrentParticleCount <= 0)
+	{
+		{
+			FScopeLock Lock(&BufferLock);
+			CachedParticlePositions.Empty();
+			CachedParticleVelocities.Empty();
+			CachedParticleSourceIDs.Empty();
+			CachedAllParticleIDs.Empty();
+			CachedSourceIDToParticleIDs.Empty();
+			CachedParticleFlags.Empty();
+			ReadyShadowPositions.Empty();
+			ReadyShadowVelocities.Empty();
+			ReadyShadowNeighborCounts.Empty();
+			ReadyShadowPositionsFrame.store(0);
+			ReadyShadowAnisotropyFrame.store(0);
+		}
+		for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
+		{
+			if (StatsReadbackFrameNumbers[i] > 0 && StatsReadbacks[i] && StatsReadbacks[i]->IsReady())
+				StatsReadbackFrameNumbers[i] = 0;
+		}
+		return;
+	}
+
+	// Search for newest ready buffer (prevents stale pre-despawn data from refilling cache)
 	int32 ReadIdx = -1;
-	uint64 OldestFrame = UINT64_MAX;
+	uint64 NewestFrame = 0;
 
 	for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
 	{
@@ -3939,9 +3953,9 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 			StatsReadbackFrameNumbers[i] > 0 &&
 			StatsReadbacks[i]->IsReady())
 		{
-			if (StatsReadbackFrameNumbers[i] < OldestFrame)
+			if (StatsReadbackFrameNumbers[i] > NewestFrame)
 			{
-				OldestFrame = StatsReadbackFrameNumbers[i];
+				NewestFrame = StatsReadbackFrameNumbers[i];
 				ReadIdx = i;
 			}
 		}
@@ -3950,6 +3964,16 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 	if (ReadIdx < 0)
 	{
 		return;  // No ready buffers
+	}
+
+	// Discard older ready buffers — they contain stale pre-despawn data
+	for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
+	{
+		if (i != ReadIdx && StatsReadbackFrameNumbers[i] > 0
+			&& StatsReadbacks[i] && StatsReadbacks[i]->IsReady())
+		{
+			StatsReadbackFrameNumbers[i] = 0;
+		}
 	}
 
 	// Use min(stored, CurrentParticleCount) to handle CPU/GPU count desync after despawn.
