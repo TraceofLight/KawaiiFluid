@@ -1,15 +1,26 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Collision/BoxFluidCollider.h"
+#include "Collision/KawaiiFluidBoxCollider.h"
 #include "GameFramework/Actor.h"
 
-UBoxFluidCollider::UBoxFluidCollider()
+/**
+ * @brief Default constructor for UKawaiiFluidBoxCollider.
+ */
+UKawaiiFluidBoxCollider::UKawaiiFluidBoxCollider()
 {
 	BoxExtent = FVector(50.0f, 50.0f, 50.0f);
 	LocalOffset = FVector::ZeroVector;
 }
 
-bool UBoxFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
+/**
+ * @brief Finds the closest point on the box surface.
+ * @param Point Query point in world space
+ * @param OutClosestPoint Closest point on the box surface
+ * @param OutNormal Surface normal at the closest point
+ * @param OutDistance Distance to the closest point
+ * @return True if successful
+ */
+bool UKawaiiFluidBoxCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)
@@ -74,7 +85,12 @@ bool UBoxFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutCloses
 	return true;
 }
 
-bool UBoxFluidCollider::IsPointInside(const FVector& Point) const
+/**
+ * @brief Checks if a point is inside the box extent.
+ * @param Point Point to check in world space
+ * @return True if the point is inside
+ */
+bool UKawaiiFluidBoxCollider::IsPointInside(const FVector& Point) const
 {
 	FVector LocalPoint = WorldToLocal(Point);
 
@@ -83,7 +99,13 @@ bool UBoxFluidCollider::IsPointInside(const FVector& Point) const
 	       FMath::Abs(LocalPoint.Z) <= BoxExtent.Z;
 }
 
-float UBoxFluidCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
+/**
+ * @brief Calculates the signed distance to the box surface using the IQ formula.
+ * @param Point Query point in world space
+ * @param OutGradient Surface normal at the closest point
+ * @return Signed distance (negative if inside)
+ */
+float UKawaiiFluidBoxCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)
@@ -150,7 +172,12 @@ float UBoxFluidCollider::GetSignedDistance(const FVector& Point, FVector& OutGra
 	return SignedDist;
 }
 
-FVector UBoxFluidCollider::WorldToLocal(const FVector& WorldPoint) const
+/**
+ * @brief Transforms a world space point to the box's local space.
+ * @param WorldPoint Point in world space
+ * @return Point in local space
+ */
+FVector UKawaiiFluidBoxCollider::WorldToLocal(const FVector& WorldPoint) const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)
@@ -164,7 +191,12 @@ FVector UBoxFluidCollider::WorldToLocal(const FVector& WorldPoint) const
 	return Owner->GetActorRotation().UnrotateVector(RelativePoint);
 }
 
-FVector UBoxFluidCollider::LocalToWorld(const FVector& LocalPoint) const
+/**
+ * @brief Transforms a local space point to world space.
+ * @param LocalPoint Point in local space
+ * @return Point in world space
+ */
+FVector UKawaiiFluidBoxCollider::LocalToWorld(const FVector& LocalPoint) const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)
@@ -176,7 +208,11 @@ FVector UBoxFluidCollider::LocalToWorld(const FVector& LocalPoint) const
 	return RotatedPoint + GetBoxCenter();
 }
 
-FVector UBoxFluidCollider::GetBoxCenter() const
+/**
+ * @brief Returns the world space center of the box.
+ * @return World space position
+ */
+FVector UKawaiiFluidBoxCollider::GetBoxCenter() const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)

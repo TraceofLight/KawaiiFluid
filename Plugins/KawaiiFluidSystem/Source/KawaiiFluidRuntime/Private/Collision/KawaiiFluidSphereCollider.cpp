@@ -1,15 +1,26 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Collision/SphereFluidCollider.h"
+#include "Collision/KawaiiFluidSphereCollider.h"
 #include "GameFramework/Actor.h"
 
-USphereFluidCollider::USphereFluidCollider()
+/**
+ * @brief Default constructor for UKawaiiFluidSphereCollider.
+ */
+UKawaiiFluidSphereCollider::UKawaiiFluidSphereCollider()
 {
 	Radius = 50.0f;
 	LocalOffset = FVector::ZeroVector;
 }
 
-bool USphereFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
+/**
+ * @brief Finds the closest point on the sphere surface.
+ * @param Point Query point in world space
+ * @param OutClosestPoint Closest point on the sphere surface
+ * @param OutNormal Surface normal at the closest point
+ * @param OutDistance Distance to the closest point
+ * @return True if successful
+ */
+bool UKawaiiFluidSphereCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
 {
 	FVector Center = GetSphereCenter();
 	FVector ToPoint = Point - Center;
@@ -30,7 +41,12 @@ bool USphereFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClo
 	return true;
 }
 
-bool USphereFluidCollider::IsPointInside(const FVector& Point) const
+/**
+ * @brief Checks if a point is inside the sphere.
+ * @param Point Point to check in world space
+ * @return True if the point is inside
+ */
+bool UKawaiiFluidSphereCollider::IsPointInside(const FVector& Point) const
 {
 	FVector Center = GetSphereCenter();
 	float DistanceSq = FVector::DistSquared(Point, Center);
@@ -38,7 +54,13 @@ bool USphereFluidCollider::IsPointInside(const FVector& Point) const
 	return DistanceSq <= Radius * Radius;
 }
 
-float USphereFluidCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
+/**
+ * @brief Calculates the signed distance to the sphere surface.
+ * @param Point Query point in world space
+ * @param OutGradient Surface normal at the closest point
+ * @return Signed distance (negative if inside)
+ */
+float UKawaiiFluidSphereCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
 {
 	FVector Center = GetSphereCenter();
 	FVector ToPoint = Point - Center;
@@ -58,7 +80,11 @@ float USphereFluidCollider::GetSignedDistance(const FVector& Point, FVector& Out
 	return DistanceToCenter - Radius;
 }
 
-FVector USphereFluidCollider::GetSphereCenter() const
+/**
+ * @brief Returns the world space center of the sphere.
+ * @return World space position
+ */
+FVector UKawaiiFluidSphereCollider::GetSphereCenter() const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)

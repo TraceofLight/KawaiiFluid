@@ -1,9 +1,12 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Collision/CapsuleFluidCollider.h"
+#include "Collision/KawaiiFluidCapsuleCollider.h"
 #include "GameFramework/Actor.h"
 
-UCapsuleFluidCollider::UCapsuleFluidCollider()
+/**
+ * @brief Default constructor for UKawaiiFluidCapsuleCollider.
+ */
+UKawaiiFluidCapsuleCollider::UKawaiiFluidCapsuleCollider()
 {
 	HalfHeight = 50.0f;
 	Radius = 25.0f;
@@ -11,7 +14,15 @@ UCapsuleFluidCollider::UCapsuleFluidCollider()
 	LocalRotation = FRotator::ZeroRotator;
 }
 
-bool UCapsuleFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
+/**
+ * @brief Finds the closest point on the capsule surface.
+ * @param Point Query point in world space
+ * @param OutClosestPoint Closest point on the capsule surface
+ * @param OutNormal Surface normal at the closest point
+ * @param OutDistance Distance to the closest point
+ * @return True if successful
+ */
+bool UKawaiiFluidCapsuleCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
 {
 	FVector Start, End;
 	GetCapsuleEndpoints(Start, End);
@@ -38,7 +49,12 @@ bool UCapsuleFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutCl
 	return true;
 }
 
-bool UCapsuleFluidCollider::IsPointInside(const FVector& Point) const
+/**
+ * @brief Checks if a point is inside the capsule.
+ * @param Point Point to check in world space
+ * @return True if the point is inside
+ */
+bool UKawaiiFluidCapsuleCollider::IsPointInside(const FVector& Point) const
 {
 	FVector Start, End;
 	GetCapsuleEndpoints(Start, End);
@@ -49,7 +65,13 @@ bool UCapsuleFluidCollider::IsPointInside(const FVector& Point) const
 	return DistanceSq <= Radius * Radius;
 }
 
-float UCapsuleFluidCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
+/**
+ * @brief Calculates the signed distance to the capsule surface.
+ * @param Point Query point in world space
+ * @param OutGradient Surface normal at the closest point
+ * @return Signed distance (negative if inside)
+ */
+float UKawaiiFluidCapsuleCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
 {
 	FVector Start, End;
 	GetCapsuleEndpoints(Start, End);
@@ -81,7 +103,11 @@ float UCapsuleFluidCollider::GetSignedDistance(const FVector& Point, FVector& Ou
 	return DistanceToLine - Radius;
 }
 
-FVector UCapsuleFluidCollider::GetCapsuleCenter() const
+/**
+ * @brief Returns the world space center of the capsule.
+ * @return World space position
+ */
+FVector UKawaiiFluidCapsuleCollider::GetCapsuleCenter() const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)
@@ -92,7 +118,12 @@ FVector UCapsuleFluidCollider::GetCapsuleCenter() const
 	return Owner->GetActorLocation() + Owner->GetActorRotation().RotateVector(LocalOffset);
 }
 
-void UCapsuleFluidCollider::GetCapsuleEndpoints(FVector& OutStart, FVector& OutEnd) const
+/**
+ * @brief Calculates the world space endpoints of the capsule segment.
+ * @param OutStart Output for the start point
+ * @param OutEnd Output for the end point
+ */
+void UKawaiiFluidCapsuleCollider::GetCapsuleEndpoints(FVector& OutStart, FVector& OutEnd) const
 {
 	AActor* Owner = GetOwner();
 	FVector Center = GetCapsuleCenter();
@@ -115,7 +146,12 @@ void UCapsuleFluidCollider::GetCapsuleEndpoints(FVector& OutStart, FVector& OutE
 	OutEnd = Center + LocalUp * HalfHeight;
 }
 
-FVector UCapsuleFluidCollider::WorldToLocal(const FVector& WorldPoint) const
+/**
+ * @brief Transforms a world space point to the capsule's local space.
+ * @param WorldPoint Point in world space
+ * @return Point in local space
+ */
+FVector UKawaiiFluidCapsuleCollider::WorldToLocal(const FVector& WorldPoint) const
 {
 	AActor* Owner = GetOwner();
 	if (!Owner)

@@ -3,7 +3,7 @@
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
-#include "Collision/MeshFluidCollider.h"
+#include "Collision/KawaiiFluidMeshCollider.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -152,7 +152,7 @@ void UKawaiiFluidInteractionComponent::CreateAutoCollider()
 		return;
 	}
 
-	AutoCollider = NewObject<UMeshFluidCollider>(Owner);
+	AutoCollider = NewObject<UKawaiiFluidMeshCollider>(Owner);
 	if (AutoCollider)
 	{
 		AutoCollider->RegisterComponent();

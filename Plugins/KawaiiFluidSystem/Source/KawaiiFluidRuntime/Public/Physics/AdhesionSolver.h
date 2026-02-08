@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Core/FluidParticle.h"
 
-class UFluidCollider;
+class UKawaiiFluidCollider;
 
 /**
  * @brief Adhesion solver.
@@ -30,7 +30,7 @@ public:
 	 */
 	void Apply(
 		TArray<FFluidParticle>& Particles,
-		const TArray<TObjectPtr<UFluidCollider>>& Colliders,
+		const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders,
 		float AdhesionStrength,
 		float AdhesionRadius,
 		float DetachThreshold,

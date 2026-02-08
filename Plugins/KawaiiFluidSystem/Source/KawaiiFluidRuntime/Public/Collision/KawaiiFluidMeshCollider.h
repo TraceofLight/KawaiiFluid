@@ -1,12 +1,20 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Collision/FluidCollider.h"
-#include "MeshFluidCollider.generated.h"
+#include "Collision/KawaiiFluidCollider.h"
+#include "KawaiiFluidMeshCollider.generated.h"
 
-/** Cached capsule collision data */
+/**
+ * @brief Cached capsule collision data.
+ * @param Start World space start point
+ * @param End World space end point
+ * @param Radius Capsule radius
+ * @param BoneName Name of the associated bone
+ * @param BoneTransform World transform of the bone
+ * @param BoneIndex Index for GPU bone transform buffer
+ */
 struct FCachedCapsule
 {
 	FVector Start;
@@ -14,59 +22,90 @@ struct FCachedCapsule
 	float Radius;
 	FName BoneName;
 	FTransform BoneTransform;
-	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
+	int32 BoneIndex = -1;
 };
 
-/** Cached sphere collision data */
+/**
+ * @brief Cached sphere collision data.
+ * @param Center World space center
+ * @param Radius Sphere radius
+ * @param BoneName Name of the associated bone
+ * @param BoneTransform World transform of the bone
+ * @param BoneIndex Index for GPU bone transform buffer
+ */
 struct FCachedSphere
 {
 	FVector Center;
 	float Radius;
 	FName BoneName;
 	FTransform BoneTransform;
-	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
+	int32 BoneIndex = -1;
 };
 
-/** Cached box collision data */
+/**
+ * @brief Cached box collision data.
+ * @param Center World space center
+ * @param Extent Half extents (X, Y, Z)
+ * @param Rotation World rotation
+ * @param BoneName Name of the associated bone
+ * @param BoneTransform World transform of the bone
+ * @param BoneIndex Index for GPU bone transform buffer
+ */
 struct FCachedBox
 {
 	FVector Center;
-	FVector Extent;  // Half extents (X, Y, Z)
+	FVector Extent;
 	FQuat Rotation;
 	FName BoneName;
 	FTransform BoneTransform;
-	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
+	int32 BoneIndex = -1;
 };
 
-/** Convex plane data */
+/**
+ * @brief Convex plane data.
+ * @param Normal Outward-facing unit normal
+ * @param Distance Signed distance from origin
+ */
 struct FCachedConvexPlane
 {
-	FVector Normal;      // Outward-facing unit normal
-	float Distance;      // Signed distance from origin
+	FVector Normal;
+	float Distance;
 };
 
-/** Cached convex hull collision data */
+/**
+ * @brief Cached convex hull collision data.
+ * @param Center Bounding sphere center
+ * @param BoundingRadius Bounding sphere radius
+ * @param Planes Array of planes defining the convex hull
+ * @param BoneName Name of the associated bone
+ * @param BoneTransform World transform of the bone
+ * @param BoneIndex Index for GPU bone transform buffer
+ */
 struct FCachedConvex
 {
-	FVector Center;           // Bounding sphere center
-	float BoundingRadius;     // Bounding sphere radius
-	TArray<FCachedConvexPlane> Planes;  // Planes defining the convex hull
+	FVector Center;
+	float BoundingRadius;
+	TArray<FCachedConvexPlane> Planes;
 	FName BoneName;
 	FTransform BoneTransform;
-	int32 BoneIndex = -1;  // Index for GPU bone transform buffer
+	int32 BoneIndex = -1;
 };
 
 /**
  * @brief Mesh-based fluid collider.
- * @details Handles collision with characters or complex objects using simplified collision shapes.
+ * Handles collision with characters or complex objects using simplified collision shapes.
+ * @param TargetMeshComponent The mesh component to extract collision from
+ * @param bAutoFindMesh Whether to automatically find a mesh on the owner
+ * @param bUseSimplifiedCollision Whether to use simplified shapes (spheres, capsules, boxes)
+ * @param CollisionMargin Safety margin added to extracted collision shapes
  */
 UCLASS(ClassGroup=(KawaiiFluid), meta=(BlueprintSpawnableComponent))
-class KAWAIIFLUIDRUNTIME_API UMeshFluidCollider : public UFluidCollider
+class KAWAIIFLUIDRUNTIME_API UKawaiiFluidMeshCollider : public UKawaiiFluidCollider
 {
 	GENERATED_BODY()
 
 public:
-	UMeshFluidCollider();
+	UKawaiiFluidMeshCollider();
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Fluid Collider|Mesh")
 	TObjectPtr<UPrimitiveComponent> TargetMeshComponent;
@@ -81,17 +120,17 @@ public:
 	float CollisionMargin;
 
 	virtual bool GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const override;
+
 	virtual bool GetClosestPointWithBone(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance, FName& OutBoneName, FTransform& OutBoneTransform) const override;
+
 	virtual bool IsPointInside(const FVector& Point) const override;
+
 	virtual void CacheCollisionShapes() override;
 
-	/** Get cached bounding box */
 	virtual FBox GetCachedBounds() const override { return CachedBounds; }
 
-	/** Check if cached data is valid */
 	virtual bool IsCacheValid() const override { return bCacheValid; }
 
-	/** Export primitive data for GPU collision */
 	void ExportToGPUPrimitives(
 		TArray<struct FGPUCollisionSphere>& OutSpheres,
 		TArray<struct FGPUCollisionCapsule>& OutCapsules,
@@ -100,10 +139,9 @@ public:
 		TArray<struct FGPUConvexPlane>& OutPlanes,
 		float Friction = 0.1f,
 		float Restitution = 0.3f,
-		int32 OwnerID = 0  // Unique ID for filtering collision feedback by owner
+		int32 OwnerID = 0
 	) const;
 
-	/** Export primitive data for GPU collision (with bone transforms) */
 	void ExportToGPUPrimitivesWithBones(
 		TArray<struct FGPUCollisionSphere>& OutSpheres,
 		TArray<struct FGPUCollisionCapsule>& OutCapsules,
@@ -111,10 +149,10 @@ public:
 		TArray<struct FGPUCollisionConvex>& OutConvexes,
 		TArray<struct FGPUConvexPlane>& OutPlanes,
 		TArray<struct FGPUBoneTransform>& OutBoneTransforms,
-		TMap<FName, int32>& BoneNameToIndex,  // Bone name to index mapping (shared across colliders)
+		TMap<FName, int32>& BoneNameToIndex,
 		float Friction = 0.1f,
 		float Restitution = 0.3f,
-		int32 OwnerID = 0  // Unique ID for filtering collision feedback by owner
+		int32 OwnerID = 0
 	) const;
 
 protected:
@@ -123,7 +161,6 @@ protected:
 private:
 	void AutoFindMeshComponent();
 
-	// Cached collision shapes
 	TArray<FCachedCapsule> CachedCapsules;
 	TArray<FCachedSphere> CachedSpheres;
 	TArray<FCachedBox> CachedBoxes;
@@ -131,7 +168,7 @@ private:
 	FBox CachedBounds;
 	bool bCacheValid;
 
-	// Extract collision shapes from StaticMesh
 	void CacheStaticMeshCollision(UStaticMeshComponent* StaticMesh);
+
 	void CacheSkeletalMeshCollision(USkeletalMeshComponent* SkelMesh);
 };

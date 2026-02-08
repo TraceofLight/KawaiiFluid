@@ -9,8 +9,8 @@
 #include "Physics/ViscositySolver.h"
 #include "Physics/AdhesionSolver.h"
 #include "Physics/StackPressureSolver.h"
-#include "Collision/FluidCollider.h"
-#include "Collision/MeshFluidCollider.h"
+#include "Collision/KawaiiFluidCollider.h"
+#include "Collision/KawaiiFluidMeshCollider.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -862,7 +862,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 
 		// Collect FluidCollider owner actors to exclude from World Collision query (avoid duplicate collision)
 		TSet<const AActor*> FluidColliderOwners;
-		for (const UFluidCollider* Collider : Params.Colliders)
+		for (const UKawaiiFluidCollider* Collider : Params.Colliders)
 		{
 			if (Collider && Collider->GetOwner())
 			{
@@ -870,7 +870,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 			}
 		}
 
-		for (UFluidCollider* Collider : Params.Colliders)
+		for (UKawaiiFluidCollider* Collider : Params.Colliders)
 		{
 			if (!Collider || !Collider->IsColliderEnabled())
 			{
@@ -880,7 +880,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 			AActor* ColliderOwner = Collider->GetOwner();
 
 			// Check if this is a MeshFluidCollider (has ExportToGPUPrimitives)
-			UMeshFluidCollider* MeshCollider = Cast<UMeshFluidCollider>(Collider);
+			UKawaiiFluidMeshCollider* MeshCollider = Cast<UKawaiiFluidMeshCollider>(Collider);
 			if (MeshCollider)
 			{
 				// Cache collider shape if needed
@@ -1438,9 +1438,9 @@ void UKawaiiFluidSimulationContext::SolveDensityConstraints(
 	}
 }
 
-void UKawaiiFluidSimulationContext::CacheColliderShapes(const TArray<TObjectPtr<UFluidCollider>>& Colliders)
+void UKawaiiFluidSimulationContext::CacheColliderShapes(const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders)
 {
-	for (UFluidCollider* Collider : Colliders)
+	for (UKawaiiFluidCollider* Collider : Colliders)
 	{
 		if (Collider && Collider->IsColliderEnabled())
 		{
@@ -1765,10 +1765,10 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 
 void UKawaiiFluidSimulationContext::HandleCollisions(
 	TArray<FFluidParticle>& Particles,
-	const TArray<TObjectPtr<UFluidCollider>>& Colliders,
+	const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders,
 	float SubstepDT)
 {
-	for (UFluidCollider* Collider : Colliders)
+	for (UKawaiiFluidCollider* Collider : Colliders)
 	{
 		if (Collider && Collider->IsColliderEnabled())
 		{
@@ -2407,7 +2407,7 @@ if (ViscositySolver.IsValid() && Preset->Viscosity > 0.0f)
 void UKawaiiFluidSimulationContext::ApplyAdhesion(
 	TArray<FFluidParticle>& Particles,
 	const UKawaiiFluidPresetDataAsset* Preset,
-	const TArray<TObjectPtr<UFluidCollider>>& Colliders)
+	const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders)
 {
 	// DEPRECATED: CPU adhesion solver is no longer used
 	// All adhesion is now handled by GPU boundary particle system (FluidApplyViscosity.usf)

@@ -1,6 +1,6 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Collision/SkeletalMeshBVH.h"
+#include "Collision/KawaiiFluidSkeletalMeshBVH.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "Rendering/SkeletalMeshRenderData.h"
@@ -13,19 +13,25 @@
 DECLARE_LOG_CATEGORY_EXTERN(LogSkeletalMeshBVH, Log, All);
 DEFINE_LOG_CATEGORY(LogSkeletalMeshBVH);
 
-FSkeletalMeshBVH::FSkeletalMeshBVH()
+/**
+ * @brief Default constructor for FKawaiiFluidSkeletalMeshBVH.
+ */
+FKawaiiFluidSkeletalMeshBVH::FKawaiiFluidSkeletalMeshBVH()
 	: LODIndex(0)
 	, VertexCount(0)
 	, bIsInitialized(false)
 {
 }
 
-FSkeletalMeshBVH::~FSkeletalMeshBVH()
+FKawaiiFluidSkeletalMeshBVH::~FKawaiiFluidSkeletalMeshBVH()
 {
 	Clear();
 }
 
-void FSkeletalMeshBVH::Clear()
+/**
+ * @brief Clears all BVH and mesh data.
+ */
+void FKawaiiFluidSkeletalMeshBVH::Clear()
 {
 	Nodes.Empty();
 	SkinnedTriangles.Empty();
@@ -36,7 +42,13 @@ void FSkeletalMeshBVH::Clear()
 	VertexCount = 0;
 }
 
-bool FSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh, int32 InLODIndex)
+/**
+ * @brief Initializes the BVH from a skeletal mesh component.
+ * @param InSkelMesh Target skeletal mesh component
+ * @param InLODIndex LOD level to use (default 0)
+ * @return True if initialization succeeded
+ */
+bool FKawaiiFluidSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh, int32 InLODIndex)
 {
 	Clear();
 
@@ -56,7 +68,6 @@ bool FSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh, int32 InLO
 	SkelMeshComponent = InSkelMesh;
 	LODIndex = FMath::Clamp(InLODIndex, 0, SkelMeshAsset->GetLODNum() - 1);
 
-	// Extract triangles from mesh
 	if (!ExtractTrianglesFromMesh())
 	{
 		UE_LOG(LogSkeletalMeshBVH, Warning, TEXT("Initialize failed: Could not extract triangles"));
@@ -71,17 +82,15 @@ bool FSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh, int32 InLO
 		return false;
 	}
 
-	// Build initial triangle positions (bind pose)
 	UpdateSkinnedPositions();
 
-	// Build BVH
 	TriangleIndicesSorted.SetNum(SkinnedTriangles.Num());
 	for (int32 i = 0; i < SkinnedTriangles.Num(); ++i)
 	{
 		TriangleIndicesSorted[i] = i;
 	}
 
-	Nodes.Reserve(SkinnedTriangles.Num() * 2);  // Estimate node count
+	Nodes.Reserve(SkinnedTriangles.Num() * 2);
 	BuildBVH(TriangleIndicesSorted, 0, TriangleIndicesSorted.Num());
 
 	bIsInitialized = true;
@@ -92,7 +101,11 @@ bool FSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh, int32 InLO
 	return true;
 }
 
-bool FSkeletalMeshBVH::ExtractTrianglesFromMesh()
+/**
+ * @brief Extracts triangle indices from the skeletal mesh render data.
+ * @return True if successful
+ */
+bool FKawaiiFluidSkeletalMeshBVH::ExtractTrianglesFromMesh()
 {
 	USkeletalMeshComponent* SkelMesh = SkelMeshComponent.Get();
 	if (!SkelMesh)
@@ -115,7 +128,6 @@ bool FSkeletalMeshBVH::ExtractTrianglesFromMesh()
 	const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
 	VertexCount = LODData.GetNumVertices();
 
-	// Extract index buffer
 	const FRawStaticIndexBuffer16or32Interface* IndexBufferInterface = LODData.MultiSizeIndexContainer.GetIndexBuffer();
 	if (!IndexBufferInterface)
 	{
@@ -128,14 +140,12 @@ bool FSkeletalMeshBVH::ExtractTrianglesFromMesh()
 		return false;
 	}
 
-	// Copy index buffer
 	IndexBuffer.SetNum(NumIndices);
 	for (int32 i = 0; i < NumIndices; ++i)
 	{
 		IndexBuffer[i] = IndexBufferInterface->Get(i);
 	}
 
-	// Create triangles
 	const int32 NumTriangles = NumIndices / 3;
 	SkinnedTriangles.SetNum(NumTriangles);
 
@@ -143,15 +153,16 @@ bool FSkeletalMeshBVH::ExtractTrianglesFromMesh()
 	{
 		FSkinnedTriangle& Tri = SkinnedTriangles[TriIdx];
 		Tri.TriangleIndex = TriIdx;
-		Tri.SectionIndex = 0;  // Will be updated if needed
-
-		// Vertex indices will be used in UpdateSkinnedPositions
+		Tri.SectionIndex = 0;
 	}
 
 	return true;
 }
 
-void FSkeletalMeshBVH::UpdateSkinnedPositions()
+/**
+ * @brief Updates vertex positions by applying skinning and recalculates the BVH bounds.
+ */
+void FKawaiiFluidSkeletalMeshBVH::UpdateSkinnedPositions()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(SkeletalMeshBVH_UpdateSkinnedPositions);
 
@@ -176,39 +187,29 @@ void FSkeletalMeshBVH::UpdateSkinnedPositions()
 	const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
 	FSkinWeightVertexBuffer& SkinWeightBuffer = *const_cast<FSkinWeightVertexBuffer*>(&LODData.SkinWeightVertexBuffer);
 
-	// Get component transform to convert local → world space
 	const FTransform ComponentTransform = SkelMesh->GetComponentTransform();
-
 	const int32 NumTriangles = SkinnedTriangles.Num();
 
-	// ParallelFor for performance
 	ParallelFor(NumTriangles, [this, SkelMesh, &LODData, &SkinWeightBuffer, &ComponentTransform](int32 TriIdx)
 	{
 		FSkinnedTriangle& Tri = SkinnedTriangles[TriIdx];
-
 		const int32 BaseIndex = TriIdx * 3;
 		const uint32 Idx0 = IndexBuffer[BaseIndex + 0];
 		const uint32 Idx1 = IndexBuffer[BaseIndex + 1];
 		const uint32 Idx2 = IndexBuffer[BaseIndex + 2];
 
-		// Get skinned vertex positions in component space
 		FVector LocalV0 = FVector(USkinnedMeshComponent::GetSkinnedVertexPosition(SkelMesh, Idx0, LODData, SkinWeightBuffer));
 		FVector LocalV1 = FVector(USkinnedMeshComponent::GetSkinnedVertexPosition(SkelMesh, Idx1, LODData, SkinWeightBuffer));
 		FVector LocalV2 = FVector(USkinnedMeshComponent::GetSkinnedVertexPosition(SkelMesh, Idx2, LODData, SkinWeightBuffer));
 
-		// Transform to world space
 		Tri.V0 = ComponentTransform.TransformPosition(LocalV0);
 		Tri.V1 = ComponentTransform.TransformPosition(LocalV1);
 		Tri.V2 = ComponentTransform.TransformPosition(LocalV2);
-
-		// Compute derived data
 		Tri.ComputeDerivedData();
 	});
 
-	// Update BVH bounds (bottom-up)
 	if (Nodes.Num() > 0)
 	{
-		// Update from leaves to root (reverse order works for complete trees)
 		for (int32 i = Nodes.Num() - 1; i >= 0; --i)
 		{
 			UpdateNodeBounds(i);
@@ -216,7 +217,11 @@ void FSkeletalMeshBVH::UpdateSkinnedPositions()
 	}
 }
 
-void FSkeletalMeshBVH::UpdateNodeBounds(int32 NodeIndex)
+/**
+ * @brief Updates the AABB bounds of a specific node by aggregating child or triangle bounds.
+ * @param NodeIndex Index of the node to update
+ */
+void FKawaiiFluidSkeletalMeshBVH::UpdateNodeBounds(int32 NodeIndex)
 {
 	if (!Nodes.IsValidIndex(NodeIndex))
 	{
@@ -227,7 +232,6 @@ void FSkeletalMeshBVH::UpdateNodeBounds(int32 NodeIndex)
 
 	if (Node.IsLeaf())
 	{
-		// Leaf node: compute bounds from triangles
 		Node.Bounds = FBox(ForceInit);
 		const int32 End = Node.TriangleStartIndex + Node.TriangleCount;
 		for (int32 i = Node.TriangleStartIndex; i < End; ++i)
@@ -243,7 +247,6 @@ void FSkeletalMeshBVH::UpdateNodeBounds(int32 NodeIndex)
 	}
 	else
 	{
-		// Internal node: compute bounds from children
 		Node.Bounds = FBox(ForceInit);
 		if (Nodes.IsValidIndex(Node.LeftChild))
 		{
@@ -256,7 +259,14 @@ void FSkeletalMeshBVH::UpdateNodeBounds(int32 NodeIndex)
 	}
 }
 
-int32 FSkeletalMeshBVH::BuildBVH(TArray<int32>& TriangleIndices, int32 Start, int32 End)
+/**
+ * @brief Recursively builds the BVH tree using median splitting on the longest axis.
+ * @param TriangleIndices Array of triangle indices to split
+ * @param Start Start index in the array
+ * @param End End index in the array
+ * @return Index of the created node
+ */
+int32 FKawaiiFluidSkeletalMeshBVH::BuildBVH(TArray<int32>& TriangleIndices, int32 Start, int32 End)
 {
 	const int32 Count = End - Start;
 	const int32 NodeIndex = Nodes.Num();
@@ -267,7 +277,6 @@ int32 FSkeletalMeshBVH::BuildBVH(TArray<int32>& TriangleIndices, int32 Start, in
 		return NodeIndex;
 	}
 
-	// Compute bounds for this node
 	FBox Bounds(ForceInit);
 	for (int32 i = Start; i < End; ++i)
 	{
@@ -278,7 +287,6 @@ int32 FSkeletalMeshBVH::BuildBVH(TArray<int32>& TriangleIndices, int32 Start, in
 	}
 	Nodes[NodeIndex].Bounds = Bounds;
 
-	// Leaf condition
 	if (Count <= LeafTriangleThreshold)
 	{
 		Nodes[NodeIndex].LeftChild = INDEX_NONE;
@@ -288,22 +296,17 @@ int32 FSkeletalMeshBVH::BuildBVH(TArray<int32>& TriangleIndices, int32 Start, in
 		return NodeIndex;
 	}
 
-	// Find best split axis (longest axis)
 	const FVector Extent = Bounds.GetExtent();
 	int32 SplitAxis = 0;
 	if (Extent.Y > Extent.X) SplitAxis = 1;
 	if (Extent.Z > Extent[SplitAxis]) SplitAxis = 2;
 
-	// Sort triangles by centroid along split axis
 	Algo::Sort(MakeArrayView(&TriangleIndices[Start], Count), [this, SplitAxis](int32 A, int32 B)
 	{
 		return SkinnedTriangles[A].Centroid[SplitAxis] < SkinnedTriangles[B].Centroid[SplitAxis];
 	});
 
-	// Split at median
 	const int32 Mid = Start + Count / 2;
-
-	// Build children recursively
 	Nodes[NodeIndex].LeftChild = BuildBVH(TriangleIndices, Start, Mid);
 	Nodes[NodeIndex].RightChild = BuildBVH(TriangleIndices, Mid, End);
 	Nodes[NodeIndex].TriangleStartIndex = INDEX_NONE;
@@ -312,7 +315,14 @@ int32 FSkeletalMeshBVH::BuildBVH(TArray<int32>& TriangleIndices, int32 Start, in
 	return NodeIndex;
 }
 
-bool FSkeletalMeshBVH::QueryClosestTriangle(const FVector& Point, float MaxDistance, FTriangleQueryResult& OutResult) const
+/**
+ * @brief Queries the closest triangle to a given point within a search distance.
+ * @param Point Query point in world space
+ * @param MaxDistance Maximum distance to search
+ * @param OutResult Output result structure
+ * @return True if a triangle was found
+ */
+bool FKawaiiFluidSkeletalMeshBVH::QueryClosestTriangle(const FVector& Point, float MaxDistance, FTriangleQueryResult& OutResult) const
 {
 	OutResult = FTriangleQueryResult();
 
@@ -340,7 +350,14 @@ bool FSkeletalMeshBVH::QueryClosestTriangle(const FVector& Point, float MaxDista
 	return false;
 }
 
-void FSkeletalMeshBVH::QueryClosestRecursive(int32 NodeIndex, const FVector& Point, float& BestDistSq, int32& BestTriangle) const
+/**
+ * @brief Recursive helper for QueryClosestTriangle.
+ * @param NodeIndex Current node being visited
+ * @param Point Query point
+ * @param BestDistSq Reference to current best squared distance
+ * @param BestTriangle Reference to current best triangle index
+ */
+void FKawaiiFluidSkeletalMeshBVH::QueryClosestRecursive(int32 NodeIndex, const FVector& Point, float& BestDistSq, int32& BestTriangle) const
 {
 	if (!Nodes.IsValidIndex(NodeIndex))
 	{
@@ -348,8 +365,6 @@ void FSkeletalMeshBVH::QueryClosestRecursive(int32 NodeIndex, const FVector& Poi
 	}
 
 	const FBVHNode& Node = Nodes[NodeIndex];
-
-	// Early rejection: check if node bounds can contain a closer point
 	const float NodeDistSq = Node.Bounds.ComputeSquaredDistanceToPoint(Point);
 	if (NodeDistSq > BestDistSq)
 	{
@@ -358,15 +373,10 @@ void FSkeletalMeshBVH::QueryClosestRecursive(int32 NodeIndex, const FVector& Poi
 
 	if (Node.IsLeaf())
 	{
-		// Check all triangles in leaf
 		const int32 End = Node.TriangleStartIndex + Node.TriangleCount;
 		for (int32 i = Node.TriangleStartIndex; i < End; ++i)
 		{
-			if (!TriangleIndicesSorted.IsValidIndex(i))
-			{
-				continue;
-			}
-
+			if (!TriangleIndicesSorted.IsValidIndex(i)) continue;
 			const FSkinnedTriangle& Tri = SkinnedTriangles[TriangleIndicesSorted[i]];
 			const FVector ClosestPt = ClosestPointOnTriangle(Point, Tri.V0, Tri.V1, Tri.V2);
 			const float DistSq = FVector::DistSquared(Point, ClosestPt);
@@ -380,12 +390,8 @@ void FSkeletalMeshBVH::QueryClosestRecursive(int32 NodeIndex, const FVector& Poi
 	}
 	else
 	{
-		// Recurse into children
-		// Visit closer child first for better pruning
-		const float LeftDistSq = Nodes.IsValidIndex(Node.LeftChild) ?
-			Nodes[Node.LeftChild].Bounds.ComputeSquaredDistanceToPoint(Point) : FLT_MAX;
-		const float RightDistSq = Nodes.IsValidIndex(Node.RightChild) ?
-			Nodes[Node.RightChild].Bounds.ComputeSquaredDistanceToPoint(Point) : FLT_MAX;
+		const float LeftDistSq = Nodes.IsValidIndex(Node.LeftChild) ? Nodes[Node.LeftChild].Bounds.ComputeSquaredDistanceToPoint(Point) : FLT_MAX;
+		const float RightDistSq = Nodes.IsValidIndex(Node.RightChild) ? Nodes[Node.RightChild].Bounds.ComputeSquaredDistanceToPoint(Point) : FLT_MAX;
 
 		if (LeftDistSq < RightDistSq)
 		{
@@ -400,45 +406,35 @@ void FSkeletalMeshBVH::QueryClosestRecursive(int32 NodeIndex, const FVector& Poi
 	}
 }
 
-void FSkeletalMeshBVH::QuerySphere(const FVector& Center, float Radius, TArray<int32>& OutTriangleIndices) const
+/**
+ * @brief Queries all triangles that might intersect a given sphere.
+ * @param Center Sphere center
+ * @param Radius Sphere radius
+ * @param OutTriangleIndices Output array for overlapping triangle indices
+ */
+void FKawaiiFluidSkeletalMeshBVH::QuerySphere(const FVector& Center, float Radius, TArray<int32>& OutTriangleIndices) const
 {
 	OutTriangleIndices.Reset();
-
-	if (!IsValid())
-	{
-		return;
-	}
-
+	if (!IsValid()) return;
 	const float RadiusSq = Radius * Radius;
 	QuerySphereRecursive(0, Center, RadiusSq, OutTriangleIndices);
 }
 
-void FSkeletalMeshBVH::QuerySphereRecursive(int32 NodeIndex, const FVector& Center, float RadiusSq, TArray<int32>& OutTriangleIndices) const
+/**
+ * @brief Recursive helper for QuerySphere.
+ */
+void FKawaiiFluidSkeletalMeshBVH::QuerySphereRecursive(int32 NodeIndex, const FVector& Center, float RadiusSq, TArray<int32>& OutTriangleIndices) const
 {
-	if (!Nodes.IsValidIndex(NodeIndex))
-	{
-		return;
-	}
-
+	if (!Nodes.IsValidIndex(NodeIndex)) return;
 	const FBVHNode& Node = Nodes[NodeIndex];
-
-	// Check if sphere intersects node bounds
-	const float DistSq = Node.Bounds.ComputeSquaredDistanceToPoint(Center);
-	if (DistSq > RadiusSq)
-	{
-		return;
-	}
+	if (Node.Bounds.ComputeSquaredDistanceToPoint(Center) > RadiusSq) return;
 
 	if (Node.IsLeaf())
 	{
-		// Add all triangles in leaf (actual intersection test can be done by caller)
 		const int32 End = Node.TriangleStartIndex + Node.TriangleCount;
 		for (int32 i = Node.TriangleStartIndex; i < End; ++i)
 		{
-			if (TriangleIndicesSorted.IsValidIndex(i))
-			{
-				OutTriangleIndices.Add(TriangleIndicesSorted[i]);
-			}
+			if (TriangleIndicesSorted.IsValidIndex(i)) OutTriangleIndices.Add(TriangleIndicesSorted[i]);
 		}
 	}
 	else
@@ -448,43 +444,33 @@ void FSkeletalMeshBVH::QuerySphereRecursive(int32 NodeIndex, const FVector& Cent
 	}
 }
 
-void FSkeletalMeshBVH::QueryAABB(const FBox& AABB, TArray<int32>& OutTriangleIndices) const
+/**
+ * @brief Queries all triangles that might intersect a given AABB.
+ * @param AABB Query bounding box
+ * @param OutTriangleIndices Output array for overlapping triangle indices
+ */
+void FKawaiiFluidSkeletalMeshBVH::QueryAABB(const FBox& AABB, TArray<int32>& OutTriangleIndices) const
 {
 	OutTriangleIndices.Reset();
-
-	if (!IsValid())
-	{
-		return;
-	}
-
+	if (!IsValid()) return;
 	QueryAABBRecursive(0, AABB, OutTriangleIndices);
 }
 
-void FSkeletalMeshBVH::QueryAABBRecursive(int32 NodeIndex, const FBox& AABB, TArray<int32>& OutTriangleIndices) const
+/**
+ * @brief Recursive helper for QueryAABB.
+ */
+void FKawaiiFluidSkeletalMeshBVH::QueryAABBRecursive(int32 NodeIndex, const FBox& AABB, TArray<int32>& OutTriangleIndices) const
 {
-	if (!Nodes.IsValidIndex(NodeIndex))
-	{
-		return;
-	}
-
+	if (!Nodes.IsValidIndex(NodeIndex)) return;
 	const FBVHNode& Node = Nodes[NodeIndex];
-
-	// Check if AABB intersects node bounds
-	if (!Node.Bounds.Intersect(AABB))
-	{
-		return;
-	}
+	if (!Node.Bounds.Intersect(AABB)) return;
 
 	if (Node.IsLeaf())
 	{
-		// Add all triangles in leaf
 		const int32 End = Node.TriangleStartIndex + Node.TriangleCount;
 		for (int32 i = Node.TriangleStartIndex; i < End; ++i)
 		{
-			if (TriangleIndicesSorted.IsValidIndex(i))
-			{
-				OutTriangleIndices.Add(TriangleIndicesSorted[i]);
-			}
+			if (TriangleIndicesSorted.IsValidIndex(i)) OutTriangleIndices.Add(TriangleIndicesSorted[i]);
 		}
 	}
 	else
@@ -494,146 +480,56 @@ void FSkeletalMeshBVH::QueryAABBRecursive(int32 NodeIndex, const FBox& AABB, TAr
 	}
 }
 
-FVector FSkeletalMeshBVH::ClosestPointOnTriangle(const FVector& Point, const FVector& V0, const FVector& V1, const FVector& V2)
+/**
+ * @brief Computes the closest point on a triangle surface to a query point.
+ * @param Point Query point
+ * @param V0 Triangle vertex 0
+ * @param V1 Triangle vertex 1
+ * @param V2 Triangle vertex 2
+ * @return Closest point on the triangle
+ */
+FVector FKawaiiFluidSkeletalMeshBVH::ClosestPointOnTriangle(const FVector& Point, const FVector& V0, const FVector& V1, const FVector& V2)
 {
-	// Compute vectors
-	const FVector Edge0 = V1 - V0;
-	const FVector Edge1 = V2 - V0;
-	const FVector V0ToPoint = V0 - Point;
-
-	// Compute dot products
-	const float A = FVector::DotProduct(Edge0, Edge0);
-	const float B = FVector::DotProduct(Edge0, Edge1);
-	const float C = FVector::DotProduct(Edge1, Edge1);
-	const float D = FVector::DotProduct(Edge0, V0ToPoint);
-	const float E = FVector::DotProduct(Edge1, V0ToPoint);
-
-	// Compute determinant
+	const FVector Edge0 = V1 - V0, Edge1 = V2 - V0, V0ToPoint = V0 - Point;
+	const float A = FVector::DotProduct(Edge0, Edge0), B = FVector::DotProduct(Edge0, Edge1), C = FVector::DotProduct(Edge1, Edge1), D = FVector::DotProduct(Edge0, V0ToPoint), E = FVector::DotProduct(Edge1, V0ToPoint);
 	const float Det = A * C - B * B;
-	float S = B * E - C * D;
-	float T = B * D - A * E;
+	float S = B * E - C * D, T = B * D - A * E;
 
 	if (S + T <= Det)
 	{
 		if (S < 0.0f)
 		{
-			if (T < 0.0f)
-			{
-				// Region 4
-				if (D < 0.0f)
-				{
-					S = FMath::Clamp(-D / A, 0.0f, 1.0f);
-					T = 0.0f;
-				}
-				else
-				{
-					S = 0.0f;
-					T = FMath::Clamp(-E / C, 0.0f, 1.0f);
-				}
-			}
-			else
-			{
-				// Region 3
-				S = 0.0f;
-				T = FMath::Clamp(-E / C, 0.0f, 1.0f);
-			}
+			if (T < 0.0f) { if (D < 0.0f) { S = FMath::Clamp(-D / A, 0.0f, 1.0f); T = 0.0f; } else { S = 0.0f; T = FMath::Clamp(-E / C, 0.0f, 1.0f); } }
+			else { S = 0.0f; T = FMath::Clamp(-E / C, 0.0f, 1.0f); }
 		}
-		else if (T < 0.0f)
-		{
-			// Region 5
-			S = FMath::Clamp(-D / A, 0.0f, 1.0f);
-			T = 0.0f;
-		}
-		else
-		{
-			// Region 0 (inside triangle)
-			const float InvDet = 1.0f / Det;
-			S *= InvDet;
-			T *= InvDet;
-		}
+		else if (T < 0.0f) { S = FMath::Clamp(-D / A, 0.0f, 1.0f); T = 0.0f; }
+		else { const float InvDet = 1.0f / Det; S *= InvDet; T *= InvDet; }
 	}
 	else
 	{
-		if (S < 0.0f)
-		{
-			// Region 2
-			const float Tmp0 = B + D;
-			const float Tmp1 = C + E;
-			if (Tmp1 > Tmp0)
-			{
-				const float Numer = Tmp1 - Tmp0;
-				const float Denom = A - 2.0f * B + C;
-				S = FMath::Clamp(Numer / Denom, 0.0f, 1.0f);
-				T = 1.0f - S;
-			}
-			else
-			{
-				S = 0.0f;
-				T = FMath::Clamp(-E / C, 0.0f, 1.0f);
-			}
-		}
-		else if (T < 0.0f)
-		{
-			// Region 6
-			const float Tmp0 = B + E;
-			const float Tmp1 = A + D;
-			if (Tmp1 > Tmp0)
-			{
-				const float Numer = Tmp1 - Tmp0;
-				const float Denom = A - 2.0f * B + C;
-				T = FMath::Clamp(Numer / Denom, 0.0f, 1.0f);
-				S = 1.0f - T;
-			}
-			else
-			{
-				T = 0.0f;
-				S = FMath::Clamp(-D / A, 0.0f, 1.0f);
-			}
-		}
-		else
-		{
-			// Region 1
-			const float Numer = (C + E) - (B + D);
-			if (Numer <= 0.0f)
-			{
-				S = 0.0f;
-			}
-			else
-			{
-				const float Denom = A - 2.0f * B + C;
-				S = FMath::Clamp(Numer / Denom, 0.0f, 1.0f);
-			}
-			T = 1.0f - S;
-		}
+		if (S < 0.0f) { const float Tmp0 = B + D, Tmp1 = C + E; if (Tmp1 > Tmp0) { const float Numer = Tmp1 - Tmp0, Denom = A - 2.0f * B + C; S = FMath::Clamp(Numer / Denom, 0.0f, 1.0f); T = 1.0f - S; } else { S = 0.0f; T = FMath::Clamp(-E / C, 0.0f, 1.0f); } }
+		else if (T < 0.0f) { const float Tmp0 = B + E, Tmp1 = A + D; if (Tmp1 > Tmp0) { const float Numer = Tmp1 - Tmp0, Denom = A - 2.0f * B + C; T = FMath::Clamp(Numer / Denom, 0.0f, 1.0f); S = 1.0f - T; } else { T = 0.0f; S = FMath::Clamp(-D / A, 0.0f, 1.0f); } }
+		else { const float Numer = (C + E) - (B + D); if (Numer <= 0.0f) S = 0.0f; else { const float Denom = A - 2.0f * B + C; S = FMath::Clamp(Numer / Denom, 0.0f, 1.0f); } T = 1.0f - S; }
 	}
-
 	return V0 + S * Edge0 + T * Edge1;
 }
 
-bool FSkeletalMeshBVH::GetSkinnedVertexPosition(int32 VertexIndex, FVector& OutPosition) const
+/**
+ * @brief Retrieves the skinned world space position of a specific vertex.
+ * @param VertexIndex Index of the vertex
+ * @param OutPosition Output position
+ * @return True if successful
+ */
+bool FKawaiiFluidSkeletalMeshBVH::GetSkinnedVertexPosition(int32 VertexIndex, FVector& OutPosition) const
 {
 	USkeletalMeshComponent* SkelMesh = SkelMeshComponent.Get();
-	if (!SkelMesh || VertexIndex < 0 || VertexIndex >= VertexCount)
-	{
-		return false;
-	}
-
+	if (!SkelMesh || VertexIndex < 0 || VertexIndex >= VertexCount) return false;
 	USkeletalMesh* MeshAsset = SkelMesh->GetSkeletalMeshAsset();
-	if (!MeshAsset)
-	{
-		return false;
-	}
-
+	if (!MeshAsset) return false;
 	FSkeletalMeshRenderData* RenderData = MeshAsset->GetResourceForRendering();
-	if (!RenderData || !RenderData->LODRenderData.IsValidIndex(LODIndex))
-	{
-		return false;
-	}
-
+	if (!RenderData || !RenderData->LODRenderData.IsValidIndex(LODIndex)) return false;
 	const FSkeletalMeshLODRenderData& LODData = RenderData->LODRenderData[LODIndex];
 	FSkinWeightVertexBuffer& SkinWeightBuffer = *const_cast<FSkinWeightVertexBuffer*>(&LODData.SkinWeightVertexBuffer);
-
-	// Get position in component space and transform to world space
 	FVector LocalPos = FVector(USkinnedMeshComponent::GetSkinnedVertexPosition(SkelMesh, VertexIndex, LODData, SkinWeightBuffer));
 	OutPosition = SkelMesh->GetComponentTransform().TransformPosition(LocalPos);
 	return true;

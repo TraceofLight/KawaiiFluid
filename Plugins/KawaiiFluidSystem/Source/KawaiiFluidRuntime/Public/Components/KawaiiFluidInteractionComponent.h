@@ -8,8 +8,8 @@
 #include "KawaiiFluidInteractionComponent.generated.h"
 
 class UKawaiiFluidSimulatorSubsystem;
-class UFluidCollider;
-class UMeshFluidCollider;
+class UKawaiiFluidCollider;
+class UKawaiiFluidMeshCollider;
 class UKawaiiFluidPresetDataAsset;
 
 //========================================
@@ -589,7 +589,7 @@ protected:
 
 private:
 	UPROPERTY()
-	TObjectPtr<UMeshFluidCollider> AutoCollider;
+	TObjectPtr<UKawaiiFluidMeshCollider> AutoCollider;
 
 	void CreateAutoCollider();
 	void RegisterWithSimulator();

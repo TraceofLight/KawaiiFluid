@@ -1,25 +1,35 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Collision/FluidCollider.h"
+#include "Collision/KawaiiFluidCollider.h"
 #include "Async/ParallelFor.h"
 
-UFluidCollider::UFluidCollider()
+/**
+ * @brief Default constructor for UKawaiiFluidCollider.
+ * Sets default values for friction and restitution.
+ */
+UKawaiiFluidCollider::UKawaiiFluidCollider()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 
 	bColliderEnabled = true;
 	Friction = 0.3f;
 	Restitution = 0.2f;
-	//bAllowAdhesion = true;
-	//AdhesionMultiplier = 1.0f;
 }
 
-void UFluidCollider::BeginPlay()
+/**
+ * @brief Called when the game starts or when spawned.
+ */
+void UKawaiiFluidCollider::BeginPlay()
 {
 	Super::BeginPlay();
 }
 
-void UFluidCollider::ResolveCollisions(TArray<FFluidParticle>& Particles, float SubstepDT)
+/**
+ * @brief Resolves collisions for an entire array of particles in parallel.
+ * @param Particles Array of fluid particles to process
+ * @param SubstepDT Delta time for the current simulation substep
+ */
+void UKawaiiFluidCollider::ResolveCollisions(TArray<FFluidParticle>& Particles, float SubstepDT)
 {
 	if (!bColliderEnabled)
 	{
@@ -32,12 +42,26 @@ void UFluidCollider::ResolveCollisions(TArray<FFluidParticle>& Particles, float 
 	});
 }
 
-bool UFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
+/**
+ * @brief Finds the closest point on the collider surface.
+ * @param Point Query point in world space
+ * @param OutClosestPoint Closest point on the surface
+ * @param OutNormal Surface normal at the closest point
+ * @param OutDistance Distance to the closest point
+ * @return True if a closest point was found
+ */
+bool UKawaiiFluidCollider::GetClosestPoint(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance) const
 {
 	return false;
 }
 
-float UFluidCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
+/**
+ * @brief Calculates the signed distance to the collider surface.
+ * @param Point Query point in world space
+ * @param OutGradient Surface normal pointing outward
+ * @return Signed distance (negative if inside, positive if outside)
+ */
+float UKawaiiFluidCollider::GetSignedDistance(const FVector& Point, FVector& OutGradient) const
 {
 	// Default implementation using GetClosestPoint
 	FVector ClosestPoint;
@@ -61,7 +85,17 @@ float UFluidCollider::GetSignedDistance(const FVector& Point, FVector& OutGradie
 	return Distance;
 }
 
-bool UFluidCollider::GetClosestPointWithBone(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance, FName& OutBoneName, FTransform& OutBoneTransform) const
+/**
+ * @brief Finds the closest point including bone information for skeletal colliders.
+ * @param Point Query point in world space
+ * @param OutClosestPoint Closest point on the surface
+ * @param OutNormal Surface normal at the closest point
+ * @param OutDistance Distance to the closest point
+ * @param OutBoneName Name of the closest bone
+ * @param OutBoneTransform Transform of the closest bone
+ * @return True if a closest point was found
+ */
+bool UKawaiiFluidCollider::GetClosestPointWithBone(const FVector& Point, FVector& OutClosestPoint, FVector& OutNormal, float& OutDistance, FName& OutBoneName, FTransform& OutBoneTransform) const
 {
 	// Default implementation: no bone information
 	OutBoneName = NAME_None;
@@ -69,12 +103,22 @@ bool UFluidCollider::GetClosestPointWithBone(const FVector& Point, FVector& OutC
 	return GetClosestPoint(Point, OutClosestPoint, OutNormal, OutDistance);
 }
 
-bool UFluidCollider::IsPointInside(const FVector& Point) const
+/**
+ * @brief Checks if a point is inside the collider.
+ * @param Point Point to check in world space
+ * @return True if the point is inside
+ */
+bool UKawaiiFluidCollider::IsPointInside(const FVector& Point) const
 {
 	return false;
 }
 
-void UFluidCollider::ResolveParticleCollision(FFluidParticle& Particle, float SubstepDT)
+/**
+ * @brief Resolves collision for a single particle using SDF.
+ * @param Particle Fluid particle to process
+ * @param SubstepDT Delta time for the current simulation substep
+ */
+void UKawaiiFluidCollider::ResolveParticleCollision(FFluidParticle& Particle, float SubstepDT)
 {
 	// Use SDF-based collision
 	FVector Gradient;
@@ -121,8 +165,6 @@ void UFluidCollider::ResolveParticleCollision(FFluidParticle& Particle, float Su
 				DesiredVelocity = VelTangent * (1.0f - Friction);
 			}
 		}
-		// else: VelDotNormal >= 0 means particle moving AWAY from surface
-		// DesiredVelocity stays zero - particle stops on surface (same as OLD behavior)
 
 		// Back-calculate Position so FinalizePositions derives DesiredVelocity
 		// FinalizePositions: Velocity = (PredictedPosition - Position) / dt

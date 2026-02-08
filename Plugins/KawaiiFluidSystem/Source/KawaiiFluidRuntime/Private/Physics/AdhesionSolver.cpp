@@ -2,7 +2,7 @@
 
 #include "Physics/AdhesionSolver.h"
 #include "Physics/SPHKernels.h"
-#include "Collision/FluidCollider.h"
+#include "Collision/KawaiiFluidCollider.h"
 #include "Async/ParallelFor.h"
 #include "GameFramework/Actor.h"
 
@@ -12,7 +12,7 @@ FAdhesionSolver::FAdhesionSolver()
 
 void FAdhesionSolver::Apply(
 	TArray<FFluidParticle>& Particles,
-	const TArray<TObjectPtr<UFluidCollider>>& Colliders,
+	const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders,
 	float AdhesionStrength,
 	float AdhesionRadius,
 	float DetachThreshold,
@@ -58,7 +58,7 @@ void FAdhesionSolver::Apply(
 		FVector ClosestSurfaceNormal = FVector::UpVector;
 		FVector ClosestSurfacePoint = FVector::ZeroVector;
 
-		for (UFluidCollider* Collider : Colliders)
+		for (UKawaiiFluidCollider* Collider : Colliders)
 		{
 			if (!Collider || !Collider->IsColliderEnabled())
 			{
