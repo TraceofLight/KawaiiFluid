@@ -1,7 +1,7 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Physics/DensityConstraint.h"
-#include "Physics/SPHKernels.h"
+#include "Physics/KawaiiFluidDensityConstraint.h"
+#include "Physics/KawaiiFluidSPHKernels.h"
 #include "Math/UnrealMathSSE.h"
 #include "Async/ParallelFor.h"
 
@@ -27,14 +27,23 @@ FORCEINLINE VectorRegister4Float VectorInvSqrtSafe(VectorRegister4Float V)
 //========================================
 // Constructor
 //========================================
-FDensityConstraint::FDensityConstraint()
+/**
+ * @brief Default constructor for FKawaiiFluidDensityConstraint.
+ */
+FKawaiiFluidDensityConstraint::FKawaiiFluidDensityConstraint()
 	: RestDensity(1000.0f)
 	, Epsilon(100.0f)
 	, SmoothingRadius(0.1f)
 {
 }
 
-FDensityConstraint::FDensityConstraint(float InRestDensity, float InSmoothingRadius, float InEpsilon)
+/**
+ * @brief Constructor with custom initialization parameters.
+ * @param InRestDensity Initial rest density.
+ * @param InSmoothingRadius Initial smoothing radius.
+ * @param InEpsilon Initial stability constant.
+ */
+FKawaiiFluidDensityConstraint::FKawaiiFluidDensityConstraint(float InRestDensity, float InSmoothingRadius, float InEpsilon)
 	: RestDensity(InRestDensity)
 	, Epsilon(InEpsilon)
 	, SmoothingRadius(InSmoothingRadius)
@@ -44,7 +53,12 @@ FDensityConstraint::FDensityConstraint(float InRestDensity, float InSmoothingRad
 //========================================
 // SoA Management
 //========================================
-void FDensityConstraint::ResizeSoAArrays(int32 NumParticles)
+
+/**
+ * @brief Resizes the Structure of Arrays (SoA) buffers to accommodate the specified number of particles.
+ * @param NumParticles Target number of particles.
+ */
+void FKawaiiFluidDensityConstraint::ResizeSoAArrays(int32 NumParticles)
 {
 	if (PosX.Num() != NumParticles)
 	{
@@ -60,7 +74,11 @@ void FDensityConstraint::ResizeSoAArrays(int32 NumParticles)
 	}
 }
 
-void FDensityConstraint::CopyToSoA(const TArray<FKawaiiFluidParticle>& Particles)
+/**
+ * @brief Copies particle position and mass data from the AOS (Array of Structures) to the SoA buffers.
+ * @param Particles Source particle array.
+ */
+void FKawaiiFluidDensityConstraint::CopyToSoA(const TArray<FKawaiiFluidParticle>& Particles)
 {
 	ParallelFor(Particles.Num(), [&](int32 i)
 	{
@@ -72,7 +90,11 @@ void FDensityConstraint::CopyToSoA(const TArray<FKawaiiFluidParticle>& Particles
 	});
 }
 
-void FDensityConstraint::ApplyFromSoA(TArray<FKawaiiFluidParticle>& Particles)
+/**
+ * @brief Applies calculated position corrections and updates density/lambda in the AOS from SoA buffers.
+ * @param Particles Target particle array to update.
+ */
+void FKawaiiFluidDensityConstraint::ApplyFromSoA(TArray<FKawaiiFluidParticle>& Particles)
 {
 	ParallelFor(Particles.Num(), [&](int32 i)
 	{
@@ -88,7 +110,16 @@ void FDensityConstraint::ApplyFromSoA(TArray<FKawaiiFluidParticle>& Particles)
 //========================================
 // Main Solver
 //========================================
-void FDensityConstraint::Solve(TArray<FKawaiiFluidParticle>& Particles, float InSmoothingRadius, float InRestDensity, float InCompliance, float DeltaTime)
+
+/**
+ * @brief Solve the density constraint for a single iteration using the XPBD method.
+ * @param Particles In/Out particle array.
+ * @param InSmoothingRadius Interaction radius (cm).
+ * @param InRestDensity Target rest density.
+ * @param InCompliance Constraint compliance (stiffness).
+ * @param DeltaTime Substep time interval.
+ */
+void FKawaiiFluidDensityConstraint::Solve(TArray<FKawaiiFluidParticle>& Particles, float InSmoothingRadius, float InRestDensity, float InCompliance, float DeltaTime)
 {
 	SmoothingRadius = InSmoothingRadius;
 	RestDensity = InRestDensity;
@@ -129,7 +160,17 @@ void FDensityConstraint::Solve(TArray<FKawaiiFluidParticle>& Particles, float In
 //========================================
 // Main Solver (with Tensile Instability Correction)
 //========================================
-void FDensityConstraint::SolveWithTensileCorrection(
+
+/**
+ * @brief Solve the density constraint with an additional tensile instability correction term (scorr).
+ * @param Particles In/Out particle array.
+ * @param InSmoothingRadius Interaction radius (cm).
+ * @param InRestDensity Target rest density.
+ * @param InCompliance Constraint compliance.
+ * @param DeltaTime Substep time interval.
+ * @param TensileParams Parameters for the artificial pressure correction.
+ */
+void FKawaiiFluidDensityConstraint::SolveWithTensileCorrection(
 	TArray<FKawaiiFluidParticle>& Particles,
 	float InSmoothingRadius,
 	float InRestDensity,
@@ -188,7 +229,13 @@ void FDensityConstraint::SolveWithTensileCorrection(
 //========================================
 // Step 1: Density + Lambda (SIMD)
 //========================================
-void FDensityConstraint::ComputeDensityAndLambda_SIMD(
+/**
+ * @brief Calculate particle densities and Lagrange multipliers (Lambdas) using SIMD optimization.
+ * 
+ * Processes 4 particles at a time using SSE/NEON instructions.
+ * Implements the XPBD Lagrange multiplier update rule.
+ */
+void FKawaiiFluidDensityConstraint::ComputeDensityAndLambda_SIMD(
 	const TArray<FKawaiiFluidParticle>& Particles,
 	const FSPHKernelCoeffs& Coeffs)
 {
@@ -382,7 +429,12 @@ void FDensityConstraint::ComputeDensityAndLambda_SIMD(
 //========================================
 // Step 2: DeltaP (SIMD) - with Tensile Instability (scorr) Correction
 //========================================
-void FDensityConstraint::ComputeDeltaP_SIMD(
+/**
+ * @brief Calculate position corrections (DeltaP) based on particle Lambdas using SIMD.
+ * 
+ * Implements tensile instability correction (scorr) if enabled in the coefficients.
+ */
+void FKawaiiFluidDensityConstraint::ComputeDeltaP_SIMD(
 	const TArray<FKawaiiFluidParticle>& Particles,
 	const FSPHKernelCoeffs& Coeffs)
 {
@@ -576,7 +628,7 @@ void FDensityConstraint::ComputeDeltaP_SIMD(
 // Legacy Functions (backward compatibility)
 //========================================
 
-void FDensityConstraint::ComputeDensities(TArray<FKawaiiFluidParticle>& Particles)
+void FKawaiiFluidDensityConstraint::ComputeDensities(TArray<FKawaiiFluidParticle>& Particles)
 {
 	ParallelFor(Particles.Num(), [&](int32 i)
 	{
@@ -584,7 +636,7 @@ void FDensityConstraint::ComputeDensities(TArray<FKawaiiFluidParticle>& Particle
 	}, EParallelForFlags::Unbalanced);
 }
 
-void FDensityConstraint::ComputeLambdas(TArray<FKawaiiFluidParticle>& Particles)
+void FKawaiiFluidDensityConstraint::ComputeLambdas(TArray<FKawaiiFluidParticle>& Particles)
 {
 	ParallelFor(Particles.Num(), [&](int32 i)
 	{
@@ -592,7 +644,7 @@ void FDensityConstraint::ComputeLambdas(TArray<FKawaiiFluidParticle>& Particles)
 	}, EParallelForFlags::Unbalanced);
 }
 
-void FDensityConstraint::ApplyPositionCorrection(TArray<FKawaiiFluidParticle>& Particles)
+void FKawaiiFluidDensityConstraint::ApplyPositionCorrection(TArray<FKawaiiFluidParticle>& Particles)
 {
 	TArray<FVector> DeltaPositions;
 	DeltaPositions.SetNum(Particles.Num());
@@ -608,7 +660,7 @@ void FDensityConstraint::ApplyPositionCorrection(TArray<FKawaiiFluidParticle>& P
 	});
 }
 
-float FDensityConstraint::ComputeParticleDensity(const FKawaiiFluidParticle& Particle, const TArray<FKawaiiFluidParticle>& Particles)
+float FKawaiiFluidDensityConstraint::ComputeParticleDensity(const FKawaiiFluidParticle& Particle, const TArray<FKawaiiFluidParticle>& Particles)
 {
 	float Density = 0.0f;
 	for (int32 NeighborIdx : Particle.NeighborIndices)
@@ -620,7 +672,7 @@ float FDensityConstraint::ComputeParticleDensity(const FKawaiiFluidParticle& Par
 	return Density;
 }
 
-float FDensityConstraint::ComputeParticleLambda(const FKawaiiFluidParticle& Particle, const TArray<FKawaiiFluidParticle>& Particles)
+float FKawaiiFluidDensityConstraint::ComputeParticleLambda(const FKawaiiFluidParticle& Particle, const TArray<FKawaiiFluidParticle>& Particles)
 {
 	float C_i = (Particle.Density / RestDensity) - 1.0f;
 	if (C_i < 0.0f) return Particle.Lambda;  // Compressed state: preserve Lambda
@@ -647,7 +699,7 @@ float FDensityConstraint::ComputeParticleLambda(const FKawaiiFluidParticle& Part
 	return Lambda_prev + DeltaLambda;
 }
 
-FVector FDensityConstraint::ComputeDeltaPosition(int32 ParticleIndex, const TArray<FKawaiiFluidParticle>& Particles)
+FVector FKawaiiFluidDensityConstraint::ComputeDeltaPosition(int32 ParticleIndex, const TArray<FKawaiiFluidParticle>& Particles)
 {
 	const FKawaiiFluidParticle& Particle = Particles[ParticleIndex];
 	FVector DeltaP = FVector::ZeroVector;
@@ -665,12 +717,20 @@ FVector FDensityConstraint::ComputeDeltaPosition(int32 ParticleIndex, const TArr
 	return DeltaP / RestDensity;
 }
 
-void FDensityConstraint::SetRestDensity(float NewRestDensity)
+/**
+ * @brief Update the target rest density.
+ * @param NewRestDensity Value in kg/m³.
+ */
+void FKawaiiFluidDensityConstraint::SetRestDensity(float NewRestDensity)
 {
 	RestDensity = FMath::Max(NewRestDensity, 1.0f);
 }
 
-void FDensityConstraint::SetEpsilon(float NewEpsilon)
+/**
+ * @brief Update the stability constant (XPBD epsilon).
+ * @param NewEpsilon Regularization factor.
+ */
+void FKawaiiFluidDensityConstraint::SetEpsilon(float NewEpsilon)
 {
 	Epsilon = FMath::Max(NewEpsilon, 0.01f);
 }

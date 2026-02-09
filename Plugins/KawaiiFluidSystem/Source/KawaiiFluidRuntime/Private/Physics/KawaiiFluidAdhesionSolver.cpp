@@ -1,16 +1,28 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Physics/AdhesionSolver.h"
-#include "Physics/SPHKernels.h"
+#include "Physics/KawaiiFluidAdhesionSolver.h"
+#include "Physics/KawaiiFluidSPHKernels.h"
 #include "Collision/KawaiiFluidCollider.h"
 #include "Async/ParallelFor.h"
 #include "GameFramework/Actor.h"
 
-FAdhesionSolver::FAdhesionSolver()
+/**
+ * @brief Default constructor for FKawaiiFluidAdhesionSolver.
+ */
+FKawaiiFluidAdhesionSolver::FKawaiiFluidAdhesionSolver()
 {
 }
 
-void FAdhesionSolver::Apply(
+/**
+ * @brief Apply adhesion forces to particles from registered colliders.
+ * @param Particles Particle array to process.
+ * @param Colliders List of colliders to check for adhesion.
+ * @param AdhesionStrength Global strength multiplier for adhesion forces.
+ * @param AdhesionRadius Maximum distance for adhesion influence.
+ * @param DetachThreshold Force threshold for releasing attachments (currently unused).
+ * @param ColliderContactOffset Padding for surface distance calculation.
+ */
+void FKawaiiFluidAdhesionSolver::Apply(
 	TArray<FKawaiiFluidParticle>& Particles,
 	const TArray<TObjectPtr<UKawaiiFluidCollider>>& Colliders,
 	float AdhesionStrength,
@@ -185,7 +197,13 @@ void FAdhesionSolver::Apply(
 	}
 }
 
-void FAdhesionSolver::ApplyCohesion(
+/**
+ * @brief Apply inter-particle cohesion (surface tension) forces.
+ * @param Particles Particle array to process.
+ * @param CohesionStrength Multiplier for the cohesion attraction force.
+ * @param SmoothingRadius Interaction kernel radius.
+ */
+void FKawaiiFluidAdhesionSolver::ApplyCohesion(
 	TArray<FKawaiiFluidParticle>& Particles,
 	float CohesionStrength,
 	float SmoothingRadius)
@@ -238,7 +256,17 @@ void FAdhesionSolver::ApplyCohesion(
 	});
 }
 
-FVector FAdhesionSolver::ComputeAdhesionForce(
+/**
+ * @brief Calculate the adhesion force vector between a particle and a surface point.
+ * @param ParticlePos Position of the particle.
+ * @param SurfacePoint Closest point on the surface.
+ * @param SurfaceNormal Normal of the surface at the closest point.
+ * @param Distance Distance to the surface.
+ * @param AdhesionStrength Base strength coefficient.
+ * @param AdhesionRadius Falloff radius for the adhesion kernel.
+ * @return Adhesion force vector.
+ */
+FVector FKawaiiFluidAdhesionSolver::ComputeAdhesionForce(
 	const FVector& ParticlePos,
 	const FVector& SurfacePoint,
 	const FVector& SurfaceNormal,
@@ -270,7 +298,18 @@ FVector FAdhesionSolver::ComputeAdhesionForce(
 	return AdhesionForce;
 }
 
-void FAdhesionSolver::UpdateAttachmentState(
+/**
+ * @brief Update the internal attachment state of a particle based on proximity to a collider.
+ * @param Particle Reference to the particle to update.
+ * @param ColliderActor Actor representing the collider surface.
+ * @param Force Magnitude of the calculated adhesion force.
+ * @param DetachThreshold Threshold for detachment.
+ * @param BoneName Name of the specific bone if attached to a skeletal mesh.
+ * @param BoneTransform Transform of the bone for local offset calculation.
+ * @param ParticlePosition World-space position of the particle.
+ * @param SurfaceNormal Surface normal for dripping calculation.
+ */
+void FKawaiiFluidAdhesionSolver::UpdateAttachmentState(
 	FKawaiiFluidParticle& Particle,
 	AActor* ColliderActor,
 	float Force,

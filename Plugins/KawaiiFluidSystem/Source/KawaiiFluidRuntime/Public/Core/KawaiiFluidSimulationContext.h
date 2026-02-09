@@ -13,10 +13,10 @@
 
 // Forward declarations
 class FKawaiiFluidSpatialHash;
-class FDensityConstraint;
-class FViscositySolver;
-class FAdhesionSolver;
-class FStackPressureSolver;
+class FKawaiiFluidDensityConstraint;
+class FKawaiiFluidViscositySolver;
+class FKawaiiFluidAdhesionSolver;
+class FKawaiiFluidStackPressureSolver;
 class FGPUFluidSimulator;
 class FKawaiiFluidRenderResource;
 struct FGPUFluidSimulationParams;
@@ -242,13 +242,13 @@ protected:
 	// Cached Solvers
 	//========================================
 
-	TSharedPtr<FDensityConstraint> DensityConstraint;
+	TSharedPtr<FKawaiiFluidDensityConstraint> DensityConstraint;
 
-	TSharedPtr<FViscositySolver> ViscositySolver;
+	TSharedPtr<FKawaiiFluidViscositySolver> ViscositySolver;
 
-	TSharedPtr<FAdhesionSolver> AdhesionSolver;
+	TSharedPtr<FKawaiiFluidAdhesionSolver> AdhesionSolver;
 
-	TSharedPtr<FStackPressureSolver> StackPressureSolver;
+	TSharedPtr<FKawaiiFluidStackPressureSolver> StackPressureSolver;
 
 	bool bSolversInitialized = false;
 

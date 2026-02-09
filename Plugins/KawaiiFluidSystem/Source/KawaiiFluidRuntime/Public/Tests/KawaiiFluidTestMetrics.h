@@ -1,178 +1,147 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
-// Fluid Simulation Test Metrics Collection
-// Used for automated testing and validation of PBF/XPBD implementation
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "FluidTestMetrics.generated.h"
+#include "KawaiiFluidTestMetrics.generated.h"
 
 /**
- * FFluidTestMetrics
- *
- * Collects simulation metrics for automated testing and validation.
+ * @struct FKawaiiFluidTestMetrics
+ * @brief Snapshot of simulation metrics used for automated testing and validation.
+ * 
  * Based on Position Based Fluids (Macklin & Müller, 2013) expected behaviors.
+ * 
+ * @param AverageDensity Average density of all particles (kg/m³).
+ * @param MaxDensity Maximum density recorded (kg/m³).
+ * @param MinDensity Minimum density recorded (kg/m³).
+ * @param DensityStdDev Standard deviation of density across all particles.
+ * @param DensityVariance Variance of density values.
+ * @param DensityRatio Average density relative to RestDensity (1.0 = ideal).
+ * @param CenterOfMass Calculated world-space center of mass (cm).
+ * @param TotalVolume Estimated total volume of the fluid system (cm³).
+ * @param ParticleBounds Axis-Aligned Bounding Box containing all particles.
+ * @param TotalMass Total mass of the simulation (kg).
+ * @param ParticlesOutOfBounds Count of particles that have escaped simulation boundaries.
+ * @param InvalidParticles Count of particles with NaN or Infinite states.
+ * @param MaxVelocity Maximum velocity magnitude found in the system (cm/s).
+ * @param AverageVelocity Mean velocity magnitude (cm/s).
+ * @param MaxAcceleration Peak acceleration experienced by any particle (cm/s²).
+ * @param AverageLambda Mean Lagrange multiplier value.
+ * @param MaxLambda Maximum absolute Lagrange multiplier value.
+ * @param AverageConstraintError Mean absolute constraint violation |C_i|.
+ * @param MaxConstraintError Peak constraint violation.
+ * @param SolverIterations Number of iterations performed by the PBF solver.
+ * @param AverageNeighborCount Mean number of neighbors per particle.
+ * @param MaxNeighborCount Highest neighbor count recorded.
+ * @param MinNeighborCount Lowest neighbor count (excluding isolated particles).
+ * @param IsolatedParticleCount Number of particles with zero neighbors.
+ * @param SimulationTimeMs Total processing time for the simulation frame (ms).
+ * @param NeighborSearchTimeMs Time spent on spatial partitioning and neighbor lookup (ms).
+ * @param DensitySolveTimeMs Time spent in the XPBD density solver pass (ms).
+ * @param ParticleCount Number of particles included in the metrics.
+ * @param FrameNumber The frame index at which these metrics were captured.
+ * @param SimulationElapsedTime Total simulation time elapsed in seconds.
  */
 USTRUCT(BlueprintType)
-struct KAWAIIFLUIDRUNTIME_API FFluidTestMetrics
+struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidTestMetrics
 {
 	GENERATED_BODY()
 
-	//=========================================================================
-	// Density Metrics (PBF Core Validation)
-	//=========================================================================
-
-	/** Average density of all particles (kg/m³) - Should be near RestDensity */
 	UPROPERTY(BlueprintReadOnly, Category = "Density")
 	float AverageDensity = 0.0f;
 
-	/** Maximum density among all particles (kg/m³) - Should not exceed 200% of RestDensity */
 	UPROPERTY(BlueprintReadOnly, Category = "Density")
 	float MaxDensity = 0.0f;
 
-	/** Minimum density among all particles (kg/m³) - Low values indicate neighbor deficiency */
 	UPROPERTY(BlueprintReadOnly, Category = "Density")
 	float MinDensity = 0.0f;
 
-	/** Standard deviation of density (kg/m³) - Lower is more uniform */
 	UPROPERTY(BlueprintReadOnly, Category = "Density")
 	float DensityStdDev = 0.0f;
 
-	/** Variance of density (kg²/m⁶) */
 	UPROPERTY(BlueprintReadOnly, Category = "Density")
 	float DensityVariance = 0.0f;
 
-	/** Density relative to RestDensity (1.0 = exactly at rest density) */
 	UPROPERTY(BlueprintReadOnly, Category = "Density")
 	float DensityRatio = 0.0f;
 
-	//=========================================================================
-	// Volume & Mass Conservation Metrics
-	//=========================================================================
-
-	/** Center of mass position (cm) */
 	UPROPERTY(BlueprintReadOnly, Category = "Conservation")
 	FVector CenterOfMass = FVector::ZeroVector;
 
-	/** Estimated total volume based on particle count and rest density (cm³) */
 	UPROPERTY(BlueprintReadOnly, Category = "Conservation")
 	float TotalVolume = 0.0f;
 
-	/** Axis-Aligned Bounding Box of all particles */
 	UPROPERTY(BlueprintReadOnly, Category = "Conservation")
 	FBox ParticleBounds = FBox(EForceInit::ForceInit);
 
-	/** Total mass of simulation (kg) */
 	UPROPERTY(BlueprintReadOnly, Category = "Conservation")
 	float TotalMass = 0.0f;
 
-	//=========================================================================
-	// Stability Metrics
-	//=========================================================================
-
-	/** Number of particles that escaped simulation bounds */
 	UPROPERTY(BlueprintReadOnly, Category = "Stability")
 	int32 ParticlesOutOfBounds = 0;
 
-	/** Number of particles with NaN or Infinite position/velocity */
 	UPROPERTY(BlueprintReadOnly, Category = "Stability")
 	int32 InvalidParticles = 0;
 
-	/** Maximum velocity magnitude (cm/s) - High values may indicate instability */
 	UPROPERTY(BlueprintReadOnly, Category = "Stability")
 	float MaxVelocity = 0.0f;
 
-	/** Average velocity magnitude (cm/s) */
 	UPROPERTY(BlueprintReadOnly, Category = "Stability")
 	float AverageVelocity = 0.0f;
 
-	/** Maximum acceleration experienced (cm/s²) */
 	UPROPERTY(BlueprintReadOnly, Category = "Stability")
 	float MaxAcceleration = 0.0f;
 
-	//=========================================================================
-	// XPBD Solver Metrics
-	//=========================================================================
-
-	/** Average Lambda value across all particles */
 	UPROPERTY(BlueprintReadOnly, Category = "Solver")
 	float AverageLambda = 0.0f;
 
-	/** Maximum absolute Lambda value */
 	UPROPERTY(BlueprintReadOnly, Category = "Solver")
 	float MaxLambda = 0.0f;
 
-	/** Average constraint error |C_i| after solving */
 	UPROPERTY(BlueprintReadOnly, Category = "Solver")
 	float AverageConstraintError = 0.0f;
 
-	/** Maximum constraint error after solving */
 	UPROPERTY(BlueprintReadOnly, Category = "Solver")
 	float MaxConstraintError = 0.0f;
 
-	/** Number of solver iterations performed */
 	UPROPERTY(BlueprintReadOnly, Category = "Solver")
 	int32 SolverIterations = 0;
 
-	//=========================================================================
-	// Neighbor Statistics
-	//=========================================================================
-
-	/** Average number of neighbors per particle */
 	UPROPERTY(BlueprintReadOnly, Category = "Neighbors")
 	float AverageNeighborCount = 0.0f;
 
-	/** Maximum neighbor count */
 	UPROPERTY(BlueprintReadOnly, Category = "Neighbors")
 	int32 MaxNeighborCount = 0;
 
-	/** Minimum neighbor count (excluding isolated particles) */
 	UPROPERTY(BlueprintReadOnly, Category = "Neighbors")
 	int32 MinNeighborCount = 0;
 
-	/** Number of isolated particles (0 neighbors excluding self) */
 	UPROPERTY(BlueprintReadOnly, Category = "Neighbors")
 	int32 IsolatedParticleCount = 0;
 
-	//=========================================================================
-	// Performance Metrics
-	//=========================================================================
-
-	/** Total simulation time for this frame (ms) */
 	UPROPERTY(BlueprintReadOnly, Category = "Performance")
 	float SimulationTimeMs = 0.0f;
 
-	/** Time spent on neighbor search (ms) */
 	UPROPERTY(BlueprintReadOnly, Category = "Performance")
 	float NeighborSearchTimeMs = 0.0f;
 
-	/** Time spent on density constraint solving (ms) */
 	UPROPERTY(BlueprintReadOnly, Category = "Performance")
 	float DensitySolveTimeMs = 0.0f;
 
-	/** Total particle count */
 	UPROPERTY(BlueprintReadOnly, Category = "Performance")
 	int32 ParticleCount = 0;
 
-	/** Current frame number */
 	UPROPERTY(BlueprintReadOnly, Category = "Performance")
 	int32 FrameNumber = 0;
 
-	/** Simulation time elapsed (s) */
 	UPROPERTY(BlueprintReadOnly, Category = "Performance")
 	float SimulationElapsedTime = 0.0f;
 
-	//=========================================================================
-	// Helper Methods
-	//=========================================================================
-
-	/** Reset all metrics to default values */
 	void Reset()
 	{
-		*this = FFluidTestMetrics();
+		*this = FKawaiiFluidTestMetrics();
 	}
 
-	/** Check if density is within acceptable range of RestDensity */
 	bool IsDensityStable(float RestDensity, float TolerancePercent = 10.0f) const
 	{
 		const float LowerBound = RestDensity * (1.0f - TolerancePercent / 100.0f);
@@ -180,15 +149,13 @@ struct KAWAIIFLUIDRUNTIME_API FFluidTestMetrics
 		return AverageDensity >= LowerBound && AverageDensity <= UpperBound;
 	}
 
-	/** Check if simulation is numerically stable */
 	bool IsNumericallyStable() const
 	{
 		return InvalidParticles == 0 &&
 		       FMath::IsFinite(MaxVelocity) &&
-		       MaxVelocity < 100000.0f;  // 1000 m/s threshold
+		       MaxVelocity < 100000.0f;
 	}
 
-	/** Check if volume is conserved within tolerance */
 	bool IsVolumeConserved(float InitialVolume, float TolerancePercent = 20.0f) const
 	{
 		if (InitialVolume <= 0.0f) return false;
@@ -197,7 +164,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidTestMetrics
 		       Ratio <= (1.0f + TolerancePercent / 100.0f);
 	}
 
-	/** Get a summary string for logging */
 	FString GetSummary() const
 	{
 		return FString::Printf(
@@ -213,25 +179,24 @@ struct KAWAIIFLUIDRUNTIME_API FFluidTestMetrics
 };
 
 /**
- * FFluidTestMetricsHistory
- *
- * Stores time-series of metrics for trend analysis.
+ * @struct FFluidTestMetricsHistory
+ * @brief Stores a time-series of metrics for trend analysis and stabilization checking.
+ * 
+ * @param MaxSamples Maximum number of historical frames to store.
+ * @param Samples Array of metric snapshots.
  */
 USTRUCT(BlueprintType)
 struct KAWAIIFLUIDRUNTIME_API FFluidTestMetricsHistory
 {
 	GENERATED_BODY()
 
-	/** Maximum number of samples to store */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "History")
-	int32 MaxSamples = 300;  // 5 seconds at 60 FPS
+	int32 MaxSamples = 300;
 
-	/** Recorded metrics samples */
 	UPROPERTY(BlueprintReadOnly, Category = "History")
-	TArray<FFluidTestMetrics> Samples;
+	TArray<FKawaiiFluidTestMetrics> Samples;
 
-	/** Add a new sample, removing oldest if at capacity */
-	void AddSample(const FFluidTestMetrics& Metrics)
+	void AddSample(const FKawaiiFluidTestMetrics& Metrics)
 	{
 		if (Samples.Num() >= MaxSamples)
 		{
@@ -240,7 +205,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidTestMetricsHistory
 		Samples.Add(Metrics);
 	}
 
-	/** Get average density over all samples */
 	float GetAverageDensityOverTime() const
 	{
 		if (Samples.Num() == 0) return 0.0f;
@@ -249,7 +213,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidTestMetricsHistory
 		return Sum / Samples.Num();
 	}
 
-	/** Get maximum velocity ever recorded */
 	float GetMaxVelocityEver() const
 	{
 		float Max = 0.0f;
@@ -260,7 +223,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidTestMetricsHistory
 		return Max;
 	}
 
-	/** Check if density has stabilized (low variance in recent samples) */
 	bool HasDensityStabilized(int32 RecentSampleCount = 60, float VarianceThreshold = 10.0f) const
 	{
 		if (Samples.Num() < RecentSampleCount) return false;
@@ -284,7 +246,6 @@ struct KAWAIIFLUIDRUNTIME_API FFluidTestMetricsHistory
 		return Variance < VarianceThreshold;
 	}
 
-	/** Clear all samples */
 	void Clear()
 	{
 		Samples.Empty();

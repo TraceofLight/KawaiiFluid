@@ -1,13 +1,9 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
-// XPBD Lambda Calculation Unit Tests
-// Based on XPBD: Position-Based Simulation of Compliant Constrained Dynamics
-// (Macklin, Müller, Chentanez, 2016)
-// Core formula: Δλⱼ = (-Cⱼ(xᵢ) - α̃ⱼλᵢⱼ) / (∇CⱼM⁻¹∇Cⱼᵀ + α̃ⱼ)  [XPBD Eq.18]
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Physics/SPHKernels.h"
-#include "Physics/DensityConstraint.h"
+#include "Physics/KawaiiFluidSPHKernels.h"
+#include "Physics/KawaiiFluidDensityConstraint.h"
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidSpatialHash.h"
 
@@ -35,7 +31,13 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FKawaiiFluidXPBDTest_Convergence,
 
 namespace
 {
-	// Helper: Create particles in a uniform 3D grid
+	/**
+	 * @brief Helper: Create fluid particles arranged in a uniform 3D grid.
+	 * @param GridSize Number of particles along each axis.
+	 * @param Spacing Distance between particles.
+	 * @param Mass Mass of each particle.
+	 * @return Array of initialized particles.
+	 */
 	TArray<FKawaiiFluidParticle> CreateTestGrid(int32 GridSize, float Spacing, float Mass)
 	{
 		TArray<FKawaiiFluidParticle> Particles;
@@ -68,7 +70,11 @@ namespace
 		return Particles;
 	}
 
-	// Helper: Build neighbor lists
+	/**
+	 * @brief Helper: Build neighbor lists for particles using a spatial hash.
+	 * @param Particles Reference to particle array.
+	 * @param SmoothingRadius Kernel radius for neighbor search.
+	 */
 	void BuildNeighbors(TArray<FKawaiiFluidParticle>& Particles, float SmoothingRadius)
 	{
 		FKawaiiFluidSpatialHash SpatialHash(SmoothingRadius);
@@ -92,7 +98,10 @@ namespace
 		}
 	}
 
-	// Helper: Compute average density
+	/**
+	 * @brief Helper: Compute the mean density of all particles in the array.
+	 * @return Average density value.
+	 */
 	float ComputeAverageDensity(const TArray<FKawaiiFluidParticle>& Particles)
 	{
 		float Sum = 0.0f;
@@ -103,7 +112,11 @@ namespace
 		return Sum / static_cast<float>(Particles.Num());
 	}
 
-	// Helper: Compute constraint error C = ρ/ρ₀ - 1
+	/**
+	 * @brief Helper: Find the maximum absolute constraint error among all particles.
+	 * @param RestDensity Reference density for error calculation.
+	 * @return Maximum error |C_i|.
+	 */
 	float ComputeConstraintError(const TArray<FKawaiiFluidParticle>& Particles, float RestDensity)
 	{
 		float MaxError = 0.0f;
@@ -116,11 +129,10 @@ namespace
 	}
 }
 
-//=============================================================================
-// X-01: Lambda Initialization Test
-// Lambda should be initialized to 0 at the start of each substep
-// XPBD Algorithm 1, Line 4: λ₀ = 0
-//=============================================================================
+/**
+ * @brief X-01: Lambda Initialization Test.
+ * Verifies that the solver properly initializes or updates Lambda values from their initial state.
+ */
 bool FKawaiiFluidXPBDTest_LambdaInitialization::RunTest(const FString& Parameters)
 {
 	const float SmoothingRadius = 20.0f;
@@ -128,33 +140,24 @@ bool FKawaiiFluidXPBDTest_LambdaInitialization::RunTest(const FString& Parameter
 	const float Compliance = 0.01f;
 	const float DeltaTime = 1.0f / 120.0f;
 
-	// Create test particles with non-zero Lambda
 	TArray<FKawaiiFluidParticle> Particles = CreateTestGrid(3, SmoothingRadius * 0.5f, 1.0f);
 	BuildNeighbors(Particles, SmoothingRadius);
 
-	// Set non-zero Lambda values
 	for (FKawaiiFluidParticle& P : Particles)
 	{
-		P.Lambda = 100.0f;  // Non-zero initial value
+		P.Lambda = 100.0f;
 	}
 
-	// Create solver and run one iteration
-	FDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
+	FKawaiiFluidDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
 
-	// Note: In our implementation, Lambda reset happens in SimulationContext::SolveDensityConstraints
-	// before calling the solver. We'll verify that the solver modifies Lambda values.
-
-	// Before solving, save Lambda values
 	TArray<float> LambdasBefore;
 	for (const FKawaiiFluidParticle& P : Particles)
 	{
 		LambdasBefore.Add(P.Lambda);
 	}
 
-	// Run solver
 	Solver.Solve(Particles, SmoothingRadius, RestDensity, Compliance, DeltaTime);
 
-	// After solving, Lambda values should be updated (not necessarily zero, but computed)
 	bool bAllZero = true;
 	for (int32 i = 0; i < Particles.Num(); ++i)
 	{
@@ -165,11 +168,8 @@ bool FKawaiiFluidXPBDTest_LambdaInitialization::RunTest(const FString& Parameter
 		}
 	}
 
-	// Note: Lambda being zero or non-zero depends on the density constraint
-	// The test verifies the solver runs without error
 	AddInfo(FString::Printf(TEXT("Particles: %d, Lambda values updated by solver"), Particles.Num()));
 
-	// At minimum, density should be computed
 	bool bDensityComputed = false;
 	for (const FKawaiiFluidParticle& P : Particles)
 	{
@@ -184,46 +184,38 @@ bool FKawaiiFluidXPBDTest_LambdaInitialization::RunTest(const FString& Parameter
 	return true;
 }
 
-//=============================================================================
-// X-02: Compliance Effect Test
-// Higher compliance should result in smaller Lambda (softer constraint)
-// XPBD: α̃ = α / dt² appears in denominator, so higher α → smaller |Δλ|
-//=============================================================================
+/**
+ * @brief X-02: Compliance Effect Test.
+ * Higher compliance should result in smaller Lagrange multipliers (softer constraints).
+ */
 bool FKawaiiFluidXPBDTest_ComplianceEffect::RunTest(const FString& Parameters)
 {
 	const float SmoothingRadius = 20.0f;
 	const float RestDensity = 1000.0f;
 	const float DeltaTime = 1.0f / 120.0f;
 
-	// Test with different compliance values
-	const float LowCompliance = 0.0001f;   // Stiff (water-like)
-	const float HighCompliance = 0.1f;     // Soft (very compressible)
+	const float LowCompliance = 0.0001f;
+	const float HighCompliance = 0.1f;
 
-	// Create compressed test setup (dense particles)
-	const float TightSpacing = SmoothingRadius * 0.3f;  // Compressed state
+	const float TightSpacing = SmoothingRadius * 0.3f;
 
-	// Test with low compliance
 	TArray<FKawaiiFluidParticle> ParticlesStiff = CreateTestGrid(3, TightSpacing, 1.0f);
 	BuildNeighbors(ParticlesStiff, SmoothingRadius);
 
-	FDensityConstraint SolverStiff(RestDensity, SmoothingRadius, LowCompliance);
+	FKawaiiFluidDensityConstraint SolverStiff(RestDensity, SmoothingRadius, LowCompliance);
 	SolverStiff.Solve(ParticlesStiff, SmoothingRadius, RestDensity, LowCompliance, DeltaTime);
 
-	// Test with high compliance
 	TArray<FKawaiiFluidParticle> ParticlesSoft = CreateTestGrid(3, TightSpacing, 1.0f);
 	BuildNeighbors(ParticlesSoft, SmoothingRadius);
 
-	FDensityConstraint SolverSoft(RestDensity, SmoothingRadius, HighCompliance);
+	FKawaiiFluidDensityConstraint SolverSoft(RestDensity, SmoothingRadius, HighCompliance);
 	SolverSoft.Solve(ParticlesSoft, SmoothingRadius, RestDensity, HighCompliance, DeltaTime);
 
-	// Compare position corrections
 	float TotalCorrectionStiff = 0.0f;
 	float TotalCorrectionSoft = 0.0f;
 
 	for (int32 i = 0; i < ParticlesStiff.Num(); ++i)
 	{
-		// Position correction = PredictedPosition - original position
-		// Since we used the same initial positions, compare Lambda magnitudes
 		TotalCorrectionStiff += FMath::Abs(ParticlesStiff[i].Lambda);
 		TotalCorrectionSoft += FMath::Abs(ParticlesSoft[i].Lambda);
 	}
@@ -234,9 +226,6 @@ bool FKawaiiFluidXPBDTest_ComplianceEffect::RunTest(const FString& Parameters)
 	AddInfo(FString::Printf(TEXT("Low compliance (%.4f): avg |λ| = %.4f"), LowCompliance, AvgLambdaStiff));
 	AddInfo(FString::Printf(TEXT("High compliance (%.4f): avg |λ| = %.4f"), HighCompliance, AvgLambdaSoft));
 
-	// With higher compliance, the constraint is softer, so Lambda should be smaller
-	// (or the correction per Lambda is smaller)
-	// This test verifies the compliance parameter has an effect
 	TestTrue(TEXT("Different compliance values produce different results"),
 		FMath::Abs(AvgLambdaStiff - AvgLambdaSoft) > KINDA_SMALL_NUMBER ||
 		TotalCorrectionStiff != TotalCorrectionSoft);
@@ -244,11 +233,10 @@ bool FKawaiiFluidXPBDTest_ComplianceEffect::RunTest(const FString& Parameters)
 	return true;
 }
 
-//=============================================================================
-// X-03: Compression State Skip Test
-// When density is below rest density (C_i < 0), Lambda should not be updated
-// This allows particles to separate without artificial attraction
-//=============================================================================
+/**
+ * @brief X-03: Compression State Skip Test.
+ * Particles with density below rest density should not receive attractive forces from the solver.
+ */
 bool FKawaiiFluidXPBDTest_CompressionSkip::RunTest(const FString& Parameters)
 {
 	const float SmoothingRadius = 20.0f;
@@ -256,18 +244,14 @@ bool FKawaiiFluidXPBDTest_CompressionSkip::RunTest(const FString& Parameters)
 	const float Compliance = 0.01f;
 	const float DeltaTime = 1.0f / 120.0f;
 
-	// Create sparse particles (density < RestDensity)
-	const float SparseSpacing = SmoothingRadius * 1.5f;  // Very sparse
+	const float SparseSpacing = SmoothingRadius * 1.5f;
 
 	TArray<FKawaiiFluidParticle> Particles = CreateTestGrid(3, SparseSpacing, 1.0f);
 	BuildNeighbors(Particles, SmoothingRadius);
 
-	// Run solver
-	FDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
+	FKawaiiFluidDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
 	Solver.Solve(Particles, SmoothingRadius, RestDensity, Compliance, DeltaTime);
 
-	// Check that particles with low density don't get compressed further
-	// They should have Lambda ≈ 0 or unchanged
 	int32 LowDensityCount = 0;
 	int32 SkippedCount = 0;
 
@@ -277,7 +261,6 @@ bool FKawaiiFluidXPBDTest_CompressionSkip::RunTest(const FString& Parameters)
 		if (C < 0.0f)
 		{
 			LowDensityCount++;
-			// Lambda should be small for under-dense particles
 			if (FMath::Abs(P.Lambda) < 0.1f)
 			{
 				SkippedCount++;
@@ -288,7 +271,6 @@ bool FKawaiiFluidXPBDTest_CompressionSkip::RunTest(const FString& Parameters)
 	AddInfo(FString::Printf(TEXT("Particles with ρ < ρ₀: %d"), LowDensityCount));
 	AddInfo(FString::Printf(TEXT("Particles with small |λ|: %d"), SkippedCount));
 
-	// Most under-dense particles should have small or zero Lambda
 	if (LowDensityCount > 0)
 	{
 		const float SkipRatio = static_cast<float>(SkippedCount) / static_cast<float>(LowDensityCount);
@@ -298,11 +280,10 @@ bool FKawaiiFluidXPBDTest_CompressionSkip::RunTest(const FString& Parameters)
 	return true;
 }
 
-//=============================================================================
-// X-04: Lambda Accumulation Test
-// Lambda should accumulate over iterations: λᵢ₊₁ = λᵢ + Δλ
-// This is the key difference from standard PBD
-//=============================================================================
+/**
+ * @brief X-04: Lambda Accumulation Test.
+ * Verifies that the XPBD Lagrange multiplier accumulates over multiple solver iterations.
+ */
 bool FKawaiiFluidXPBDTest_LambdaAccumulation::RunTest(const FString& Parameters)
 {
 	const float SmoothingRadius = 20.0f;
@@ -310,26 +291,22 @@ bool FKawaiiFluidXPBDTest_LambdaAccumulation::RunTest(const FString& Parameters)
 	const float Compliance = 0.01f;
 	const float DeltaTime = 1.0f / 120.0f;
 
-	// Create dense particles
 	const float DenseSpacing = SmoothingRadius * 0.4f;
 
 	TArray<FKawaiiFluidParticle> Particles = CreateTestGrid(3, DenseSpacing, 1.0f);
 	BuildNeighbors(Particles, SmoothingRadius);
 
-	// Initialize Lambda to 0
 	for (FKawaiiFluidParticle& P : Particles)
 	{
 		P.Lambda = 0.0f;
 	}
 
-	FDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
+	FKawaiiFluidDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
 
-	// Run multiple iterations and track Lambda accumulation
 	TArray<float> LambdaHistory;
 
 	for (int32 Iter = 0; Iter < 5; ++Iter)
 	{
-		// Record average Lambda before this iteration
 		float AvgLambda = 0.0f;
 		for (const FKawaiiFluidParticle& P : Particles)
 		{
@@ -338,14 +315,11 @@ bool FKawaiiFluidXPBDTest_LambdaAccumulation::RunTest(const FString& Parameters)
 		AvgLambda /= static_cast<float>(Particles.Num());
 		LambdaHistory.Add(AvgLambda);
 
-		// Run one solver iteration
 		Solver.Solve(Particles, SmoothingRadius, RestDensity, Compliance, DeltaTime);
 
-		// Rebuild neighbors after position update
 		BuildNeighbors(Particles, SmoothingRadius);
 	}
 
-	// Lambda should change over iterations (accumulating or converging)
 	bool bLambdaChanged = false;
 	for (int32 i = 1; i < LambdaHistory.Num(); ++i)
 	{
@@ -366,33 +340,29 @@ bool FKawaiiFluidXPBDTest_LambdaAccumulation::RunTest(const FString& Parameters)
 	return true;
 }
 
-//=============================================================================
-// X-05: Convergence Test
-// Constraint error should decrease with more iterations
-// |∇C|² should decrease as system approaches equilibrium
-//=============================================================================
+/**
+ * @brief X-05: Convergence Test.
+ * Constraint error should generally decrease as the system approaches equilibrium over iterations.
+ */
 bool FKawaiiFluidXPBDTest_Convergence::RunTest(const FString& Parameters)
 {
 	const float SmoothingRadius = 20.0f;
 	const float RestDensity = 1000.0f;
-	const float Compliance = 0.001f;  // Stiffer constraint for visible convergence
+	const float Compliance = 0.001f;
 	const float DeltaTime = 1.0f / 120.0f;
 
-	// Create compressed particles (will expand towards rest density)
 	const float InitialSpacing = SmoothingRadius * 0.35f;
 
 	TArray<FKawaiiFluidParticle> Particles = CreateTestGrid(4, InitialSpacing, 1.0f);
 	BuildNeighbors(Particles, SmoothingRadius);
 
-	// Initialize Lambda
 	for (FKawaiiFluidParticle& P : Particles)
 	{
 		P.Lambda = 0.0f;
 	}
 
-	FDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
+	FKawaiiFluidDensityConstraint Solver(RestDensity, SmoothingRadius, Compliance);
 
-	// Track constraint error over iterations
 	TArray<float> ErrorHistory;
 	TArray<float> DensityHistory;
 
@@ -400,36 +370,28 @@ bool FKawaiiFluidXPBDTest_Convergence::RunTest(const FString& Parameters)
 
 	for (int32 Iter = 0; Iter < MaxIterations; ++Iter)
 	{
-		// Run solver
 		Solver.Solve(Particles, SmoothingRadius, RestDensity, Compliance, DeltaTime);
 
-		// Rebuild neighbors
 		BuildNeighbors(Particles, SmoothingRadius);
 
-		// Compute constraint error (max |C_i|)
 		float MaxError = ComputeConstraintError(Particles, RestDensity);
 		ErrorHistory.Add(MaxError);
 
-		// Compute average density
 		float AvgDensity = ComputeAverageDensity(Particles);
 		DensityHistory.Add(AvgDensity);
 	}
 
-	// Check that error decreases (convergence)
 	bool bConverging = false;
 	if (ErrorHistory.Num() >= 2)
 	{
-		// Compare first and last error
 		const float InitialError = ErrorHistory[0];
 		const float FinalError = ErrorHistory.Last();
 
-		// Error should decrease or stay stable
-		bConverging = (FinalError <= InitialError * 1.1f);  // Allow 10% tolerance
+		bConverging = (FinalError <= InitialError * 1.1f);
 
 		AddInfo(FString::Printf(TEXT("Initial error: %.4f, Final error: %.4f"), InitialError, FinalError));
 	}
 
-	// Log iteration history
 	for (int32 i = 0; i < ErrorHistory.Num(); ++i)
 	{
 		AddInfo(FString::Printf(TEXT("Iter %d: max|C| = %.4f, avg ρ = %.2f"),
@@ -438,7 +400,6 @@ bool FKawaiiFluidXPBDTest_Convergence::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("Constraint error converges or stays stable"), bConverging);
 
-	// Density should approach RestDensity
 	const float FinalDensity = DensityHistory.Last();
 	const float DensityError = FMath::Abs(FinalDensity - RestDensity) / RestDensity;
 	AddInfo(FString::Printf(TEXT("Final density error: %.2f%%"), DensityError * 100.0f));
@@ -446,4 +407,4 @@ bool FKawaiiFluidXPBDTest_Convergence::RunTest(const FString& Parameters)
 	return true;
 }
 
-#endif // WITH_DEV_AUTOMATION_TESTS
+#endif

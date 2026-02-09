@@ -5,10 +5,10 @@
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
-#include "Physics/DensityConstraint.h"
-#include "Physics/ViscositySolver.h"
-#include "Physics/AdhesionSolver.h"
-#include "Physics/StackPressureSolver.h"
+#include "Physics/KawaiiFluidDensityConstraint.h"
+#include "Physics/KawaiiFluidViscositySolver.h"
+#include "Physics/KawaiiFluidAdhesionSolver.h"
+#include "Physics/KawaiiFluidStackPressureSolver.h"
 #include "Collision/KawaiiFluidCollider.h"
 #include "Collision/KawaiiFluidMeshCollider.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
@@ -355,14 +355,14 @@ void UKawaiiFluidSimulationContext::InitializeSolvers(const UKawaiiFluidPresetDa
 		return;
 	}
 
-	DensityConstraint = MakeShared<FDensityConstraint>(
+	DensityConstraint = MakeShared<FKawaiiFluidDensityConstraint>(
 		Preset->Density,
 		Preset->SmoothingRadius,
 		SPHScaling::GetScaledCompliance(Preset->Compressibility, Preset->SmoothingRadius, Preset->ComplianceExponent)
 	);
-	ViscositySolver = MakeShared<FViscositySolver>();
-	AdhesionSolver = MakeShared<FAdhesionSolver>();
-	StackPressureSolver = MakeShared<FStackPressureSolver>();
+	ViscositySolver = MakeShared<FKawaiiFluidViscositySolver>();
+	AdhesionSolver = MakeShared<FKawaiiFluidAdhesionSolver>();
+	StackPressureSolver = MakeShared<FKawaiiFluidStackPressureSolver>();
 
 	bSolversInitialized = true;
 }
