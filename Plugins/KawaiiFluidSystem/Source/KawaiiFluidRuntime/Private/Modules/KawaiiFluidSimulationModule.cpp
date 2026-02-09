@@ -20,27 +20,27 @@
 #include "Editor.h"  // For FEditorDelegates
 #endif
 
+/**
+ * @brief Default constructor initializing default volume dimensions.
+ */
 UKawaiiFluidSimulationModule::UKawaiiFluidSimulationModule()
 {
-	// Initialize default volume size based on Medium Z-Order preset and CellSize
-	// Formula: GridResolution(Medium) * CellSize = 128 * CellSize
 	const float MediumGridResolution = static_cast<float>(GridResolutionPresetHelper::GetGridResolution(EGridResolutionPreset::Medium));
 	const float DefaultVolumeSize = MediumGridResolution * CellSize;
 	UniformVolumeSize = DefaultVolumeSize;
 	VolumeSize = FVector(DefaultVolumeSize);
 
-	// Calculate initial bounds
 	RecalculateVolumeBounds();
 }
 
+/**
+ * @brief Handles delegate binding after property initialization.
+ */
 void UKawaiiFluidSimulationModule::PostInitProperties()
 {
 	Super::PostInitProperties();
 
 #if WITH_EDITOR
-	// Bind delegate only if not CDO
-	// PostLoad is called only when loading from disk,
-	// so bind here for cases created with CreateDefaultSubobject
 	if (!HasAnyFlags(RF_ClassDefaultObject) && !PreBeginPIEHandle.IsValid())
 	{
 		PreBeginPIEHandle = FEditorDelegates::PreBeginPIE.AddUObject(this, &UKawaiiFluidSimulationModule::OnPreBeginPIE);
@@ -48,54 +48,50 @@ void UKawaiiFluidSimulationModule::PostInitProperties()
 #endif
 }
 
+/**
+ * @brief Handles editor delegate binding and volume info synchronization after loading.
+ */
 void UKawaiiFluidSimulationModule::PostLoad()
 {
 	Super::PostLoad();
 
 #if WITH_EDITOR
-	// Bind to preset property changes when loading in editor
 	if (Preset)
 	{
 		BindToPresetPropertyChanged();
 	}
 
-	// Bind to objects replaced event (for asset reload detection)
 	BindToObjectsReplaced();
 
-	// Bind to PreBeginPIE for GPU→CPU sync before PIE duplication
 	if (!PreBeginPIEHandle.IsValid())
 	{
 		PreBeginPIEHandle = FEditorDelegates::PreBeginPIE.AddUObject(this, &UKawaiiFluidSimulationModule::OnPreBeginPIE);
 	}
 
-	// Update volume info to fix any mismatch between CellSize and VolumeSize
-	// This ensures internal grid preset is calculated correctly based on current Preset
 	UpdateVolumeInfoDisplay();
 #endif
 }
 
+/**
+ * @brief Clears stale pointers and re-initializes state after duplication.
+ * @param bDuplicateForPIE Whether the duplication is for a PIE session.
+ */
 void UKawaiiFluidSimulationModule::PostDuplicate(bool bDuplicateForPIE)
 {
 	Super::PostDuplicate(bDuplicateForPIE);
 
-	// Initialize stale pointers to EditorWorld objects when duplicated for PIE
-	// These pointers are reset to correct objects in new World's BeginPlay
 	CachedSimulationContext = nullptr;
 	WeakGPUSimulator.Reset();
 	bGPUSimulationActive = false;
 
-	// ⚠️ Particles array is preserved! (GPU data cached in PreBeginPIE)
-	// UPROPERTY TArray so automatically deep-copied
 	const int32 PreservedParticleCount = Particles.Num();
 
-	// SpatialHash recreated in Initialize
 	SpatialHash.Reset();
 
-	// OwnedVolumeComponent also reset as it's from different World
 	OwnedVolumeComponent = nullptr;
 	PreviousRegisteredVolume.Reset();
 
-	bIsInitialized = false;  // Re-initialize in BeginPlay
+	bIsInitialized = false;
 
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidSimulationModule::PostDuplicate - Preserved %d particles, cleared stale pointers (PIE=%d)"),
 		PreservedParticleCount, bDuplicateForPIE ? 1 : 0);
@@ -105,31 +101,35 @@ void UKawaiiFluidSimulationModule::PostDuplicate(bool bDuplicateForPIE)
 // Serialization (PreSave)
 //========================================
 
+/**
+ * @brief Synchronizes GPU data to the CPU buffer before saving the object.
+ * @param SaveContext Context for the save operation.
+ */
 void UKawaiiFluidSimulationModule::PreSave(FObjectPreSaveContext SaveContext)
 {
 	Super::PreSave(SaveContext);
 
-	// Sync GPU data to CPU Particles array before saving
 	SyncGPUParticlesToCPU();
 }
 
 //========================================
-// GPU ↔ CPU Particle Sync
+// GPU <-> CPU Particle Sync
 //========================================
 
+/**
+ * @brief Downloads particles belonging to this module from the GPU buffer to the CPU array.
+ */
 void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 {
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (!GPUSim)
 	{
-		// If no GPU simulator, keep existing CPU Particles
 		return;
 	}
 
 	const int32 GPUCount = GPUSim->GetParticleCount();
 	if (GPUCount <= 0)
 	{
-		// If no particles in GPU, keep existing
 		return;
 	}
 
@@ -137,7 +137,6 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 
 	if (GPUSim->IsReady())
 	{
-		// Get only my SourceID particles filtered (handle batching environment)
 		if (GPUSim->GetParticlesBySourceID(CachedSourceID, MyParticles))
 		{
 			Particles = MoveTemp(MyParticles);
@@ -145,6 +144,9 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 	}
 }
 
+/**
+ * @brief Uploads existing CPU particles to the GPU simulator and triggers an initialization simulation pass.
+ */
 void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 {
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
@@ -216,16 +218,16 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 	}
 }
 
+/**
+ * @brief Performs cleanup before the object is destroyed.
+ */
 void UKawaiiFluidSimulationModule::BeginDestroy()
 {
 #if WITH_EDITOR
-	// Unbind from preset property changes
 	UnbindFromPresetPropertyChanged();
 
-	// Unbind from objects replaced event
 	UnbindFromObjectsReplaced();
 
-	// Unbind from PreBeginPIE
 	if (PreBeginPIEHandle.IsValid())
 	{
 		FEditorDelegates::PreBeginPIE.Remove(PreBeginPIEHandle);
@@ -233,25 +235,27 @@ void UKawaiiFluidSimulationModule::BeginDestroy()
 	}
 #endif
 
-	// Unbind from volume destroyed event
 	UnbindFromVolumeDestroyedEvent();
 
 	Super::BeginDestroy();
 }
 
 #if WITH_EDITOR
+/**
+ * @brief Syncs GPU data to CPU before PIE starts.
+ */
 void UKawaiiFluidSimulationModule::OnPreBeginPIE(bool bIsSimulating)
 {
-	// Sync GPU particles to CPU before PIE starts
-	// This data is automatically deep-copied in PostDuplicate and transferred to PIE World
 	SyncGPUParticlesToCPU();
-
 
 	UE_LOG(LogTemp, Log, TEXT("OnPreBeginPIE: Synced %d particles for PIE transfer"), Particles.Num());
 }
 #endif
 
 #if WITH_EDITOR
+/**
+ * @brief Handles logic when a property is modified in the Unreal Editor.
+ */
 void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);
@@ -261,35 +265,27 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 	// When Preset changes
 	if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, Preset))
 	{
-		// Unbind from old preset's delegate, bind to new preset
 		UnbindFromPresetPropertyChanged();
 
 			if (Preset)
 		{
-			// Reconstruct SpatialHash
 			if (SpatialHash.IsValid())
 			{
 				SpatialHash = MakeShared<FKawaiiFluidSpatialHash>(Preset->SmoothingRadius);
 			}
-			// Subscribe to preset property changes
 			BindToPresetPropertyChanged();
 		}
-		// Update CellSize and bounds (handles both internal and external volume cases)
 		UpdateVolumeInfoDisplay();
 	}
-	// Update information when TargetSimulationVolume changes
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, TargetSimulationVolume))
 	{
-		// Unbind from previous volume's OnDestroyed event
 		UnbindFromVolumeDestroyedEvent();
 
-		// Unregister from previous volume
 		if (UKawaiiFluidVolumeComponent* PrevVolume = PreviousRegisteredVolume.Get())
 		{
 			PrevVolume->UnregisterModule(this);
 		}
 
-		// Register with new volume and update tracking
 		if (TargetSimulationVolume)
 		{
 			if (UKawaiiFluidVolumeComponent* NewVolume = TargetSimulationVolume->GetVolumeComponent())
@@ -297,7 +293,6 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 				NewVolume->RegisterModule(this);
 				PreviousRegisteredVolume = NewVolume;
 			}
-			// Bind to new volume's OnDestroyed event
 			BindToVolumeDestroyedEvent();
 		}
 		else
@@ -307,51 +302,42 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 
 		UpdateVolumeInfoDisplay();
 	}
-	// When GridResolutionPreset changes (for Internal Volume)
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, GridResolutionPreset))
 	{
-		// Only update if not using external volume
 		if (!TargetSimulationVolume)
 		{
 			UpdateVolumeInfoDisplay();
 		}
 	}
-	// When bUniformSize checkbox changes - Sync values between uniform and non-uniform
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, bUniformSize))
 	{
 		if (!TargetSimulationVolume)
 		{
 			if (bUniformSize)
 			{
-				// When switching to uniform, use the max axis of VolumeSize
 				UniformVolumeSize = FMath::Max3(VolumeSize.X, VolumeSize.Y, VolumeSize.Z);
 			}
 			else
 			{
-				// When switching to non-uniform, copy uniform to all axes
 				VolumeSize = FVector(UniformVolumeSize);
 			}
 			RecalculateVolumeBounds();
 		}
 	}
-	// When UniformVolumeSize changes - Clamp and recalculate
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, UniformVolumeSize))
 	{
 		if (!TargetSimulationVolume)
 		{
-			// Clamp to max supported (Large preset max * 2 for full size)
 			const float EffectiveCellSize = FMath::Max(CellSize, 1.0f);
 			const float MaxFullSize = GridResolutionPresetHelper::GetMaxExtentForPreset(EGridResolutionPreset::Large, EffectiveCellSize) * 2.0f;
 			UniformVolumeSize = FMath::Clamp(UniformVolumeSize, 10.0f, MaxFullSize);
 			RecalculateVolumeBounds();
 		}
 	}
-	// When VolumeSize changes - Clamp and recalculate
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, VolumeSize))
 	{
 		if (!TargetSimulationVolume)
 		{
-			// Clamp each axis to max supported
 			const float EffectiveCellSize = FMath::Max(CellSize, 1.0f);
 			const float MaxFullSize = GridResolutionPresetHelper::GetMaxExtentForPreset(EGridResolutionPreset::Large, EffectiveCellSize) * 2.0f;
 			VolumeSize.X = FMath::Clamp(VolumeSize.X, 10.0f, MaxFullSize);
@@ -360,7 +346,6 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 			RecalculateVolumeBounds();
 		}
 	}
-	// When VolumeRotation changes - Recalculate bounds (OBB → AABB expansion)
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, VolumeRotation))
 	{
 		if (!TargetSimulationVolume)
@@ -368,12 +353,10 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 			RecalculateVolumeBounds();
 		}
 	}
-	// When CellSize changes - Recalculate volume size to maintain Medium preset
 	else if (PropertyName == GET_MEMBER_NAME_CHECKED(UKawaiiFluidSimulationModule, CellSize))
 	{
 		if (!TargetSimulationVolume)
 		{
-			// Recalculate volume size based on Medium Z-Order preset
 			const float MediumGridResolution = static_cast<float>(GridResolutionPresetHelper::GetGridResolution(EGridResolutionPreset::Medium));
 			const float NewDefaultSize = MediumGridResolution * CellSize;
 			UniformVolumeSize = NewDefaultSize;
@@ -384,6 +367,10 @@ void UKawaiiFluidSimulationModule::PostEditChangeProperty(FPropertyChangedEvent&
 }
 #endif
 
+/**
+ * @brief Initialize the simulation module with a specific preset.
+ * @param InPreset Data asset defining the fluid behavior.
+ */
 void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPreset)
 {
 	if (bIsInitialized)
@@ -393,12 +380,10 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 
 	Preset = InPreset;
 
-	// Initialize SpatialHash (for Independent mode)
 	float SpatialHashCellSize = 20.0f;
 	if (Preset)
 	{
 		SpatialHashCellSize = Preset->SmoothingRadius;
-		// Always sync CellSize to Preset's SmoothingRadius for optimal SPH neighbor search
 		if (Preset->SmoothingRadius > 0.0f)
 		{
 			CellSize = Preset->SmoothingRadius;
@@ -406,18 +391,16 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 	}
 	InitializeSpatialHash(SpatialHashCellSize);
 
-	// Create owned volume component for internal bounds (data-only, no rendering)
 	if (!OwnedVolumeComponent)
 	{
 		OwnedVolumeComponent = NewObject<UKawaiiFluidVolumeComponent>(this, NAME_None, RF_Transient);
 		OwnedVolumeComponent->CellSize = CellSize;
-		OwnedVolumeComponent->bShowBoundsInEditor = false;  // Module controls its own visualization
+		OwnedVolumeComponent->bShowBoundsInEditor = false;
 		OwnedVolumeComponent->bShowBoundsAtRuntime = false;
-		OwnedVolumeComponent->SetVisibility(false);  // Never render this internal component
+		OwnedVolumeComponent->SetVisibility(false);
 		OwnedVolumeComponent->SetHiddenInGame(true);
 	}
 
-	// Update volume bounds
 	RecalculateVolumeBounds();
 
 	bIsInitialized = true;
@@ -425,6 +408,9 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidSimulationModule initialized"));
 }
 
+/**
+ * @brief Clears simulation data and releases associated resources.
+ */
 void UKawaiiFluidSimulationModule::Shutdown()
 {
 	if (!bIsInitialized)
@@ -445,22 +431,33 @@ void UKawaiiFluidSimulationModule::Shutdown()
 	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidSimulationModule shutdown"));
 }
 
+/**
+ * @brief Update the fluid preset and reconstruct associated search structures.
+ * @param InPreset New preset data asset.
+ */
 void UKawaiiFluidSimulationModule::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
 {
 	Preset = InPreset;
 
-	// Reconstruct SpatialHash
 	if (Preset && SpatialHash.IsValid())
 	{
 		SpatialHash = MakeShared<FKawaiiFluidSpatialHash>(Preset->SmoothingRadius);
 	}
 }
 
+/**
+ * @brief Allocate a new spatial hash for CPU neighbor lookup.
+ * @param InCellSize Dimension of the spatial cells.
+ */
 void UKawaiiFluidSimulationModule::InitializeSpatialHash(float InCellSize)
 {
 	SpatialHash = MakeShared<FKawaiiFluidSpatialHash>(InCellSize);
 }
 
+/**
+ * @brief Get the actor that owns this module.
+ * @return AActor pointer.
+ */
 AActor* UKawaiiFluidSimulationModule::GetOwnerActor() const
 {
 	if (UActorComponent* OwnerComp = Cast<UActorComponent>(GetOuter()))
@@ -470,6 +467,10 @@ AActor* UKawaiiFluidSimulationModule::GetOwnerActor() const
 	return nullptr;
 }
 
+/**
+ * @brief Construct frame-specific simulation parameters for the solver.
+ * @return FKawaiiFluidSimulationParams structure.
+ */
 FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams() const
 {
 	FKawaiiFluidSimulationParams Params;
@@ -627,11 +628,15 @@ FKawaiiFluidSimulationParams UKawaiiFluidSimulationModule::BuildSimulationParams
 	return Params;
 }
 
+/**
+ * @brief Processes collision events collected during the simulation pass (both GPU and CPU).
+ * @param OwnerIDToIC Mapping of owner IDs to interaction components for fast lookup.
+ * @param CPUFeedbackBuffer Buffer containing collision events detected on the CPU.
+ */
 void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 	const TMap<int32, UKawaiiFluidInteractionComponent*>& OwnerIDToIC,
 	const TArray<FKawaiiFluidCollisionEvent>& CPUFeedbackBuffer)
 {
-	// Skip if no callback or collision events disabled
 	if (!OnCollisionEventCallback.IsBound() || !bEnableCollisionEvents)
 	{
 		return;
@@ -640,9 +645,6 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	int32 EventCount = 0;
 
-	//========================================
-	// GPU feedback processing
-	//========================================
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
@@ -654,20 +656,17 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 		{
 			const FGPUCollisionFeedback& Feedback = GPUFeedbacks[i];
 
-			// SourceID filtering
 			if (CachedSourceID >= 0 && Feedback.ParticleSourceID != CachedSourceID)
 			{
 				continue;
 			}
 
-			// Velocity check
 			const float HitSpeed = FVector3f(Feedback.ParticleVelocity).Length();
 			if (HitSpeed < MinVelocityForEvent)
 			{
 				continue;
 			}
 
-			// Cooldown check
 			if (const float* LastTime = ParticleLastEventTime.Find(Feedback.ParticleIndex))
 			{
 				if (CurrentTime - *LastTime < EventCooldownPerParticle)
@@ -676,10 +675,8 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 				}
 			}
 
-			// Update cooldown
 			ParticleLastEventTime.Add(Feedback.ParticleIndex, CurrentTime);
 
-			// Create event
 			FKawaiiFluidCollisionEvent Event;
 			Event.ParticleIndex = Feedback.ParticleIndex;
 			Event.SourceID = Feedback.ParticleSourceID;
@@ -690,7 +687,6 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 			Event.HitSpeed = HitSpeed;
 			Event.SourceModule = const_cast<UKawaiiFluidSimulationModule*>(this);
 
-			// IC lookup (O(1))
 			if (const UKawaiiFluidInteractionComponent* const* FoundIC = OwnerIDToIC.Find(Feedback.ColliderOwnerID))
 			{
 				Event.HitInteractionComponent = const_cast<UKawaiiFluidInteractionComponent*>(*FoundIC);
@@ -702,9 +698,6 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 		}
 	}
 
-	//========================================
-	// CPU feedback processing (filter by SourceID from Subsystem buffer)
-	//========================================
 	for (const FKawaiiFluidCollisionEvent& BufferEvent : CPUFeedbackBuffer)
 	{
 		if (EventCount >= MaxEventsPerFrame)
@@ -712,13 +705,11 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 			break;
 		}
 
-		// SourceID filtering - process only this Module's particles
 		if (CachedSourceID >= 0 && BufferEvent.SourceID != CachedSourceID)
 		{
 			continue;
 		}
 
-		// Cooldown check
 		if (const float* LastTime = ParticleLastEventTime.Find(BufferEvent.ParticleIndex))
 		{
 			if (CurrentTime - *LastTime < EventCooldownPerParticle)
@@ -727,14 +718,11 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 			}
 		}
 
-		// Update cooldown
 		ParticleLastEventTime.Add(BufferEvent.ParticleIndex, CurrentTime);
 
-		// Copy event and set additional information
 		FKawaiiFluidCollisionEvent Event = BufferEvent;
 		Event.SourceModule = const_cast<UKawaiiFluidSimulationModule*>(this);
 
-		// IC lookup (O(1)) - CPU buffer may not have IC
 		if (!Event.HitInteractionComponent && Event.ColliderOwnerID >= 0)
 		{
 			if (const UKawaiiFluidInteractionComponent* const* FoundIC = OwnerIDToIC.Find(Event.ColliderOwnerID))
@@ -752,6 +740,12 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 	}
 }
 
+/**
+ * @brief Spawns a single fluid particle at the specified location.
+ * @param Position World-space position.
+ * @param Velocity Initial velocity vector.
+ * @return Unique identifier assigned by the GPU (async, may return -1).
+ */
 int32 UKawaiiFluidSimulationModule::SpawnParticle(FVector Position, FVector Velocity)
 {
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
@@ -774,9 +768,15 @@ int32 UKawaiiFluidSimulationModule::SpawnParticle(FVector Position, FVector Velo
 	Requests.Add(Request);
 	GPUSim->AddSpawnRequests(Requests);
 
-	return -1;  // GPU assigns ID asynchronously
+	return -1;
 }
 
+/**
+ * @brief Spawns multiple particles with a random distribution within a radius.
+ * @param Location Center of the spawn region.
+ * @param Count Number of particles to spawn.
+ * @param SpawnRadius Radius of the random distribution.
+ */
 void UKawaiiFluidSimulationModule::SpawnParticles(FVector Location, int32 Count, float SpawnRadius)
 {
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
@@ -808,6 +808,17 @@ void UKawaiiFluidSimulationModule::SpawnParticles(FVector Location, int32 Count,
 	GPUSim->AddSpawnRequests(SpawnRequests);
 }
 
+/**
+ * @brief Spawns particles in a spherical region with a grid-based distribution.
+ * @param Center Center of the sphere.
+ * @param Radius Radius of the sphere.
+ * @param Spacing Distance between grid points.
+ * @param bJitter Whether to apply random offsets to grid points.
+ * @param JitterAmount Magnitude of random variation (0 to 0.5).
+ * @param Velocity Initial velocity applied to all spawned particles.
+ * @param Rotation Orientation of the spawn volume (affects velocity).
+ * @return Total number of spawned particles.
+ */
 int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float Radius, float Spacing,
                                                          bool bJitter, float JitterAmount, FVector Velocity,
                                                          FRotator Rotation)
@@ -1862,6 +1873,12 @@ void UKawaiiFluidSimulationModule::SetContainment(bool bEnabled, const FVector& 
 	// Note: Restitution/Friction parameters are ignored. Use Preset's Restitution/Friction instead.
 }
 
+/**
+ * @brief Manually resolves particle collisions with the volume boundaries on the CPU.
+ * 
+ * Particles are clamped to the box volume and their velocity is reflected or dampened 
+ * based on wall bounce and friction settings.
+ */
 void UKawaiiFluidSimulationModule::ResolveVolumeBoundaryCollisions()
 {
 	// Determine bounds parameters based on whether using external or internal volume
@@ -2217,6 +2234,9 @@ void UKawaiiFluidSimulationModule::RecalculateVolumeBounds()
 	}
 }
 
+/**
+ * @brief Syncs internal volume properties with the target simulation volume or derives them from the current preset.
+ */
 void UKawaiiFluidSimulationModule::UpdateVolumeInfoDisplay()
 {
 	if (TargetSimulationVolume)
@@ -2261,33 +2281,34 @@ void UKawaiiFluidSimulationModule::UpdateVolumeInfoDisplay()
 	}
 }
 
+/**
+ * @brief Logic executed when the target simulation volume actor is destroyed.
+ * @param DestroyedActor The actor being destroyed.
+ */
 void UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed(AActor* DestroyedActor)
 {
-	// The TargetSimulationVolume actor was deleted
 	if (DestroyedActor == TargetSimulationVolume)
 	{
-		// Unregister from the volume component before it's destroyed
 		if (UKawaiiFluidVolumeComponent* VolumeComp = PreviousRegisteredVolume.Get())
 		{
 			VolumeComp->UnregisterModule(this);
 		}
 
-		// Clear references (don't unbind - the actor is being destroyed)
 		TargetSimulationVolume = nullptr;
 		PreviousRegisteredVolume = nullptr;
 		bBoundToVolumeDestroyed = false;
 
-		// Update display - derives CellSize from Preset
 		UpdateVolumeInfoDisplay();
 	}
 }
 
+/**
+ * @brief Binds to the target volume's destruction event for automatic cleanup.
+ */
 void UKawaiiFluidSimulationModule::BindToVolumeDestroyedEvent()
 {
-	// First unbind any existing binding
 	UnbindFromVolumeDestroyedEvent();
 
-	// Bind to the new volume's OnDestroyed
 	if (TargetSimulationVolume && IsValid(TargetSimulationVolume))
 	{
 		TargetSimulationVolume->OnDestroyed.AddDynamic(this, &UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed);
@@ -2295,11 +2316,13 @@ void UKawaiiFluidSimulationModule::BindToVolumeDestroyedEvent()
 	}
 }
 
+/**
+ * @brief Safely unbinds from the target volume's destruction event.
+ */
 void UKawaiiFluidSimulationModule::UnbindFromVolumeDestroyedEvent()
 {
 	if (bBoundToVolumeDestroyed)
 	{
-		// Need to check if the actor is still valid before unbinding
 		if (TargetSimulationVolume && IsValid(TargetSimulationVolume))
 		{
 			TargetSimulationVolume->OnDestroyed.RemoveDynamic(this, &UKawaiiFluidSimulationModule::OnTargetVolumeDestroyed);
@@ -2308,6 +2331,10 @@ void UKawaiiFluidSimulationModule::UnbindFromVolumeDestroyedEvent()
 	}
 }
 
+/**
+ * @brief Synchronizes the module state when the preset is changed by an external source.
+ * @param NewPreset The newly assigned preset asset.
+ */
 void UKawaiiFluidSimulationModule::OnPresetChangedExternal(UKawaiiFluidPresetDataAsset* NewPreset)
 {
 #if WITH_EDITOR
@@ -2337,32 +2364,32 @@ void UKawaiiFluidSimulationModule::OnPresetChangedExternal(UKawaiiFluidPresetDat
 }
 
 #if WITH_EDITOR
+/**
+ * @brief Logic executed when a fluid preset property is modified in the editor.
+ * @param ChangedPreset The modified preset.
+ */
 void UKawaiiFluidSimulationModule::OnPresetPropertyChanged(UKawaiiFluidPresetDataAsset* ChangedPreset)
 {
-	// Ensure this is our preset
 	if (ChangedPreset != Preset)
 	{
 		return;
 	}
 
-	// Mark preset as dirty for runtime rebuild
-
-	// Update SpatialHash if it exists
 	if (SpatialHash.IsValid() && Preset)
 	{
 		SpatialHash = MakeShared<FKawaiiFluidSpatialHash>(Preset->SmoothingRadius);
 	}
 
-	// Update CellSize and bounds display
 	UpdateVolumeInfoDisplay();
 }
 
+/**
+ * @brief Binds to the current preset's property change delegate.
+ */
 void UKawaiiFluidSimulationModule::BindToPresetPropertyChanged()
 {
-	// First unbind any existing binding
 	UnbindFromPresetPropertyChanged();
 
-	// Bind to the preset's OnPropertyChanged delegate
 	if (Preset)
 	{
 		PresetPropertyChangedHandle = Preset->OnPropertyChanged.AddUObject(
@@ -2370,6 +2397,9 @@ void UKawaiiFluidSimulationModule::BindToPresetPropertyChanged()
 	}
 }
 
+/**
+ * @brief Unbinds from the preset's property change delegate.
+ */
 void UKawaiiFluidSimulationModule::UnbindFromPresetPropertyChanged()
 {
 	if (PresetPropertyChangedHandle.IsValid())
@@ -2382,9 +2412,12 @@ void UKawaiiFluidSimulationModule::UnbindFromPresetPropertyChanged()
 	}
 }
 
+/**
+ * @brief Logic executed when objects are replaced during an asset reload.
+ * @param ReplacementMap Map of old objects to new objects.
+ */
 void UKawaiiFluidSimulationModule::OnObjectsReplaced(const TMap<UObject*, UObject*>& ReplacementMap)
 {
-	// Check if our Preset was replaced (e.g., via asset reload)
 	if (Preset)
 	{
 		if (UObject* const* NewPresetPtr = ReplacementMap.Find(Preset))
@@ -2394,40 +2427,39 @@ void UKawaiiFluidSimulationModule::OnObjectsReplaced(const TMap<UObject*, UObjec
 			UE_LOG(LogTemp, Log, TEXT("SimulationModule: Preset replaced via reload (Old=%p, New=%p)"),
 				Preset.Get(), NewPreset);
 
-			// Unbind from old preset
 			UnbindFromPresetPropertyChanged();
 
-			// Update preset reference
 			Preset = NewPreset;
 		
-			// Update SpatialHash if it exists
 			if (SpatialHash.IsValid() && Preset)
 			{
 				SpatialHash = MakeShared<FKawaiiFluidSpatialHash>(Preset->SmoothingRadius);
 			}
 
-			// Bind to new preset's property changed delegate
 			if (Preset)
 			{
 				BindToPresetPropertyChanged();
 			}
 
-			// Update CellSize and bounds display
 			UpdateVolumeInfoDisplay();
 		}
 	}
 }
 
+/**
+ * @brief Binds to the global object replacement delegate.
+ */
 void UKawaiiFluidSimulationModule::BindToObjectsReplaced()
 {
-	// First unbind any existing binding
 	UnbindFromObjectsReplaced();
 
-	// Bind to the objects replaced delegate
 	ObjectsReplacedHandle = FCoreUObjectDelegates::OnObjectsReplaced.AddUObject(
 		this, &UKawaiiFluidSimulationModule::OnObjectsReplaced);
 }
 
+/**
+ * @brief Unbinds from the global object replacement delegate.
+ */
 void UKawaiiFluidSimulationModule::UnbindFromObjectsReplaced()
 {
 	if (ObjectsReplacedHandle.IsValid())

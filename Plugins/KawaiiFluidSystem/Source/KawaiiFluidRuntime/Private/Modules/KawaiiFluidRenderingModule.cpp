@@ -1,28 +1,31 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Rendering/KawaiiFluidISMRenderer.h"
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
 #include "Core/KawaiiFluidParticle.h"
 
+/**
+ * @brief Default constructor creating default renderer subobjects.
+ */
 UKawaiiFluidRenderingModule::UKawaiiFluidRenderingModule()
 {
-	// Create renderer instances as default subobjects (Instanced pattern)
 	ISMRenderer = CreateDefaultSubobject<UKawaiiFluidISMRenderer>(TEXT("KawaiiFluidISMRenderer"));
 	MetaballRenderer = CreateDefaultSubobject<UKawaiiFluidMetaballRenderer>(TEXT("KawaiiFluidMetaballRenderer"));
 }
 
+/**
+ * @brief Handles cleanup of stale pointers after duplication (e.g. for PIE).
+ * @param bDuplicateForPIE Whether this is a PIE duplication.
+ */
 void UKawaiiFluidRenderingModule::PostDuplicate(bool bDuplicateForPIE)
 {
 	Super::PostDuplicate(bDuplicateForPIE);
 
-	// When duplicated for PIE, clear stale pointers to EditorWorld objects
-	// Initialize() will be called again in BeginPlay to set correct values
 	CachedWorld = nullptr;
 	CachedOwnerComponent = nullptr;
 	DataProviderPtr = nullptr;
 
-	// Cleanup child renderers (ISMRenderer, MetaballRenderer are subobjects and auto-duplicated)
 	if (ISMRenderer)
 	{
 		ISMRenderer->Cleanup();
@@ -36,28 +39,29 @@ void UKawaiiFluidRenderingModule::PostDuplicate(bool bDuplicateForPIE)
 		bDuplicateForPIE ? 1 : 0);
 }
 
+/**
+ * @brief Initialize the rendering module and its sub-renderers.
+ * @param InWorld World context.
+ * @param InOwnerComponent Parent component for renderer attachment.
+ * @param InDataProvider Source of simulation particle data.
+ * @param InPreset Preset data asset for rendering parameters.
+ */
 void UKawaiiFluidRenderingModule::Initialize(UWorld* InWorld, USceneComponent* InOwnerComponent, IKawaiiFluidDataProvider* InDataProvider, UKawaiiFluidPresetDataAsset* InPreset)
 {
 	CachedWorld = InWorld;
 	CachedOwnerComponent = InOwnerComponent;
 	DataProviderPtr = InDataProvider;
 
-	// CreateDefaultSubobject only works in CDO context.
-	// If created via NewObject (e.g., editor preview), renderers will be nullptr.
-	// Create them here if missing.
 	if (!ISMRenderer)
 	{
 		ISMRenderer = NewObject<UKawaiiFluidISMRenderer>(this, TEXT("ISMRenderer"));
-		UE_LOG(LogTemp, Log, TEXT("RenderingModule: Created ISMRenderer via NewObject (non-CDO context)"));
 	}
 
 	if (!MetaballRenderer)
 	{
 		MetaballRenderer = NewObject<UKawaiiFluidMetaballRenderer>(this, TEXT("MetaballRenderer"));
-		UE_LOG(LogTemp, Log, TEXT("RenderingModule: Created MetaballRenderer via NewObject (non-CDO context)"));
 	}
 
-	// Initialize renderers
 	if (ISMRenderer)
 	{
 		ISMRenderer->Initialize(InWorld, InOwnerComponent, InPreset);
@@ -73,6 +77,9 @@ void UKawaiiFluidRenderingModule::Initialize(UWorld* InWorld, USceneComponent* I
 		MetaballRenderer && MetaballRenderer->IsEnabled() ? TEXT("Enabled") : TEXT("Disabled"));
 }
 
+/**
+ * @brief Release resources and cleanup sub-renderers.
+ */
 void UKawaiiFluidRenderingModule::Cleanup()
 {
 	if (ISMRenderer)
@@ -90,6 +97,9 @@ void UKawaiiFluidRenderingModule::Cleanup()
 	CachedOwnerComponent = nullptr;
 }
 
+/**
+ * @brief Fetch data from the provider and update all enabled renderers.
+ */
 void UKawaiiFluidRenderingModule::UpdateRenderers()
 {
 	if (!DataProviderPtr)
@@ -107,6 +117,10 @@ void UKawaiiFluidRenderingModule::UpdateRenderers()
 	}
 }
 
+/**
+ * @brief Get the current number of particles being rendered.
+ * @return Particle count from the data provider.
+ */
 int32 UKawaiiFluidRenderingModule::GetParticleCount() const
 {
 	if (DataProviderPtr)

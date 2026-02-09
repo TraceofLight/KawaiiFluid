@@ -1,17 +1,24 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Data/KawaiiFluidPresetDataAsset.h"
 
 #include "EditorFramework/ThumbnailInfo.h"
-#include "GPU/GPUFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
+#include "GPU/GPUFluidSimulatorShaders.h"
 
+/**
+ * @brief Default constructor initializing default physical properties and calculating derived values.
+ */
 UKawaiiFluidPresetDataAsset::UKawaiiFluidPresetDataAsset()
 {
-	// Default values are set in header
-	// Calculate initial derived parameters
 	RecalculateDerivedParameters();
 }
 
+/**
+ * @brief Recalculates physical constants (SmoothingRadius, ParticleSpacing, ParticleMass) based on user inputs.
+ * 
+ * This ensures that physical consistency is maintained when the base ParticleRadius or SpacingRatio is modified.
+ * Mass is calculated using density and spacing to ensure that a uniform grid of particles reaches the target rest density.
+ */
 void UKawaiiFluidPresetDataAsset::RecalculateDerivedParameters()
 {
 	//========================================
@@ -43,6 +50,13 @@ void UKawaiiFluidPresetDataAsset::RecalculateDerivedParameters()
 }
 
 #if WITH_EDITOR
+/**
+ * @brief Handles property modifications in the Unreal Editor.
+ * @param PropertyChangedEvent Structure containing details about the changed property.
+ * 
+ * Automatically triggers recalculation of derived parameters if resolution-related properties change.
+ * Broadcasts OnPropertyChanged delegate to notify active simulation components.
+ */
 void UKawaiiFluidPresetDataAsset::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
 {
 	Super::PostEditChangeProperty(PropertyChangedEvent);

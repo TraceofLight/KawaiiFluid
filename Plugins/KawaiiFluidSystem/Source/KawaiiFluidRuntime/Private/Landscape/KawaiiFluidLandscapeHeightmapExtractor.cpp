@@ -1,7 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-
-#include "Landscape/LandscapeHeightmapExtractor.h"
+#include "Landscape/KawaiiFluidLandscapeHeightmapExtractor.h"
 #include "LandscapeComponent.h"
 #include "EngineUtils.h"
 #include "LandscapeProxy.h"
@@ -9,14 +8,29 @@
 
 DEFINE_LOG_CATEGORY_STATIC(LogHeightmapExtractor, Log, All);
 
-// Thread-local min/max tracking for parallel height sampling
+/**
+ * @struct FHeightMinMax
+ * @brief Thread-local tracking for parallel height sampling.
+ * @param MinZ Minimum height found by the thread.
+ * @param MaxZ Maximum height found by the thread.
+ */
 struct FHeightMinMax
 {
 	float MinZ = FLT_MAX;
 	float MaxZ = -FLT_MAX;
 };
 
-bool FLandscapeHeightmapExtractor::ExtractHeightmap(
+/**
+ * @brief Extract normalized heightmap data from a single landscape actor.
+ * @param Landscape Source landscape.
+ * @param OutHeightData Output array of normalized heights (0-1).
+ * @param OutWidth Width of the generated heightmap.
+ * @param OutHeight Height of the generated heightmap.
+ * @param OutBounds Output world-space bounds of the extracted area.
+ * @param Resolution Desired resolution (clamped to power of 2).
+ * @return True if extraction was successful.
+ */
+bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractHeightmap(
 	ALandscapeProxy* Landscape,
 	TArray<float>& OutHeightData,
 	int32& OutWidth,
@@ -30,12 +44,10 @@ bool FLandscapeHeightmapExtractor::ExtractHeightmap(
 		return false;
 	}
 
-	// Clamp resolution to power of 2
 	Resolution = ClampToPowerOfTwo(Resolution);
 	OutWidth = Resolution;
 	OutHeight = Resolution;
 
-	// Get landscape bounds
 	OutBounds = Landscape->GetComponentsBoundingBox(true);
 
 	if (!OutBounds.IsValid)
@@ -44,27 +56,22 @@ bool FLandscapeHeightmapExtractor::ExtractHeightmap(
 		return false;
 	}
 
-	// Add small padding to bounds
 	const float Padding = 10.0f;
 	OutBounds = OutBounds.ExpandBy(FVector(Padding, Padding, 0.0f));
 
 	const FVector BoundsSize = OutBounds.GetSize();
-	const float StepX = BoundsSize.X / (float)(Resolution - 1);
-	const float StepY = BoundsSize.Y / (float)(Resolution - 1);
+	const float StepX = BoundsSize.X / static_cast<float>(Resolution - 1);
+	const float StepY = BoundsSize.Y / static_cast<float>(Resolution - 1);
 
-	// Allocate height data
 	OutHeightData.SetNumUninitialized(Resolution * Resolution);
 
-	// Sample heights in a grid (parallel)
 	float MinZ = OutBounds.Max.Z;
 	float MaxZ = OutBounds.Min.Z;
 
-	// Thread-local accumulators for min/max
 	const int32 NumThreads = FMath::Max(1, FPlatformMisc::NumberOfWorkerThreadsToSpawn() + 1);
 	TArray<FHeightMinMax> ThreadMinMax;
 	ThreadMinMax.SetNum(NumThreads);
 
-	// Parallel sampling - each thread handles a row
 	ParallelFor(Resolution, [&](int32 y)
 	{
 		const int32 ThreadIdx = FPlatformTLS::GetCurrentThreadId() % NumThreads;
@@ -77,30 +84,22 @@ bool FLandscapeHeightmapExtractor::ExtractHeightmap(
 			const float WorldX = OutBounds.Min.X + x * StepX;
 			const float Height = SampleLandscapeHeight(Landscape, WorldX, WorldY);
 
-			// Track height range (thread-local)
 			LocalMinMax.MinZ = FMath::Min(LocalMinMax.MinZ, Height);
 			LocalMinMax.MaxZ = FMath::Max(LocalMinMax.MaxZ, Height);
 
-			// Store raw height
 			OutHeightData[y * Resolution + x] = Height;
 		}
 	});
 
-	// Merge thread-local min/max
 	for (const FHeightMinMax& Local : ThreadMinMax)
 	{
 		MinZ = FMath::Min(MinZ, Local.MinZ);
 		MaxZ = FMath::Max(MaxZ, Local.MaxZ);
 	}
 
-	// Update Z bounds to actual height range (with padding for collision margin)
 	OutBounds.Min.Z = MinZ - Padding;
 	OutBounds.Max.Z = MaxZ + Padding;
 
-	// Normalize heights to 0-1 range
-	// IMPORTANT: Use the PADDED bounds for normalization so shader lerp matches!
-	// Shader does: terrainZ = lerp(WorldMin.z, WorldMax.z, normalizedHeight)
-	// So we must normalize using the same range: (OutBounds.Min.Z, OutBounds.Max.Z)
 	const float PaddedMinZ = OutBounds.Min.Z;
 	const float PaddedMaxZ = OutBounds.Max.Z;
 	const float HeightRange = PaddedMaxZ - PaddedMinZ;
@@ -114,7 +113,6 @@ bool FLandscapeHeightmapExtractor::ExtractHeightmap(
 	}
 	else
 	{
-		// Flat terrain
 		for (float& Height : OutHeightData)
 		{
 			Height = 0.5f;
@@ -129,7 +127,17 @@ bool FLandscapeHeightmapExtractor::ExtractHeightmap(
 	return true;
 }
 
-bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
+/**
+ * @brief Combine heightmap data from multiple landscape actors into a single unified map.
+ * @param Landscapes Array of landscape actors.
+ * @param OutHeightData Output array of normalized heights.
+ * @param OutWidth Width of the unified map.
+ * @param OutHeight Height of the unified map.
+ * @param OutBounds Combined world-space bounds.
+ * @param Resolution Target resolution for the combined map.
+ * @return True if extraction and merging succeeded.
+ */
+bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 	const TArray<ALandscapeProxy*>& Landscapes,
 	TArray<float>& OutHeightData,
 	int32& OutWidth,
@@ -143,18 +151,15 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 		return false;
 	}
 
-	// Single landscape - use simple extraction
 	if (Landscapes.Num() == 1)
 	{
 		return ExtractHeightmap(Landscapes[0], OutHeightData, OutWidth, OutHeight, OutBounds, Resolution);
 	}
 
-	// Clamp resolution to power of 2
 	Resolution = ClampToPowerOfTwo(Resolution);
 	OutWidth = Resolution;
 	OutHeight = Resolution;
 
-	// Calculate combined bounds
 	OutBounds = FBox(ForceInit);
 	for (ALandscapeProxy* Landscape : Landscapes)
 	{
@@ -170,7 +175,6 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 		return false;
 	}
 
-	// Add padding
 	const float Padding = 10.0f;
 	OutBounds = OutBounds.ExpandBy(FVector(Padding, Padding, 0.0f));
 
@@ -178,19 +182,15 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 	const float StepX = BoundsSize.X / (float)(Resolution - 1);
 	const float StepY = BoundsSize.Y / (float)(Resolution - 1);
 
-	// Allocate height data
 	OutHeightData.SetNumUninitialized(Resolution * Resolution);
 
-	// Sample heights from all landscapes (parallel)
 	float MinZ = OutBounds.Max.Z;
 	float MaxZ = OutBounds.Min.Z;
 
-	// Thread-local accumulators for min/max
-	const int32 NumThreads = FMath::Max(1, FPlatformMisc::NumberOfWorkerThreadsToSpawn() + 1);
+	const int32 NumThreads = FPlatformMisc::NumberOfWorkerThreadsToSpawn() + 1;
 	TArray<FHeightMinMax> ThreadMinMax;
 	ThreadMinMax.SetNum(NumThreads);
 
-	// Pre-cache landscape bounds (avoid repeated calls in parallel loop)
 	TArray<FBox> LandscapeBoundsCache;
 	LandscapeBoundsCache.SetNum(Landscapes.Num());
 	for (int32 i = 0; i < Landscapes.Num(); ++i)
@@ -201,7 +201,6 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 		}
 	}
 
-	// Parallel sampling - each thread handles a row
 	ParallelFor(Resolution, [&](int32 y)
 	{
 		const int32 ThreadIdx = FPlatformTLS::GetCurrentThreadId() % NumThreads;
@@ -213,7 +212,6 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 		{
 			const float WorldX = OutBounds.Min.X + x * StepX;
 
-			// Try each landscape, use the one that contains this point
 			float Height = OutBounds.Min.Z;
 			bool bFoundHeight = false;
 
@@ -222,7 +220,6 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 				ALandscapeProxy* Landscape = Landscapes[i];
 				if (!Landscape) continue;
 
-				// Check if point is within this landscape's XY bounds (use cached)
 				const FBox& LandscapeBounds = LandscapeBoundsCache[i];
 				if (WorldX >= LandscapeBounds.Min.X && WorldX <= LandscapeBounds.Max.X &&
 					WorldY >= LandscapeBounds.Min.Y && WorldY <= LandscapeBounds.Max.Y)
@@ -243,18 +240,15 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 		}
 	});
 
-	// Merge thread-local min/max
 	for (const FHeightMinMax& Local : ThreadMinMax)
 	{
 		MinZ = FMath::Min(MinZ, Local.MinZ);
 		MaxZ = FMath::Max(MaxZ, Local.MaxZ);
 	}
 
-	// Update Z bounds (with padding for collision margin)
 	OutBounds.Min.Z = MinZ - Padding;
 	OutBounds.Max.Z = MaxZ + Padding;
 
-	// Normalize heights using PADDED bounds (must match shader's lerp range)
 	const float PaddedMinZ = OutBounds.Min.Z;
 	const float PaddedMaxZ = OutBounds.Max.Z;
 	const float HeightRange = PaddedMaxZ - PaddedMinZ;
@@ -280,7 +274,10 @@ bool FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 	return true;
 }
 
-FGPUHeightmapCollisionParams FLandscapeHeightmapExtractor::BuildCollisionParams(
+/**
+ * @brief Build GPU-compatible collision parameters from extracted heightmap metadata.
+ */
+FGPUHeightmapCollisionParams FKawaiiFluidLandscapeHeightmapExtractor::BuildCollisionParams(
 	const FBox& Bounds,
 	int32 Width,
 	int32 Height,
@@ -301,13 +298,15 @@ FGPUHeightmapCollisionParams FLandscapeHeightmapExtractor::BuildCollisionParams(
 	Params.CollisionOffset = 0.0f;
 	Params.bEnabled = 1;
 
-	// Calculate inverse values
 	Params.UpdateInverseValues();
 
 	return Params;
 }
 
-void FLandscapeHeightmapExtractor::FindLandscapesInWorld(UWorld* World, TArray<ALandscapeProxy*>& OutLandscapes)
+/**
+ * @brief Find and collect all landscape actors present in the specified world.
+ */
+void FKawaiiFluidLandscapeHeightmapExtractor::FindLandscapesInWorld(UWorld* World, TArray<ALandscapeProxy*>& OutLandscapes)
 {
 	OutLandscapes.Reset();
 
@@ -324,7 +323,10 @@ void FLandscapeHeightmapExtractor::FindLandscapesInWorld(UWorld* World, TArray<A
 	UE_LOG(LogHeightmapExtractor, Log, TEXT("Found %d landscapes in world"), OutLandscapes.Num());
 }
 
-float FLandscapeHeightmapExtractor::SampleLandscapeHeight(ALandscapeProxy* Landscape, float WorldX, float WorldY)
+/**
+ * @brief Internal helper to sample the exact Z height of a landscape at a world XY position.
+ */
+float FKawaiiFluidLandscapeHeightmapExtractor::SampleLandscapeHeight(ALandscapeProxy* Landscape, float WorldX, float WorldY)
 {
 	if (!Landscape)
 	{
@@ -339,7 +341,6 @@ float FLandscapeHeightmapExtractor::SampleLandscapeHeight(ALandscapeProxy* Lands
 		return Height.GetValue();
 	}
 
-	// Fallback: try line trace
 	FVector Start(WorldX, WorldY, 100000.0f);
 	FVector End(WorldX, WorldY, -100000.0f);
 
@@ -353,16 +354,17 @@ float FLandscapeHeightmapExtractor::SampleLandscapeHeight(ALandscapeProxy* Lands
 		return HitResult.ImpactPoint.Z;
 	}
 
-	// Return landscape center Z as fallback
 	FBox Bounds = Landscape->GetComponentsBoundingBox(true);
 	return (Bounds.Min.Z + Bounds.Max.Z) * 0.5f;
 }
 
-int32 FLandscapeHeightmapExtractor::ClampToPowerOfTwo(int32 Value, int32 MinValue, int32 MaxValue)
+/**
+ * @brief Internal helper to clamp and round a value to the nearest power of two.
+ */
+int32 FKawaiiFluidLandscapeHeightmapExtractor::ClampToPowerOfTwo(int32 Value, int32 MinValue, int32 MaxValue)
 {
 	Value = FMath::Clamp(Value, MinValue, MaxValue);
 
-	// Round up to next power of 2
 	Value--;
 	Value |= Value >> 1;
 	Value |= Value >> 2;

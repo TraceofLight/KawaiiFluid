@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #pragma once
 
@@ -9,9 +9,6 @@
 struct FKawaiiFluidParticle;
 class FGPUFluidSimulator;
 
-/**
- * UInterface (for Unreal Reflection System)
- */
 UINTERFACE(MinimalAPI, Blueprintable)
 class UKawaiiFluidDataProvider : public UInterface
 {
@@ -19,34 +16,11 @@ class UKawaiiFluidDataProvider : public UInterface
 };
 
 /**
- * Fluid Simulation Data Provider Interface
- *
- * This interface provides simulation particle data to rendering modules.
- * Simulation modules implement this interface to expose their particle data
- * to the rendering layer without creating dependencies on rendering code.
- *
- * Architecture:
- * - SimulationModule (UKawaiiFluidSimulationModule) implements this interface
- * - RenderingModule (UKawaiiFluidRenderingModule) consumes the data
- * - Provides raw simulation data (FFluidParticle) without rendering concerns
- *
- * Implemented by:
- * - UKawaiiFluidSimulationModule (production simulation module)
- * - UKawaiiFluidTestDataComponent (test/dummy data provider)
- *
- * Usage example:
- * @code
- * // RenderingModule initialization
- * RenderingModule->Initialize(World, Owner, SimulationModule);
- *
- * // In rendering code
- * if (DataProvider && DataProvider->IsDataValid())
- * {
- *     const TArray<FFluidParticle>& Particles = DataProvider->GetParticles();
- *     float Radius = DataProvider->GetParticleRadius();
- *     // Render particles...
- * }
- * @endcode
+ * @class IKawaiiFluidDataProvider
+ * @brief Interface providing fluid simulation particle data to rendering modules.
+ * 
+ * Simulation modules implement this interface to expose their data without 
+ * creating direct dependencies on the rendering layer.
  */
 class IKawaiiFluidDataProvider
 {
@@ -54,65 +28,50 @@ class IKawaiiFluidDataProvider
 
 public:
 	/**
-	 * Get simulation particle data
-	 *
-	 * Returns raw simulation particle array containing position, velocity,
-	 * density, adhesion state, and other simulation-specific data.
-	 *
-	 * @return Const reference to particle array
+	 * @brief Get simulation particle data.
+	 * @return Const reference to particle array containing raw simulation state.
 	 */
 	virtual const TArray<FKawaiiFluidParticle>& GetParticles() const = 0;
 
 	/**
-	 * Get particle count
-	 * @return Number of active particles in simulation
+	 * @brief Get the number of active particles in the simulation.
+	 * @return Active particle count.
 	 */
 	virtual int32 GetParticleCount() const = 0;
 
 	/**
-	 * Get particle radius used in simulation (cm)
-	 *
-	 * Returns the actual particle radius used for physics calculations.
-	 * This is NOT a rendering-specific scale - renderers may apply additional
-	 * scaling based on their own settings.
-	 *
-	 * @return Simulation particle radius in centimeters
+	 * @brief Get the particle radius used in physical simulation (cm).
+	 * @return Simulation particle radius.
 	 */
 	virtual float GetParticleRadius() const = 0;
 
 	/**
-	 * Check if data is valid for rendering
-	 * @return True if particle data is available and ready to render
+	 * @brief Check if particle data is valid and ready for rendering.
+	 * @return True if data is available.
 	 */
 	virtual bool IsDataValid() const = 0;
 
 	/**
-	 * Get debug name for profiling/logging
-	 * @return Human-readable identifier for this data provider
+	 * @brief Get a human-readable identifier for this data provider.
+	 * @return Debug name string.
 	 */
 	virtual FString GetDebugName() const = 0;
 
-	//========================================
-	// GPU Buffer Access (Phase 2)
-	//========================================
-
 	/**
-	 * Check if GPU simulation is active and ready for rendering
-	 * @return True if GPU simulation is running and buffers are ready
+	 * @brief Check if GPU simulation is currently active.
+	 * @return True if GPU buffers are ready for access.
 	 */
 	virtual bool IsGPUSimulationActive() const { return false; }
 
 	/**
-	 * Get GPU particle count
-	 * @return Number of particles currently in GPU buffer
+	 * @brief Get the number of particles currently in the GPU buffer.
+	 * @return GPU particle count.
 	 */
 	virtual int32 GetGPUParticleCount() const { return 0; }
 
 	/**
-	 * Get GPU fluid simulator instance (for advanced GPU operations)
-	 * Use this to access GPU buffers directly: GetGPUSimulator()->GetParticleSRV()
-	 * @return Pointer to GPU simulator, or nullptr if not using GPU
+	 * @brief Get the GPU fluid simulator instance for direct buffer access.
+	 * @return Pointer to GPU simulator, or nullptr if not using GPU.
 	 */
 	virtual FGPUFluidSimulator* GetGPUSimulator() const { return nullptr; }
 };
-

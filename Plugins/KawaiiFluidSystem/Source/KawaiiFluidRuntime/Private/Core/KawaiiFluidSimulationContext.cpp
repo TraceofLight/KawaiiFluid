@@ -25,7 +25,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "PhysicsEngine/BodySetup.h"
-#include "Landscape/LandscapeHeightmapExtractor.h"
+#include "Landscape/KawaiiFluidLandscapeHeightmapExtractor.h"
 #include "LandscapeProxy.h"
 
 // Profiling
@@ -2853,7 +2853,7 @@ void UKawaiiFluidSimulationContext::UpdateLandscapeHeightmapCollision(
 
 	// Find all landscapes in the world
 	TArray<ALandscapeProxy*> Landscapes;
-	FLandscapeHeightmapExtractor::FindLandscapesInWorld(World, Landscapes);
+	FKawaiiFluidLandscapeHeightmapExtractor::FindLandscapesInWorld(World, Landscapes);
 
 	if (Landscapes.IsEmpty())
 	{
@@ -2872,7 +2872,7 @@ void UKawaiiFluidSimulationContext::UpdateLandscapeHeightmapCollision(
 	// - Improved: Volume area only (100m) -> 1024 texels = 0.097m/texel
 	const int32 Resolution = 1024;  // Default resolution, could be exposed as parameter
 
-	bool bSuccess = FLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
+	bool bSuccess = FKawaiiFluidLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 		Landscapes,
 		CachedLandscapeHeightmap,
 		CachedHeightmapWidth,
@@ -2893,7 +2893,7 @@ void UKawaiiFluidSimulationContext::UpdateLandscapeHeightmapCollision(
 	const float HeightmapFriction = Preset ? Preset->Friction : 0.3f;
 	const float HeightmapRestitution = 0.1f;  // Low restitution for terrain collision (no bounce)
 
-	FGPUHeightmapCollisionParams HeightmapParams = FLandscapeHeightmapExtractor::BuildCollisionParams(
+	FGPUHeightmapCollisionParams HeightmapParams = FKawaiiFluidLandscapeHeightmapExtractor::BuildCollisionParams(
 		CachedHeightmapBounds,
 		CachedHeightmapWidth,
 		CachedHeightmapHeight,
