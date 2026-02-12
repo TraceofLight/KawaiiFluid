@@ -3,16 +3,16 @@
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Core/KawaiiFluidSimulationContext.h"
 #include "Core/KawaiiFluidSpatialHash.h"
-#include "Data/KawaiiFluidPresetDataAsset.h"
+#include "Core/KawaiiFluidPresetDataAsset.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Actors/KawaiiFluidVolume.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
-#include "Rendering/KawaiiFluidRenderResource.h"
+#include "Rendering/KawaiiFluidRenderer.h"
+#include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Collision/KawaiiFluidCollider.h"
-#include "GPU/GPUFluidSimulator.h"
+#include "Simulation/GPUFluidSimulator.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 
@@ -245,7 +245,7 @@ void UKawaiiFluidSimulatorSubsystem::RegisterModule(UKawaiiFluidSimulationModule
 				{
 					if (UKawaiiFluidRenderingModule* RenderingMod = OwnerVolume->GetRenderingModule())
 					{
-						if (UKawaiiFluidMetaballRenderer* MR = RenderingMod->GetMetaballRenderer())
+						if (UKawaiiFluidRenderer* MR = RenderingMod->GetMetaballRenderer())
 						{
 							MR->SetSimulationContext(Context);
 						}

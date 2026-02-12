@@ -8,10 +8,10 @@
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Actors/KawaiiFluidVolume.h"
-#include "Data/KawaiiFluidPresetDataAsset.h"
-#include "GPU/GPUFluidSimulator.h"
-#include "GPU/GPUFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
-#include "GPU/GPUFluidParticle.h"  // For FGPUSpawnRequest
+#include "Core/KawaiiFluidPresetDataAsset.h"
+#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
+#include "Simulation/Resources/GPUFluidParticle.h"  // For FGPUSpawnRequest
 #include "UObject/UObjectGlobals.h"  // For FCoreUObjectDelegates
 #include "UObject/ObjectSaveContext.h"  // For FObjectPreSaveContext
 #include "Engine/World.h"
@@ -1844,33 +1844,6 @@ void UKawaiiFluidSimulationModule::SetSimulationVolume(const FVector& Size, cons
 
 	// Recalculate bounds (auto-selects Z-Order preset)
 	RecalculateVolumeBounds();
-}
-
-// Legacy API - deprecated
-void UKawaiiFluidSimulationModule::SetContainment(bool bEnabled, const FVector& Center, const FVector& Extent,
-                                                   const FQuat& Rotation, float Restitution, float Friction)
-{
-	// Map to new unified API (ignoring bEnabled and Center since containment is always enabled)
-	// Extent is half-extent in legacy API, convert to full size
-	const float EffectiveCellSize = FMath::Max(CellSize, 1.0f);
-	const FVector ClampedHalfExtent = GridResolutionPresetHelper::ClampExtentToMaxSupported(Extent, EffectiveCellSize);
-	const FVector ClampedFullSize = ClampedHalfExtent * 2.0f;
-
-	// Update the appropriate size property based on current bUniformSize setting
-	// Note: bUniformSize is user-controlled from editor, don't modify it here
-	if (bUniformSize)
-	{
-		UniformVolumeSize = FMath::Max3(ClampedFullSize.X, ClampedFullSize.Y, ClampedFullSize.Z);
-	}
-	else
-	{
-		VolumeSize = ClampedFullSize;
-	}
-
-	VolumeRotation = Rotation.Rotator();
-	VolumeCenter = Center;  // Set center directly
-	VolumeRotationQuat = Rotation;
-	// Note: Restitution/Friction parameters are ignored. Use Preset's Restitution/Friction instead.
 }
 
 /**

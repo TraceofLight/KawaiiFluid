@@ -6,8 +6,8 @@
 #include "UObject/Object.h"
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
-#include "Interfaces/IKawaiiFluidDataProvider.h"
-#include "GPU/GPUFluidSimulator.h"
+#include "Core/IKawaiiFluidDataProvider.h"
+#include "Simulation/GPUFluidSimulator.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "KawaiiFluidSimulationModule.generated.h"
 
@@ -353,10 +353,6 @@ public:
 	void SetSimulationVolume(const FVector& Size, const FRotator& Rotation, float Bounce, float Friction);
 
 	void ResolveVolumeBoundaryCollisions();
-
-	UFUNCTION(BlueprintCallable, Category = "Fluid|Containment", meta = (DeprecatedFunction, DeprecationMessage = "Use SetSimulationVolume instead"))
-	void SetContainment(bool bEnabled, const FVector& Center, const FVector& Extent,
-	                    const FQuat& Rotation, float Restitution, float Friction);
 
 	void ResolveContainmentCollisions();
 

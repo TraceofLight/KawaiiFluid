@@ -2,8 +2,8 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Physics/KawaiiFluidSPHKernels.h"
-#include "Physics/KawaiiFluidDensityConstraint.h"
+#include "Simulation/Physics/KawaiiFluidSPHKernels.h"
+#include "Simulation/Physics/KawaiiFluidDensityConstraint.h"
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidSpatialHash.h"
 

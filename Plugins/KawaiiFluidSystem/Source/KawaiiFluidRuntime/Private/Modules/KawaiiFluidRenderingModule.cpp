@@ -1,8 +1,8 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Modules/KawaiiFluidRenderingModule.h"
-#include "Rendering/KawaiiFluidISMRenderer.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidProxyRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "Core/KawaiiFluidParticle.h"
 
 /**
@@ -10,8 +10,8 @@
  */
 UKawaiiFluidRenderingModule::UKawaiiFluidRenderingModule()
 {
-	ISMRenderer = CreateDefaultSubobject<UKawaiiFluidISMRenderer>(TEXT("KawaiiFluidISMRenderer"));
-	MetaballRenderer = CreateDefaultSubobject<UKawaiiFluidMetaballRenderer>(TEXT("KawaiiFluidMetaballRenderer"));
+	ISMRenderer = CreateDefaultSubobject<UKawaiiFluidProxyRenderer>(TEXT("KawaiiFluidISMRenderer"));
+	MetaballRenderer = CreateDefaultSubobject<UKawaiiFluidRenderer>(TEXT("KawaiiFluidMetaballRenderer"));
 }
 
 /**
@@ -54,12 +54,12 @@ void UKawaiiFluidRenderingModule::Initialize(UWorld* InWorld, USceneComponent* I
 
 	if (!ISMRenderer)
 	{
-		ISMRenderer = NewObject<UKawaiiFluidISMRenderer>(this, TEXT("ISMRenderer"));
+		ISMRenderer = NewObject<UKawaiiFluidProxyRenderer>(this, TEXT("ISMRenderer"));
 	}
 
 	if (!MetaballRenderer)
 	{
-		MetaballRenderer = NewObject<UKawaiiFluidMetaballRenderer>(this, TEXT("MetaballRenderer"));
+		MetaballRenderer = NewObject<UKawaiiFluidRenderer>(this, TEXT("MetaballRenderer"));
 	}
 
 	if (ISMRenderer)

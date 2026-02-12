@@ -5,24 +5,24 @@
 #include "CoreMinimal.h"
 #include "RenderGraphDefinitions.h"
 #include "ScreenPass.h"
-#include "Rendering/KawaiiFluidRenderingParameters.h"
-#include "Rendering/KawaiiFluidMetaballRenderingData.h"
+#include "Rendering/Parameters/KawaiiFluidRenderingParameters.h"
+#include "Rendering/Resources/KawaiiFluidMetaballRenderingData.h"
 
 class FRDGBuilder;
 class FSceneView;
-class UKawaiiFluidMetaballRenderer;
+class UKawaiiFluidRenderer;
 
 /**
- * @class IKawaiiMetaballRenderingPipeline
+ * @class IKawaiiFluidRenderingPipeline
  * @brief Interface for metaball rendering pipelines responsible for surface computation and shading.
  * 
  * Pipelines manage the generation of intermediate surface data (depth, normals, thickness) 
  * and apply final lighting/shading in a post-process pass.
  */
-class IKawaiiMetaballRenderingPipeline
+class IKawaiiFluidRenderingPipeline
 {
 public:
-	virtual ~IKawaiiMetaballRenderingPipeline() = default;
+	virtual ~IKawaiiFluidRenderingPipeline() = default;
 
 	/**
 	 * @brief Prepare intermediate textures and buffers needed for rendering.
@@ -40,7 +40,7 @@ public:
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FKawaiiFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+		const TArray<UKawaiiFluidRenderer*>& Renderers,
 		FRDGTextureRef SceneDepthTexture,
 		FRDGTextureRef& GlobalDepthTexture,
 		FRDGTextureRef GlobalVelocityTexture = nullptr,
@@ -62,7 +62,7 @@ public:
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FKawaiiFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+		const TArray<UKawaiiFluidRenderer*>& Renderers,
 		FRDGTextureRef SceneDepthTexture,
 		FRDGTextureRef GlobalDepthTexture,
 		FRDGTextureRef SceneColorTexture,

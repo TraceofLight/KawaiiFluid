@@ -1,16 +1,16 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/Pipeline/KawaiiFluidScreenSpacePipeline.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
-#include "Rendering/KawaiiFluidDepthPass.h"
-#include "Rendering/KawaiiFluidSmoothingPass.h"
-#include "Rendering/KawaiiFluidNormalPass.h"
-#include "Rendering/KawaiiFluidThicknessPass.h"
+#include "Rendering/KawaiiFluidRenderer.h"
+#include "Rendering/Passes/KawaiiFluidDepthPass.h"
+#include "Rendering/Passes/KawaiiFluidSmoothingPass.h"
+#include "Rendering/Passes/KawaiiFluidNormalPass.h"
+#include "Rendering/Passes/KawaiiFluidThicknessPass.h"
 
 // Separated shading implementation
-#include "Rendering/Shading/KawaiiFluidCompositeShading.h"
-#include "Rendering/KawaiiFluidSurfaceDecorationPass.h"
-#include "Rendering/KawaiiFluidFlowAccumulationPass.h"
+#include "Rendering/Passes/KawaiiFluidShadingPass.h"
+#include "Rendering/Passes/KawaiiFluidSurfaceDecorationPass.h"
+#include "Rendering/Passes/KawaiiFluidFlowAccumulationPass.h"
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphEvent.h"
@@ -20,6 +20,8 @@
 #include "SceneRendering.h"
 #include "SceneTextures.h"
 
+namespace KFR = KawaiiFluidRenderer;
+
 /**
  * @brief Internal helper to generate surface textures (depth, normal, thickness) for a batch of renderers.
  */
@@ -27,9 +29,10 @@ static bool GenerateIntermediateTextures(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FKawaiiFluidRenderingParameters& RenderParams,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+	const TArray<UKawaiiFluidRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
-	FRDGTextureRef& GlobalDepthTexture, // Reference to allow updating the accumulated hardware depth
+	FRDGTextureRef& GlobalDepthTexture,
+	// Reference to allow updating the accumulated hardware depth
 	FMetaballIntermediateTextures& OutIntermediateTextures)
 {
 	// Calculate average particle radius for this batch
@@ -37,7 +40,7 @@ static bool GenerateIntermediateTextures(
 	float TotalRadius = 0.0f;
 	int ValidCount = 0;
 
-	for (UKawaiiFluidMetaballRenderer* Renderer : Renderers)
+	for (UKawaiiFluidRenderer* Renderer : Renderers)
 	{
 		TotalRadius += Renderer->GetCachedParticleRadius();
 		ValidCount++;
@@ -68,9 +71,10 @@ static bool GenerateIntermediateTextures(
 	// Cache the depth BEFORE it is updated by the current batch.
 	// This will be used as the background (refraction/transmittance reference) in the shading pass.
 	OutIntermediateTextures.BackgroundDepthTexture = GlobalDepthTexture;
-	
-	RenderKawaiiFluidDepthPass(GraphBuilder, View, Renderers, GlobalDepthTexture, 
-		DepthTexture, VelocityTexture, OcclusionMaskTexture, HardwareDepthTexture, true);
+
+	KFR::RenderKawaiiFluidDepthPass(GraphBuilder, View, Renderers, GlobalDepthTexture,
+	                           DepthTexture, VelocityTexture, OcclusionMaskTexture,
+	                           HardwareDepthTexture, true);
 
 	if (!DepthTexture)
 	{
@@ -94,55 +98,60 @@ static bool GenerateIntermediateTextures(
 	}
 
 	// Distance-based dynamic smoothing parameters
-	FDistanceBasedSmoothingParams DistanceBasedParams;
+	KFR::FDistanceBasedSmoothingParams DistanceBasedParams;
 	DistanceBasedParams.WorldScale = RenderParams.SmoothingWorldScale;
 	DistanceBasedParams.MinRadius = RenderParams.SmoothingMinRadius;
 	DistanceBasedParams.MaxRadius = RenderParams.SmoothingMaxRadius;
-	
-	RenderKawaiiFluidNarrowRangeSmoothingPass(GraphBuilder, View, DepthTexture, SmoothedDepthTexture,
-	                                    AdjustedParticleRadius,
-	                                    RenderParams.NarrowRangeThresholdRatio,
-	                                    RenderParams.NarrowRangeClampRatio,
-	                                    NumIterations,
-	                                    RenderParams.NarrowRangeGrazingBoost,
-	                                    DistanceBasedParams);
+
+	KawaiiFluidRenderer::RenderNarrowRangeSmoothingPass(GraphBuilder, View, DepthTexture,
+	                                                    SmoothedDepthTexture,
+	                                                    AdjustedParticleRadius,
+	                                                    RenderParams.NarrowRangeThresholdRatio,
+	                                                    RenderParams.NarrowRangeClampRatio,
+	                                                    NumIterations,
+	                                                    RenderParams.NarrowRangeGrazingBoost,
+	                                                    DistanceBasedParams);
 
 	if (!SmoothedDepthTexture)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Smoothing pass failed"));
+		UE_LOG(LogTemp, Warning,
+		       TEXT("FKawaiiMetaballScreenSpacePipeline: Smoothing pass failed"));
 		return false;
 	}
 
 	// 3. Normal Pass
 	FRDGTextureRef NormalTexture = nullptr;
-	RenderKawaiiFluidNormalPass(GraphBuilder, View, SmoothedDepthTexture, NormalTexture);
+	KFR::RenderNormalPass(GraphBuilder, View, SmoothedDepthTexture, NormalTexture);
 
 	if (!NormalTexture)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Normal pass failed"));
+		UE_LOG(LogTemp, Warning,
+		       TEXT("FKawaiiMetaballScreenSpacePipeline: Normal pass failed"));
 		return false;
 	}
 
 	// 4. Thickness Pass
 	FRDGTextureRef ThicknessTexture = nullptr;
-	RenderKawaiiFluidThicknessPass(GraphBuilder, View, Renderers, SceneDepthTexture, ThicknessTexture);
+	KFR::RenderThicknessPass(GraphBuilder, View, Renderers, SceneDepthTexture, ThicknessTexture);
 
 	if (!ThicknessTexture)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Thickness pass failed"));
+		UE_LOG(LogTemp, Warning,
+		       TEXT("FKawaiiMetaballScreenSpacePipeline: Thickness pass failed"));
 		return false;
 	}
 
 	// 5. Thickness Smoothing Pass (Separable Gaussian Blur)
 	FRDGTextureRef SmoothedThicknessTexture = nullptr;
 	const float ThicknessBlurRadius = static_cast<float>(RenderParams.SmoothingMaxRadius);
-	RenderKawaiiFluidThicknessSmoothingPass(GraphBuilder, View, ThicknessTexture, SmoothedThicknessTexture,
-	                                  ThicknessBlurRadius, 2);  // 2 iterations for thickness
+	KFR::RenderThicknessSmoothingPass(GraphBuilder, View, ThicknessTexture, SmoothedThicknessTexture,
+	                             ThicknessBlurRadius, 2); // 2 iterations for thickness
 
 	if (!SmoothedThicknessTexture)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Thickness smoothing pass failed"));
-		SmoothedThicknessTexture = ThicknessTexture;  // Fallback to unsmoothed
+		UE_LOG(LogTemp, Warning,
+		       TEXT("FKawaiiMetaballScreenSpacePipeline: Thickness smoothing pass failed"));
+		SmoothedThicknessTexture = ThicknessTexture; // Fallback to unsmoothed
 	}
 
 	// 6. Velocity Smoothing Pass (Separable Gaussian Blur)
@@ -155,7 +164,7 @@ static bool GenerateIntermediateTextures(
 	if (bShouldSmoothVelocity)
 	{
 		FRDGTextureRef SmoothedVelocityTexture = nullptr;
-		RenderKawaiiFluidVelocitySmoothingPass(
+		KFR::RenderVelocitySmoothingPass(
 			GraphBuilder, View, VelocityTexture, SmoothedVelocityTexture,
 			RenderParams.SurfaceDecoration.Foam.VelocitySmoothingRadius,
 			RenderParams.SurfaceDecoration.Foam.VelocitySmoothingIterations);
@@ -195,7 +204,7 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FKawaiiFluidRenderingParameters& RenderParams,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+	const TArray<UKawaiiFluidRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef& GlobalDepthTexture,
 	FRDGTextureRef GlobalVelocityTexture,
@@ -209,8 +218,9 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 	RDG_EVENT_SCOPE(GraphBuilder, "MetaballPipeline_ScreenSpace_PrepareForTonemap");
 
 	// Generate and cache intermediate textures using hardware depth updates
-	if (!GenerateIntermediateTextures(GraphBuilder, View, RenderParams, Renderers, SceneDepthTexture, 
-		GlobalDepthTexture, CachedIntermediateTextures))
+	if (!GenerateIntermediateTextures(GraphBuilder, View, RenderParams, Renderers,
+	                                  SceneDepthTexture,
+	                                  GlobalDepthTexture, CachedIntermediateTextures))
 	{
 		return;
 	}
@@ -231,7 +241,10 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 		{
 			PrevAccumulatedFlowRT = nullptr;
 			bHasPrevFrameData = false;
-			UE_LOG(LogTemp, Verbose, TEXT("FKawaiiMetaballScreenSpacePipeline: Flow accumulation disabled, cleared history buffer"));
+			UE_LOG(LogTemp, Verbose,
+			       TEXT(
+				       "FKawaiiMetaballScreenSpacePipeline: Flow accumulation disabled, cleared history buffer"
+			       ));
 		}
 	}
 
@@ -247,7 +260,7 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 		}
 
 		// Setup flow accumulation parameters from surface decoration settings
-		FKawaiiFluidAccumulationParams FlowParams;
+		KFR::FKawaiiFluidAccumulationParams FlowParams;
 		FlowParams.VelocityScale = RenderParams.SurfaceDecoration.FlowMap.VelocityScale;
 		FlowParams.FlowDecay = RenderParams.SurfaceDecoration.FlowMap.FlowDecay;
 		FlowParams.MaxFlowOffset = RenderParams.SurfaceDecoration.FlowMap.MaxFlowOffset;
@@ -260,12 +273,12 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 		// Previous frame's view-projection for temporal reprojection
 		// Use current frame's matrix if no previous data (first frame)
 		FlowParams.PrevViewProjectionMatrix = bHasPrevFrameData
-			? PrevViewProjectionMatrix
-			: View.ViewMatrices.GetViewProjectionMatrix();
+			                                      ? PrevViewProjectionMatrix
+			                                      : View.ViewMatrices.GetViewProjectionMatrix();
 
 		// Run flow accumulation pass
 		FRDGTextureRef AccumulatedFlowTexture = nullptr;
-		RenderKawaiiFluidFlowAccumulationPass(
+		RenderFlowAccumulationPass(
 			GraphBuilder,
 			View,
 			FlowParams,
@@ -288,7 +301,10 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 		bHasPrevFrameData = true;
 	}
 
-	UE_LOG(LogTemp, Verbose, TEXT("FKawaiiMetaballScreenSpacePipeline: PrepareForTonemap completed - intermediate textures cached"));
+	UE_LOG(LogTemp, Verbose,
+	       TEXT(
+		       "FKawaiiMetaballScreenSpacePipeline: PrepareForTonemap completed - intermediate textures cached"
+	       ));
 }
 
 
@@ -310,7 +326,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FKawaiiFluidRenderingParameters& RenderParams,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+	const TArray<UKawaiiFluidRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef GlobalDepthTexture,
 	FRDGTextureRef SceneColorTexture,
@@ -325,7 +341,10 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	// Validate cached intermediate textures
 	if (!CachedIntermediateTextures.IsValid())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Missing cached intermediate textures for Tonemap"));
+		UE_LOG(LogTemp, Warning,
+		       TEXT(
+			       "FKawaiiMetaballScreenSpacePipeline: Missing cached intermediate textures for Tonemap"
+		       ));
 		return;
 	}
 
@@ -352,7 +371,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 		// Create intermediate render target for composite pass (use Output's ViewRect)
 		FScreenPassRenderTarget IntermediateOutput;
 		IntermediateOutput.Texture = CompositeResultTexture;
-		IntermediateOutput.ViewRect = Output.ViewRect;  // Same ViewRect as final output
+		IntermediateOutput.ViewRect = Output.ViewRect; // Same ViewRect as final output
 		IntermediateOutput.LoadAction = ERenderTargetLoadAction::EClear;
 
 		// Copy scene color to intermediate (same size, safe to use CopyTexture)
@@ -360,7 +379,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 
 		// Render fluid composite to intermediate texture
 		// Use BackgroundDepthTexture (Hardware) which contains background + previous fluid info (excluding current fluid)
-		KawaiiScreenSpaceShading::RenderPostProcessShading(
+		KFR::RenderShadingPass(
 			GraphBuilder,
 			View,
 			RenderParams,
@@ -371,7 +390,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 
 		// Apply Surface Decoration and output to final target
 		FRDGTextureRef DecoratedTexture = nullptr;
-		RenderKawaiiFluidSurfaceDecorationPass(
+		KFR::RenderSurfaceDecorationPass(
 			GraphBuilder,
 			View,
 			RenderParams.SurfaceDecoration,
@@ -379,10 +398,10 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 			CachedIntermediateTextures.NormalTexture,
 			CachedIntermediateTextures.ThicknessTexture,
 			CompositeResultTexture,
-			CachedIntermediateTextures.VelocityTexture,         // Screen-space velocity
-			CachedIntermediateTextures.AccumulatedFlowTexture,  // Accumulated flow UV offset
-			CachedIntermediateTextures.OcclusionMaskTexture,    // Occlusion mask for depth culling
-			Output.ViewRect,  // Pass the actual ViewRect where fluid was rendered
+			CachedIntermediateTextures.VelocityTexture, // Screen-space velocity
+			CachedIntermediateTextures.AccumulatedFlowTexture, // Accumulated flow UV offset
+			CachedIntermediateTextures.OcclusionMaskTexture, // Occlusion mask for depth culling
+			Output.ViewRect, // Pass the actual ViewRect where fluid was rendered
 			DecoratedTexture);
 
 		// Copy decorated result to final output (same size now)
@@ -392,7 +411,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	{
 		// Surface Decoration disabled: render directly to output (no overhead)
 		// Use BackgroundDepthTexture (Hardware) which contains background + previous fluid info (excluding current fluid)
-		KawaiiScreenSpaceShading::RenderPostProcessShading(
+		KFR::RenderShadingPass(
 			GraphBuilder,
 			View,
 			RenderParams,

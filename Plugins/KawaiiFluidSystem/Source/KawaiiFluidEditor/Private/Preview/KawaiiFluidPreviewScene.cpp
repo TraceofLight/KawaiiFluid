@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Preview/KawaiiFluidPreviewScene.h"
-#include "Data/KawaiiFluidPresetDataAsset.h"
+#include "Core/KawaiiFluidPresetDataAsset.h"
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidSpatialHash.h"
 #include "Core/KawaiiFluidSimulationContext.h"
@@ -9,9 +9,9 @@
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
-#include "GPU/GPUFluidSimulator.h"
+#include "Simulation/GPUFluidSimulator.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -62,7 +62,7 @@ FKawaiiFluidPreviewScene::FKawaiiFluidPreviewScene(FPreviewScene::ConstructionVa
 		// Metaball settings come from Preset->RenderingParameters (set in SetPreset)
 
 		// Connect MetaballRenderer to SimulationContext for batched rendering
-		if (UKawaiiFluidMetaballRenderer* MR = RenderingModule->GetMetaballRenderer())
+		if (UKawaiiFluidRenderer* MR = RenderingModule->GetMetaballRenderer())
 		{
 			MR->SetSimulationContext(SimulationContext);
 		}
@@ -208,7 +208,7 @@ void FKawaiiFluidPreviewScene::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
 		if (RenderingModule)
 		{
 			// Metaball uses Preset->RenderingParameters via SetPreset
-			if (UKawaiiFluidMetaballRenderer* Metaball = RenderingModule->GetMetaballRenderer())
+			if (UKawaiiFluidRenderer* Metaball = RenderingModule->GetMetaballRenderer())
 			{
 				Metaball->SetPreset(CurrentPreset);
 			}
@@ -257,7 +257,7 @@ void FKawaiiFluidPreviewScene::RefreshFromPreset()
 	if (RenderingModule)
 	{
 		// Metaball uses Preset->RenderingParameters via SetPreset
-		if (UKawaiiFluidMetaballRenderer* Metaball = RenderingModule->GetMetaballRenderer())
+		if (UKawaiiFluidRenderer* Metaball = RenderingModule->GetMetaballRenderer())
 		{
 			Metaball->SetPreset(CurrentPreset);
 		}

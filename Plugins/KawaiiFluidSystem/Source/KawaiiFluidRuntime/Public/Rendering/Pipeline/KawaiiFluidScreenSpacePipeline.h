@@ -17,17 +17,17 @@
  * 4. Thickness Pass - View-space thickness accumulation.
  * 5. Shading - Blinn-Phong lighting with Beer's law absorption.
  */
-class FKawaiiFluidScreenSpacePipeline : public IKawaiiMetaballRenderingPipeline
+class FKawaiiFluidScreenSpacePipeline : public IKawaiiFluidRenderingPipeline
 {
 public:
 	FKawaiiFluidScreenSpacePipeline() = default;
-	virtual ~FKawaiiFluidScreenSpacePipeline() = default;
+	virtual ~FKawaiiFluidScreenSpacePipeline() override = default;
 
 	virtual void PrepareRender(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FKawaiiFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+		const TArray<UKawaiiFluidRenderer*>& Renderers,
 		FRDGTextureRef SceneDepthTexture,
 		FRDGTextureRef& GlobalDepthTexture,
 		FRDGTextureRef GlobalVelocityTexture = nullptr,
@@ -37,7 +37,7 @@ public:
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FKawaiiFluidRenderingParameters& RenderParams,
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+		const TArray<UKawaiiFluidRenderer*>& Renderers,
 		FRDGTextureRef SceneDepthTexture,
 		FRDGTextureRef GlobalDepthTexture,
 		FRDGTextureRef SceneColorTexture,

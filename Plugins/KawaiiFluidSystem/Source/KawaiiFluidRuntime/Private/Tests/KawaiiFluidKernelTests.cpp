@@ -2,7 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Misc/AutomationTest.h"
-#include "Physics/KawaiiFluidSPHKernels.h"
+#include "Simulation/Physics/KawaiiFluidSPHKernels.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
 
