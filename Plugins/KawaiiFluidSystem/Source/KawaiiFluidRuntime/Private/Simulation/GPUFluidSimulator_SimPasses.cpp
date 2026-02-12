@@ -3,7 +3,7 @@
 
 #include "Simulation/GPUFluidSimulator.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
-#include "Simulation/GPUIndirectDispatchUtils.h"
+#include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "Simulation/Managers/GPUBoundarySkinningManager.h"
 #include "Simulation/Managers/GPUZOrderSortManager.h"
 #include "Simulation/Managers/GPUCollisionManager.h"

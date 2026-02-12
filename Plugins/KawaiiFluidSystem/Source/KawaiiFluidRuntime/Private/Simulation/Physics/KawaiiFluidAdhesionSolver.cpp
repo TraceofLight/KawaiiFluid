@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Physics/KawaiiFluidAdhesionSolver.h"
-#include "Physics/KawaiiFluidSPHKernels.h"
+#include "Simulation/Physics/KawaiiFluidAdhesionSolver.h"
+#include "Simulation/Physics/KawaiiFluidSPHKernels.h"
 #include "Collision/KawaiiFluidCollider.h"
 #include "Async/ParallelFor.h"
 #include "GameFramework/Actor.h"

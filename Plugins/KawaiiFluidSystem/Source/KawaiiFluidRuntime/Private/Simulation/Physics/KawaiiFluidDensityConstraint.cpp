@@ -1,7 +1,7 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Physics/KawaiiFluidDensityConstraint.h"
-#include "Physics/KawaiiFluidSPHKernels.h"
+#include "Simulation/Physics/KawaiiFluidDensityConstraint.h"
+#include "Simulation/Physics/KawaiiFluidSPHKernels.h"
 #include "Math/UnrealMathSSE.h"
 #include "Async/ParallelFor.h"
 

@@ -3,7 +3,7 @@
 #include "Simulation/Managers/GPUAdhesionManager.h"
 #include "Simulation/Managers/GPUCollisionManager.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
-#include "Simulation/GPUIndirectDispatchUtils.h"
+#include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "GlobalShader.h"

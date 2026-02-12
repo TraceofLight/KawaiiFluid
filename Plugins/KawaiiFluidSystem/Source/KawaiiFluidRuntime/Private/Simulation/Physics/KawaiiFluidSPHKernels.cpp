@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Physics/KawaiiFluidSPHKernels.h"
+#include "Simulation/Physics/KawaiiFluidSPHKernels.h"
 
 namespace SPHKernels
 {

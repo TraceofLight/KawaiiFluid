@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Physics/KawaiiFluidStackPressureSolver.h"
-#include "Physics/KawaiiFluidSPHKernels.h"
+#include "Simulation/Physics/KawaiiFluidStackPressureSolver.h"
+#include "Simulation/Physics/KawaiiFluidSPHKernels.h"
 #include "Async/ParallelFor.h"
 
 /**

@@ -5,10 +5,10 @@
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Core/KawaiiFluidPresetDataAsset.h"
-#include "Physics/KawaiiFluidDensityConstraint.h"
-#include "Physics/KawaiiFluidViscositySolver.h"
-#include "Physics/KawaiiFluidAdhesionSolver.h"
-#include "Physics/KawaiiFluidStackPressureSolver.h"
+#include "Simulation/Physics/KawaiiFluidDensityConstraint.h"
+#include "Simulation/Physics/KawaiiFluidViscositySolver.h"
+#include "Simulation/Physics/KawaiiFluidAdhesionSolver.h"
+#include "Simulation/Physics/KawaiiFluidStackPressureSolver.h"
 #include "Collision/KawaiiFluidCollider.h"
 #include "Collision/KawaiiFluidMeshCollider.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
@@ -25,7 +25,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "PhysicsEngine/BodySetup.h"
-#include "Landscape/KawaiiFluidLandscapeHeightmapExtractor.h"
+#include "Simulation/Utils/KawaiiFluidLandscapeHeightmapExtractor.h"
 #include "LandscapeProxy.h"
 
 // Profiling

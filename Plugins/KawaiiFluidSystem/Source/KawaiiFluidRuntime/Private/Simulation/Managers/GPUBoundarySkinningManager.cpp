@@ -6,7 +6,7 @@
 #include <Simulation/Resources/GPUFluidSpatialData.h>
 
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
-#include "Simulation/GPUIndirectDispatchUtils.h"
+#include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "Components/SkeletalMeshComponent.h"

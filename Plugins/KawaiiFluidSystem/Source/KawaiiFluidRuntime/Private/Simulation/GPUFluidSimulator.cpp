@@ -2,7 +2,7 @@
 
 #include "Simulation/GPUFluidSimulator.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
-#include "Simulation/GPUIndirectDispatchUtils.h"
+#include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "Simulation/Shaders/FluidAnisotropyComputeShader.h"
 #include "Simulation/Shaders/FluidStatsCompactShader.h"
 #include "Simulation/Shaders/FluidRecordZOrderIndicesShader.h"

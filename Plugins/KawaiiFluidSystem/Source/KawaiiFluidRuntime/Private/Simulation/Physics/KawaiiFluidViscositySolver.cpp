@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Physics/KawaiiFluidViscositySolver.h"
-#include "Physics/KawaiiFluidSPHKernels.h"
+#include "Simulation/Physics/KawaiiFluidViscositySolver.h"
+#include "Simulation/Physics/KawaiiFluidSPHKernels.h"
 #include "Async/ParallelFor.h"
 
 /** Constants for unit conversion within the viscosity solver */
