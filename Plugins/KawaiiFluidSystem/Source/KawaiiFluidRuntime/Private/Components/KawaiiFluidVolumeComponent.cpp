@@ -6,7 +6,7 @@
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "Actors/KawaiiFluidVolume.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
 #include "UObject/ConstructorHelpers.h"
@@ -190,7 +190,7 @@ void UKawaiiFluidVolumeComponent::PostEditChangeProperty(FPropertyChangedEvent& 
 		{
 			if (UKawaiiFluidRenderingModule* RenderingMod = Volume->GetRenderingModule())
 			{
-				if (UKawaiiFluidMetaballRenderer* MR = RenderingMod->GetMetaballRenderer()) MR->SetPreset(Preset);
+				if (UKawaiiFluidRenderer* MR = RenderingMod->GetMetaballRenderer()) MR->SetPreset(Preset);
 			}
 		}
 	}

@@ -541,7 +541,7 @@ IMPLEMENT_GLOBAL_SHADER(FFluidThicknessUpsampleCS,
  * @param GrazingBoost Threshold boost factor for steep viewing angles.
  * @param DistanceBasedParams Settings for depth-adaptive blur radius.
  */
-void RenderKawaiiFluidNarrowRangeSmoothingPass(
+void KawaiiFluidRenderer::RenderNarrowRangeSmoothingPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	FRDGTextureRef InputDepthTexture,
@@ -827,7 +827,7 @@ void RenderKawaiiFluidNarrowRangeSmoothingPass(
  * @param NumIterations Number of blur passes.
  * @param bUseHalfRes Optimization flag to perform blurring at half resolution.
  */
-void RenderKawaiiFluidThicknessSmoothingPass(
+void KawaiiFluidRenderer::RenderThicknessSmoothingPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	FRDGTextureRef InputThicknessTexture,
@@ -1041,7 +1041,7 @@ void RenderKawaiiFluidThicknessSmoothingPass(
  * @param BlurRadius Blur kernel radius in pixels
  * @param NumIterations Number of blur iterations (1-5)
  */
-void RenderKawaiiFluidVelocitySmoothingPass(
+void KawaiiFluidRenderer::RenderVelocitySmoothingPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	FRDGTextureRef InputVelocityTexture,

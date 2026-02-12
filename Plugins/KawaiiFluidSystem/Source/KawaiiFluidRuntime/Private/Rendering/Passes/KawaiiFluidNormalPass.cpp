@@ -50,7 +50,7 @@ IMPLEMENT_GLOBAL_SHADER(FFluidNormalCS, "/Plugin/KawaiiFluidSystem/Private/Fluid
  * @param SmoothedDepthTexture Fluid depth texture after bilateral filtering.
  * @param OutNormalTexture Output world-space normal texture (RGBA16F).
  */
-void RenderKawaiiFluidNormalPass(
+void KawaiiFluidRenderer::RenderNormalPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	FRDGTextureRef SmoothedDepthTexture,

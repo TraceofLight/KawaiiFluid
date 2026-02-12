@@ -8,8 +8,8 @@
 #include "Core/KawaiiFluidSimulationContext.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
-#include "Rendering/KawaiiFluidISMRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
+#include "Rendering/KawaiiFluidProxyRenderer.h"
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
 #include "GPU/GPUFluidSimulator.h"
 #include "Core/KawaiiFluidSimulationStats.h"
@@ -202,8 +202,8 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 
 	if (bRenderingReady || bEditorRenderingReady)
 	{
-		UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer();
-		UKawaiiFluidMetaballRenderer* MetaballRenderer = RenderingModule->GetMetaballRenderer();
+		UKawaiiFluidProxyRenderer* ISMRenderer = RenderingModule->GetISMRenderer();
+		UKawaiiFluidRenderer* MetaballRenderer = RenderingModule->GetMetaballRenderer();
 
 		const EKawaiiFluidDebugDrawMode CurrentMode = VolumeComponent->DebugDrawMode;
 		const bool bISMMode = (CurrentMode == EKawaiiFluidDebugDrawMode::ISM);
@@ -909,7 +909,7 @@ void AKawaiiFluidVolume::InitializeRendering()
 	RenderingModule->Initialize(World, VolumeComponent, SimulationModule, Preset);
 
 	// Configure ISMRenderer based on initial DebugDrawMode (like KawaiiFluidComponent)
-	if (UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
+	if (UKawaiiFluidProxyRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
 	{
 		const bool bISMMode = (VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM);
 		ISMRenderer->SetEnabled(bISMMode);
@@ -922,7 +922,7 @@ void AKawaiiFluidVolume::InitializeRendering()
 
 	// Configure MetaballRenderer based on preset's RenderingParameters
 	// Metaball is disabled when ISM or DebugDraw mode is active (mutual exclusion)
-	if (UKawaiiFluidMetaballRenderer* MetaballRenderer = RenderingModule->GetMetaballRenderer())
+	if (UKawaiiFluidRenderer* MetaballRenderer = RenderingModule->GetMetaballRenderer())
 	{
 		const bool bISMMode = (VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::ISM);
 		const bool bPointDebugMode = IsPointDebugMode(VolumeComponent->DebugDrawMode);
@@ -999,7 +999,7 @@ void AKawaiiFluidVolume::InitializeEditorRendering()
 	const bool bISMMode = (CurrentMode == EKawaiiFluidDebugDrawMode::ISM);
 	const bool bPointDebugMode = IsPointDebugMode(CurrentMode);
 
-	if (UKawaiiFluidISMRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
+	if (UKawaiiFluidProxyRenderer* ISMRenderer = RenderingModule->GetISMRenderer())
 	{
 		ISMRenderer->SetEnabled(bISMMode);
 		if (bISMMode)
@@ -1011,7 +1011,7 @@ void AKawaiiFluidVolume::InitializeEditorRendering()
 	}
 
 	// Metaball is enabled when Actor is visible AND not in ISM/DebugDraw mode
-	if (UKawaiiFluidMetaballRenderer* MetaballRenderer = RenderingModule->GetMetaballRenderer())
+	if (UKawaiiFluidRenderer* MetaballRenderer = RenderingModule->GetMetaballRenderer())
 	{
 		const bool bIsActorVisible = !IsHidden();
 		const bool bEnableMetaball = bIsActorVisible && !bISMMode && !bPointDebugMode;

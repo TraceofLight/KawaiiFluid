@@ -10,12 +10,12 @@
 #include "Rendering/Parameters/KawaiiFluidRenderingParameters.h"
 #include "Core/KawaiiFluidAnisotropy.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
-#include "KawaiiFluidMetaballRenderer.generated.h"
+#include "KawaiiFluidRenderer.generated.h"
 
 class IKawaiiFluidDataProvider;
 class UKawaiiFluidRendererSubsystem;
 class FKawaiiFluidRenderResource;
-class IKawaiiMetaballRenderingPipeline;
+class IKawaiiFluidRenderingPipeline;
 class FGPUFluidSimulator;
 class UKawaiiFluidSimulationContext;
 
@@ -118,10 +118,8 @@ struct KAWAIIFLUIDRUNTIME_API FKawaiiFluidMetaballRendererSettings
 	float ThicknessScale = 1.0f;
 };
 
-using FKawaiiFluidSSFRRendererSettings = FKawaiiFluidMetaballRendererSettings;
-
 /**
- * @class UKawaiiFluidMetaballRenderer
+ * @class UKawaiiFluidRenderer
  * @brief Renderer that computes high-quality fluid surfaces using screen-space reconstruction.
  * 
  * Implements the SSFR pipeline including bilateral filtering, normal reconstruction, and volumetric 
@@ -144,12 +142,12 @@ using FKawaiiFluidSSFRRendererSettings = FKawaiiFluidMetaballRendererSettings;
  * @param CachedPreset Reference to the source data asset.
  */
 UCLASS()
-class KAWAIIFLUIDRUNTIME_API UKawaiiFluidMetaballRenderer : public UObject
+class KAWAIIFLUIDRUNTIME_API UKawaiiFluidRenderer : public UObject
 {
 	GENERATED_BODY()
 
 public:
-	UKawaiiFluidMetaballRenderer();
+	UKawaiiFluidRenderer();
 
 	void Initialize(UWorld* InWorld, USceneComponent* InOwnerComponent, UKawaiiFluidPresetDataAsset* InPreset);
 
@@ -177,7 +175,7 @@ public:
 		return CachedPreset->RenderingParameters;
 	}
 
-	TSharedPtr<IKawaiiMetaballRenderingPipeline> GetPipeline() const { return Pipeline; }
+	TSharedPtr<IKawaiiFluidRenderingPipeline> GetPipeline() const { return Pipeline; }
 	
 	FVector GetSpawnPositionHint() const { return CachedOwnerComponent ? CachedOwnerComponent->GetComponentLocation() : FVector::ZeroVector; }
 
@@ -196,12 +194,6 @@ public:
 	bool bUseSimulationRadius = false;
 
 	bool bRenderSurfaceOnly = false;
-
-	//========================================
-	// DEPRECATED State
-	//========================================
-
-	FKawaiiFluidRenderingParameters LocalParameters;
 
 	//========================================
 	// Performance Options
@@ -245,7 +237,7 @@ private:
 	// Pipeline Architecture
 	//========================================
 
-	TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline;
+	TSharedPtr<IKawaiiFluidRenderingPipeline> Pipeline;
 
 	//========================================
 	// Preset Reference

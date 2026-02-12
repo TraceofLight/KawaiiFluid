@@ -8,8 +8,8 @@
 #include "Core/KawaiiFluidRenderParticle.h"
 #include "KawaiiFluidRenderingModule.generated.h"
 
-class UKawaiiFluidISMRenderer;
-class UKawaiiFluidMetaballRenderer;
+class UKawaiiFluidProxyRenderer;
+class UKawaiiFluidRenderer;
 class UKawaiiFluidPresetDataAsset;
 
 /**
@@ -48,12 +48,12 @@ public:
 	bool IsInitialized() const { return CachedWorld != nullptr && DataProviderPtr != nullptr; }
 
 	UFUNCTION(BlueprintPure, Category = "Rendering")
-	UKawaiiFluidISMRenderer* GetISMRenderer() const { return ISMRenderer; }
+	UKawaiiFluidProxyRenderer* GetISMRenderer() const { return ISMRenderer; }
 
 	UFUNCTION(BlueprintPure, Category = "Rendering")
-	UKawaiiFluidMetaballRenderer* GetMetaballRenderer() const { return MetaballRenderer; }
+	UKawaiiFluidRenderer* GetMetaballRenderer() const { return MetaballRenderer; }
 
-	UKawaiiFluidMetaballRenderer* GetSSFRRenderer() const { return MetaballRenderer; }
+	UKawaiiFluidRenderer* GetSSFRRenderer() const { return MetaballRenderer; }
 
 protected:
 	UPROPERTY()
@@ -65,10 +65,10 @@ protected:
 	IKawaiiFluidDataProvider* DataProviderPtr;
 
 	UPROPERTY()
-	TObjectPtr<UKawaiiFluidISMRenderer> ISMRenderer;
+	TObjectPtr<UKawaiiFluidProxyRenderer> ISMRenderer;
 
 	UPROPERTY()
-	TObjectPtr<UKawaiiFluidMetaballRenderer> MetaballRenderer;
+	TObjectPtr<UKawaiiFluidRenderer> MetaballRenderer;
 
 	TArray<FKawaiiFluidRenderParticle> RenderParticlesCache;
 };

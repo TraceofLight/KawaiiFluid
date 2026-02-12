@@ -5,18 +5,18 @@
 #include "CoreMinimal.h"
 #include "UObject/Object.h"
 #include "Components/InstancedStaticMeshComponent.h"
-#include "KawaiiFluidISMRenderer.generated.h"
+#include "KawaiiFluidProxyRenderer.generated.h"
 
 class IKawaiiFluidDataProvider;
 
 /**
- * @class UKawaiiFluidISMRenderer
- * @brief Renderer that represents fluid particles as instances of a static mesh for high performance.
+ * @class UKawaiiFluidProxyRenderer
+ * @brief Lightweight renderer that represents fluid particles as static mesh instances for debugging or shadow proxies.
  * 
- * Each particle is rendered as a mesh instance using GPU instancing, supporting velocity-based 
- * colors and rotations.
+ * Each particle is rendered as an efficient mesh instance using GPU instancing (ISM), supporting 
+ * velocity-based colors, rotations, and shadow casting for the fluid volume.
  * 
- * @param bEnabled Toggle for the ISM debug renderer.
+ * @param bEnabled Toggle for the Proxy renderer.
  * @param CullDistance Distance at which instances are no longer rendered (cm).
  * @param bCastShadow Whether the particle instances should cast shadows.
  * @param bRotateByVelocity Orient instances toward their velocity vector.
@@ -26,16 +26,16 @@ class IKawaiiFluidDataProvider;
  * @param MaxVelocityForColor Normalization value for the velocity-to-color mapping.
  * @param ISMComponent The internal component managing the static mesh instances.
  * @param CachedWorld Cached pointer to the world context.
- * @param CachedOwnerComponent Component to which the ISM is attached.
+ * @param CachedOwnerComponent Component to which the internal instances are attached.
  * @param CachedPreset The data asset containing fluid physical properties.
  */
 UCLASS()
-class KAWAIIFLUIDRUNTIME_API UKawaiiFluidISMRenderer : public UObject
+class KAWAIIFLUIDRUNTIME_API UKawaiiFluidProxyRenderer : public UObject
 {
 	GENERATED_BODY()
 
 public:
-	UKawaiiFluidISMRenderer();
+	UKawaiiFluidProxyRenderer();
 
 	void Initialize(UWorld* InWorld, USceneComponent* InOwnerComponent, class UKawaiiFluidPresetDataAsset* InPreset);
 

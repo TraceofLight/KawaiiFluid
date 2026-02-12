@@ -4,7 +4,7 @@
 #include "Rendering/Shaders/KawaiiFluidDepthShaders.h"
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "GPU/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -47,10 +47,10 @@ static FRDGBufferSRVRef GetOrCreateDummyVelocitySRV(FRDGBuilder& GraphBuilder)
 /**
  * @brief Fluid Depth rendering pass (Batched path).
  */
-void RenderKawaiiFluidDepthPass(
+void KawaiiFluidRenderer::RenderKawaiiFluidDepthPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+	const TArray<UKawaiiFluidRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef& OutLinearDepthTexture,
 	FRDGTextureRef& OutVelocityTexture,
@@ -142,7 +142,7 @@ void RenderKawaiiFluidDepthPass(
 	TSet<FKawaiiFluidRenderResource*> ProcessedResources;
 
 	// Render each renderer's particles (batch-specific only)
-	for (UKawaiiFluidMetaballRenderer* Renderer : Renderers)
+	for (UKawaiiFluidRenderer* Renderer : Renderers)
 	{
 		if (!Renderer) continue;
 

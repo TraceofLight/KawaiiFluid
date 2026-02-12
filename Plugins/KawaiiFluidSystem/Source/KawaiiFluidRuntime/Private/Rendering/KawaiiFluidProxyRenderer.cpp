@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/KawaiiFluidISMRenderer.h"
+#include "Rendering/KawaiiFluidProxyRenderer.h"
 #include "Interfaces/IKawaiiFluidDataProvider.h"
 #include "Core/KawaiiFluidParticle.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
@@ -8,19 +8,19 @@
 #include "GPU/GPUFluidSimulator.h"
 #include "Engine/StaticMesh.h"
 
-UKawaiiFluidISMRenderer::UKawaiiFluidISMRenderer()
+UKawaiiFluidProxyRenderer::UKawaiiFluidProxyRenderer()
 {
 	// No component tick needed - UObject doesn't tick
 }
 
 /**
- * @brief Initialize the ISM renderer with world context, owner, and physical preset.
+ * @brief Initialize the Proxy renderer with world context, owner, and physical preset.
  * 
  * @param InWorld World context for accessing subsystems.
- * @param InOwnerComponent Parent component for attaching the internal ISM.
+ * @param InOwnerComponent Parent component for attaching the internal instances.
  * @param InPreset Physical property asset.
  */
-void UKawaiiFluidISMRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwnerComponent, UKawaiiFluidPresetDataAsset* InPreset)
+void UKawaiiFluidProxyRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwnerComponent, UKawaiiFluidPresetDataAsset* InPreset)
 {
 	CachedWorld = InWorld;
 	CachedOwnerComponent = InOwnerComponent;
@@ -28,26 +28,26 @@ void UKawaiiFluidISMRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwn
 
 	if (!CachedWorld)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidISMRenderer::Initialize - No world context provided"));
+		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer::Initialize - No world context provided"));
 	}
 
 	if (!CachedOwnerComponent)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidISMRenderer::Initialize - No owner component provided"));
+		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer::Initialize - No owner component provided"));
 	}
 
 	if (!CachedPreset)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidISMRenderer::Initialize - No preset provided"));
+		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer::Initialize - No preset provided"));
 	}
 
 	InitializeISM();
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidISMRenderer: Initialized (Mesh: %s)"),
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidProxyRenderer: Initialized (Mesh: %s)"),
 		ISMComponent && ISMComponent->GetStaticMesh() ? *ISMComponent->GetStaticMesh()->GetName() : TEXT("None"));
 }
 
-void UKawaiiFluidISMRenderer::Cleanup()
+void UKawaiiFluidProxyRenderer::Cleanup()
 {
 	if (ISMComponent)
 	{
@@ -63,7 +63,7 @@ void UKawaiiFluidISMRenderer::Cleanup()
 	// Note: Do NOT reset bEnabled here - it's controlled by Component's bEnableISMDebugView
 }
 
-void UKawaiiFluidISMRenderer::SetEnabled(bool bInEnabled)
+void UKawaiiFluidProxyRenderer::SetEnabled(bool bInEnabled)
 {
 	bEnabled = bInEnabled;
 
@@ -76,14 +76,14 @@ void UKawaiiFluidISMRenderer::SetEnabled(bool bInEnabled)
 }
 
 /**
- * @brief Synchronizes ISM instance transforms with current particle data from the provider.
+ * @brief Synchronizes Proxy instance transforms with current particle data from the provider.
  * 
  * Handles both CPU and GPU simulation modes by reading back positions and velocities.
  * 
  * @param DataProvider Source of particle simulation data.
  * @param DeltaTime Current frame's time step.
  */
-void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime)
+void UKawaiiFluidProxyRenderer::UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime)
 {
 	static int32 UpdateLogCounter = 0;
 	const bool bShouldLog = (UpdateLogCounter++ % 120 == 0);
@@ -95,13 +95,13 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 
 	if (!ISMComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ISMRenderer::UpdateRendering - ISMComponent is NULL!"));
+		UE_LOG(LogTemp, Error, TEXT("ProxyRenderer::UpdateRendering - ISMComponent is NULL!"));
 		return;
 	}
 
 	if (!DataProvider)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ISMRenderer::UpdateRendering - DataProvider is NULL!"));
+		UE_LOG(LogTemp, Error, TEXT("ProxyRenderer::UpdateRendering - DataProvider is NULL!"));
 		return;
 	}
 
@@ -115,12 +115,12 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 		FGPUFluidSimulator* Simulator = DataProvider->GetGPUSimulator();
 		if (Simulator)
 		{
-			// Enable velocity readback for ISM rendering
+			// Enable velocity readback for Proxy rendering
 			Simulator->SetFullReadbackEnabled(true);
 
 			if (!Simulator->GetParticlePositionsAndVelocities(Positions, Velocities))
 			{
-				// Readback not available: clear only once when particle count is confirmed zero
+				// Readback not available: clear instances when particle count is confirmed zero
 				if (Simulator->GetParticleCount() <= 0 && ISMComponent->GetInstanceCount() > 0)
 				{
 					ISMComponent->ClearInstances();
@@ -155,7 +155,7 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 
 	if (bShouldLog)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("=== ISM Debug: Particles=%d, Registered=%d, Visible=%d, Mesh=%s, Material=%s, InstanceCount=%d ==="),
+		UE_LOG(LogTemp, Warning, TEXT("=== Proxy Debug: Particles=%d, Registered=%d, Visible=%d, Mesh=%s, Material=%s, InstanceCount=%d ==="),
 			Positions.Num(),
 			ISMComponent->IsRegistered() ? 1 : 0,
 			ISMComponent->IsVisible() ? 1 : 0,
@@ -164,7 +164,7 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 			ISMComponent->GetInstanceCount());
 	}
 
-	// Use all particles without limit
+	// Use all particles without limit for the debug/proxy view
 	const int32 NumInstances = Positions.Num();
 
 	// Clear existing instances and preallocate memory
@@ -185,7 +185,7 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 	// Check if velocities available
 	const bool bHasVelocities = Velocities.Num() == Positions.Num();
 
-	// Add each particle as instance
+	// Add each particle as an instance
 	int32 InstanceIndex = 0;
 	for (int32 i = 0; i < NumInstances; ++i)
 	{
@@ -211,7 +211,7 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 			InstanceTransform.SetRotation(Rotation.Quaternion());
 		}
 
-		// Add instance (use local space - SetAbsolute makes local=world)
+		// Add instance to the ISM component
 		ISMComponent->AddInstance(InstanceTransform, false);
 
 		// Velocity-based color (optional)
@@ -231,39 +231,39 @@ void UKawaiiFluidISMRenderer::UpdateRendering(const IKawaiiFluidDataProvider* Da
 		++InstanceIndex;
 	}
 
-	// Update bounds and render state - essential for Virtual Shadow Maps (VSM) and Cascaded Shadow coverage
+	// Update bounds and render state - essential for Virtual Shadow Maps (VSM) and Cascaded Shadows
 	ISMComponent->UpdateBounds();
 	ISMComponent->MarkRenderStateDirty();
 }
 
-void UKawaiiFluidISMRenderer::InitializeISM()
+void UKawaiiFluidProxyRenderer::InitializeISM()
 {
 	if (!CachedOwnerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidISMRenderer: No owner component"));
+		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: No owner component"));
 		return;
 	}
 
-	// Create ISM component on owner component
+	// Create internal ISM component on the owner component
 	ISMComponent = NewObject<UInstancedStaticMeshComponent>(
 		CachedOwnerComponent,
 		UInstancedStaticMeshComponent::StaticClass(),
-		TEXT("FluidISM_Internal")
+		TEXT("FluidProxyISM_Internal")
 	);
 
 	if (!ISMComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidISMRenderer: Failed to create ISM component"));
+		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: Failed to create ISM component"));
 		return;
 	}
 
-	// Component setup - Attach directly to FluidComponent (stable hierarchy)
+	// Component setup - Attach to FluidComponent for stable hierarchy
 	ISMComponent->SetupAttachment(CachedOwnerComponent);
 
-	// Use absolute coordinates (same as DummyComponent)
+	// Use absolute coordinates for simpler world-space mapping
 	ISMComponent->SetAbsolute(true, true, true);
 
-	// Mesh setup - MUST be done before RegisterComponent()
+	// Mesh setup - Default sphere for particle visualization
 	UStaticMesh* DefaultMesh = GetDefaultParticleMesh();
 	if (DefaultMesh)
 	{
@@ -271,11 +271,11 @@ void UKawaiiFluidISMRenderer::InitializeISM()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidISMRenderer: Failed to load default sphere mesh"));
+		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: Failed to load default sphere mesh"));
 		return;
 	}
 
-	// Material setup - MUST be done before RegisterComponent()
+	// Material setup
 	UMaterialInterface* DefaultMaterial = GetDefaultParticleMaterial();
 	if (DefaultMaterial)
 	{
@@ -283,36 +283,36 @@ void UKawaiiFluidISMRenderer::InitializeISM()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidISMRenderer: Failed to load default material"));
+		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer: Failed to load default material"));
 	}
 
-	// Set properties before registration
+	// Performance and visibility properties
 	ISMComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	ISMComponent->SetCastShadow(bCastShadow);
-	ISMComponent->bCastShadowAsTwoSided = true; // Improve shadow stability for small spheres
+	ISMComponent->bCastShadowAsTwoSided = true; // Improve shadow stability for small particles
 	ISMComponent->SetCullDistances(0, CullDistance);
 	ISMComponent->SetVisibility(true);
 	ISMComponent->SetHiddenInGame(false);
 
-	// Register component AFTER all setup is done
+	// Register component with the world
 	ISMComponent->RegisterComponent();
 
 	if (!ISMComponent->IsRegistered())
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidISMRenderer: RegisterComponent() failed!"));
+		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: RegisterComponent() failed!"));
 		return;
 	}
 
-	// Custom data setup (for color variation)
+	// Custom data setup (e.g., for color variation based on velocity)
 	if (bColorByVelocity)
 	{
 		ISMComponent->NumCustomDataFloats = 4; // RGBA
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidISMRenderer: ISM component initialized"));
+	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidProxyRenderer: Internal ISM component initialized"));
 }
 
-UStaticMesh* UKawaiiFluidISMRenderer::GetDefaultParticleMesh()
+UStaticMesh* UKawaiiFluidProxyRenderer::GetDefaultParticleMesh()
 {
 	// Load engine default sphere mesh
 	UStaticMesh* SphereMesh = LoadObject<UStaticMesh>(
@@ -328,7 +328,7 @@ UStaticMesh* UKawaiiFluidISMRenderer::GetDefaultParticleMesh()
 	return SphereMesh;
 }
 
-UMaterialInterface* UKawaiiFluidISMRenderer::GetDefaultParticleMaterial()
+UMaterialInterface* UKawaiiFluidProxyRenderer::GetDefaultParticleMaterial()
 {
 	// Load engine default material
 	UMaterialInterface* DefaultMaterial = LoadObject<UMaterialInterface>(
@@ -344,7 +344,7 @@ UMaterialInterface* UKawaiiFluidISMRenderer::GetDefaultParticleMaterial()
 	return DefaultMaterial;
 }
 
-void UKawaiiFluidISMRenderer::SetFluidColor(FLinearColor Color)
+void UKawaiiFluidProxyRenderer::SetFluidColor(FLinearColor Color)
 {
 	if (!ISMComponent)
 	{

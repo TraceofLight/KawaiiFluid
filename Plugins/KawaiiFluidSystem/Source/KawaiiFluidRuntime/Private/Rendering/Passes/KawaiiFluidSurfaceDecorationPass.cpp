@@ -202,7 +202,7 @@ static FRHITexture* GetTextureRHIOrDefault(UTexture2D* Texture, FRHITexture* Def
  * @param OutputViewRect Screen rectangle for rendering.
  * @param OutDecoratedTexture Output: Final texture with all surface decorations applied.
  */
-void RenderKawaiiFluidSurfaceDecorationPass(
+void KawaiiFluidRenderer::RenderSurfaceDecorationPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FSurfaceDecorationParams& Params,

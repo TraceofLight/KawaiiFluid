@@ -7,11 +7,14 @@
 
 class FSceneView;
 
-/**
- * @brief Reconstructs world-space normals from the smoothed depth buffer.
- */
-void RenderKawaiiFluidNormalPass(
-	FRDGBuilder& GraphBuilder,
-	const FSceneView& View,
-	FRDGTextureRef SmoothedDepthTexture,
-	FRDGTextureRef& OutNormalTexture);
+namespace KawaiiFluidRenderer
+{
+	/**
+	 * @brief Reconstructs world-space normals from the smoothed depth buffer.
+	 */
+	void RenderNormalPass(
+		FRDGBuilder& GraphBuilder,
+		const FSceneView& View,
+		FRDGTextureRef SmoothedDepthTexture,
+		FRDGTextureRef& OutNormalTexture);
+}

@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "Interfaces/IKawaiiFluidDataProvider.h"
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
@@ -15,7 +15,7 @@
 #include "Rendering/Pipeline/IKawaiiFluidRenderingPipeline.h"
 #include "Rendering/Pipeline/KawaiiFluidScreenSpacePipeline.h"
 
-UKawaiiFluidMetaballRenderer::UKawaiiFluidMetaballRenderer()
+UKawaiiFluidRenderer::UKawaiiFluidRenderer()
 {
 	// No component tick needed - UObject doesn't tick
 }
@@ -27,7 +27,7 @@ UKawaiiFluidMetaballRenderer::UKawaiiFluidMetaballRenderer()
  * @param InOwnerComponent Parent component reference.
  * @param InPreset Rendering property asset.
  */
-void UKawaiiFluidMetaballRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwnerComponent, UKawaiiFluidPresetDataAsset* InPreset)
+void UKawaiiFluidRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwnerComponent, UKawaiiFluidPresetDataAsset* InPreset)
 {
 	CachedWorld = InWorld;
 	CachedOwnerComponent = InOwnerComponent;
@@ -65,7 +65,7 @@ void UKawaiiFluidMetaballRenderer::Initialize(UWorld* InWorld, USceneComponent* 
 		MaxRenderParticles);
 }
 
-void UKawaiiFluidMetaballRenderer::Cleanup()
+void UKawaiiFluidRenderer::Cleanup()
 {
 	// Clear context reference - Context owns the RenderResource
 	CachedSimulationContext.Reset();
@@ -83,7 +83,7 @@ void UKawaiiFluidMetaballRenderer::Cleanup()
 	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Cleanup completed"));
 }
 
-void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRendererSettings& Settings)
+void UKawaiiFluidRenderer::ApplySettings(const FKawaiiFluidMetaballRendererSettings& Settings)
 {
 	bEnabled = Settings.bEnabled;
 	bUseSimulationRadius = Settings.bUseSimulationRadius;
@@ -95,36 +95,19 @@ void UKawaiiFluidMetaballRenderer::ApplySettings(const FKawaiiFluidMetaballRende
 		bIsRenderingActive = false;
 	}
 
-	// Map settings to LocalParameters
-	LocalParameters.FluidColor = Settings.FluidColor;
-	LocalParameters.FresnelStrength = Settings.FresnelStrength;
-	LocalParameters.RefractiveIndex = Settings.RefractiveIndex;
-	LocalParameters.AbsorptionStrength = Settings.AbsorptionStrength;
-	LocalParameters.SpecularStrength = Settings.SpecularStrength;
-	LocalParameters.SpecularRoughness = Settings.SpecularRoughness;
-	LocalParameters.ParticleRenderRadius = Settings.ParticleRenderRadius;
-	LocalParameters.SmoothingWorldScale = Settings.SmoothingWorldScale;
-	LocalParameters.SmoothingMinRadius = Settings.SmoothingMinRadius;
-	LocalParameters.SmoothingMaxRadius = Settings.SmoothingMaxRadius;
-	LocalParameters.ThicknessScale = Settings.ThicknessScale;
-
-	// Anisotropy parameters
-	LocalParameters.AnisotropyParams = Settings.AnisotropyParams;
-
 	// MaxRenderParticles stays as member variable (not in LocalParameters)
 	MaxRenderParticles = Settings.MaxRenderParticles;
 
 	// Update Pipeline (ShadingMode is handled internally by Pipeline)
 	UpdatePipeline();
 
-	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Applied settings (Enabled: %s, UseSimRadius: %s, Color: %s, MaxParticles: %d)"),
+	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Applied settings (Enabled: %s, UseSimRadius: %s, MaxParticles: %d)"),
 		bEnabled ? TEXT("true") : TEXT("false"),
 		bUseSimulationRadius ? TEXT("true") : TEXT("false"),
-		*LocalParameters.FluidColor.ToString(),
 		MaxRenderParticles);
 }
 
-void UKawaiiFluidMetaballRenderer::SetEnabled(bool bInEnabled)
+void UKawaiiFluidRenderer::SetEnabled(bool bInEnabled)
 {
 	bEnabled = bInEnabled;
 
@@ -143,7 +126,7 @@ void UKawaiiFluidMetaballRenderer::SetEnabled(bool bInEnabled)
  * @param DataProvider Source of simulation particle data.
  * @param DeltaTime Frame time step.
  */
-void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime)
+void UKawaiiFluidRenderer::UpdateRendering(const IKawaiiFluidDataProvider* DataProvider, float DeltaTime)
 {
 	
 	
@@ -210,7 +193,7 @@ void UKawaiiFluidMetaballRenderer::UpdateRendering(const IKawaiiFluidDataProvide
 	// }
 }
 
-FKawaiiFluidRenderResource* UKawaiiFluidMetaballRenderer::GetFluidRenderResource() const
+FKawaiiFluidRenderResource* UKawaiiFluidRenderer::GetFluidRenderResource() const
 {
 	if (CachedSimulationContext.IsValid())
 	{
@@ -219,7 +202,7 @@ FKawaiiFluidRenderResource* UKawaiiFluidMetaballRenderer::GetFluidRenderResource
 	return nullptr;
 }
 
-void UKawaiiFluidMetaballRenderer::SetSimulationContext(UKawaiiFluidSimulationContext* InContext)
+void UKawaiiFluidRenderer::SetSimulationContext(UKawaiiFluidSimulationContext* InContext)
 {
 	CachedSimulationContext = InContext;
 
@@ -227,12 +210,12 @@ void UKawaiiFluidMetaballRenderer::SetSimulationContext(UKawaiiFluidSimulationCo
 		InContext ? TEXT("Set") : TEXT("Cleared"));
 }
 
-bool UKawaiiFluidMetaballRenderer::IsRenderingActive() const
+bool UKawaiiFluidRenderer::IsRenderingActive() const
 {
 	return bIsRenderingActive && CachedSimulationContext.IsValid() && CachedSimulationContext->HasValidRenderResource();
 }
 
-void UKawaiiFluidMetaballRenderer::UpdatePipeline()
+void UKawaiiFluidRenderer::UpdatePipeline()
 {
 	// Create Pipeline if needed
 	if (!Pipeline)
@@ -242,7 +225,7 @@ void UKawaiiFluidMetaballRenderer::UpdatePipeline()
 	}
 }
 
-void UKawaiiFluidMetaballRenderer::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
+void UKawaiiFluidRenderer::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
 {
 	CachedPreset = InPreset;
 

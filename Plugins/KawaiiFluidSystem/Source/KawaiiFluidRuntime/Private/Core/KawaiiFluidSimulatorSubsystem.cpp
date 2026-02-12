@@ -8,7 +8,7 @@
 #include "Actors/KawaiiFluidVolume.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Collision/KawaiiFluidCollider.h"
@@ -245,7 +245,7 @@ void UKawaiiFluidSimulatorSubsystem::RegisterModule(UKawaiiFluidSimulationModule
 				{
 					if (UKawaiiFluidRenderingModule* RenderingMod = OwnerVolume->GetRenderingModule())
 					{
-						if (UKawaiiFluidMetaballRenderer* MR = RenderingMod->GetMetaballRenderer())
+						if (UKawaiiFluidRenderer* MR = RenderingMod->GetMetaballRenderer())
 						{
 							MR->SetSimulationContext(Context);
 						}

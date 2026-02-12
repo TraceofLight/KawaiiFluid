@@ -4,7 +4,7 @@
 #include "Rendering/Shaders/KawaiiFluidThicknessShaders.h"
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "GPU/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -23,10 +23,10 @@
 /**
  * @brief Fluid Thickness rendering pass (Batched path).
  */
-void RenderKawaiiFluidThicknessPass(
+void KawaiiFluidRenderer::RenderThicknessPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
-	const TArray<UKawaiiFluidMetaballRenderer*>& Renderers,
+	const TArray<UKawaiiFluidRenderer*>& Renderers,
 	FRDGTextureRef SceneDepthTexture,
 	FRDGTextureRef& OutThicknessTexture)
 {
@@ -64,7 +64,7 @@ void RenderKawaiiFluidThicknessPass(
 	TSet<FKawaiiFluidRenderResource*> ProcessedResources;
 
 	// Render each renderer's particles (batch-specific only)
-	for (UKawaiiFluidMetaballRenderer* Renderer : Renderers)
+	for (UKawaiiFluidRenderer* Renderer : Renderers)
 	{
 		if (!Renderer) continue;
 

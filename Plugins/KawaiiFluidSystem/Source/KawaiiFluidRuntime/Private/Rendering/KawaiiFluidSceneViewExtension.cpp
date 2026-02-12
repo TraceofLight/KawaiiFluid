@@ -12,7 +12,7 @@
 #include "PostProcess/PostProcessMaterialInputs.h"
 #include "PostProcess/PostProcessing.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
-#include "Rendering/KawaiiFluidMetaballRenderer.h"
+#include "Rendering/KawaiiFluidRenderer.h"
 #include "EngineUtils.h"
 
 // New Pipeline architecture (ShadingPass removed - Pipeline handles ShadingMode internally)
@@ -154,7 +154,7 @@ void FKawaiiFluidSceneViewExtension::PreRenderViewFamily_RenderThread(
 	{
 		if (!Module) continue;
 
-		UKawaiiFluidMetaballRenderer* MetaballRenderer = Module->GetMetaballRenderer();
+		UKawaiiFluidRenderer* MetaballRenderer = Module->GetMetaballRenderer();
 		if (!MetaballRenderer || !MetaballRenderer->IsRenderingActive())
 		{
 			continue;
@@ -382,15 +382,15 @@ void FKawaiiFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	}
 
 	// Collect all renderers for PrePostProcess (before TSR)
-	TMap<FContextCacheKey, TArray<UKawaiiFluidMetaballRenderer*>> ScreenSpaceBatches;
-	TArray<UKawaiiFluidMetaballRenderer*> AllActiveRenderers;
+	TMap<FContextCacheKey, TArray<UKawaiiFluidRenderer*>> ScreenSpaceBatches;
+	TArray<UKawaiiFluidRenderer*> AllActiveRenderers;
 
 	const TArray<TObjectPtr<UKawaiiFluidRenderingModule>>& Modules = SubsystemPtr->GetAllRenderingModules();
 	for (UKawaiiFluidRenderingModule* Module : Modules)
 	{
 		if (!Module) continue;
 
-		UKawaiiFluidMetaballRenderer* MetaballRenderer = Module->GetMetaballRenderer();
+		UKawaiiFluidRenderer* MetaballRenderer = Module->GetMetaballRenderer();
 		if (MetaballRenderer && MetaballRenderer->IsRenderingActive())
 		{
 			// Get preset for batching
@@ -466,7 +466,7 @@ void FKawaiiFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	struct FSortableBatch
 	{
 		FContextCacheKey Key;
-		TArray<UKawaiiFluidMetaballRenderer*> Renderers;
+		TArray<UKawaiiFluidRenderer*> Renderers;
 		float MaxDistanceToCamera;
 	};
 
@@ -480,7 +480,7 @@ void FKawaiiFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 		NewBatch.Renderers = Pair.Value;
 
 		float MaxDist = 0.0f;
-		for (UKawaiiFluidMetaballRenderer* Renderer : NewBatch.Renderers)
+		for (UKawaiiFluidRenderer* Renderer : NewBatch.Renderers)
 		{
 			float Dist = FVector::Distance(CameraLocation, Renderer->GetSpawnPositionHint());
 			MaxDist = FMath::Max(MaxDist, Dist);
@@ -501,7 +501,7 @@ void FKawaiiFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	{
 		const FContextCacheKey& CacheKey = Batch.Key;
 		UKawaiiFluidPresetDataAsset* Preset = CacheKey.Preset;
-		const TArray<UKawaiiFluidMetaballRenderer*>& Renderers = Batch.Renderers;
+		const TArray<UKawaiiFluidRenderer*>& Renderers = Batch.Renderers;
 
 		const FKawaiiFluidRenderingParameters& BatchParams = Preset->RenderingParameters;
 
@@ -509,7 +509,7 @@ void FKawaiiFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 
 		if (Renderers.Num() > 0 && Renderers[0]->GetPipeline())
 		{
-			TSharedPtr<IKawaiiMetaballRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
+			TSharedPtr<IKawaiiFluidRenderingPipeline> Pipeline = Renderers[0]->GetPipeline();
 
 			// 1. PrepareRender - CombinedHardwareDepth is passed as REFERENCE to be updated
 			{

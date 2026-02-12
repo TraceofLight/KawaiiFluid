@@ -75,7 +75,7 @@ IMPLEMENT_GLOBAL_SHADER(FFluidFlowAccumulationCS, "/Plugin/KawaiiFluidSystem/Pri
  * @param PrevAccumulatedFlowTexture Previous frame's accumulated flow (nullptr for first frame).
  * @param OutAccumulatedFlowTexture Output accumulated flow texture (RG16F).
  */
-void RenderKawaiiFluidFlowAccumulationPass(
+void KawaiiFluidRenderer::RenderFlowAccumulationPass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FKawaiiFluidAccumulationParams& Params,
