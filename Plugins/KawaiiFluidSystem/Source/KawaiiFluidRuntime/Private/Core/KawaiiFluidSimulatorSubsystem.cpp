@@ -11,7 +11,7 @@
 #include "Rendering/KawaiiFluidRenderer.h"
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
-#include "Collision/KawaiiFluidCollider.h"
+#include "Simulation/Collision/KawaiiFluidCollider.h"
 #include "Simulation/GPUFluidSimulator.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"

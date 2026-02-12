@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Collision/KawaiiFluidCapsuleCollider.h"
+#include "Simulation/Collision/KawaiiFluidCapsuleCollider.h"
 #include "GameFramework/Actor.h"
 
 /**

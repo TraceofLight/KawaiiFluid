@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Collision/KawaiiFluidCollider.h"
+#include "Simulation/Collision/KawaiiFluidCollider.h"
 #include "KawaiiFluidSphereCollider.generated.h"
 
 /**

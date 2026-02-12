@@ -2,7 +2,7 @@
 
 #include "Simulation/Physics/KawaiiFluidAdhesionSolver.h"
 #include "Simulation/Physics/KawaiiFluidSPHKernels.h"
-#include "Collision/KawaiiFluidCollider.h"
+#include "Simulation/Collision/KawaiiFluidCollider.h"
 #include "Async/ParallelFor.h"
 #include "GameFramework/Actor.h"
 
