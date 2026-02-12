@@ -15,7 +15,6 @@ public class KawaiiFluidRuntime : ModuleRules
 			new string[] {
 				Path.Combine(ModulePath, "Public"),
 				Path.Combine(ModulePath, "Public/Core"),
-				Path.Combine(ModulePath, "Public/Collision"),
 				Path.Combine(ModulePath, "Public/Components"),
 				Path.Combine(ModulePath, "Public/Rendering"),
 				Path.Combine(ModulePath, "Public/Tests")
@@ -26,7 +25,6 @@ public class KawaiiFluidRuntime : ModuleRules
 			new string[] {
 				Path.Combine(ModulePath, "Private"),
 				Path.Combine(ModulePath, "Private/Core"),
-				Path.Combine(ModulePath, "Private/Collision"),
 				Path.Combine(ModulePath, "Private/Components"),
 				Path.Combine(ModulePath, "Private/Rendering"),
 				Path.Combine(ModulePath, "Private/Tests"),

@@ -4,7 +4,7 @@
 
 #include "KawaiiFluidSimulationContext.h"
 #include "Core/KawaiiFluidSpatialHash.h"
-#include "Collision/KawaiiFluidCollider.h"
+#include "Simulation/Collision/KawaiiFluidCollider.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Actors/KawaiiFluidVolume.h"

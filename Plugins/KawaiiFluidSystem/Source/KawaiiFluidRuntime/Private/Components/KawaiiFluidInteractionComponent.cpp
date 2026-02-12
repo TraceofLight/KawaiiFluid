@@ -3,7 +3,7 @@
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Core/KawaiiFluidPresetDataAsset.h"
-#include "Collision/KawaiiFluidMeshCollider.h"
+#include "Simulation/Collision/KawaiiFluidMeshCollider.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
