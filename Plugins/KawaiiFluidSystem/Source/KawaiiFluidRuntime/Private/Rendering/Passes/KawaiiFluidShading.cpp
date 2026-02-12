@@ -1,9 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/Shading/KawaiiFluidCompositeShading.h"
-#include "Rendering/KawaiiFluidRenderingParameters.h"
-#include "Rendering/KawaiiFluidMetaballRenderingData.h"
-#include "Rendering/KawaiiFluidCompositeShaders.h"
+#include "Rendering/Passes/KawaiiFluidShading.h"
+#include "Rendering/Parameters/KawaiiFluidRenderingParameters.h"
+#include "Rendering/Resources/KawaiiFluidMetaballRenderingData.h"
+#include "Rendering/Shaders/KawaiiFluidCompositeShaders.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphEvent.h"
 #include "SceneView.h"
@@ -27,7 +27,7 @@
  * @param SceneColorTexture Background color for refraction.
  * @param Output Final render target.
  */
-void KawaiiScreenSpaceShading::RenderPostProcessShading(
+void KawaiiFluidShading::RenderCompositePass(
 	FRDGBuilder& GraphBuilder,
 	const FSceneView& View,
 	const FKawaiiFluidRenderingParameters& RenderParams,

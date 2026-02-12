@@ -9,7 +9,7 @@
 #include "Modules/KawaiiFluidSimulationModule.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
-#include "Rendering/KawaiiFluidRenderResource.h"
+#include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Collision/KawaiiFluidCollider.h"
 #include "GPU/GPUFluidSimulator.h"

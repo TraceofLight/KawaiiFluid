@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "Engine/EngineTypes.h"
-#include "Rendering/KawaiiFluidRenderingParameters.h"
+#include "Rendering/Parameters/KawaiiFluidRenderingParameters.h"
 #include "KawaiiFluidPresetDataAsset.generated.h"
 
 class UKawaiiFluidPresetDataAsset;

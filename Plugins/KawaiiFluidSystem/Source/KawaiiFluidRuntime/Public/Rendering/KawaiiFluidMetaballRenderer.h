@@ -7,7 +7,7 @@
 #include "Components/SceneComponent.h"
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidRenderParticle.h"
-#include "Rendering/KawaiiFluidRenderingParameters.h"
+#include "Rendering/Parameters/KawaiiFluidRenderingParameters.h"
 #include "Core/KawaiiFluidAnisotropy.h"
 #include "Data/KawaiiFluidPresetDataAsset.h"
 #include "KawaiiFluidMetaballRenderer.generated.h"

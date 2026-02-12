@@ -3,7 +3,7 @@
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
 #include "Interfaces/IKawaiiFluidDataProvider.h"
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
-#include "Rendering/KawaiiFluidRenderResource.h"
+#include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Core/KawaiiFluidSimulationContext.h"
 #include "Core/KawaiiFluidRenderParticle.h"
 #include "RenderGraphResources.h"

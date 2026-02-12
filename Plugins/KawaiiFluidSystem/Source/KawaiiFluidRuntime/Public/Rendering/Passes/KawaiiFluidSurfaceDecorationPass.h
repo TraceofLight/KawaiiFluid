@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "RenderGraphDefinitions.h"
-#include "KawaiiFluidSurfaceDecoration.h"
+#include "Parameters/KawaiiFluidSurfaceDecoration.h"
 
 class FSceneView;
 

@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/KawaiiFluidSurfaceDecorationPass.h"
+#include "Rendering/Passes/KawaiiFluidSurfaceDecorationPass.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "SceneView.h"

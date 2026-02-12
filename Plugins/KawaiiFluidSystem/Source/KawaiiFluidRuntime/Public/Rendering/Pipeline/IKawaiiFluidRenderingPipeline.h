@@ -5,8 +5,8 @@
 #include "CoreMinimal.h"
 #include "RenderGraphDefinitions.h"
 #include "ScreenPass.h"
-#include "Rendering/KawaiiFluidRenderingParameters.h"
-#include "Rendering/KawaiiFluidMetaballRenderingData.h"
+#include "Rendering/Parameters/KawaiiFluidRenderingParameters.h"
+#include "Rendering/Resources/KawaiiFluidMetaballRenderingData.h"
 
 class FRDGBuilder;
 class FSceneView;

@@ -1,6 +1,6 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/KawaiiFluidRenderResource.h"
+#include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ClearQuad.h"

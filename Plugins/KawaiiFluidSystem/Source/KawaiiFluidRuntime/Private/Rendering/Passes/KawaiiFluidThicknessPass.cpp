@@ -1,8 +1,8 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/KawaiiFluidThicknessPass.h"
-#include "Rendering/KawaiiFluidThicknessShaders.h"
-#include "Rendering/KawaiiFluidRenderResource.h"
+#include "Rendering/Passes/KawaiiFluidThicknessPass.h"
+#include "Rendering/Shaders/KawaiiFluidThicknessShaders.h"
+#include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
 #include "GPU/GPUIndirectDispatchUtils.h"

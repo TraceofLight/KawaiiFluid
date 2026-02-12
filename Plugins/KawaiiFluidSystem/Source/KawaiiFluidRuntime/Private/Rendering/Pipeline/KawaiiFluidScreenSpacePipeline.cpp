@@ -2,15 +2,15 @@
 
 #include "Rendering/Pipeline/KawaiiFluidScreenSpacePipeline.h"
 #include "Rendering/KawaiiFluidMetaballRenderer.h"
-#include "Rendering/KawaiiFluidDepthPass.h"
-#include "Rendering/KawaiiFluidSmoothingPass.h"
-#include "Rendering/KawaiiFluidNormalPass.h"
-#include "Rendering/KawaiiFluidThicknessPass.h"
+#include "Rendering/Passes/KawaiiFluidDepthPass.h"
+#include "Rendering/Passes/KawaiiFluidSmoothingPass.h"
+#include "Rendering/Passes/KawaiiFluidNormalPass.h"
+#include "Rendering/Passes/KawaiiFluidThicknessPass.h"
 
 // Separated shading implementation
-#include "Rendering/Shading/KawaiiFluidCompositeShading.h"
-#include "Rendering/KawaiiFluidSurfaceDecorationPass.h"
-#include "Rendering/KawaiiFluidFlowAccumulationPass.h"
+#include "Rendering/Passes/KawaiiFluidShading.h"
+#include "Rendering/Passes/KawaiiFluidSurfaceDecorationPass.h"
+#include "Rendering/Passes/KawaiiFluidFlowAccumulationPass.h"
 
 #include "RenderGraphBuilder.h"
 #include "RenderGraphEvent.h"
@@ -360,7 +360,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 
 		// Render fluid composite to intermediate texture
 		// Use BackgroundDepthTexture (Hardware) which contains background + previous fluid info (excluding current fluid)
-		KawaiiScreenSpaceShading::RenderPostProcessShading(
+		KawaiiFluidShading::RenderCompositePass(
 			GraphBuilder,
 			View,
 			RenderParams,
@@ -392,7 +392,7 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	{
 		// Surface Decoration disabled: render directly to output (no overhead)
 		// Use BackgroundDepthTexture (Hardware) which contains background + previous fluid info (excluding current fluid)
-		KawaiiScreenSpaceShading::RenderPostProcessShading(
+		KawaiiFluidShading::RenderCompositePass(
 			GraphBuilder,
 			View,
 			RenderParams,

@@ -24,12 +24,12 @@
 #include "Data/KawaiiFluidPresetDataAsset.h"
 
 // Unified interface
-#include "Rendering/KawaiiFluidRenderResource.h"
+#include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Core/KawaiiFluidRenderParticle.h"
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidSimulatorShaders.h"
 #include "RHIGPUReadback.h"  // FRHIGPUBufferReadback for particle bounds readback
-#include "Rendering/KawaiiFluidDepthPass.h"
+#include "Rendering/Passes/KawaiiFluidDepthPass.h"
 
 // ==============================================================================
 // Class Implementation

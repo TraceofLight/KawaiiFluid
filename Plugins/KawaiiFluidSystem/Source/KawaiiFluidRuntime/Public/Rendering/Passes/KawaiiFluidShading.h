@@ -11,15 +11,15 @@ struct FMetaballIntermediateTextures;
 class FSceneView;
 
 /**
- * @namespace KawaiiScreenSpaceShading
+ * @namespace KawaiiFluidShading
  * @brief Stateless shading functions for the ScreenSpace fluid rendering pipeline.
  * 
  * Implements custom post-process shading including Blinn-Phong lighting, Fresnel reflections, 
  * and Beer's Law based absorption for volumetric fluid appearance.
  */
-namespace KawaiiScreenSpaceShading
+namespace KawaiiFluidShading
 {
-	void RenderPostProcessShading(
+	void RenderCompositePass(
 		FRDGBuilder& GraphBuilder,
 		const FSceneView& View,
 		const FKawaiiFluidRenderingParameters& RenderParams,

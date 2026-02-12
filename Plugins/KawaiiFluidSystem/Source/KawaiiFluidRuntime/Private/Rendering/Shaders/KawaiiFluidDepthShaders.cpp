@@ -1,6 +1,6 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Rendering/KawaiiFluidDepthShaders.h"
+#include "Rendering/Shaders/KawaiiFluidDepthShaders.h"
 #include "ShaderParameterUtils.h"
 #include "RenderGraphUtils.h"
 

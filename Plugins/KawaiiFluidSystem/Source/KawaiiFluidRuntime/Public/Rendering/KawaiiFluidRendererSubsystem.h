@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Tickable.h"
-#include "KawaiiFluidRenderingParameters.h"
+#include "Parameters/KawaiiFluidRenderingParameters.h"
 #include "Core/KawaiiFluidRenderingTypes.h"
 #include "KawaiiFluidRendererSubsystem.generated.h"
 

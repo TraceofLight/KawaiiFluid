@@ -19,7 +19,7 @@
 #include "RenderingThread.h"
 #include "GPU/GPUFluidSimulator.h"
 #include "GPU/GPUFluidParticle.h"
-#include "Rendering/KawaiiFluidRenderResource.h"
+#include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Engine/EngineTypes.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
