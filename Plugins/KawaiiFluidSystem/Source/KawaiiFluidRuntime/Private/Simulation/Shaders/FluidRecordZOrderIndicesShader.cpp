@@ -12,7 +12,7 @@
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FRecordZOrderIndicesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidRecordZOrderIndices.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidRecordZOrderIndices.usf",
 	"RecordZOrderIndicesCS", SF_Compute);
 
 /**

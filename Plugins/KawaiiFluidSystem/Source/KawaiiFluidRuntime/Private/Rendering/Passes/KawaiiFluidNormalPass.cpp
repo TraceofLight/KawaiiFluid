@@ -40,7 +40,7 @@ public:
 	}
 };
 
-IMPLEMENT_GLOBAL_SHADER(FFluidNormalCS, "/Plugin/KawaiiFluidSystem/Private/FluidNormal.usf",
+IMPLEMENT_GLOBAL_SHADER(FFluidNormalCS, "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidNormal.usf",
                         "ReconstructNormalCS", SF_Compute);
 
 /**

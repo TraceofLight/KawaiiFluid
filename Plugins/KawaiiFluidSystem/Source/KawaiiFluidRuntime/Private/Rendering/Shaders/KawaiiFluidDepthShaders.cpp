@@ -5,5 +5,5 @@
 #include "RenderGraphUtils.h"
 
 // Shader implementation
-IMPLEMENT_GLOBAL_SHADER(FKawaiiFluidDepthVS, "/Plugin/KawaiiFluidSystem/Private/FluidDepth.usf", "MainVS", SF_Vertex);
-IMPLEMENT_GLOBAL_SHADER(FKawaiiFluidDepthPS, "/Plugin/KawaiiFluidSystem/Private/FluidDepth.usf", "MainPS", SF_Pixel);
+IMPLEMENT_GLOBAL_SHADER(FKawaiiFluidDepthVS, "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidDepth.usf", "MainVS", SF_Vertex);
+IMPLEMENT_GLOBAL_SHADER(FKawaiiFluidDepthPS, "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidDepth.usf", "MainPS", SF_Pixel);

@@ -54,7 +54,7 @@ class FFluidFlowAccumulationCS : public FGlobalShader
 	}
 };
 
-IMPLEMENT_GLOBAL_SHADER(FFluidFlowAccumulationCS, "/Plugin/KawaiiFluidSystem/Private/FluidFlowAccumulation.usf", "FlowAccumulationCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FFluidFlowAccumulationCS, "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidFlowAccumulation.usf", "FlowAccumulationCS", SF_Compute);
 
 //=============================================================================
 // Pass Implementation

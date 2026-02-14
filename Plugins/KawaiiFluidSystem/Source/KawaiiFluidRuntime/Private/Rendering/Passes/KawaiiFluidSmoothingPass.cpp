@@ -46,7 +46,7 @@ class FFluidNarrowRangeFilterCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidNarrowRangeFilterCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "NarrowRangeFilterCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "NarrowRangeFilterCS",
                         SF_Compute);
 
 //=============================================================================
@@ -90,7 +90,7 @@ class FFluidNarrowRangeFilterLDS_CS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidNarrowRangeFilterLDS_CS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "NarrowRangeFilterLDS_CS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "NarrowRangeFilterLDS_CS",
                         SF_Compute);
 
 //=============================================================================
@@ -125,7 +125,7 @@ class FFluidNarrowRangeFilterHorizontalCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidNarrowRangeFilterHorizontalCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "NarrowRangeFilterHorizontalCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "NarrowRangeFilterHorizontalCS",
                         SF_Compute);
 
 //=============================================================================
@@ -160,7 +160,7 @@ class FFluidNarrowRangeFilterVerticalCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidNarrowRangeFilterVerticalCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "NarrowRangeFilterVerticalCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "NarrowRangeFilterVerticalCS",
                         SF_Compute);
 
 //=============================================================================
@@ -195,7 +195,7 @@ class FFluidNarrowRangeFilterDiagonal1CS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidNarrowRangeFilterDiagonal1CS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "NarrowRangeFilterDiagonal1CS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "NarrowRangeFilterDiagonal1CS",
                         SF_Compute);
 
 //=============================================================================
@@ -230,7 +230,7 @@ class FFluidNarrowRangeFilterDiagonal2CS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidNarrowRangeFilterDiagonal2CS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "NarrowRangeFilterDiagonal2CS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "NarrowRangeFilterDiagonal2CS",
                         SF_Compute);
 
 //=============================================================================
@@ -263,7 +263,7 @@ class FFluidThicknessGaussianBlurHorizontalCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidThicknessGaussianBlurHorizontalCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "ThicknessGaussianBlurHorizontalCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "ThicknessGaussianBlurHorizontalCS",
                         SF_Compute);
 
 //=============================================================================
@@ -296,7 +296,7 @@ class FFluidThicknessGaussianBlurVerticalCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidThicknessGaussianBlurVerticalCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "ThicknessGaussianBlurVerticalCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "ThicknessGaussianBlurVerticalCS",
                         SF_Compute);
 
 //=============================================================================
@@ -329,7 +329,7 @@ class FFluidDepthDownsampleCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidDepthDownsampleCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "DepthDownsampleCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "DepthDownsampleCS",
                         SF_Compute);
 
 //=============================================================================
@@ -364,7 +364,7 @@ class FFluidDepthUpsampleCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidDepthUpsampleCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "DepthUpsampleCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "DepthUpsampleCS",
                         SF_Compute);
 
 //=============================================================================
@@ -398,7 +398,7 @@ class FFluidVelocityGaussianBlurHorizontalCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidVelocityGaussianBlurHorizontalCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "VelocityGaussianBlurHorizontalCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "VelocityGaussianBlurHorizontalCS",
                         SF_Compute);
 
 //=============================================================================
@@ -431,7 +431,7 @@ class FFluidVelocityGaussianBlurVerticalCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidVelocityGaussianBlurVerticalCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "VelocityGaussianBlurVerticalCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "VelocityGaussianBlurVerticalCS",
                         SF_Compute);
 
 //=============================================================================
@@ -464,7 +464,7 @@ class FFluidThicknessDownsampleCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidThicknessDownsampleCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "ThicknessDownsampleCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "ThicknessDownsampleCS",
                         SF_Compute);
 
 //=============================================================================
@@ -497,7 +497,7 @@ class FFluidThicknessUpsampleCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidThicknessUpsampleCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSmoothing.usf", "ThicknessUpsampleCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSmoothing.usf", "ThicknessUpsampleCS",
                         SF_Compute);
 
 //=============================================================================

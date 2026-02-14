@@ -163,7 +163,7 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidSurfaceDecorationCS,
-                        "/Plugin/KawaiiFluidSystem/Private/FluidSurfaceDecoration.usf", "SurfaceDecorationCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSurfaceDecoration.usf", "SurfaceDecorationCS",
                         SF_Compute);
 
 //=============================================================================

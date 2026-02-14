@@ -11,7 +11,7 @@
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FPredictPositionsCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidPredictPositions.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidPredictPositions.usf",
 	"PredictPositionsCS", SF_Compute);
 
 /**
@@ -39,7 +39,7 @@ void FPredictPositionsCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FSolveDensityPressureCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidSolveDensityPressure.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidSolveDensityPressure.usf",
 	"SolveDensityPressureCS", SF_Compute);
 
 /**
@@ -80,7 +80,7 @@ void FSolveDensityPressureCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FParticleSleepingCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidParticleSleeping.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidParticleSleeping.usf",
 	"UpdateParticleSleepingCS", SF_Compute);
 
 /**
@@ -108,7 +108,7 @@ void FParticleSleepingCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FBoundsCollisionCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundsCollision.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Collision/FluidBoundsCollision.usf",
 	"BoundsCollisionCS", SF_Compute);
 
 /**
@@ -135,7 +135,7 @@ void FBoundsCollisionCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FHeightmapCollisionCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidHeightmapCollision.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Collision/FluidHeightmapCollision.usf",
 	"HeightmapCollisionCS", SF_Compute);
 
 /**
@@ -162,7 +162,7 @@ void FHeightmapCollisionCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FPrimitiveCollisionCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidPrimitiveCollision.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Collision/FluidPrimitiveCollision.usf",
 	"PrimitiveCollisionCS", SF_Compute);
 
 /**
@@ -189,7 +189,7 @@ void FPrimitiveCollisionCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FFinalizePositionsCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidFinalizePositions.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidFinalizePositions.usf",
 	"FinalizePositionsCS", SF_Compute);
 
 /**
@@ -216,7 +216,7 @@ void FFinalizePositionsCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FExtractPositionsCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidExtractPositions.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidExtractPositions.usf",
 	"ExtractPositionsCS", SF_Compute);
 
 /**
@@ -243,7 +243,7 @@ void FExtractPositionsCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FExtractRenderDataCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidExtractRenderData.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Rendering/FluidExtractRenderData.usf",
 	"ExtractRenderDataCS", SF_Compute);
 
 /**
@@ -270,7 +270,7 @@ void FExtractRenderDataCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FExtractRenderDataWithBoundsCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidExtractRenderDataWithBounds.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Rendering/FluidExtractRenderDataWithBounds.usf",
 	"ExtractRenderDataWithBoundsCS", SF_Compute);
 
 /**
@@ -297,7 +297,7 @@ void FExtractRenderDataWithBoundsCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FExtractRenderDataSoACS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidExtractRenderData.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Rendering/FluidExtractRenderData.usf",
 	"ExtractRenderDataSoACS", SF_Compute);
 
 /**
@@ -324,7 +324,7 @@ void FExtractRenderDataSoACS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FCopyParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidCopyParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidCopyParticles.usf",
 	"CopyParticlesCS", SF_Compute);
 
 /**
@@ -351,7 +351,7 @@ void FCopyParticlesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FSpawnParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidSpawnParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidSpawnParticles.usf",
 	"SpawnParticlesCS", SF_Compute);
 
 /**
@@ -378,7 +378,7 @@ void FSpawnParticlesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FInitAliveMaskCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidInitAliveMask.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidInitAliveMask.usf",
 	"InitAliveMaskCS", SF_Compute);
 
 /**
@@ -403,7 +403,7 @@ void FInitAliveMaskCS::ModifyCompilationEnvironment(const FGlobalShaderPermutati
 }
 
 IMPLEMENT_GLOBAL_SHADER(FMarkDespawnByBrushCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnByBrush.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnByBrush.usf",
 	"MarkDespawnByBrushCS", SF_Compute);
 
 /**
@@ -428,7 +428,7 @@ void FMarkDespawnByBrushCS::ModifyCompilationEnvironment(const FGlobalShaderPerm
 }
 
 IMPLEMENT_GLOBAL_SHADER(FMarkDespawnBySourceCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnBySource.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnBySource.usf",
 	"MarkDespawnBySourceCS", SF_Compute);
 
 /**
@@ -453,7 +453,7 @@ void FMarkDespawnBySourceCS::ModifyCompilationEnvironment(const FGlobalShaderPer
 }
 
 IMPLEMENT_GLOBAL_SHADER(FBuildIDHistogramCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnOldest.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnOldest.usf",
 	"BuildIDHistogramCS", SF_Compute);
 
 /**
@@ -478,7 +478,7 @@ void FBuildIDHistogramCS::ModifyCompilationEnvironment(const FGlobalShaderPermut
 }
 
 IMPLEMENT_GLOBAL_SHADER(FFindOldestThresholdCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnOldest.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnOldest.usf",
 	"FindOldestThresholdCS", SF_Compute);
 
 /**
@@ -492,7 +492,7 @@ bool FFindOldestThresholdCS::ShouldCompilePermutation(const FGlobalShaderPermuta
 }
 
 IMPLEMENT_GLOBAL_SHADER(FMarkOldestParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnOldest.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnOldest.usf",
 	"MarkOldestParticlesCS", SF_Compute);
 
 /**
@@ -517,7 +517,7 @@ void FMarkOldestParticlesCS::ModifyCompilationEnvironment(const FGlobalShaderPer
 }
 
 IMPLEMENT_GLOBAL_SHADER(FComputePerSourceRecycleCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidComputePerSourceRecycle.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidComputePerSourceRecycle.usf",
 	"ComputePerSourceRecycleCS", SF_Compute);
 
 /**
@@ -531,7 +531,7 @@ bool FComputePerSourceRecycleCS::ShouldCompilePermutation(const FGlobalShaderPer
 }
 
 IMPLEMENT_GLOBAL_SHADER(FUpdateSourceCountersDespawnCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidUpdateSourceCountersDespawn.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidUpdateSourceCountersDespawn.usf",
 	"UpdateSourceCountersDespawnCS", SF_Compute);
 
 /**
@@ -556,7 +556,7 @@ void FUpdateSourceCountersDespawnCS::ModifyCompilationEnvironment(const FGlobalS
 }
 
 IMPLEMENT_GLOBAL_SHADER(FPrefixSumBlockCS_RDG,
-	"/Plugin/KawaiiFluidSystem/Private/FluidPrefixSum.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidPrefixSum.usf",
 	"PrefixSumBlockCS", SF_Compute);
 
 /**
@@ -583,7 +583,7 @@ void FPrefixSumBlockCS_RDG::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FScanBlockSumsCS_RDG,
-	"/Plugin/KawaiiFluidSystem/Private/FluidPrefixSum.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidPrefixSum.usf",
 	"ScanBlockSumsCS", SF_Compute);
 
 /**
@@ -610,7 +610,7 @@ void FScanBlockSumsCS_RDG::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FAddBlockOffsetsCS_RDG,
-	"/Plugin/KawaiiFluidSystem/Private/FluidPrefixSum.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidPrefixSum.usf",
 	"AddBlockOffsetsCS", SF_Compute);
 
 /**
@@ -637,7 +637,7 @@ void FAddBlockOffsetsCS_RDG::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FCompactParticlesCS_RDG,
-	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnParticles.usf",
 	"CompactParticlesCS", SF_Compute);
 
 /**
@@ -664,7 +664,7 @@ void FCompactParticlesCS_RDG::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FWriteTotalCountCS_RDG,
-	"/Plugin/KawaiiFluidSystem/Private/FluidDespawnParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnParticles.usf",
 	"WriteTotalCountCS", SF_Compute);
 
 /**
@@ -681,19 +681,19 @@ bool FWriteTotalCountCS_RDG::ShouldCompilePermutation(const FGlobalShaderPermuta
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FAdhesionCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidAdhesion.usf",
 	"AdhesionCS", SF_Compute);
 
 IMPLEMENT_GLOBAL_SHADER(FUpdateAttachedPositionsCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidAdhesion.usf",
 	"UpdateAttachedPositionsCS", SF_Compute);
 
 IMPLEMENT_GLOBAL_SHADER(FClearDetachedFlagCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidAdhesion.usf",
 	"ClearDetachedFlagCS", SF_Compute);
 
 IMPLEMENT_GLOBAL_SHADER(FStackPressureCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidStackPressure.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidStackPressure.usf",
 	"StackPressureCS", SF_Compute);
 
 //=============================================================================
@@ -701,15 +701,15 @@ IMPLEMENT_GLOBAL_SHADER(FStackPressureCS,
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FClearBoundaryHashCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryAdhesion.usf",
 	"ClearBoundaryHashCS", SF_Compute);
 
 IMPLEMENT_GLOBAL_SHADER(FBuildBoundaryHashCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryAdhesion.usf",
 	"BuildBoundaryHashCS", SF_Compute);
 
 IMPLEMENT_GLOBAL_SHADER(FBoundaryAdhesionCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryAdhesion.usf",
 	"BoundaryAdhesionCS", SF_Compute);
 
 //=============================================================================
@@ -718,7 +718,7 @@ IMPLEMENT_GLOBAL_SHADER(FBoundaryAdhesionCS,
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FBoundarySkinningCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundarySkinning.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundarySkinning.usf",
 	"BoundarySkinningCS", SF_Compute);
 
 //=============================================================================
@@ -727,7 +727,7 @@ IMPLEMENT_GLOBAL_SHADER(FBoundarySkinningCS,
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FComputeMortonCodesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidMortonCode.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidMortonCode.usf",
 	"ComputeMortonCodesCellBasedCS", SF_Compute);
 
 /**
@@ -765,7 +765,7 @@ void FComputeMortonCodesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FRadixSortHistogramCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidRadixSort.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidRadixSort.usf",
 	"RadixSortHistogramCS", SF_Compute);
 
 /**
@@ -794,7 +794,7 @@ void FRadixSortHistogramCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FRadixSortGlobalPrefixSumCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidRadixSort.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidRadixSort.usf",
 	"RadixSortGlobalPrefixSumCS", SF_Compute);
 
 /**
@@ -823,7 +823,7 @@ void FRadixSortGlobalPrefixSumCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FRadixSortBucketPrefixSumCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidRadixSort.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidRadixSort.usf",
 	"RadixSortBucketPrefixSumCS", SF_Compute);
 
 /**
@@ -851,7 +851,7 @@ void FRadixSortBucketPrefixSumCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FRadixSortScatterCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidRadixSort.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidRadixSort.usf",
 	"RadixSortScatterCS", SF_Compute);
 
 /**
@@ -880,7 +880,7 @@ void FRadixSortScatterCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FRadixSortSmallCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidRadixSort.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidRadixSort.usf",
 	"RadixSortSmallCS", SF_Compute);
 
 /**
@@ -907,7 +907,7 @@ void FRadixSortSmallCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FReorderParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidReorderParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidReorderParticles.usf",
 	"ReorderParticlesCS", SF_Compute);
 
 /**
@@ -934,7 +934,7 @@ void FReorderParticlesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FBuildReverseMappingCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidReorderParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidReorderParticles.usf",
 	"BuildReverseMappingCS", SF_Compute);
 
 /**
@@ -965,7 +965,7 @@ void FBuildReverseMappingCS::ModifyCompilationEnvironment(
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FClearCellIndicesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidCellStartEnd.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidCellStartEnd.usf",
 	"ClearCellIndicesCS", SF_Compute);
 
 /**
@@ -1001,7 +1001,7 @@ void FClearCellIndicesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FComputeCellStartEndCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidCellStartEnd.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidCellStartEnd.usf",
 	"ComputeCellStartEndCS", SF_Compute);
 
 /**
@@ -1041,7 +1041,7 @@ void FComputeCellStartEndCS::ModifyCompilationEnvironment(
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FComputeBoundaryMortonCodesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
 	"ComputeBoundaryMortonCodesCS", SF_Compute);
 
 /**
@@ -1079,7 +1079,7 @@ void FComputeBoundaryMortonCodesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FClearBoundaryCellIndicesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
 	"ClearBoundaryCellIndicesCS", SF_Compute);
 
 /**
@@ -1115,7 +1115,7 @@ void FClearBoundaryCellIndicesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FReorderBoundaryParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
 	"ReorderBoundaryParticlesCS", SF_Compute);
 
 /**
@@ -1142,7 +1142,7 @@ void FReorderBoundaryParticlesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FComputeBoundaryCellStartEndCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
 	"ComputeBoundaryCellStartEndCS", SF_Compute);
 
 /**
@@ -1183,7 +1183,7 @@ void FComputeBoundaryCellStartEndCS::ModifyCompilationEnvironment(
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FApplyBoneTransformCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidApplyBoneTransform.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Attachment/FluidApplyBoneTransform.usf",
 	"ApplyBoneTransformCS", SF_Compute);
 
 /**
@@ -1210,7 +1210,7 @@ void FApplyBoneTransformCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FUpdateBoneDeltaAttachmentCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidUpdateBoneDeltaAttachment.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Attachment/FluidUpdateBoneDeltaAttachment.usf",
 	"UpdateBoneDeltaAttachmentCS", SF_Compute);
 
 /**
@@ -1465,7 +1465,7 @@ void FGPUFluidSimulatorPassBuilder::AddExtractRenderDataSoAPass(
 // SoA Conversion Shaders
 //=============================================================================
 
-IMPLEMENT_GLOBAL_SHADER(FSplitAoSToSoACS, "/Plugin/KawaiiFluidSystem/Private/FluidParticleSoA.usf", "SplitAoSToSoACS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FSplitAoSToSoACS, "/Plugin/KawaiiFluidSystem/Private/Simulation/FluidParticleSoA.usf", "SplitAoSToSoACS", SF_Compute);
 
 /**
  * @brief Check if split AoS to SoA shader permutation should be compiled.
@@ -1488,7 +1488,7 @@ void FSplitAoSToSoACS::ModifyCompilationEnvironment(const FGlobalShaderPermutati
 	OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), (int32)ThreadGroupSize);
 }
 
-IMPLEMENT_GLOBAL_SHADER(FMergeSoAToAoSCS, "/Plugin/KawaiiFluidSystem/Private/FluidParticleSoA.usf", "MergeSoAToAoSCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FMergeSoAToAoSCS, "/Plugin/KawaiiFluidSystem/Private/Simulation/FluidParticleSoA.usf", "MergeSoAToAoSCS", SF_Compute);
 
 /**
  * @brief Check if merge SoA to AoS shader permutation should be compiled.
@@ -1516,7 +1516,7 @@ void FMergeSoAToAoSCS::ModifyCompilationEnvironment(const FGlobalShaderPermutati
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FWriteAliveCountAfterCompactionCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidUpdateParticleCount.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidUpdateParticleCount.usf",
 	"WriteAliveCountAfterCompactionCS", SF_Compute);
 
 /**
@@ -1530,7 +1530,7 @@ bool FWriteAliveCountAfterCompactionCS::ShouldCompilePermutation(const FGlobalSh
 }
 
 IMPLEMENT_GLOBAL_SHADER(FUpdateCountAfterSpawnCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidUpdateParticleCount.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidUpdateParticleCount.usf",
 	"UpdateCountAfterSpawnCS", SF_Compute);
 
 /**
@@ -1544,7 +1544,7 @@ bool FUpdateCountAfterSpawnCS::ShouldCompilePermutation(const FGlobalShaderPermu
 }
 
 IMPLEMENT_GLOBAL_SHADER(FCopyCountToSpawnCounterCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidCopyParticleCount.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidCopyParticleCount.usf",
 	"CopyCountToSpawnCounterCS", SF_Compute);
 
 /**
