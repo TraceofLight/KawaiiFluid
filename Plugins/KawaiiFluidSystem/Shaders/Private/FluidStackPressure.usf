@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidStackPressure.usf
+ * @brief Shader implementation for FluidStackPressure
+ */
+
 // GPU Fluid Physics - Stack Pressure Pass
 // Applies weight transfer from stacked attached particles for realistic dripping behavior
 // Particles higher up on the surface transfer their weight to particles below,
@@ -53,7 +58,9 @@ float DeltaTime;
 // Helper Functions
 //=============================================================================
 
-// Get surface normal at position for attached particle
+/**
+ * @brief Get surface normal at position for attached particle
+ */
 float3 GetAttachmentSurfaceNormal(FGPUParticleAttachment attachment, float3 worldPos)
 {
     float3 normal = float3(0, 0, 1);
@@ -96,6 +103,9 @@ float3 GetAttachmentSurfaceNormal(FGPUParticleAttachment attachment, float3 worl
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for StackPressureCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void StackPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

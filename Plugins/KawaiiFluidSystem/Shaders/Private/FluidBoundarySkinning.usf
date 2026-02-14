@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidBoundarySkinning.usf
+ * @brief Shader implementation for FluidBoundarySkinning
+ */
+
 // GPU Boundary Particle Skinning
 // Transforms bone-local boundary particles to world space using bone transforms
 
@@ -11,6 +16,9 @@
 // Structures (must match C++ FGPUBoundaryParticleLocal and FGPUBoundaryParticle)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUBoundaryParticleLocal
+ */
 struct FGPUBoundaryParticleLocal
 {
 	float3 LocalPosition;   // 12 bytes - Bone-local position
@@ -21,6 +29,9 @@ struct FGPUBoundaryParticleLocal
 	float3 Padding;         // 12 bytes - Alignment padding
 };
 
+/**
+ * @brief Data layout for FGPUBoundaryParticle
+ */
 struct FGPUBoundaryParticle
 {
 	float3 Position;        // 12 bytes - World position
@@ -68,6 +79,9 @@ float DeltaTime;
 // Main Skinning Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for BoundarySkinningCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void BoundarySkinningCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

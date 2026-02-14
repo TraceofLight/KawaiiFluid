@@ -12,6 +12,9 @@
 // GPU Particle Structure (must match FGPUFluidParticle in C++)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
 struct FGPUFluidParticle
 {
 	float3 Position;           // 12 bytes
@@ -35,6 +38,9 @@ struct FGPUFluidParticle
 
 #define SOURCE_INVALID_SOURCE_ID -1
 
+/**
+ * @brief Returns whether the source ID is valid
+ */
 bool HasValidSource(int sourceID)
 {
 	return sourceID != SOURCE_INVALID_SOURCE_ID;
@@ -80,7 +86,7 @@ bool HasValidSource(int sourceID)
 //=============================================================================
 
 /**
- * Poly6 kernel (for density calculation)
+ * @brief Poly6 kernel (for density calculation)
  * W(r, h) = 315 / (64 * PI * h^9) * (h^2 - r^2)^3
  *
  * @param r2 - Squared distance between particles
@@ -94,7 +100,7 @@ float Poly6Kernel(float r2, float h2)
 }
 
 /**
- * Poly6 kernel with coefficient
+ * @brief Poly6 kernel with coefficient
  * @param r2 - Squared distance
  * @param h - Smoothing radius
  * @param coeff - Precomputed coefficient (315 / (64 * PI * h^9))
@@ -107,7 +113,7 @@ float Poly6KernelWithCoeff(float r2, float h, float coeff)
 }
 
 /**
- * Spiky kernel gradient (for pressure calculation)
+ * @brief Spiky kernel gradient (for pressure calculation)
  * ∇W(r, h) = -45 / (PI * h^6) * (h - |r|)^2 * r̂
  *
  * @param r - Vector from neighbor to particle (particle.pos - neighbor.pos)
@@ -134,7 +140,7 @@ float3 SpikyGradient(float3 r, float rLen, float h)
 }
 
 /**
- * Spiky gradient with coefficient
+ * @brief Spiky gradient with coefficient
  * @param r - Vector from neighbor to particle
  * @param rLen - Length of r
  * @param h - Smoothing radius
@@ -158,7 +164,7 @@ float3 SpikyGradientWithCoeff(float3 r, float rLen, float h, float coeff)
 }
 
 /**
- * Optimized Spiky gradient using rsqrt (faster inverse square root)
+ * @brief Optimized Spiky gradient using rsqrt (faster inverse square root)
  * Uses rsqrt(r2) instead of sqrt(r2) for better GPU performance
  *
  * @param r - Vector from neighbor to particle (particle.pos - neighbor.pos)
@@ -192,7 +198,7 @@ float3 SpikyGradientFast(float3 r, float r2, float h, float h2)
 }
 
 /**
- * Viscosity kernel Laplacian (for viscosity calculation)
+ * @brief Viscosity kernel Laplacian (for viscosity calculation)
  * ∇²W(r, h) = 45 / (PI * h^6) * (h - |r|)
  *
  * @param rLen - Distance between particles
@@ -211,7 +217,7 @@ float ViscosityLaplacian(float rLen, float h, float coeff)
 //=============================================================================
 
 /**
- * Akinci Cohesion Spline Function C(r)
+ * @brief Akinci Cohesion Spline Function C(r)
  * Provides attraction at h/2 and repulsion at close range
  *
  * C(r) = 32/(πh^9) * {
@@ -259,7 +265,7 @@ float AkinciCohesionSpline(float rLen, float h)
 }
 
 /**
- * Optimized Akinci Cohesion Spline with precomputed coefficients
+ * @brief Optimized Akinci Cohesion Spline with precomputed coefficients
  * Use this version in tight loops for better performance
  *
  * @param rLen - Distance between particles
@@ -291,7 +297,7 @@ float AkinciCohesionSplineFast(float rLen, float h, float h6, float cohesionCoef
 }
 
 /**
- * Legacy cohesion kernel (kept for compatibility)
+ * @brief Legacy cohesion kernel (kept for compatibility)
  */
 float CohesionKernel(float rLen, float h)
 {
@@ -299,7 +305,7 @@ float CohesionKernel(float rLen, float h)
 }
 
 /**
- * Akinci Adhesion Spline Function A(r)
+ * @brief Akinci Adhesion Spline Function A(r)
  * For fluid-solid boundary adhesion
  *
  * A(r) = 0.007/h^3.25 * ⁴√(-4r²/h + 6r - 2h)   if h/2 < r ≤ h
@@ -334,7 +340,7 @@ float AkinciAdhesionSpline(float rLen, float h)
 }
 
 /**
- * Simple adhesion kernel for boundary adhesion (legacy)
+ * @brief Simple adhesion kernel for boundary adhesion (legacy)
  * Linear falloff: r=0 → max, r=h → 0
  */
 float AdhesionKernel(float rLen, float h)
@@ -349,7 +355,7 @@ float AdhesionKernel(float rLen, float h)
 }
 
 /**
- * Particle Deficiency Correction Factor K_ij (Akinci 2013)
+ * @brief Particle Deficiency Correction Factor K_ij (Akinci 2013)
  * Compensates for particles with fewer neighbors (surface particles)
  *
  * K_ij = 2 * ρ₀ / (ρ_i + ρ_j)
@@ -377,7 +383,7 @@ float AkinciCorrectionFactor(float rho_i, float rho_j, float rho_0)
 //=============================================================================
 
 /**
- * Calculate squared distance between two points
+ * @brief Calculate squared distance between two points
  */
 float DistanceSquared(float3 a, float3 b)
 {
@@ -386,7 +392,7 @@ float DistanceSquared(float3 a, float3 b)
 }
 
 /**
- * Clamp position to bounds with collision response
+ * @brief Clamp position to bounds with collision response
  * @param position - Current position
  * @param velocity - Current velocity (modified on collision)
  * @param boundsMin - Minimum bounds
@@ -454,7 +460,7 @@ float3 ClampToBoundsWithResponse(
 }
 
 /**
- * Convert flag check to bool
+ * @brief Convert flag check to bool
  */
 bool HasFlag(uint flags, uint flag)
 {
@@ -462,7 +468,7 @@ bool HasFlag(uint flags, uint flag)
 }
 
 /**
- * Set flag
+ * @brief Set flag
  */
 uint SetFlag(uint flags, uint flag)
 {
@@ -470,7 +476,7 @@ uint SetFlag(uint flags, uint flag)
 }
 
 /**
- * Clear flag
+ * @brief Clear flag
  */
 uint ClearFlag(uint flags, uint flag)
 {
@@ -483,6 +489,9 @@ uint ClearFlag(uint flags, uint flag)
 // 80 bytes total for drag-based force calculation + impact offset
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUCollisionFeedback
+ */
 struct FGPUCollisionFeedback
 {
 	// Row 1: 16 bytes
@@ -527,7 +536,7 @@ struct FGPUCollisionFeedback
 //=============================================================================
 
 /**
- * Pack two floats into one uint (2x float16)
+ * @brief Pack two floats into one uint (2x float16)
  * @param v - float2 to pack
  * @return Packed uint containing two half-precision values
  */
@@ -537,7 +546,7 @@ uint PackHalf2(float2 v)
 }
 
 /**
- * Unpack one uint into two floats
+ * @brief Unpack one uint into two floats
  * @param packed - uint containing two half-precision values
  * @return float2 with unpacked values
  */
@@ -547,7 +556,7 @@ float2 UnpackHalf2(uint packed)
 }
 
 /**
- * Pack float3 velocity into uint2 (half4: xy in .x, z+padding in .y)
+ * @brief Pack float3 velocity into uint2 (half4: xy in .x, z+padding in .y)
  * Total: 12 bytes → 8 bytes (33% bandwidth reduction)
  * @param vel - float3 velocity to pack
  * @return uint2 with packed half-precision velocity
@@ -561,7 +570,7 @@ uint2 PackVelocity(float3 vel)
 }
 
 /**
- * Unpack uint2 into float3 velocity
+ * @brief Unpack uint2 into float3 velocity
  * @param packed - uint2 containing packed velocity
  * @return float3 unpacked velocity
  */
@@ -573,7 +582,7 @@ float3 UnpackVelocity(uint2 packed)
 }
 
 /**
- * Pack Density + Lambda into one uint (half2)
+ * @brief Pack Density + Lambda into one uint (half2)
  * Total: 8 bytes → 4 bytes (50% bandwidth reduction)
  * @param density - particle density
  * @param lambda - PBF lambda constraint multiplier
@@ -585,7 +594,7 @@ uint PackDensityLambda(float density, float lambda)
 }
 
 /**
- * Unpack uint into Density and Lambda
+ * @brief Unpack uint into Density and Lambda
  * @param packed - uint containing packed density/lambda
  * @param density - output density
  * @param lambda - output lambda
@@ -603,7 +612,7 @@ void UnpackDensityLambda(uint packed, out float density, out float lambda)
 //=============================================================================
 
 /**
- * Read velocity from packed SoA buffer
+ * @brief Read velocity from packed SoA buffer
  * @param PackedVelocities - uint2 buffer containing packed velocities
  * @param idx - particle index
  * @return float3 unpacked velocity
@@ -614,7 +623,7 @@ float3 ReadPackedVelocity(Buffer<uint2> PackedVelocities, uint idx)
 }
 
 /**
- * Write velocity to packed SoA buffer
+ * @brief Write velocity to packed SoA buffer
  * @param PackedVelocities - RWBuffer<uint2> to write to
  * @param idx - particle index
  * @param vel - float3 velocity to pack and write

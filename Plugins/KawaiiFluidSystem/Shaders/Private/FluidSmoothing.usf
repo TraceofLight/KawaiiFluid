@@ -1,5 +1,10 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
+/**
+ * @file FluidSmoothing.usf
+ * @brief Shader implementation for FluidSmoothing
+ */
+
 #include "/Engine/Private/Common.ush"
 
 // IO Resources
@@ -31,7 +36,9 @@ float SmoothingMinRadius;         // Minimum blur radius in pixels
 float SmoothingMaxRadius;         // Maximum blur radius in pixels
 float FocalLengthPixels;          // Focal length in pixels for projection
 
-// Gaussian weight calculation function
+/**
+ * @brief Gaussian weight calculation function
+ */
 float GetGaussianWeight(float Distance, float Sigma)
 {
 	// Prevent division by zero
@@ -52,6 +59,9 @@ float GetGaussianWeight(float Distance, float Sigma)
 // use hard threshold with dynamic range expansion for better edge preservation
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void NarrowRangeFilterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -176,6 +186,9 @@ void NarrowRangeFilterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 groupshared float LDS_Depth[NR_LDS_SIZE][NR_LDS_SIZE];
 
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterLDS_CS
+ */
 [numthreads(NR_TILE_SIZE, NR_TILE_SIZE, 1)]
 void NarrowRangeFilterLDS_CS(
 	uint3 GroupId : SV_GroupID,
@@ -310,6 +323,9 @@ void NarrowRangeFilterLDS_CS(
 // 65×65 = 4,225 iterations → 65+65 = 130 iterations
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterHorizontalCS
+ */
 [numthreads(256, 1, 1)]
 void NarrowRangeFilterHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -377,6 +393,9 @@ void NarrowRangeFilterHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Separable Narrow-Range Filter (Vertical Pass)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterVerticalCS
+ */
 [numthreads(1, 256, 1)]
 void NarrowRangeFilterVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -444,6 +463,9 @@ void NarrowRangeFilterVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Separable Narrow-Range Filter (Diagonal1 Pass: ↘ direction)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterDiagonal1CS
+ */
 [numthreads(256, 1, 1)]
 void NarrowRangeFilterDiagonal1CS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -511,6 +533,9 @@ void NarrowRangeFilterDiagonal1CS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Separable Narrow-Range Filter (Diagonal2 Pass: ↙ direction)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterDiagonal2CS
+ */
 [numthreads(256, 1, 1)]
 void NarrowRangeFilterDiagonal2CS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -585,6 +610,9 @@ void NarrowRangeFilterDiagonal2CS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // 3. We want to smooth out individual particle profiles
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ThicknessGaussianBlurHorizontalCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void ThicknessGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -615,6 +643,9 @@ void ThicknessGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThrea
 	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedThickness / TotalWeight) : 0.0f;
 }
 
+/**
+ * @brief Compute shader entry point for ThicknessGaussianBlurVerticalCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void ThicknessGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -650,6 +681,9 @@ void ThicknessGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadI
 // Min-Depth selection to preserve silhouettes
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for DepthDownsampleCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void DepthDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -711,6 +745,9 @@ void DepthDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Joint Bilateral Upsample: uses full-res depth as guide
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for DepthUpsampleCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void DepthUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -794,6 +831,9 @@ void DepthUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 Texture2D<float2> VelocityInputTexture;
 RWTexture2D<float2> VelocityOutputTexture;
 
+/**
+ * @brief Compute shader entry point for VelocityGaussianBlurHorizontalCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void VelocityGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -829,6 +869,9 @@ void VelocityGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThread
 	VelocityOutputTexture[CenterCoord] = Result;
 }
 
+/**
+ * @brief Compute shader entry point for VelocityGaussianBlurVerticalCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void VelocityGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -865,6 +908,9 @@ void VelocityGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID
 // Uses average (not min) because thickness is additive
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ThicknessDownsampleCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void ThicknessDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -899,6 +945,9 @@ void ThicknessDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Simple bilinear interpolation (no joint bilateral needed for thickness)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ThicknessUpsampleCS
+ */
 [numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
 void ThicknessUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

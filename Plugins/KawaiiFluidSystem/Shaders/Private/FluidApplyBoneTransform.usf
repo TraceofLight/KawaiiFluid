@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidApplyBoneTransform.usf
+ * @brief Shader implementation for FluidApplyBoneTransform
+ */
+
 // GPU Fluid Physics - Apply Boundary Attachment Pass
 //
 // Runs at SIMULATION START: Moves attached particles to follow bone transforms
@@ -20,6 +25,9 @@
 // Local Boundary Particle Structure (must match C++ FGPUBoundaryParticleLocal)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUBoundaryParticleLocal
+ */
 struct FGPUBoundaryParticleLocal
 {
 	float3 LocalPosition;   // 12 bytes - Bone-local position
@@ -60,6 +68,9 @@ float DeltaTime;
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ApplyBoneTransformCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ApplyBoneTransformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

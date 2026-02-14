@@ -11,6 +11,9 @@
 // Primitive Structures (must match C++ definitions)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUCollisionSphere
+ */
 struct FGPUCollisionSphere
 {
 	float3 Center;
@@ -23,6 +26,9 @@ struct FGPUCollisionSphere
 	int bHasFluidInteraction; // 1 if from FluidInteraction component, 0 if from WorldCollision
 };
 
+/**
+ * @brief Data layout for FGPUCollisionCapsule
+ */
 struct FGPUCollisionCapsule
 {
 	float3 Start;
@@ -37,6 +43,9 @@ struct FGPUCollisionCapsule
 	int Padding;       // Alignment padding
 };
 
+/**
+ * @brief Data layout for FGPUCollisionBox
+ */
 struct FGPUCollisionBox
 {
 	float3 Center;
@@ -50,6 +59,9 @@ struct FGPUCollisionBox
 	int bHasFluidInteraction; // 1 if from FluidInteraction component, 0 if from WorldCollision
 };
 
+/**
+ * @brief Data layout for FGPUCollisionConvex
+ */
 struct FGPUCollisionConvex
 {
 	float3 Center;
@@ -64,6 +76,9 @@ struct FGPUCollisionConvex
 	int bHasFluidInteraction; // 1 if from FluidInteraction component, 0 if from WorldCollision
 };
 
+/**
+ * @brief Data layout for FGPUConvexPlane
+ */
 struct FGPUConvexPlane
 {
 	float3 Normal;
@@ -74,6 +89,9 @@ struct FGPUConvexPlane
 // Bone Transform Structure (must match C++ FGPUBoneTransform)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUBoneTransform
+ */
 struct FGPUBoneTransform
 {
 	float3 Position;      // Bone world position
@@ -88,6 +106,9 @@ struct FGPUBoneTransform
 // Particle Attachment Structure (must match C++ FGPUParticleAttachment)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUParticleAttachment
+ */
 struct FGPUParticleAttachment
 {
 	int PrimitiveType;      // 0=Sphere, 1=Capsule, 2=Box, 3=Convex, -1=None
@@ -104,14 +125,18 @@ struct FGPUParticleAttachment
 // Quaternion Utilities (must be defined before Bone Transform Utilities)
 //=============================================================================
 
-// Rotate vector by quaternion
+/**
+ * @brief Rotate vector by quaternion
+ */
 float3 RotateByQuat(float3 v, float4 q)
 {
 	float3 t = 2.0f * cross(q.xyz, v);
 	return v + q.w * t + cross(q.xyz, t);
 }
 
-// Inverse rotate vector by quaternion
+/**
+ * @brief Inverse rotate vector by quaternion
+ */
 float3 InverseRotateByQuat(float3 v, float4 q)
 {
 	// Conjugate of quaternion: (x,y,z,w) -> (-x,-y,-z,w)
@@ -122,7 +147,9 @@ float3 InverseRotateByQuat(float3 v, float4 q)
 // Bone Transform Utilities
 //=============================================================================
 
-// Transform position from bone-local to world space
+/**
+ * @brief Transform position from bone-local to world space
+ */
 float3 BoneLocalToWorld(float3 localPos, FGPUBoneTransform bone)
 {
 	float3 scaled = localPos * bone.Scale;
@@ -130,7 +157,9 @@ float3 BoneLocalToWorld(float3 localPos, FGPUBoneTransform bone)
 	return rotated + bone.Position;
 }
 
-// Transform position from world to bone-local space
+/**
+ * @brief Transform position from world to bone-local space
+ */
 float3 WorldToBoneLocal(float3 worldPos, FGPUBoneTransform bone)
 {
 	float3 relative = worldPos - bone.Position;
@@ -138,7 +167,9 @@ float3 WorldToBoneLocal(float3 worldPos, FGPUBoneTransform bone)
 	return rotated / bone.Scale;
 }
 
-// Calculate bone velocity at a local position
+/**
+ * @brief Calculate bone velocity at a local position
+ */
 float3 CalcBoneVelocity(float3 localPos, FGPUBoneTransform bone, float deltaTime)
 {
 	if (deltaTime < 0.0001f) return float3(0, 0, 0);
@@ -160,13 +191,17 @@ float3 CalcBoneVelocity(float3 localPos, FGPUBoneTransform bone, float deltaTime
 // SDF Functions
 //=============================================================================
 
-// Sphere SDF
+/**
+ * @brief Sphere SDF
+ */
 float sdSphere(float3 p, float3 center, float radius)
 {
 	return length(p - center) - radius;
 }
 
-// Capsule SDF (line segment with radius)
+/**
+ * @brief Capsule SDF (line segment with radius)
+ */
 float sdCapsule(float3 p, float3 a, float3 b, float radius)
 {
 	float3 pa = p - a;
@@ -175,14 +210,18 @@ float sdCapsule(float3 p, float3 a, float3 b, float radius)
 	return length(pa - ba * h) - radius;
 }
 
-// Axis-aligned box SDF (in local space)
+/**
+ * @brief Axis-aligned box SDF (in local space)
+ */
 float sdBoxLocal(float3 p, float3 halfExtent)
 {
 	float3 q = abs(p) - halfExtent;
 	return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f);
 }
 
-// Oriented box SDF
+/**
+ * @brief Oriented box SDF
+ */
 float sdBox(float3 p, float3 center, float3 halfExtent, float4 rotation)
 {
 	// Transform point to local space
@@ -190,7 +229,9 @@ float sdBox(float3 p, float3 center, float3 halfExtent, float4 rotation)
 	return sdBoxLocal(localP, halfExtent);
 }
 
-// Convex hull SDF (intersection of half-spaces)
+/**
+ * @brief Convex hull SDF (intersection of half-spaces)
+ */
 float sdConvex(
 	float3 p,
 	float3 center,
@@ -224,6 +265,9 @@ float sdConvex(
 // Collision Response
 //=============================================================================
 
+/**
+ * @brief Data layout for FCollisionResult
+ */
 struct FCollisionResult
 {
 	bool bHit;
@@ -233,7 +277,9 @@ struct FCollisionResult
 	float Restitution;
 };
 
-// Calculate gradient (normal) from SDF
+/**
+ * @brief Calculate gradient (normal) from SDF
+ */
 float3 CalcSDFGradient(float3 p, float sdfValue, float3 center)
 {
 	// Simple approximation: direction from center to point
@@ -242,7 +288,9 @@ float3 CalcSDFGradient(float3 p, float sdfValue, float3 center)
 	return len > 0.0001f ? dir / len : float3(0, 0, 1);
 }
 
-// Numerical gradient for more accurate normal
+/**
+ * @brief Numerical gradient for more accurate normal
+ */
 float3 CalcNumericalGradient_Sphere(float3 p, float3 center, float radius)
 {
 	const float eps = 0.1f;
@@ -256,6 +304,9 @@ float3 CalcNumericalGradient_Sphere(float3 p, float3 center, float radius)
 	return normalize(gradient);
 }
 
+/**
+ * @brief Calculates numerical SDF gradient for a capsule
+ */
 float3 CalcNumericalGradient_Capsule(float3 p, float3 a, float3 b, float radius)
 {
 	const float eps = 0.1f;
@@ -269,6 +320,9 @@ float3 CalcNumericalGradient_Capsule(float3 p, float3 a, float3 b, float radius)
 	return normalize(gradient);
 }
 
+/**
+ * @brief Calculates numerical SDF gradient for a box
+ */
 float3 CalcNumericalGradient_Box(float3 p, float3 center, float3 extent, float4 rotation)
 {
 	const float eps = 0.1f;
@@ -283,7 +337,7 @@ float3 CalcNumericalGradient_Box(float3 p, float3 center, float3 extent, float4 
 }
 
 /**
- * Apply position-level friction (Unified Particle Physics, Macklin et al. 2014)
+ * @brief Apply position-level friction (Unified Particle Physics, Macklin et al. 2014)
  *
  * This function applies friction at the position level rather than velocity level.
  * This is critical for PBF because FinalizePositions overwrites velocity with:
@@ -350,7 +404,7 @@ void ApplyPositionLevelFriction(
 }
 
 /**
- * Apply collision response with position-level friction
+ * @brief Apply collision response with position-level friction
  *
  * @param predictedPos - Predicted position (will be modified for push-out and friction)
  * @param originalPos - Original position before this timestep (for friction calculation)
@@ -382,9 +436,11 @@ void ApplyCollisionResponseWithFriction(
 	}
 }
 
-// Legacy: Apply collision response to velocity (kept for compatibility)
-// WARNING: This approach doesn't work correctly with PBF because FinalizePositions
-// overwrites velocity. Use ApplyCollisionResponseWithFriction instead.
+/**
+ * @brief Legacy: Apply collision response to velocity (kept for compatibility)
+ * WARNING: This approach doesn't work correctly with PBF because FinalizePositions
+ * overwrites velocity. Use ApplyCollisionResponseWithFriction instead.
+ */
 void ApplyCollisionResponse(
 	inout float3 position,
 	inout float3 velocity,

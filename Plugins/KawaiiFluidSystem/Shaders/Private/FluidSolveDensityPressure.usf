@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidSolveDensityPressure.usf
+ * @brief Shader implementation for FluidSolveDensityPressure
+ */
+
 // GPU Fluid Physics - Combined Density and Pressure Pass
 // Merges ComputeDensity and SolvePressure into single neighbor traversal
 //
@@ -43,7 +48,9 @@ groupshared float3 gs_Positions[TILE_SIZE];
 groupshared float  gs_Lambdas[TILE_SIZE];
 groupshared uint   gs_Flags[TILE_SIZE];
 
-// Neighbor particle data structure
+/**
+ * @brief Data layout for FNeighborParticleData
+ */
 struct FNeighborParticleData
 {
 	float3 Position;
@@ -51,8 +58,10 @@ struct FNeighborParticleData
 	uint Flags;
 };
 
-// Get neighbor data with LDS + Global Memory hierarchy
-// LDS is safe because data persists until Thread Group completes
+/**
+ * @brief Get neighbor data with LDS + Global Memory hierarchy
+ * LDS is safe because data persists until Thread Group completes
+ */
 FNeighborParticleData GetNeighborDataWithTile(
 	uint neighborIdx,
 	uint tileStartIdx,
@@ -153,6 +162,9 @@ int bUseHybridTiledZOrder;
 //=============================================================================
 // Boundary Particles for density contribution (Akinci 2012)
 //=============================================================================
+/**
+ * @brief Data layout for FGPUBoundaryParticle
+ */
 struct FGPUBoundaryParticle
 {
 	float3 Position;      // 12 bytes - World position
@@ -207,10 +219,12 @@ float MaxSurfaceTensionCorrection;        // Max correction per iteration (cm)
 // Morton code functions are provided by FluidMortonUtils.ush
 //=============================================================================
 
-// Compute Morton-based cell ID from cell coordinates (integer)
-// This version uses shader parameters (MortonBoundsMin, CellSize) directly.
-// IMPORTANT: Must match FluidMortonCode.usf's ComputeMortonCodesCellBasedCS
-// IMPORTANT: Result is truncated to fit CellStart/CellEnd buffer size (MAX_CELLS)
+/**
+ * @brief Compute Morton-based cell ID from cell coordinates (integer)
+ * This version uses shader parameters (MortonBoundsMin, CellSize) directly.
+ * IMPORTANT: Must match FluidMortonCode.usf's ComputeMortonCodesCellBasedCS
+ * IMPORTANT: Result is truncated to fit CellStart/CellEnd buffer size (MAX_CELLS)
+ */
 uint GetMortonCellIDFromCellCoord(int3 cellCoord)
 {
 	// Hybrid mode: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
@@ -247,6 +261,9 @@ uint GetMortonCellIDFromCellCoord(int3 cellCoord)
 // Main Compute Shader - Combined Density + Pressure with Neighbor Caching
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for SolveDensityPressureCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidDespawnByBrush.usf
+ * @brief Shader implementation for FluidDespawnByBrush
+ */
+
 // Brush-Based Despawn Shader - Marks particles within brush radius for removal
 
 #include "/Engine/Public/Platform.ush"
@@ -8,6 +13,9 @@
 // Struct Definitions (Must match C++)
 // ===================================================================================
 
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
 struct FGPUFluidParticle
 {
 	float3 Position;           // 12 bytes
@@ -22,6 +30,9 @@ struct FGPUFluidParticle
 	uint NeighborCount;        // 4 bytes (total: 64)
 };
 
+/**
+ * @brief Data layout for FDespawnBrushRequest
+ */
 struct FDespawnBrushRequest
 {
 	float3 Center;             // 12 bytes
@@ -45,6 +56,9 @@ int BrushRequestCount;
 // Marks particles within any brush radius for removal (AliveMask = 0)
 // Contract: Only writes 0 (never writes 1). AliveMask must be pre-cleared to 1.
 // ===================================================================================
+/**
+ * @brief Compute shader entry point for MarkDespawnByBrushCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void MarkDespawnByBrushCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

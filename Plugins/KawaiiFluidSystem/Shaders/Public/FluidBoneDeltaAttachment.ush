@@ -15,6 +15,9 @@
 // 48 bytes, 16-byte aligned
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUBoneDeltaAttachment
+ */
 struct FGPUBoneDeltaAttachment
 {
 	int BoundaryParticleIndex;  // 4 bytes - Index into WorldBoundaryParticles (-1 = not attached)
@@ -50,7 +53,7 @@ struct FGPUBoneDeltaAttachment
 //=============================================================================
 
 /**
- * Check if attachment is valid (attached to a boundary particle)
+ * @brief Check if attachment is valid (attached to a boundary particle)
  */
 bool IsBoneDeltaAttached(FGPUBoneDeltaAttachment attachment)
 {
@@ -58,7 +61,7 @@ bool IsBoneDeltaAttached(FGPUBoneDeltaAttachment attachment)
 }
 
 /**
- * Clear attachment data
+ * @brief Clear attachment data
  */
 void ClearBoneDeltaAttachment(inout FGPUBoneDeltaAttachment attachment)
 {
@@ -69,7 +72,7 @@ void ClearBoneDeltaAttachment(inout FGPUBoneDeltaAttachment attachment)
 }
 
 /**
- * Check if particle should detach based on distance from previous position
+ * @brief Check if particle should detach based on distance from previous position
  * @param currentPos - Current world position
  * @param attachment - Attachment data containing previous position
  * @return true if should detach

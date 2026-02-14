@@ -15,6 +15,9 @@
 // Force Accumulation Result Structure
 // Contains all forces calculated in a single neighbor loop
 //=============================================================================
+/**
+ * @brief Data layout for FForceAccumulationResult
+ */
 struct FForceAccumulationResult
 {
     float3 CohesionAccel;       // Cohesion acceleration (cm/s^2)
@@ -52,6 +55,9 @@ struct FForceAccumulationResult
 //   FForceAccumulationResult containing all calculated forces
 //=============================================================================
 
+/**
+ * @brief Computes per-particle force accumulation
+ */
 FForceAccumulationResult CalculateForceAccumulation(
     uint idx,
     float3 position,

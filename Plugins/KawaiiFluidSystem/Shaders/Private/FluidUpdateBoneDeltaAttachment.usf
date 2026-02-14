@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidUpdateBoneDeltaAttachment.usf
+ * @brief Shader implementation for FluidUpdateBoneDeltaAttachment
+ */
+
 // GPU Fluid Physics - Update Bone Delta Attachment Pass
 //
 // Runs at SIMULATION END: Updates attachment data after physics simulation
@@ -30,6 +35,9 @@
 // Includes OriginalIndex for stable attachment across Z-Order sorting
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUBoundaryParticleWithBone
+ */
 struct FGPUBoundaryParticleWithBone
 {
 	float3 Position;      // 12 bytes - World position
@@ -95,6 +103,9 @@ int BoneCount;
 // Finds the closest collider and returns its surface normal at contact point
 //=============================================================================
 
+/**
+ * @brief Returns the nearest collider surface normal
+ */
 float3 GetClosestColliderNormal(float3 pos, float searchRadius)
 {
 	float closestDist = searchRadius;
@@ -194,6 +205,9 @@ float3 GetClosestColliderNormal(float3 pos, float searchRadius)
 // Z-Order Cell ID Calculation
 //=============================================================================
 
+/**
+ * @brief Computes cell key for attachment update
+ */
 uint GetMortonCellIDFromCellCoord_Update(int3 cellCoord)
 {
 	if (bUseHybridTiledZOrder)
@@ -213,6 +227,9 @@ uint GetMortonCellIDFromCellCoord_Update(int3 cellCoord)
 	}
 }
 
+/**
+ * @brief Converts world position to update cell coordinates
+ */
 int3 WorldToCell_Update(float3 worldPos)
 {
 	return int3(floor(worldPos / CellSize));
@@ -222,6 +239,9 @@ int3 WorldToCell_Update(float3 worldPos)
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for UpdateBoneDeltaAttachmentCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void UpdateBoneDeltaAttachmentCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidRecordZOrderIndices.usf
+ * @brief Shader implementation for FluidRecordZOrderIndices
+ */
+
 // GPU Fluid - Record Z-Order Array Indices (Debug Visualization)
 //
 // Records each particle's array index after Z-Order sort, before ParticleID re-sort.
@@ -14,6 +19,9 @@
 //=============================================================================
 // Particle Structure (minimal fields needed)
 //=============================================================================
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
 struct FGPUFluidParticle
 {
     float3 Position;           // 12 bytes
@@ -47,6 +55,9 @@ int ParticleCount;
 //=============================================================================
 #define THREAD_GROUP_SIZE 256
 
+/**
+ * @brief Compute shader entry point for RecordZOrderIndicesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void RecordZOrderIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

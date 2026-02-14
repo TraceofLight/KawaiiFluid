@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidCopyParticleCount.usf
+ * @brief Shader implementation for FluidCopyParticleCount
+ */
+
 // GPU Fluid Physics - Copy Particle Count to Spawn Counter
 // GPU→GPU counter initialization (replaces CPU InitialCounterData upload)
 
@@ -15,6 +20,9 @@
 StructuredBuffer<uint> SourceParticleCountBuffer;  // 7 elements, raw count at index 6
 RWStructuredBuffer<uint> DestSpawnCounter;          // Single uint32 atomic counter
 
+/**
+ * @brief Compute shader entry point for CopyCountToSpawnCounterCS
+ */
 [numthreads(1, 1, 1)]
 void CopyCountToSpawnCounterCS(uint3 DTid : SV_DispatchThreadID)
 {

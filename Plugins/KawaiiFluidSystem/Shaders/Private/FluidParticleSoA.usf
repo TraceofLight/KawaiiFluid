@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidParticleSoA.usf
+ * @brief Shader implementation for FluidParticleSoA
+ */
+
 // Particle SoA (Structure of Arrays) Conversion Shaders
 //
 // Memory bandwidth optimization:
@@ -38,6 +43,9 @@ RWBuffer<int> OutSourceIDs;                // int
 int SplitParticleCount;
 StructuredBuffer<uint> ParticleCountBuffer;
 
+/**
+ * @brief Compute shader entry point for SplitAoSToSoACS
+ */
 [numthreads(256, 1, 1)]
 void SplitAoSToSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -93,6 +101,9 @@ RWStructuredBuffer<FGPUFluidParticle> TargetParticles;
 
 int MergeParticleCount;
 
+/**
+ * @brief Compute shader entry point for MergeSoAToAoSCS
+ */
 [numthreads(256, 1, 1)]
 void MergeSoAToAoSCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

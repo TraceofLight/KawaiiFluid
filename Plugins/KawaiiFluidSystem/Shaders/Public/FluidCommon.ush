@@ -7,7 +7,7 @@
 #pragma once
 
 /**
- * Sphere-Ray Intersection
+ * @brief Sphere-Ray Intersection
  * Calculate depth at intersection point between spherical particle and ray
  *
  * @param SphereCenter Sphere center position (View Space)
@@ -51,7 +51,7 @@ float CalculateSphereDepth(float3 SphereCenter, float SphereRadius, float3 RayOr
 }
 
 /**
- * Calculate View Ray Direction from Screen UV
+ * @brief Calculate View Ray Direction from Screen UV
  *
  * @param ScreenUV Screen UV coordinates (0~1)
  * @param InverseProjectionMatrix Inverse projection matrix
@@ -73,7 +73,7 @@ float3 CalculateViewRayDirection(float2 ScreenUV, float4x4 InverseProjectionMatr
 }
 
 /**
- * Reconstruct View Space Position from Screen UV and Linear Depth
+ * @brief Reconstruct View Space Position from Screen UV and Linear Depth
  *
  * UE5 coordinate conventions:
  * - Screen UV: (0,0) = top-left, (1,1) = bottom-right
@@ -114,7 +114,7 @@ float3 ReconstructViewPositionFromDepth(float2 ScreenUV, float LinearDepth, floa
 }
 
 /**
- * Project View Space Position to Screen UV
+ * @brief Project View Space Position to Screen UV
  *
  * @param ViewPos View Space position
  * @param ProjectionMatrix Projection matrix

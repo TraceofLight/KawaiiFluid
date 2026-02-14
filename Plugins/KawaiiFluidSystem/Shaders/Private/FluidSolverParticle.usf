@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidSolverParticle.usf
+ * @brief Shader implementation for FluidSolverParticle
+ */
+
 // Compact Solver Particle Extract/Update Shaders
 //
 // Memory bandwidth optimization: Extract only solver-needed data (24 bytes)
@@ -15,6 +20,9 @@ StructuredBuffer<FGPUFluidParticle> SourceParticles;
 RWStructuredBuffer<FSolverParticle> SolverParticles;
 int ParticleCount;
 
+/**
+ * @brief Compute shader entry point for ExtractSolverDataCS
+ */
 [numthreads(256, 1, 1)]
 void ExtractSolverDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -44,6 +52,9 @@ void ExtractSolverDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 StructuredBuffer<FSolverParticle> SolverParticlesInput;
 RWStructuredBuffer<FGPUFluidParticle> TargetParticles;
 
+/**
+ * @brief Compute shader entry point for UpdateFromSolverDataCS
+ */
 [numthreads(256, 1, 1)]
 void UpdateFromSolverDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

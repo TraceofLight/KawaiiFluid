@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidStatsCompact.usf
+ * @brief Shader implementation for FluidStatsCompact
+ */
+
 // GPU Fluid - Stats Buffer Compaction
 //
 // Extracts only necessary fields from full particle buffer for efficient readback.
@@ -16,6 +21,9 @@
 // Full Particle Structure (must match C++ FGPUFluidParticle)
 // 64 bytes per particle
 //=============================================================================
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
 struct FGPUFluidParticle
 {
     float3 Position;           // 12 bytes
@@ -34,6 +42,9 @@ struct FGPUFluidParticle
 // Compact Stats Structure - Basic (must match C++ FCompactParticleStats)
 // 32 bytes per particle - for non-ISM/non-Shadow mode
 //=============================================================================
+/**
+ * @brief Data layout for FCompactParticleStats
+ */
 struct FCompactParticleStats
 {
     float3 Position;    // 12 bytes
@@ -48,6 +59,9 @@ struct FCompactParticleStats
 // Compact Stats Structure - Extended (must match C++ FCompactParticleStatsEx)
 // 48 bytes per particle - includes Velocity for ISM/Shadow
 //=============================================================================
+/**
+ * @brief Data layout for FCompactParticleStatsEx
+ */
 struct FCompactParticleStatsEx
 {
     float3 Position;    // 12 bytes
@@ -74,6 +88,9 @@ RWStructuredBuffer<FCompactParticleStatsEx> OutCompactStatsEx;
 //=============================================================================
 #define THREAD_GROUP_SIZE 256
 
+/**
+ * @brief Compute shader entry point for CompactStatsCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CompactStatsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -100,6 +117,9 @@ void CompactStatsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Main Compute Shader - Extended Mode (48 bytes output)
 // Extracts: Position, ParticleID, Velocity, SourceID, NeighborCount
 //=============================================================================
+/**
+ * @brief Compute shader entry point for CompactStatsExCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CompactStatsExCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

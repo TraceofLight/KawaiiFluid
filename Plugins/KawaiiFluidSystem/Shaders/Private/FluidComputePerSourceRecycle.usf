@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidComputePerSourceRecycle.usf
+ * @brief Shader implementation for FluidComputePerSourceRecycle
+ */
+
 // Per-Source Recycle Compute Shader
 // Computes per-source excess particles for sources with emitter max limits
 // Single-threaded pass (up to 64 sources is trivial)
@@ -12,6 +17,9 @@ StructuredBuffer<uint> IncomingSpawnCounts;    // Per-source spawn count this fr
 RWStructuredBuffer<uint> PerSourceExcess;     // Output: per-source excess [64]
 int ActiveSourceCount;
 
+/**
+ * @brief Compute shader entry point for ComputePerSourceRecycleCS
+ */
 [numthreads(1, 1, 1)]
 void ComputePerSourceRecycleCS(uint3 DTid : SV_DispatchThreadID)
 {

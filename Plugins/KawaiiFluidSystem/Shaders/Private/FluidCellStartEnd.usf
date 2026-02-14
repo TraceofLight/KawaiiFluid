@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidCellStartEnd.usf
+ * @brief Shader implementation for FluidCellStartEnd
+ */
+
 // GPU Fluid Physics - Cell Start/End Index Computation
 //
 // After particles are sorted by Morton code, this shader computes the
@@ -60,6 +65,9 @@ StructuredBuffer<uint> ParticleCountBuffer;
 
 #define THREAD_GROUP_SIZE 512
 
+/**
+ * @brief Compute shader entry point for ClearCellIndicesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ClearCellIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -78,6 +86,9 @@ void ClearCellIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Detects boundaries where Morton code changes in sorted array
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ComputeCellStartEndCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -130,6 +141,9 @@ void ComputeCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Input: Sorted cell IDs (computed from position, not Morton code)
 StructuredBuffer<uint> SortedCellIDs;
 
+/**
+ * @brief Compute shader entry point for ComputeCellStartEndGridCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeCellStartEndGridCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -172,6 +186,9 @@ void ComputeCellStartEndGridCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 RWStructuredBuffer<uint> CellCounts;  // For validation
 
+/**
+ * @brief Compute shader entry point for ValidateCellCountsCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ValidateCellCountsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

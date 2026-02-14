@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidDespawnParticles.usf
+ * @brief Shader implementation for FluidDespawnParticles
+ */
+
 // Stream Compaction Shaders for Particle Despawn (shared by ID-based despawn)
 
 #include "/Engine/Public/Platform.ush"
@@ -8,6 +13,9 @@
 // Struct Definitions (Must match C++)
 // ===================================================================================
 
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
 struct FGPUFluidParticle
 {
 	float3 Position;           // 12 bytes
@@ -42,6 +50,9 @@ RWStructuredBuffer<uint> OutTotalCount;
 // Kernel: CompactParticlesCS
 // Compacts alive particles to new buffer based on prefix sums
 // ===================================================================================
+/**
+ * @brief Compute shader entry point for CompactParticlesCS
+ */
 [numthreads(256, 1, 1)]
 void CompactParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -65,6 +76,9 @@ void CompactParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Kernel: WriteTotalCountCS
 // Calculates total dead count for async readback
 // ===================================================================================
+/**
+ * @brief Compute shader entry point for WriteTotalCountCS
+ */
 [numthreads(1, 1, 1)]
 void WriteTotalCountCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

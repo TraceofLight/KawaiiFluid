@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidBoundaryAdhesion.usf
+ * @brief Shader implementation for FluidBoundaryAdhesion
+ */
+
 // GPU Fluid Physics - Boundary Adhesion Pass
 // Applies adhesion forces between fluid particles and boundary particles
 // Based on Akinci 2012 "Versatile Rigid-Fluid Coupling"
@@ -19,6 +24,9 @@
 // Structures (must match C++ definitions)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUBoundaryParticle
+ */
 struct FGPUBoundaryParticle
 {
 	float3 Position;      // 12 bytes - World position
@@ -83,6 +91,9 @@ int bUseBoundaryAABBCulling;
 // AABB Distance Function for Particle-Level Early-Out
 // Returns squared distance from position to AABB (0 if inside)
 //=============================================================================
+/**
+ * @brief Computes squared distance to an axis-aligned box
+ */
 float DistanceSquaredToAABB(float3 testPos, float3 aabbMin, float3 aabbMax)
 {
 	float3 closestPoint = clamp(testPos, aabbMin, aabbMax);
@@ -99,6 +110,9 @@ float DistanceSquaredToAABB(float3 testPos, float3 aabbMin, float3 aabbMax)
 // Z-Order Cell ID Calculation (must match FluidSolveDensityPressure.usf)
 // IMPORTANT: Result is truncated to fit CellStart/CellEnd buffer size (MAX_CELLS)
 //=============================================================================
+/**
+ * @brief Computes cell key for adhesion lookup
+ */
 uint GetMortonCellIDFromCellCoord_Adhesion(int3 cellCoord)
 {
 	// Hybrid mode: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
@@ -132,6 +146,9 @@ uint GetMortonCellIDFromCellCoord_Adhesion(int3 cellCoord)
 RWStructuredBuffer<uint> RWBoundaryCellCounts;
 RWStructuredBuffer<uint> RWBoundaryParticleIndices;
 
+/**
+ * @brief Compute shader entry point for ClearBoundaryHashCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ClearBoundaryHashCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -147,6 +164,9 @@ void ClearBoundaryHashCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Pass 2: Build Boundary Hash
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for BuildBoundaryHashCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void BuildBoundaryHashCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -179,6 +199,9 @@ void BuildBoundaryHashCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // 2. Legacy Spatial Hash Mode: Uses BoundaryCellCounts/BoundaryParticleIndices
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for BoundaryAdhesionCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void BoundaryAdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

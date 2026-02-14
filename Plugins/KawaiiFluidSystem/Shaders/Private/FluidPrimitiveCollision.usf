@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidPrimitiveCollision.usf
+ * @brief Shader implementation for FluidPrimitiveCollision
+ */
+
 // GPU Fluid Physics - Primitive Collision Pass
 // Applies collision with explicit primitives (spheres, capsules, boxes, convexes)
 
@@ -91,7 +96,7 @@ int MaxColliderCount;
 //=============================================================================
 
 /**
- * Writes FGPUCollisionFeedback struct to unified buffer at given byte offset
+ * @brief Writes FGPUCollisionFeedback struct to unified buffer at given byte offset
  * FGPUCollisionFeedback layout (96 bytes):
  *   Row 1: ParticleIndex(4) + ColliderIndex(4) + ColliderType(4) + Density(4)
  *   Row 2: ImpactNormal(12) + Penetration(4)
@@ -159,7 +164,7 @@ void WriteFeedbackToBuffer(uint byteOffset, int particleIdx, int colliderIdx, in
 //=============================================================================
 
 /**
- * Records collision feedback for CPU readback (particle -> player interaction)
+ * @brief Records collision feedback for CPU readback (particle -> player interaction)
  * Uses atomic counter in unified buffer header to safely write to shared buffer
  *
  * Unified Buffer Layout:
@@ -256,6 +261,9 @@ void RecordCollisionFeedback(int particleIdx, int colliderIdx, int colliderType,
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for PrimitiveCollisionCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void PrimitiveCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

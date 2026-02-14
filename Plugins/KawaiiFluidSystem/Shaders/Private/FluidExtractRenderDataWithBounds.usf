@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidExtractRenderDataWithBounds.usf
+ * @brief Shader implementation for FluidExtractRenderDataWithBounds
+ */
+
 // GPU Fluid Physics - Merged Extract Render Data + Calculate Bounds Pass
 // Converts physics particle buffer to render particle buffer AND calculates bounds in single pass
 // Eliminates the need for separate CalculateGPUBounds pass
@@ -11,6 +16,9 @@
 // Render Particle Structure (must match FKawaiiRenderParticle - 32 bytes)
 //=============================================================================
 
+/**
+ * @brief Data layout for FRenderParticle
+ */
 struct FRenderParticle
 {
 	float3 Position;
@@ -40,6 +48,9 @@ groupshared float3 SharedMax[BOUNDS_THREAD_GROUP_SIZE];
 // Dispatch: (1, 1, 1) - single group of 256 threads (same as BoundsReduction)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ExtractRenderDataWithBoundsCS
+ */
 [numthreads(BOUNDS_THREAD_GROUP_SIZE, 1, 1)]
 void ExtractRenderDataWithBoundsCS(uint3 GroupId : SV_GroupID, uint3 DTid : SV_DispatchThreadID, uint GI : SV_GroupIndex)
 {

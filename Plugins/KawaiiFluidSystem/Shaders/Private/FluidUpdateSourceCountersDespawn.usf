@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidUpdateSourceCountersDespawn.usf
+ * @brief Shader implementation for FluidUpdateSourceCountersDespawn
+ */
+
 // Source Counter Update for GPU Despawn - Decrements source counters for marked particles
 
 #include "/Engine/Public/Platform.ush"
@@ -8,6 +13,9 @@
 // Struct Definitions (Must match C++)
 // ===================================================================================
 
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
 struct FGPUFluidParticle
 {
 	float3 Position;           // 12 bytes
@@ -38,6 +46,9 @@ int MaxSourceCount;
 // Kernel: UpdateSourceCountersDespawnCS
 // Decrements source counters for particles marked as dead (AliveMask == 0)
 // ===================================================================================
+/**
+ * @brief Compute shader entry point for UpdateSourceCountersDespawnCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void UpdateSourceCountersDespawnCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

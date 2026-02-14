@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidExtractPositions.usf
+ * @brief Shader implementation for FluidExtractPositions
+ */
+
 // GPU Fluid Physics - Extract Positions Pass
 // Extracts positions from particle buffer for spatial hash building
 
@@ -20,6 +25,9 @@ int bUsePredictedPosition;
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ExtractPositionsCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ExtractPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

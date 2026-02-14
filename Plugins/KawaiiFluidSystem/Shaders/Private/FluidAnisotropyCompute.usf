@@ -1,5 +1,10 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
+/**
+ * @file FluidAnisotropyCompute.usf
+ * @brief Shader implementation for FluidAnisotropyCompute
+ */
+
 #include "/Engine/Private/Common.ush"
 #include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"  // Half precision packing utilities (UnpackVelocity, etc.)
 #include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
@@ -81,6 +86,9 @@ int bUseHybridTiledZOrder;    // 1 = Hybrid Tiled Z-Order (unlimited range), 0 =
 //-----------------------------------------------------------------------------
 // Boundary Particles for anisotropy calculation (Akinci 2012 style)
 //-----------------------------------------------------------------------------
+/**
+ * @brief Data layout for FGPUBoundaryParticle
+ */
 struct FGPUBoundaryParticle
 {
 	float3 Position;      // 12 bytes - World position
@@ -126,6 +134,9 @@ float NonPreservedRenderScale;
 // BoneDelta Attachment for NEAR_BOUNDARY particles (must match C++ FGPUBoneDeltaAttachment)
 // 64 bytes - matches GPUBoundaryAttachment.h and FluidBoneDeltaAttachment.ush
 //-----------------------------------------------------------------------------
+/**
+ * @brief Data layout for FGPUBoneDeltaAttachment
+ */
 struct FGPUBoneDeltaAttachment
 {
 	int BoundaryParticleIndex;  // 4 bytes - Index into WorldBoundaryParticles (-1 = not attached)
@@ -166,9 +177,11 @@ float ColliderSearchRadius;
 // Morton code functions are provided by FluidMortonUtils.ush
 //-----------------------------------------------------------------------------
 
-// Compute cell ID from cell coordinates (integer)
-// Supports both Hybrid Tiled Z-Order (unlimited range) and Classic Morton (bounded)
-// This version uses shader parameters (MortonBoundsMin, CellSize, bUseHybridTiledZOrder) directly.
+/**
+ * @brief Compute cell ID from cell coordinates (integer)
+ * Supports both Hybrid Tiled Z-Order (unlimited range) and Classic Morton (bounded)
+ * This version uses shader parameters (MortonBoundsMin, CellSize, bUseHybridTiledZOrder) directly.
+ */
 uint GetMortonCellIDFromCellCoord_Aniso(int3 cellCoord)
 {
 	if (bUseHybridTiledZOrder)
@@ -218,6 +231,9 @@ uint GetMortonCellIDFromCellCoord_Aniso(int3 cellCoord)
 //-----------------------------------------------------------------------------
 // Helper: Build orthonormal basis from direction (Frisvad's method)
 //-----------------------------------------------------------------------------
+/**
+ * @brief Builds an orthonormal basis from a direction
+ */
 void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
 {
 	if (N.z < -0.9999999f)
@@ -240,6 +256,9 @@ void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
 // NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
 //-----------------------------------------------------------------------------
 
+/**
+ * @brief Returns the nearest collider surface normal
+ */
 float3 GetClosestColliderNormal(float3 pos, float searchRadius)
 {
 	float closestDist = searchRadius;
@@ -339,7 +358,7 @@ float3 GetClosestColliderNormal(float3 pos, float searchRadius)
 //-----------------------------------------------------------------------------
 
 /**
- * Calculate anisotropy for NEAR_BOUNDARY particles using bone collider surface normal
+ * @brief Calculate anisotropy for NEAR_BOUNDARY particles using bone collider surface normal
  * Directly queries collision primitives instead of reading stored normal
  *
  * @param ParticleIndex - Particle index
@@ -403,6 +422,9 @@ bool CalculateBoundaryAnisotropy(
 //-----------------------------------------------------------------------------
 // Helper: SPH Kernel weight (cubic spline)
 //-----------------------------------------------------------------------------
+/**
+ * @brief Computes anisotropy kernel weight
+ */
 float KernelWeight(float Distance, float H)
 {
 	if (Distance >= H)
@@ -428,7 +450,9 @@ float KernelWeight(float Distance, float H)
 // Reference: "Eigenvalues of a 3x3 symmetric matrix" - Kopp (2008)
 //-----------------------------------------------------------------------------
 
-// Compute eigenvector for a given eigenvalue using cross product method
+/**
+ * @brief Compute eigenvector for a given eigenvalue using cross product method
+ */
 float3 ComputeEigenvector(float3x3 A, float eigenvalue)
 {
 	// (A - λI) should have rank 2, so we find null space
@@ -470,6 +494,9 @@ float3 ComputeEigenvector(float3x3 A, float eigenvalue)
 	return float3(1, 0, 0);
 }
 
+/**
+ * @brief Solves eigen decomposition for a symmetric 3x3 matrix
+ */
 void SymmetricEigen3x3(
 	float3x3 M,
 	out float3 EigenValues,
@@ -632,6 +659,9 @@ void SymmetricEigen3x3(
 // Velocity-Based Anisotropy (with explicit velocity parameter)
 // Supports both volume-preserving (Yu & Turk) and FleX style
 //-----------------------------------------------------------------------------
+/**
+ * @brief Calculates velocity-based anisotropy with relative velocity
+ */
 void CalculateVelocityBasedWithVelocity(
 	float3 Velocity,
 	out float3 Axis1, out float3 Axis2, out float3 Axis3,
@@ -699,7 +729,9 @@ void CalculateVelocityBasedWithVelocity(
 	}
 }
 
-// Wrapper for backward compatibility
+/**
+ * @brief Wrapper for backward compatibility
+ */
 void CalculateVelocityBased(
 	uint ParticleIndex,
 	out float3 Axis1, out float3 Axis2, out float3 Axis3,
@@ -722,6 +754,9 @@ void CalculateVelocityBased(
 // NOTE: Keep this small (32) to avoid GPU register spilling. 64 causes ~50% slowdown.
 #define MAX_CACHED_NEIGHBORS 32
 
+/**
+ * @brief Calculates density-based anisotropy
+ */
 void CalculateDensityBased(
 	uint ParticleIndex,
 	out float3 Axis1, out float3 Axis2, out float3 Axis3,
@@ -1170,6 +1205,9 @@ void CalculateDensityBased(
 // Apply Velocity Stretching to existing ellipsoid
 // Stretches the ellipsoid along velocity direction (Yu & Turk style)
 //-----------------------------------------------------------------------------
+/**
+ * @brief Applies velocity stretching to anisotropy axes
+ */
 void ApplyVelocityStretching(
 	uint ParticleIndex,
 	inout float3 Axis1, inout float3 Axis2, inout float3 Axis3,
@@ -1277,6 +1315,9 @@ void CalculateAttachedAnisotropy(
 //-----------------------------------------------------------------------------
 // Main Compute Shader
 //-----------------------------------------------------------------------------
+/**
+ * @brief Compute shader entry point for MainCS
+ */
 [numthreads(THREADGROUP_SIZE, 1, 1)]
 void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

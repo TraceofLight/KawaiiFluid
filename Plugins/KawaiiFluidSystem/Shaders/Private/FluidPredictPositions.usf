@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidPredictPositions.usf
+ * @brief Shader implementation for FluidPredictPositions
+ */
+
 // GPU Fluid Physics - Predict Positions Pass
 //
 // Phase 2 of PBF/XPBD simulation:
@@ -54,6 +59,9 @@ int PrevParticleCount;       // Safety: bounds check
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for PredictPositionsCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void PredictPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

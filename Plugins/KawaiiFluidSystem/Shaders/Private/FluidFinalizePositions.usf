@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidFinalizePositions.usf
+ * @brief Shader implementation for FluidFinalizePositions
+ */
+
 // GPU Fluid Physics - Finalize Positions Pass
 // Updates positions from predictions and recalculates velocities
 
@@ -25,6 +30,9 @@ float GlobalDamping;    // Velocity damping per substep (1.0 = no damping)
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for FinalizePositionsCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void FinalizePositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

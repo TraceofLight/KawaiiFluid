@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidFlowAccumulation.usf
+ * @brief Shader implementation for FluidFlowAccumulation
+ */
+
 //
 // Flow Accumulation Shader
 // Accumulates screen-space velocity into UV offset for flow texture effects.
@@ -48,7 +53,9 @@ RWTexture2D<float2> OutputAccumulatedFlow;
 // Helper Functions
 //=============================================================================
 
-// Reconstruct view-space position from screen UV and linear depth
+/**
+ * @brief Reconstruct view-space position from screen UV and linear depth
+ */
 float3 ReconstructViewPosition(float2 ScreenUV, float LinearDepth)
 {
 	// Convert UV to NDC (clip space)
@@ -71,7 +78,9 @@ float3 ReconstructViewPosition(float2 ScreenUV, float LinearDepth)
 	return ViewRay * (-LinearDepth);
 }
 
-// Reconstruct world position from screen UV and linear depth
+/**
+ * @brief Reconstruct world position from screen UV and linear depth
+ */
 float3 ReconstructWorldPosition(float2 ScreenUV, float LinearDepth)
 {
 	// First get view-space position
@@ -83,7 +92,9 @@ float3 ReconstructWorldPosition(float2 ScreenUV, float LinearDepth)
 	return WorldPos.xyz;
 }
 
-// Reproject world position to previous frame's screen UV
+/**
+ * @brief Reproject world position to previous frame's screen UV
+ */
 float2 ReprojectToPrevFrame(float3 WorldPos)
 {
 	float4 PrevClipPos = mul(float4(WorldPos, 1.0), PrevViewProjectionMatrix);
@@ -101,6 +112,9 @@ float2 ReprojectToPrevFrame(float3 WorldPos)
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for FlowAccumulationCS
+ */
 [numthreads(8, 8, 1)]
 void FlowAccumulationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

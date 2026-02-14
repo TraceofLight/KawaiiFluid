@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidReorderParticles.usf
+ * @brief Shader implementation for FluidReorderParticles
+ */
+
 // GPU Fluid Physics - Particle Data Reordering
 //
 // After sorting Morton codes with particle indices, this shader physically
@@ -43,6 +48,9 @@ StructuredBuffer<uint> ParticleCountBuffer;
 
 #define THREAD_GROUP_SIZE 256
 
+/**
+ * @brief Compute shader entry point for ReorderParticlesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ReorderParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -70,6 +78,9 @@ void ReorderParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Useful for updating external references to particles
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for BuildReverseMappingCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void BuildReverseMappingCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -100,6 +111,9 @@ RWStructuredBuffer<float4> SortedPositions;
 RWStructuredBuffer<float4> SortedVelocities;
 RWStructuredBuffer<float4> SortedDynamics;
 
+/**
+ * @brief Compute shader entry point for ReorderParticlesSoACS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ReorderParticlesSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

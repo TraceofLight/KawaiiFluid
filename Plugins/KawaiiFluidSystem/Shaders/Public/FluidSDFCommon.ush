@@ -13,7 +13,9 @@
 // SDF Primitives
 //=============================================================================
 
-// Sphere SDF: returns signed distance from point p to sphere surface
+/**
+ * @brief Sphere SDF: returns signed distance from point p to sphere surface
+ */
 float sdSphere(float3 p, float3 center, float radius)
 {
 	return length(p - center) - radius;
@@ -24,8 +26,10 @@ float sdSphere(float3 p, float3 center, float radius)
 // Reference: Inigo Quilez https://iquilezles.org/articles/ellipsoids/
 //=============================================================================
 
-// Ellipsoid SDF with axis-aligned radii
-// radii: (rx, ry, rz) - radii along each axis
+/**
+ * @brief Ellipsoid SDF with axis-aligned radii
+ * radii: (rx, ry, rz) - radii along each axis
+ */
 float sdEllipsoid(float3 p, float3 center, float3 radii)
 {
 	float3 pLocal = p - center;
@@ -37,10 +41,12 @@ float sdEllipsoid(float3 p, float3 center, float3 radii)
 	return k0 * (k0 - 1.0) / k1;
 }
 
-// Anisotropic Particle SDF using transformation matrix
-// Transforms point into ellipsoid's local space, then evaluates as sphere
-// axis1/2/3: orthonormal basis vectors (eigenvectors)
-// scale1/2/3: scale factors along each axis (eigenvalues)
+/**
+ * @brief Anisotropic Particle SDF using transformation matrix
+ * Transforms point into ellipsoid's local space, then evaluates as sphere
+ * axis1/2/3: orthonormal basis vectors (eigenvectors)
+ * scale1/2/3: scale factors along each axis (eigenvalues)
+ */
 float sdAnisotropicParticle(
 	float3 p,
 	float3 center,
@@ -68,9 +74,11 @@ float sdAnisotropicParticle(
 // SDF Operations
 //=============================================================================
 
-// Smooth minimum (polynomial smooth min)
-// k: smoothness factor (higher = smoother blend, typical: 4.0 ~ 16.0)
-// Reference: https://iquilezles.org/articles/smin/
+/**
+ * @brief Smooth minimum (polynomial smooth min)
+ * k: smoothness factor (higher = smoother blend, typical: 4.0 ~ 16.0)
+ * Reference: https://iquilezles.org/articles/smin/
+ */
 float smin(float a, float b, float k)
 {
 	float h = max(k - abs(a - b), 0.0) / k;
@@ -81,7 +89,9 @@ float smin(float a, float b, float k)
 // Metaball SDF Evaluation
 //=============================================================================
 
-// Evaluate metaball SDF from FKawaiiRenderParticle buffer
+/**
+ * @brief Evaluate metaball SDF from FKawaiiRenderParticle buffer
+ */
 float EvaluateMetaballSDFFromRenderParticles(
 	float3 p,
 	StructuredBuffer<FKawaiiRenderParticle> RenderParticles,
@@ -103,7 +113,9 @@ float EvaluateMetaballSDFFromRenderParticles(
 	return sdf;
 }
 
-// Calculate normal using 3-tap forward difference
+/**
+ * @brief Calculate normal using 3-tap forward difference
+ */
 float3 CalculateSDFNormal3TapFromRenderParticles(
 	float3 p,
 	float centerSDF,
@@ -126,9 +138,11 @@ float3 CalculateSDFNormal3TapFromRenderParticles(
 // Spatial Hash SDF Evaluation (Multi-pass version with dynamic layout)
 //=============================================================================
 
-// Evaluate metaball SDF with Spatial Hash acceleration (O(k) instead of O(N))
-// Uses CellData: {startIndex, count} and sorted ParticleIndices
-// Always 3x3x3 search (27 cells) - cell size must be >= SearchRadius
+/**
+ * @brief Evaluate metaball SDF with Spatial Hash acceleration (O(k) instead of O(N))
+ * Uses CellData: {startIndex, count} and sorted ParticleIndices
+ * Always 3x3x3 search (27 cells) - cell size must be >= SearchRadius
+ */
 float EvaluateMetaballSDFWithSpatialHash(
 	float3 p,
 	StructuredBuffer<FKawaiiRenderParticle> RenderParticles,
@@ -195,8 +209,10 @@ float EvaluateMetaballSDFWithSpatialHash(
 	return bFoundAny ? sdf : 1e10;
 }
 
-// Analytic Gradient Normal calculation (1-Loop, no finite differences)
-// Uses smin blend weights to compute weighted average of particle directions
+/**
+ * @brief Analytic Gradient Normal calculation (1-Loop, no finite differences)
+ * Uses smin blend weights to compute weighted average of particle directions
+ */
 float3 CalculateNormalAnalyticWithSpatialHash(
 	float3 p,
 	float centerSDF,
@@ -270,7 +286,9 @@ float3 CalculateNormalAnalyticWithSpatialHash(
 // - Cache hit rate improvement: 4 → 10 particles per 128B cache line
 //=============================================================================
 
-// Evaluate metaball SDF from SoA Position buffer
+/**
+ * @brief Evaluate metaball SDF from SoA Position buffer
+ */
 float EvaluateMetaballSDFFromPositions_SoA(
 	float3 p,
 	StructuredBuffer<float3> RenderPositions,
@@ -292,7 +310,9 @@ float EvaluateMetaballSDFFromPositions_SoA(
 	return sdf;
 }
 
-// Calculate normal using 3-tap forward difference (SoA version)
+/**
+ * @brief Calculate normal using 3-tap forward difference (SoA version)
+ */
 float3 CalculateSDFNormal3Tap_SoA(
 	float3 p,
 	float centerSDF,
@@ -311,8 +331,10 @@ float3 CalculateSDFNormal3Tap_SoA(
 	return normalize(n);
 }
 
-// Evaluate metaball SDF with Spatial Hash acceleration (SoA version)
-// Uses Position-only buffer for 62% memory bandwidth reduction
+/**
+ * @brief Evaluate metaball SDF with Spatial Hash acceleration (SoA version)
+ * Uses Position-only buffer for 62% memory bandwidth reduction
+ */
 float EvaluateMetaballSDFWithSpatialHash_SoA(
 	float3 p,
 	StructuredBuffer<float3> RenderPositions,
@@ -379,7 +401,9 @@ float EvaluateMetaballSDFWithSpatialHash_SoA(
 	return bFoundAny ? sdf : 1e10;
 }
 
-// Analytic Gradient Normal calculation (SoA version)
+/**
+ * @brief Analytic Gradient Normal calculation (SoA version)
+ */
 float3 CalculateNormalAnalyticWithSpatialHash_SoA(
 	float3 p,
 	float centerSDF,
@@ -453,7 +477,9 @@ float3 CalculateNormalAnalyticWithSpatialHash_SoA(
 // AnisotropyAxis1/2/3: float4(axis.xyz, scale.w) per particle
 //=============================================================================
 
-// Evaluate anisotropic metaball SDF with Spatial Hash acceleration
+/**
+ * @brief Evaluate anisotropic metaball SDF with Spatial Hash acceleration
+ */
 float EvaluateAnisotropicSDFWithSpatialHash_SoA(
 	float3 p,
 	StructuredBuffer<float3> RenderPositions,
@@ -537,7 +563,9 @@ float EvaluateAnisotropicSDFWithSpatialHash_SoA(
 	return bFoundAny ? sdf : 1e10;
 }
 
-// Analytic Gradient Normal calculation for anisotropic particles
+/**
+ * @brief Analytic Gradient Normal calculation for anisotropic particles
+ */
 float3 CalculateNormalAnisotropicWithSpatialHash_SoA(
 	float3 p,
 	float centerSDF,
@@ -635,7 +663,9 @@ float3 CalculateNormalAnisotropicWithSpatialHash_SoA(
 	return normalize(gradient);
 }
 
-// O(N) fallback version (no spatial hash) for anisotropic particles
+/**
+ * @brief O(N) fallback version (no spatial hash) for anisotropic particles
+ */
 float EvaluateAnisotropicSDFFromPositions_SoA(
 	float3 p,
 	StructuredBuffer<float3> RenderPositions,
@@ -667,7 +697,9 @@ float EvaluateAnisotropicSDFFromPositions_SoA(
 	return sdf;
 }
 
-// 3-tap normal for anisotropic (fallback)
+/**
+ * @brief 3-tap normal for anisotropic (fallback)
+ */
 float3 CalculateSDFNormal3Tap_Anisotropic_SoA(
 	float3 p,
 	float centerSDF,

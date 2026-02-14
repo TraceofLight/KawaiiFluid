@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidUpdateParticleCount.usf
+ * @brief Shader implementation for FluidUpdateParticleCount
+ */
+
 // GPU Fluid Physics - Update Particle Count Kernels
 // Writes accurate alive count to PersistentParticleCountBuffer after compaction/spawn
 
@@ -17,6 +22,9 @@ StructuredBuffer<uint> AliveMask;
 RWStructuredBuffer<uint> ParticleCountBuffer;  // 11 elements (44 bytes)
 int OldParticleCount;
 
+/**
+ * @brief Compute shader entry point for WriteAliveCountAfterCompactionCS
+ */
 [numthreads(1, 1, 1)]
 void WriteAliveCountAfterCompactionCS(uint3 DTid : SV_DispatchThreadID)
 {
@@ -54,6 +62,9 @@ void WriteAliveCountAfterCompactionCS(uint3 DTid : SV_DispatchThreadID)
 StructuredBuffer<uint> SpawnCounter;  // Atomic counter value after spawn
 RWStructuredBuffer<uint> SpawnParticleCountBuffer;  // 11 elements (44 bytes)
 
+/**
+ * @brief Compute shader entry point for UpdateCountAfterSpawnCS
+ */
 [numthreads(1, 1, 1)]
 void UpdateCountAfterSpawnCS(uint3 DTid : SV_DispatchThreadID)
 {

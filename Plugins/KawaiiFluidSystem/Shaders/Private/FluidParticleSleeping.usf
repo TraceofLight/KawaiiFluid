@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidParticleSleeping.usf
+ * @brief Shader implementation for FluidParticleSleeping
+ */
+
 // Particle Sleeping - NVIDIA Flex stabilization technique
 //
 // Sleeping particles are excluded from constraint solving to:
@@ -36,6 +41,9 @@ StructuredBuffer<uint> NeighborCounts;
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for UpdateParticleSleepingCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void UpdateParticleSleepingCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

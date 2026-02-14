@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidDespawnBySource.usf
+ * @brief Shader implementation for FluidDespawnBySource
+ */
+
 // Source-Based Despawn Shader - Marks particles matching specific SourceIDs for removal
 
 #include "/Engine/Public/Platform.ush"
@@ -8,6 +13,9 @@
 // Struct Definitions (Must match C++)
 // ===================================================================================
 
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
 struct FGPUFluidParticle
 {
 	float3 Position;           // 12 bytes
@@ -39,6 +47,9 @@ int DespawnSourceIDCount;
 // Marks particles matching any despawn SourceID for removal (AliveMask = 0)
 // Contract: Only writes 0 (never writes 1). AliveMask must be pre-cleared to 1.
 // ===================================================================================
+/**
+ * @brief Compute shader entry point for MarkDespawnBySourceCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void MarkDespawnBySourceCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

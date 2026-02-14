@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidSurfaceDecoration.usf
+ * @brief Shader implementation for FluidSurfaceDecoration
+ */
+
 //
 // Surface Decoration Shader for Fluid Rendering
 // Applies texture overlays, foam, emissive effects on fluid surfaces.
@@ -137,7 +142,9 @@ RWTexture2D<float4> OutputTexture;
 #define ACCUMULATED_FLOW_MIN_THRESHOLD 0.1
 #define VELOCITY_FALLBACK_THRESHOLD 1.0
 
-// Reconstruct view-space position from linear depth
+/**
+ * @brief Reconstruct view-space position from linear depth
+ */
 float3 ReconstructViewPosition(float2 ScreenUV, float LinearDepth)
 {
 	// Convert texture UV to NDC (Clip Space)
@@ -157,7 +164,9 @@ float3 ReconstructViewPosition(float2 ScreenUV, float LinearDepth)
 	return ViewRay * (-LinearDepth);
 }
 
-// Reconstruct world position from view-space linear depth
+/**
+ * @brief Reconstruct world position from view-space linear depth
+ */
 float3 ReconstructWorldPosition(float2 UV, float LinearDepth)
 {
 	// First get view-space position
@@ -169,11 +178,13 @@ float3 ReconstructWorldPosition(float2 UV, float LinearDepth)
 	return WorldPos.xyz;
 }
 
-// Get accumulated flow offset (velocity-based, accumulated over time)
-// Returns the flow offset in world units (cm)
-// Still water: returns near-zero (no movement)
-// Flowing water: returns accumulated offset (texture moves)
-// SSFRTexcoord: UV coordinates in SSFR texture space [0,1]
+/**
+ * @brief Get accumulated flow offset (velocity-based, accumulated over time)
+ * Returns the flow offset in world units (cm)
+ * Still water: returns near-zero (no movement)
+ * Flowing water: returns accumulated offset (texture moves)
+ * SSFRTexcoord: UV coordinates in SSFR texture space [0,1]
+ */
 float2 GetAccumulatedFlowOffset(float2 SSFRTexcoord)
 {
 	if (bUseAccumulatedFlow > 0)
@@ -186,7 +197,9 @@ float2 GetAccumulatedFlowOffset(float2 SSFRTexcoord)
 	return float2(0, 0);
 }
 
-// Sample foam texture with addressing mode support
+/**
+ * @brief Sample foam texture with addressing mode support
+ */
 float4 SampleFoamTexture(float2 UV)
 {
 	if (FoamAddressingMode == 1)
@@ -201,7 +214,9 @@ float4 SampleFoamTexture(float2 UV)
 	}
 }
 
-// Sample layer texture with addressing mode support
+/**
+ * @brief Sample layer texture with addressing mode support
+ */
 float4 SampleLayerTexture(float2 UV)
 {
 	if (LayerAddressingMode == 1)
@@ -216,7 +231,9 @@ float4 SampleLayerTexture(float2 UV)
 	}
 }
 
-// Sample layer normal map with addressing mode support
+/**
+ * @brief Sample layer normal map with addressing mode support
+ */
 float3 SampleLayerNormalMap(float2 UV)
 {
 	float4 NormalSample;
@@ -232,11 +249,13 @@ float3 SampleLayerNormalMap(float2 UV)
 	return NormalSample.xyz * 2.0 - 1.0;
 }
 
-// Blend two normals using Reoriented Normal Mapping (RNM)
-// Reference: "Blending in Detail" by Colin Barré-Brisebois & Stephen Hill
-// BaseNormal: existing surface normal (world space, normalized)
-// DetailNormal: texture normal (tangent space, Z-up, in [-1,1] range)
-// Strength: blend strength (0 = base only, 1 = full detail)
+/**
+ * @brief Blend two normals using Reoriented Normal Mapping (RNM)
+ * Reference: "Blending in Detail" by Colin Barré-Brisebois & Stephen Hill
+ * BaseNormal: existing surface normal (world space, normalized)
+ * DetailNormal: texture normal (tangent space, Z-up, in [-1,1] range)
+ * Strength: blend strength (0 = base only, 1 = full detail)
+ */
 float3 BlendNormalsRNM(float3 BaseNormal, float3 DetailNormal, float Strength)
 {
 	// Scale detail normal XY by strength, keep Z unchanged
@@ -262,8 +281,10 @@ float3 BlendNormalsRNM(float3 BaseNormal, float3 DetailNormal, float Strength)
 	return normalize(t * tDotU / t.z - u);
 }
 
-// Build TBN matrix from world normal (for Z-axis projection)
-// Since we project from Z-axis, tangent is along X, bitangent along Y
+/**
+ * @brief Build TBN matrix from world normal (for Z-axis projection)
+ * Since we project from Z-axis, tangent is along X, bitangent along Y
+ */
 float3x3 BuildTBNFromWorldNormal(float3 WorldNormal)
 {
 	// For Z-axis projection, use world X and Y as tangent/bitangent
@@ -274,7 +295,9 @@ float3x3 BuildTBNFromWorldNormal(float3 WorldNormal)
 	return float3x3(Tangent, Bitangent, WorldNormal);
 }
 
-// Apply normal map to existing world normal
+/**
+ * @brief Apply normal map to existing world normal
+ */
 float3 ApplyNormalMap(float3 WorldNormal, float3 TangentNormal, float Strength)
 {
 	if (Strength <= 0.0)
@@ -292,9 +315,11 @@ float3 ApplyNormalMap(float3 WorldNormal, float3 TangentNormal, float Strength)
 	return normalize(lerp(WorldNormal, DetailWorldNormal, Strength));
 }
 
-// Compute lighting for texture albedo
-// Returns lit color with diffuse + specular
-// Uses View.DirectionalLightDirection if available (same as FluidComposite.usf)
+/**
+ * @brief Compute lighting for texture albedo
+ * Returns lit color with diffuse + specular
+ * Uses View.DirectionalLightDirection if available (same as FluidComposite.usf)
+ */
 float3 ComputeTextureLighting(float3 Albedo, float3 WorldNormal, float3 WorldPos)
 {
 	if (bApplyLightingToTextures <= 0)
@@ -334,8 +359,10 @@ float3 ComputeTextureLighting(float3 Albedo, float3 WorldNormal, float3 WorldPos
 	return Diffuse + Ambient + Specular;
 }
 
-// Compute foam mask based on various factors
-// Returns normalized mask (0~1) - FoamIntensity is applied separately to final color
+/**
+ * @brief Compute foam mask based on various factors
+ * Returns normalized mask (0~1) - FoamIntensity is applied separately to final color
+ */
 float ComputeFoamMask(float2 UV, float3 WorldNormal, float Depth, float2 DepthGradient, float VelocityMag, float Thickness)
 {
 	float Foam = 0.0;
@@ -380,9 +407,11 @@ float ComputeFoamMask(float2 UV, float3 WorldNormal, float Depth, float2 DepthGr
 // BaseVelocity: internal reference velocity (200 cm/s = typical lava flow)
 #define EMISSIVE_BASE_VELOCITY 200.0
 
-// Returns HDR emissive value directly
-// MinEmissive: HDR base brightness (always applied)
-// EmissiveIntensity: scales dynamic parts (velocity, pulse) only
+/**
+ * @brief Returns HDR emissive value directly
+ * MinEmissive: HDR base brightness (always applied)
+ * EmissiveIntensity: scales dynamic parts (velocity, pulse) only
+ */
 float ComputeEmissiveIntensity(float VelocityMag, float3 WorldNormal)
 {
 	// Dynamic part: velocity and pulse contributions (0~1+ normalized)
@@ -412,6 +441,9 @@ float ComputeEmissiveIntensity(float VelocityMag, float3 WorldNormal)
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for SurfaceDecorationCS
+ */
 [numthreads(8, 8, 1)]
 void SurfaceDecorationCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

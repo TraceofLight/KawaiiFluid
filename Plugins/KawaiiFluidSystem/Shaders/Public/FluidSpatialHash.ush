@@ -27,13 +27,17 @@
 // Hash Functions
 //=============================================================================
 
-// Convert world position to cell coordinate
+/**
+ * @brief Convert world position to cell coordinate
+ */
 int3 WorldToCell(float3 WorldPos, float CellSize)
 {
     return int3(floor(WorldPos / CellSize));
 }
 
-// Hash function for 3D cell coordinate
+/**
+ * @brief Hash function for 3D cell coordinate
+ */
 uint HashCell(int3 CellCoord)
 {
     const uint p1 = 73856093u;

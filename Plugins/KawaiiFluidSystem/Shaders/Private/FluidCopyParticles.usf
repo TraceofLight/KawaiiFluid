@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidCopyParticles.usf
+ * @brief Shader implementation for FluidCopyParticles
+ */
+
 // GPU Fluid Physics - Copy Particles Pass
 // Copies particles from source buffer to destination buffer
 // Used for preserving existing GPU simulation results when appending new particles
@@ -23,6 +28,9 @@ int bReadCountFromGPU;
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for CopyParticlesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void CopyParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

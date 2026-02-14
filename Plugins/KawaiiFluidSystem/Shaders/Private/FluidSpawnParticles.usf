@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidSpawnParticles.usf
+ * @brief Shader implementation for FluidSpawnParticles
+ */
+
 // GPU Fluid Physics - Spawn Particles Pass
 // Creates new particles on GPU from spawn requests (eliminates CPU→GPU race condition)
 
@@ -11,6 +16,9 @@
 // 48 bytes total for source identification support
 //=============================================================================
 
+/**
+ * @brief Data layout for FSpawnRequest
+ */
 struct FSpawnRequest
 {
 	// Row 1: 16 bytes
@@ -57,6 +65,9 @@ float DefaultMass;          // Default mass if request.Mass == 0
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for SpawnParticlesCS
+ */
 [numthreads(64, 1, 1)]
 void SpawnParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -130,7 +141,9 @@ void SpawnParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 int ParticlesPerRequest;    // Number of particles to spawn per request
 float SpawnJitter;          // Random position jitter
 
-// Simple hash for pseudo-random
+/**
+ * @brief Simple hash for pseudo-random
+ */
 uint WangHash(uint seed)
 {
 	seed = (seed ^ 61) ^ (seed >> 16);
@@ -141,11 +154,17 @@ uint WangHash(uint seed)
 	return seed;
 }
 
+/**
+ * @brief Generates a pseudo-random float
+ */
 float RandomFloat(uint seed)
 {
 	return float(WangHash(seed)) / 4294967295.0f;
 }
 
+/**
+ * @brief Generates a pseudo-random offset vector
+ */
 float3 RandomOffset(uint seed, float jitter)
 {
 	return float3(
@@ -155,6 +174,9 @@ float3 RandomOffset(uint seed, float jitter)
 	);
 }
 
+/**
+ * @brief Compute shader entry point for SpawnParticlesBatchCS
+ */
 [numthreads(64, 1, 1)]
 void SpawnParticlesBatchCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

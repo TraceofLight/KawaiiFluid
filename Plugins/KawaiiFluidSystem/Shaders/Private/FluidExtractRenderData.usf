@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidExtractRenderData.usf
+ * @brief Shader implementation for FluidExtractRenderData
+ */
+
 // GPU Fluid Physics - Extract Render Data Pass
 // Converts physics particle buffer to render particle buffer (GPU → GPU)
 
@@ -10,6 +15,9 @@
 // Render Particle Structure (must match FKawaiiRenderParticle - 32 bytes)
 //=============================================================================
 
+/**
+ * @brief Data layout for FRenderParticle
+ */
 struct FRenderParticle
 {
 	float3 Position;
@@ -36,6 +44,9 @@ RWStructuredBuffer<float3> RenderVelocities;  // 12B per particle (for motion bl
 // Main Compute Shader (Legacy AoS output)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ExtractRenderDataCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ExtractRenderDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -76,6 +87,9 @@ void ExtractRenderDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // - 32B/particle to 12B/particle (62% reduction when using Position only)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ExtractRenderDataSoACS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ExtractRenderDataSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

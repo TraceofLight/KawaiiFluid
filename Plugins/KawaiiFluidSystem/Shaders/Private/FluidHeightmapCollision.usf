@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidHeightmapCollision.usf
+ * @brief Shader implementation for FluidHeightmapCollision
+ */
+
 // GPU Fluid Physics - Heightmap Collision Pass
 // Applies collision with terrain heightmap for Landscape support
 
@@ -44,21 +49,27 @@ float CollisionOffset;   // Extra offset for collision detection
 // Helper Functions
 //=============================================================================
 
-// Convert world XY position to heightmap UV coordinates
+/**
+ * @brief Convert world XY position to heightmap UV coordinates
+ */
 float2 WorldToUV(float2 worldXY)
 {
 	return (worldXY - WorldMin.xy) * InvWorldExtent;
 }
 
-// Check if world position is within heightmap bounds (XY only)
+/**
+ * @brief Check if world position is within heightmap bounds (XY only)
+ */
 bool IsInHeightmapBounds(float2 worldXY)
 {
 	return worldXY.x >= WorldMin.x && worldXY.x <= WorldMax.x &&
 	       worldXY.y >= WorldMin.y && worldXY.y <= WorldMax.y;
 }
 
-// Sample terrain height at UV coordinates
-// Returns world Z position of terrain surface
+/**
+ * @brief Sample terrain height at UV coordinates
+ * Returns world Z position of terrain surface
+ */
 float SampleTerrainHeight(float2 uv)
 {
 	// Clamp UV to valid range
@@ -71,8 +82,10 @@ float SampleTerrainHeight(float2 uv)
 	return lerp(WorldMin.z, WorldMax.z, normalizedHeight);
 }
 
-// Calculate terrain normal using Sobel gradient
-// Uses central differences for smooth normal calculation
+/**
+ * @brief Calculate terrain normal using Sobel gradient
+ * Uses central differences for smooth normal calculation
+ */
 float3 CalculateTerrainNormal(float2 uv)
 {
 	// Texel size for gradient calculation
@@ -103,6 +116,9 @@ float3 CalculateTerrainNormal(float2 uv)
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for HeightmapCollisionCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void HeightmapCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidMortonCode.usf
+ * @brief Shader implementation for FluidMortonCode
+ */
+
 // GPU Fluid Physics - Morton Code (Z-Order Curve) Computation
 //
 // Morton Code encodes 3D spatial coordinates into a 1D integer that preserves spatial locality.
@@ -37,11 +42,17 @@ int bUseHybridTiledZOrder;  // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = C
 // Better for spatial hash grid alignment
 //=============================================================================
 
+/**
+ * @brief Converts world position to simulation cell coordinates
+ */
 int3 WorldToCell(float3 WorldPos, float CellSz)
 {
     return int3(floor(WorldPos / CellSz));
 }
 
+/**
+ * @brief Computes Morton code from cell coordinates
+ */
 uint Morton3DFromCell(int3 CellCoord, int3 GridMin)
 {
     // Offset to make all coordinates positive (relative to grid min)
@@ -63,6 +74,9 @@ uint Morton3DFromCell(int3 CellCoord, int3 GridMin)
 
 #define THREAD_GROUP_SIZE 256
 
+/**
+ * @brief Compute shader entry point for ComputeMortonCodesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -99,6 +113,9 @@ void ComputeMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 //   - CellSize = SmoothingRadius for optimal SPH neighbor search
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ComputeMortonCodesCellBasedCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeMortonCodesCellBasedCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

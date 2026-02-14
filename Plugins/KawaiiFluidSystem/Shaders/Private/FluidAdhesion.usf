@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidAdhesion.usf
+ * @brief Shader implementation for FluidAdhesion
+ */
+
 // GPU Fluid Physics - Adhesion Pass
 // Handles particle attachment to bone colliders and position tracking
 
@@ -68,7 +73,9 @@ float GravitySlidingScale;  // How much gravity affects sliding (0-1)
 // Helper Functions
 //=============================================================================
 
-// Find closest point on sphere surface
+/**
+ * @brief Find closest point on sphere surface
+ */
 float3 GetClosestPointOnSphere(float3 pos, FGPUCollisionSphere sphere, out float3 normal, out float distance)
 {
 	float3 toPoint = pos - sphere.Center;
@@ -78,7 +85,9 @@ float3 GetClosestPointOnSphere(float3 pos, FGPUCollisionSphere sphere, out float
 	return sphere.Center + normal * sphere.Radius;
 }
 
-// Find closest point on capsule surface
+/**
+ * @brief Find closest point on capsule surface
+ */
 float3 GetClosestPointOnCapsule(float3 pos, FGPUCollisionCapsule capsule, out float3 normal, out float distance)
 {
 	float3 ab = capsule.End - capsule.Start;
@@ -91,7 +100,9 @@ float3 GetClosestPointOnCapsule(float3 pos, FGPUCollisionCapsule capsule, out fl
 	return closestOnAxis + normal * capsule.Radius;
 }
 
-// Find closest point on box surface (approximate)
+/**
+ * @brief Find closest point on box surface (approximate)
+ */
 float3 GetClosestPointOnBox(float3 pos, FGPUCollisionBox box, out float3 normal, out float distance)
 {
 	// Transform to local space
@@ -125,6 +136,9 @@ float3 GetClosestPointOnBox(float3 pos, FGPUCollisionBox box, out float3 normal,
 	return box.Center + RotateByQuat(clamped, box.Rotation);
 }
 
+/**
+ * @brief Returns surface distance and normal for a convex collider
+ */
 void GetConvexSurfaceInfo(
 	float3 pos,
 	FGPUCollisionConvex convex,
@@ -168,7 +182,9 @@ void GetConvexSurfaceInfo(
 	}
 }
 
-// Calculate absolute distance between an arbitrary position and the attached primitive surface
+/**
+ * @brief Calculate absolute distance between an arbitrary position and the attached primitive surface
+ */
 float ComputeAttachmentSurfaceDistance(float3 pos, FGPUParticleAttachment attachment)
 {
 	if (attachment.PrimitiveIndex < 0)
@@ -211,6 +227,9 @@ float ComputeAttachmentSurfaceDistance(float3 pos, FGPUParticleAttachment attach
 // Adhesion Compute Shader - Check and create attachments
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for AdhesionCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void AdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -358,6 +377,9 @@ void AdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Update Attached Positions Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for UpdateAttachedPositionsCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void UpdateAttachedPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -559,6 +581,9 @@ void UpdateAttachedPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Clear Just Detached Flag (run at end of frame)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ClearDetachedFlagCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ClearDetachedFlagCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

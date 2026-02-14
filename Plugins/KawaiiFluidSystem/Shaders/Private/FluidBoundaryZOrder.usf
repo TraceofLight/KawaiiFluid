@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidBoundaryZOrder.usf
+ * @brief Shader implementation for FluidBoundaryZOrder
+ */
+
 // GPU Fluid Physics - Boundary Particle Z-Order Sorting
 // Computes Morton codes and Cell Start/End for boundary particles
 // Enables O(K) neighbor search instead of O(M) full traversal
@@ -11,6 +16,9 @@
 // Structures (must match C++ definitions in GPUFluidParticle.h)
 //=============================================================================
 
+/**
+ * @brief Data layout for FGPUBoundaryParticle
+ */
 struct FGPUBoundaryParticle
 {
 	float3 Position;      // 12 bytes - World position
@@ -41,6 +49,9 @@ StructuredBuffer<FGPUBoundaryParticle> BoundaryParticlesIn;
 RWStructuredBuffer<uint> BoundaryMortonCodes;
 RWStructuredBuffer<uint> BoundaryParticleIndices;
 
+/**
+ * @brief Compute shader entry point for ComputeBoundaryMortonCodesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeBoundaryMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -89,6 +100,9 @@ void ComputeBoundaryMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 RWStructuredBuffer<uint> BoundaryCellStart;
 RWStructuredBuffer<uint> BoundaryCellEnd;
 
+/**
+ * @brief Compute shader entry point for ClearBoundaryCellIndicesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ClearBoundaryCellIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -111,6 +125,9 @@ StructuredBuffer<FGPUBoundaryParticle> OldBoundaryParticles;
 StructuredBuffer<uint> SortedBoundaryIndices;
 RWStructuredBuffer<FGPUBoundaryParticle> SortedBoundaryParticles;
 
+/**
+ * @brief Compute shader entry point for ReorderBoundaryParticlesCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ReorderBoundaryParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -132,6 +149,9 @@ void ReorderBoundaryParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 StructuredBuffer<uint> SortedBoundaryMortonCodes;
 
+/**
+ * @brief Compute shader entry point for ComputeBoundaryCellStartEndCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeBoundaryCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidSpatialHashBuild.usf
+ * @brief Shader implementation for FluidSpatialHashBuild
+ */
+
 //
 // LEGACY: Traditional Spatial Hash Build Compute Shaders
 // ======================================================
@@ -51,6 +56,9 @@ RWStructuredBuffer<uint> PrefixSumBuffer;       // Prefix sum workspace
 // Pass 1: Count particles per cell
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for CountParticlesPerCellCS
+ */
 [numthreads(256, 1, 1)]
 void CountParticlesPerCellCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -74,6 +82,9 @@ void CountParticlesPerCellCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Pass 2: Prefix sum to compute start indices (Single-threaded for correctness)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for PrefixSumCS
+ */
 [numthreads(1, 1, 1)]
 void PrefixSumCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -91,6 +102,9 @@ void PrefixSumCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // NOTE: CellCounters is reused as local index counter (cleared before scatter)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ScatterParticlesCS
+ */
 [numthreads(256, 1, 1)]
 void ScatterParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -114,6 +128,9 @@ void ScatterParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Pass 4: Finalize cell data (set start indices)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for FinalizeCellDataCS
+ */
 [numthreads(256, 1, 1)]
 void FinalizeCellDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -136,6 +153,9 @@ void FinalizeCellDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // This is the DEFAULT method used by FBuildSpatialHashSimpleCS
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for BuildSpatialHashSimpleCS
+ */
 [numthreads(256, 1, 1)]
 void BuildSpatialHashSimpleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -165,6 +185,9 @@ void BuildSpatialHashSimpleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Used by BuildSpatialHashSimpleCS method
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for ClearCellDataCS
+ */
 [numthreads(256, 1, 1)]
 void ClearCellDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -181,6 +204,9 @@ void ClearCellDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // For fixed-layout hash (Hash * MAX_PARTICLES_PER_CELL)
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for SortCellParticlesCS
+ */
 [numthreads(256, 1, 1)]
 void SortCellParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -235,6 +261,9 @@ void SortCellParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 //=============================================================================
 
 #if USE_MULTIPASS_BUILD
+/**
+ * @brief Compute shader entry point for ClearCellDataMultipassCS
+ */
 [numthreads(256, 1, 1)]
 void ClearCellDataMultipassCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
@@ -252,6 +281,9 @@ void ClearCellDataMultipassCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 // Uses Selection Sort in global memory - NO size limit per bucket
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for SortBucketParticlesCS
+ */
 [numthreads(256, 1, 1)]
 void SortBucketParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {

@@ -5,7 +5,7 @@
  */
 
 /**
- * @brief Particle structure used in GPU render buffers.
+ * @brief Data layout for FKawaiiRenderParticle
  */
 struct FKawaiiRenderParticle
 {

@@ -1,5 +1,10 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
+/**
+ * @file FluidThickness.usf
+ * @brief Shader implementation for FluidThickness
+ */
+
 #include "/Engine/Private/Common.ush"
 #include "/Engine/Private/ScreenPass.ush"
 #include "/Plugin/KawaiiFluidSystem/Public/FluidCommon.ush"
@@ -31,12 +36,18 @@ float2 SceneTextureSize; // SceneDepth texture total size
 // Vertex Shader
 //-----------------------------------------------------------------------------
 
+/**
+ * @brief Data layout for FVertexInput
+ */
 struct FVertexInput
 {
 	uint InstanceId : SV_InstanceID;
 	uint VertexId : SV_VertexID;
 };
 
+/**
+ * @brief Data layout for FVertexOutput
+ */
 struct FVertexOutput
 {
 	float4 Position : SV_POSITION;
@@ -65,6 +76,9 @@ static const float2 QuadUVs[4] =
 	float2(1.0, 0.0)
 };
 
+/**
+ * @brief Vertex shader entry point
+ */
 FVertexOutput MainVS(FVertexInput Input)
 {
 	FVertexOutput Output;
@@ -97,6 +111,9 @@ FVertexOutput MainVS(FVertexInput Input)
 // Pixel Shader
 //-----------------------------------------------------------------------------
 
+/**
+ * @brief Pixel shader entry point
+ */
 float MainPS(FVertexOutput Input) : SV_Target0
 {
 	// =========================================================================

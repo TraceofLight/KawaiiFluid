@@ -1,4 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidBoundsCollision.usf
+ * @brief Shader implementation for FluidBoundsCollision
+ */
+
 // GPU Fluid Physics - Bounds Collision Pass
 // Applies AABB/OBB bounds collision with velocity response
 
@@ -37,7 +42,9 @@ float Friction;
 // Quaternion Helpers
 //=============================================================================
 
-// Rotate vector by quaternion: q * v * q^-1
+/**
+ * @brief Rotate vector by quaternion: q * v * q^-1
+ */
 float3 QuatRotateVector(float4 q, float3 v)
 {
 	// Optimized quaternion-vector rotation
@@ -49,7 +56,9 @@ float3 QuatRotateVector(float4 q, float3 v)
 	return v + qw * t + cross(qv, t);
 }
 
-// Rotate vector by inverse (conjugate) of quaternion
+/**
+ * @brief Rotate vector by inverse (conjugate) of quaternion
+ */
 float3 QuatRotateVectorInverse(float4 q, float3 v)
 {
 	// For unit quaternion, inverse = conjugate = (-x, -y, -z, w)
@@ -62,6 +71,9 @@ float3 QuatRotateVectorInverse(float4 q, float3 v)
 // Applies friction at position level per Unified Particle Physics (Macklin 2014)
 //=============================================================================
 
+/**
+ * @brief Applies axis-aligned friction response
+ */
 void ApplyAxisFriction(
 	inout float3 predictedPos,
 	float3 originalPos,
@@ -118,6 +130,9 @@ void ApplyAxisFriction(
 // AABB Collision with Position-Level Friction
 //=============================================================================
 
+/**
+ * @brief Applies axis-aligned box collision response
+ */
 void ApplyAABBCollision(inout float3 pos, float3 originalPos, inout float3 vel, inout uint flags)
 {
 	// Effective bounds considering particle radius
@@ -182,6 +197,9 @@ void ApplyAABBCollision(inout float3 pos, float3 originalPos, inout float3 vel, 
 // OBB Collision with Position-Level Friction
 //=============================================================================
 
+/**
+ * @brief Applies oriented box collision response
+ */
 void ApplyOBBCollision(inout float3 pos, float3 originalPos, inout float3 vel, inout uint flags)
 {
 	// Transform positions from world space to OBB local space
@@ -255,6 +273,9 @@ void ApplyOBBCollision(inout float3 pos, float3 originalPos, inout float3 vel, i
 // Main Compute Shader
 //=============================================================================
 
+/**
+ * @brief Compute shader entry point for BoundsCollisionCS
+ */
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void BoundsCollisionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
