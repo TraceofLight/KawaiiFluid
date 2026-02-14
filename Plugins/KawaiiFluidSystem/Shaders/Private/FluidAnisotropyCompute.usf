@@ -1,10 +1,10 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "/Engine/Private/Common.ush"
-#include "FluidGPUPhysics.ush"  // Half precision packing utilities (UnpackVelocity, etc.)
-#include "FluidSpatialHash.ush"
-#include "FluidMortonUtils.ush"
-#include "FluidCollisionPrimitives.ush"  // Contains FGPUParticleAttachment, FGPUCollisionSphere/Capsule/Box, quaternion utils
+#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"  // Half precision packing utilities (UnpackVelocity, etc.)
+#include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidMortonUtils.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidCollisionPrimitives.ush"  // Contains FGPUParticleAttachment, FGPUCollisionSphere/Capsule/Box, quaternion utils
 
 //-----------------------------------------------------------------------------
 // Anisotropy Compute Shader

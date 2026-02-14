@@ -5,7 +5,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "FluidMortonUtils.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidMortonUtils.ush"
 
 //=============================================================================
 // Structures (must match C++ definitions in GPUFluidParticle.h)

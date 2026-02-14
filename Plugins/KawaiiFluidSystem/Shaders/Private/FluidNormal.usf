@@ -1,7 +1,7 @@
 // Copyright KawaiiFluid Team. All Rights Reserved.
 
 #include "/Engine/Private/Common.ush"
-#include "FluidCommon.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidCommon.ush"
 
 // IO
 Texture2D<float> InputDepthTexture;

@@ -3,8 +3,8 @@
 
 #pragma once
 
-#include "KawaiiRenderParticle.ush"
-#include "FluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiRenderParticle.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
 
 //=============================================================================
 // SDF Primitives

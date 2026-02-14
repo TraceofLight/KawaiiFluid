@@ -13,7 +13,7 @@
 
 #pragma once
 
-#include "FluidGPUPhysics.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
 
 //=============================================================================
 // Force Accumulation Result Structure

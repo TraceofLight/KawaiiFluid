@@ -18,7 +18,7 @@
 
 #pragma once
 
-#include "FluidGPUPhysics.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
 
 //=============================================================================
 // Cohesion Force Calculation

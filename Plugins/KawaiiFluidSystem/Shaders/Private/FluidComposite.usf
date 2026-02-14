@@ -2,7 +2,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "FluidCommon.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidCommon.ush"
 
 // -----------------------------------------------------------------------------
 // Parameters

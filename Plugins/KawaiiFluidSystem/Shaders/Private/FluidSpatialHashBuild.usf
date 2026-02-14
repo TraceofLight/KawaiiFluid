@@ -13,7 +13,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "FluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
 
 //=============================================================================
 // Shader Parameters
