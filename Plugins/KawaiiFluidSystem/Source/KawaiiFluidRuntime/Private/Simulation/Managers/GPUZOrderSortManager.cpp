@@ -292,7 +292,6 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
 		PassParameters->ParticleCountBuffer = GraphBuilder.CreateSRV(IndirectArgsBuffer);
 	}
 	PassParameters->BoundsMin = SimulationBoundsMin;
-	PassParameters->BoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
 	PassParameters->CellSize = Params.CellSize;
 	PassParameters->bUseHybridTiledZOrder = bUseHybridTiledZOrder ? 1 : 0;
 

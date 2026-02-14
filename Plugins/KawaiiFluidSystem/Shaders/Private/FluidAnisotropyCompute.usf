@@ -720,19 +720,6 @@ void CalculateVelocityBasedWithVelocity(
 	}
 }
 
-/**
- * @brief Wrapper for backward compatibility
- */
-void CalculateVelocityBased(
-	uint ParticleIndex,
-	out float3 Axis1, out float3 Axis2, out float3 Axis3,
-	out float Scale1, out float Scale2, out float Scale3)
-{
-	uint idx3 = ParticleIndex * 3;
-	float3 velocity = UnpackVelocity(InPackedVelocities[ParticleIndex]);
-	CalculateVelocityBasedWithVelocity(velocity, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3);
-}
-
 //-----------------------------------------------------------------------------
 // Density-Based Anisotropy (Covariance Matrix)
 // NVIDIA FleX Style with Local Caching Optimization

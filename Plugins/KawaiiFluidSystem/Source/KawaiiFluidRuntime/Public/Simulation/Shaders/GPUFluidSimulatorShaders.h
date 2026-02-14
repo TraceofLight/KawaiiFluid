@@ -1689,8 +1689,7 @@ public:
  * @param MortonCodes Output Morton codes buffer.
  * @param ParticleIndices Output particle original indices.
  * @param ParticleCount Number of particles to process.
- * @param BoundsMin Minimum simulation bounds for normalization.
- * @param BoundsExtent Bounds size for normalization.
+ * @param BoundsMin Minimum simulation bounds for classic Morton mode.
  * @param CellSize Spatial hash cell size.
  * @param bUseHybridTiledZOrder Whether to use unlimited range tiling.
  * @param ParticleCountBuffer GPU-accurate particle count buffer.
@@ -1710,7 +1709,6 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, ParticleIndices)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(FVector3f, BoundsMin)
-		SHADER_PARAMETER(FVector3f, BoundsExtent)
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)

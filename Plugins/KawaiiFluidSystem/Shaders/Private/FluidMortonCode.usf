@@ -32,7 +32,6 @@ RWStructuredBuffer<uint> ParticleIndices; // Output: Particle indices (0, 1, 2, 
 int ParticleCount;
 StructuredBuffer<uint> ParticleCountBuffer;
 float3 BoundsMin;      // Simulation bounds minimum
-float3 BoundsExtent;   // Simulation bounds extent (Max - Min)
 float CellSize;        // Grid cell size (= SmoothingRadius)
 int bUseHybridTiledZOrder;  // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton (bounded)
 
@@ -67,41 +66,7 @@ uint Morton3DFromCell(int3 CellCoord, int3 GridMin)
     return Morton3D(uoffset.x, uoffset.y, uoffset.z);
 }
 
-//=============================================================================
-// Main Compute Shader: Compute Morton Codes (Legacy - not recommended)
-// Uses normalized position quantization
-//=============================================================================
-
 #define THREAD_GROUP_SIZE 256
-
-/**
- * @brief Compute shader entry point for ComputeMortonCodesCS
- */
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void ComputeMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
-{
-    uint idx = DispatchThreadId.x;
-    if (idx >= ParticleCountBuffer[6])
-    {
-        return;
-    }
-
-    // Read particle position
-    float3 pos = Particles[idx].xyz;
-
-    // Normalize position to [0, 1] range within simulation bounds
-    float3 normalizedPos = saturate((pos - BoundsMin) / BoundsExtent);
-
-    // Quantize to grid-bit integer (matches MORTON_GRID_SIZE)
-    uint3 quantized = uint3(normalizedPos * float(MORTON_MAX_VALUE));
-
-    // Compute Morton code using preset-specific function
-    uint mortonCode = Morton3D(quantized.x, quantized.y, quantized.z);
-
-    // Output Morton code and initial particle index
-    MortonCodes[idx] = mortonCode;
-    ParticleIndices[idx] = idx;
-}
 
 //=============================================================================
 // Cell-based Morton Code Computation (RECOMMENDED)
