@@ -266,29 +266,6 @@ float sdConvex(
 //=============================================================================
 
 /**
- * @brief Data layout for FCollisionResult
- */
-struct FCollisionResult
-{
-	bool bHit;
-	float Distance;
-	float3 Normal;
-	float Friction;
-	float Restitution;
-};
-
-/**
- * @brief Calculate gradient (normal) from SDF
- */
-float3 CalcSDFGradient(float3 p, float sdfValue, float3 center)
-{
-	// Simple approximation: direction from center to point
-	float3 dir = p - center;
-	float len = length(dir);
-	return len > 0.0001f ? dir / len : float3(0, 0, 1);
-}
-
-/**
  * @brief Numerical gradient for more accurate normal
  */
 float3 CalcNumericalGradient_Sphere(float3 p, float3 center, float radius)
@@ -433,39 +410,6 @@ void ApplyCollisionResponseWithFriction(
 	{
 		// Reflect normal velocity component
 		velocity -= (1.0f + restitution) * velNormal * normal;
-	}
-}
-
-/**
- * @brief Legacy: Apply collision response to velocity (kept for compatibility)
- * WARNING: This approach doesn't work correctly with PBF because FinalizePositions
- * overwrites velocity. Use ApplyCollisionResponseWithFriction instead.
- */
-void ApplyCollisionResponse(
-	inout float3 position,
-	inout float3 velocity,
-	float3 normal,
-	float penetration,
-	float friction,
-	float restitution)
-{
-	// Push out of collision
-	position += normal * (penetration + 0.1f);
-
-	// Velocity response
-	float velNormal = dot(velocity, normal);
-	if (velNormal < 0.0f)
-	{
-		float3 velNormalVec = velNormal * normal;
-		float3 velTangent = velocity - velNormalVec;
-
-		// Reflect with restitution
-		velNormalVec = -velNormalVec * restitution;
-
-		// Apply friction
-		velTangent *= (1.0f - friction);
-
-		velocity = velNormalVec + velTangent;
 	}
 }
 

@@ -41,45 +41,5 @@ struct FGPUBoneDeltaAttachment
 // Constants
 //=============================================================================
 
-// Detach distance threshold in cm
-// If particle moves more than this distance from previous position, it detaches
-#define BONE_DELTA_DETACH_DISTANCE 100000.0f  // 100000cm = 1km (For testing: almost never detaches)
-
 // Invalid boundary particle index (not attached)
 #define BONE_DELTA_INVALID_INDEX -1
-
-//=============================================================================
-// Helper Functions
-//=============================================================================
-
-/**
- * @brief Check if attachment is valid (attached to a boundary particle)
- */
-bool IsBoneDeltaAttached(FGPUBoneDeltaAttachment attachment)
-{
-	return attachment.BoundaryParticleIndex >= 0;
-}
-
-/**
- * @brief Clear attachment data
- */
-void ClearBoneDeltaAttachment(inout FGPUBoneDeltaAttachment attachment)
-{
-	attachment.BoundaryParticleIndex = BONE_DELTA_INVALID_INDEX;
-	attachment.LocalNormal = float3(0, 0, 0);
-	attachment.LocalOffset = float3(0, 0, 0);
-	// Note: PreviousPosition is kept for reference
-}
-
-/**
- * @brief Check if particle should detach based on distance from previous position
- * @param currentPos - Current world position
- * @param attachment - Attachment data containing previous position
- * @return true if should detach
- */
-bool ShouldDetachByDistance(float3 currentPos, FGPUBoneDeltaAttachment attachment)
-{
-	float dist = length(currentPos - attachment.PreviousPosition);
-	return dist > BONE_DELTA_DETACH_DISTANCE;
-}
-

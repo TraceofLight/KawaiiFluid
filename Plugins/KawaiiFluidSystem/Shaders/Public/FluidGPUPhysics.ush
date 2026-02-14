@@ -33,20 +33,6 @@ struct FGPUFluidParticle
 };
 
 //=============================================================================
-// Source ID Helper (SourceID = Component's unique ID, -1 = invalid)
-//=============================================================================
-
-#define SOURCE_INVALID_SOURCE_ID -1
-
-/**
- * @brief Returns whether the source ID is valid
- */
-bool HasValidSource(int sourceID)
-{
-	return sourceID != SOURCE_INVALID_SOURCE_ID;
-}
-
-//=============================================================================
 // GPU Particle Flags
 //=============================================================================
 
@@ -97,70 +83,6 @@ float Poly6Kernel(float r2, float h2)
 {
 	float diff = h2 - r2;
 	return (diff > 0.0f) ? diff * diff * diff : 0.0f;
-}
-
-/**
- * @brief Poly6 kernel with coefficient
- * @param r2 - Squared distance
- * @param h - Smoothing radius
- * @param coeff - Precomputed coefficient (315 / (64 * PI * h^9))
- */
-float Poly6KernelWithCoeff(float r2, float h, float coeff)
-{
-	float h2 = h * h;
-	float diff = h2 - r2;
-	return (diff > 0.0f) ? coeff * diff * diff * diff : 0.0f;
-}
-
-/**
- * @brief Spiky kernel gradient (for pressure calculation)
- * ∇W(r, h) = -45 / (PI * h^6) * (h - |r|)^2 * r̂
- *
- * @param r - Vector from neighbor to particle (particle.pos - neighbor.pos)
- * @param rLen - Length of r
- * @param h - Smoothing radius
- * @return Gradient vector (NOT multiplied by coefficient)
- */
-float3 SpikyGradient(float3 r, float rLen, float h)
-{
-	if (rLen < SMALL_NUMBER)
-	{
-		return float3(0.0f, 0.0f, 0.0f);
-	}
-
-	float diff = h - rLen;
-	if (diff <= 0.0f)
-	{
-		return float3(0.0f, 0.0f, 0.0f);
-	}
-
-	// Normalized direction * (h - r)^2
-	float3 dir = r / rLen;
-	return dir * (diff * diff);
-}
-
-/**
- * @brief Spiky gradient with coefficient
- * @param r - Vector from neighbor to particle
- * @param rLen - Length of r
- * @param h - Smoothing radius
- * @param coeff - Precomputed coefficient (-45 / (PI * h^6))
- */
-float3 SpikyGradientWithCoeff(float3 r, float rLen, float h, float coeff)
-{
-	if (rLen < SMALL_NUMBER)
-	{
-		return float3(0.0f, 0.0f, 0.0f);
-	}
-
-	float diff = h - rLen;
-	if (diff <= 0.0f)
-	{
-		return float3(0.0f, 0.0f, 0.0f);
-	}
-
-	float3 dir = r / rLen;
-	return coeff * (diff * diff) * dir;
 }
 
 /**
@@ -265,78 +187,11 @@ float AkinciCohesionSpline(float rLen, float h)
 }
 
 /**
- * @brief Optimized Akinci Cohesion Spline with precomputed coefficients
- * Use this version in tight loops for better performance
- *
- * @param rLen - Distance between particles
- * @param h - Smoothing radius
- * @param h6 - Precomputed h^6
- * @param cohesionCoeff - Precomputed 32/(πh^9)
- * @return Spline value
- */
-float AkinciCohesionSplineFast(float rLen, float h, float h6, float cohesionCoeff)
-{
-	if (rLen > h || rLen < SMALL_NUMBER)
-	{
-		return 0.0f;
-	}
-
-	float halfH = h * 0.5f;
-	float diff = h - rLen;
-	float diff3 = diff * diff * diff;
-	float r3 = rLen * rLen * rLen;
-
-	if (rLen > halfH)
-	{
-		return cohesionCoeff * diff3 * r3;
-	}
-	else
-	{
-		return cohesionCoeff * (2.0f * diff3 * r3 - h6 / 64.0f);
-	}
-}
-
-/**
  * @brief Legacy cohesion kernel (kept for compatibility)
  */
 float CohesionKernel(float rLen, float h)
 {
 	return AkinciCohesionSpline(rLen, h);
-}
-
-/**
- * @brief Akinci Adhesion Spline Function A(r)
- * For fluid-solid boundary adhesion
- *
- * A(r) = 0.007/h^3.25 * ⁴√(-4r²/h + 6r - 2h)   if h/2 < r ≤ h
- *
- * @param rLen - Distance from boundary
- * @param h - Smoothing radius
- * @return Adhesion value (only positive, attraction only)
- */
-float AkinciAdhesionSpline(float rLen, float h)
-{
-	float halfH = h * 0.5f;
-
-	// Only active in h/2 < r <= h range
-	if (rLen <= halfH || rLen > h)
-	{
-		return 0.0f;
-	}
-
-	float h325 = pow(h, 3.25f);
-	float coeff = 0.007f / h325;
-
-	// Inner term: -4r²/h + 6r - 2h
-	float inner = -4.0f * rLen * rLen / h + 6.0f * rLen - 2.0f * h;
-
-	if (inner <= 0.0f)
-	{
-		return 0.0f;
-	}
-
-	// Fourth root
-	return coeff * pow(inner, 0.25f);
 }
 
 /**
@@ -352,111 +207,6 @@ float AdhesionKernel(float rLen, float h)
 
 	// Linear falloff: r=0 → 1 (max), r=h → 0 (escape)
 	return 1.0f - (rLen / h);
-}
-
-/**
- * @brief Particle Deficiency Correction Factor K_ij (Akinci 2013)
- * Compensates for particles with fewer neighbors (surface particles)
- *
- * K_ij = 2 * ρ₀ / (ρ_i + ρ_j)
- *
- * - Fewer neighbors → lower density → K_ij > 1 → amplified force
- * - Full neighbors → rest density → K_ij ≈ 1 → no change
- *
- * @param rho_i - Density of particle i
- * @param rho_j - Density of particle j
- * @param rho_0 - Rest density
- * @return Correction factor (typically 1.0 ~ 2.0)
- */
-float AkinciCorrectionFactor(float rho_i, float rho_j, float rho_0)
-{
-	float denominator = rho_i + rho_j;
-	if (denominator < SMALL_NUMBER)
-	{
-		return 1.0f;
-	}
-	return 2.0f * rho_0 / denominator;
-}
-
-//=============================================================================
-// Utility Functions
-//=============================================================================
-
-/**
- * @brief Calculate squared distance between two points
- */
-float DistanceSquared(float3 a, float3 b)
-{
-	float3 diff = a - b;
-	return dot(diff, diff);
-}
-
-/**
- * @brief Clamp position to bounds with collision response
- * @param position - Current position
- * @param velocity - Current velocity (modified on collision)
- * @param boundsMin - Minimum bounds
- * @param boundsMax - Maximum bounds
- * @param restitution - Bounce factor (0-1)
- * @param friction - Friction factor (0-1)
- * @return Clamped position
- */
-float3 ClampToBoundsWithResponse(
-	float3 position,
-	inout float3 velocity,
-	float3 boundsMin,
-	float3 boundsMax,
-	float particleRadius,
-	float restitution,
-	float friction)
-{
-	float3 newPos = position;
-	float3 effectiveMin = boundsMin + particleRadius;
-	float3 effectiveMax = boundsMax - particleRadius;
-
-	// X axis
-	if (newPos.x < effectiveMin.x)
-	{
-		newPos.x = effectiveMin.x;
-		velocity.x = -velocity.x * restitution;
-		velocity.yz *= (1.0f - friction);
-	}
-	else if (newPos.x > effectiveMax.x)
-	{
-		newPos.x = effectiveMax.x;
-		velocity.x = -velocity.x * restitution;
-		velocity.yz *= (1.0f - friction);
-	}
-
-	// Y axis
-	if (newPos.y < effectiveMin.y)
-	{
-		newPos.y = effectiveMin.y;
-		velocity.y = -velocity.y * restitution;
-		velocity.xz *= (1.0f - friction);
-	}
-	else if (newPos.y > effectiveMax.y)
-	{
-		newPos.y = effectiveMax.y;
-		velocity.y = -velocity.y * restitution;
-		velocity.xz *= (1.0f - friction);
-	}
-
-	// Z axis
-	if (newPos.z < effectiveMin.z)
-	{
-		newPos.z = effectiveMin.z;
-		velocity.z = -velocity.z * restitution;
-		velocity.xy *= (1.0f - friction);
-	}
-	else if (newPos.z > effectiveMax.z)
-	{
-		newPos.z = effectiveMax.z;
-		velocity.z = -velocity.z * restitution;
-		velocity.xy *= (1.0f - friction);
-	}
-
-	return newPos;
 }
 
 /**
@@ -604,31 +354,4 @@ void UnpackDensityLambda(uint packed, out float density, out float lambda)
 	float2 dl = UnpackHalf2(packed);
 	density = dl.x;
 	lambda = dl.y;
-}
-
-//=============================================================================
-// SoA Buffer Read/Write Helpers
-// Unified interface for reading/writing packed velocity buffers
-//=============================================================================
-
-/**
- * @brief Read velocity from packed SoA buffer
- * @param PackedVelocities - uint2 buffer containing packed velocities
- * @param idx - particle index
- * @return float3 unpacked velocity
- */
-float3 ReadPackedVelocity(Buffer<uint2> PackedVelocities, uint idx)
-{
-	return UnpackVelocity(PackedVelocities[idx]);
-}
-
-/**
- * @brief Write velocity to packed SoA buffer
- * @param PackedVelocities - RWBuffer<uint2> to write to
- * @param idx - particle index
- * @param vel - float3 velocity to pack and write
- */
-void WritePackedVelocity(RWBuffer<uint2> PackedVelocities, uint idx, float3 vel)
-{
-	PackedVelocities[idx] = PackVelocity(vel);
 }

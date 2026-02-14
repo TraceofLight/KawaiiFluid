@@ -108,7 +108,7 @@ void FParticleSleepingCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FBoundsCollisionCS,
-	"/Plugin/KawaiiFluidSystem/Private/Collision/FluidBoundsCollision.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Collision/KawaiiFluidCollision.usf",
 	"BoundsCollisionCS", SF_Compute);
 
 /**
@@ -135,7 +135,7 @@ void FBoundsCollisionCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FHeightmapCollisionCS,
-	"/Plugin/KawaiiFluidSystem/Private/Collision/FluidHeightmapCollision.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Collision/KawaiiFluidCollision.usf",
 	"HeightmapCollisionCS", SF_Compute);
 
 /**
@@ -162,7 +162,7 @@ void FHeightmapCollisionCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FPrimitiveCollisionCS,
-	"/Plugin/KawaiiFluidSystem/Private/Collision/FluidPrimitiveCollision.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Collision/KawaiiFluidCollision.usf",
 	"PrimitiveCollisionCS", SF_Compute);
 
 /**

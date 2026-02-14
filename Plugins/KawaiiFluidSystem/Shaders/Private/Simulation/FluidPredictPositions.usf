@@ -20,7 +20,6 @@
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
 #include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidForceAccumulation.ush"
 
 //=============================================================================
 // Shader Parameters
@@ -34,7 +33,7 @@ float3 Gravity;
 float3 ExternalForce;
 
 // Cohesion Force parameters (Akinci 2013)
-// Uses C(r) spline kernel with K_ij correction in FluidForceAccumulation.ush
+// Uses C(r) spline kernel with K_ij correction
 float CohesionStrength;      // Cohesion strength (0~50, 0 = disabled)
 float SmoothingRadius;       // SPH kernel radius (cm)
 float RestDensity;           // Rest density (kg/m^3) for K_ij correction
@@ -54,6 +53,119 @@ StructuredBuffer<uint> PrevNeighborList;
 StructuredBuffer<uint> PrevNeighborCounts;
 int bUsePrevNeighborCache;   // 0 = skip forces (first frame)
 int PrevParticleCount;       // Safety: bounds check
+
+//=============================================================================
+// Force Accumulation Helpers
+//=============================================================================
+
+/**
+ * @brief Data layout for accumulated force outputs
+ */
+struct FForceAccumulationResult
+{
+    float3 CohesionAccel;
+    float3 ViscosityCorrection;
+    float3 LaplacianForce;
+    float WeightSum;
+};
+
+/**
+ * @brief Computes cohesion and viscosity terms in one neighbor pass
+ */
+FForceAccumulationResult CalculateForceAccumulation(
+    uint idx,
+    float3 position,
+    float3 velocity,
+    float mass,
+    float density,
+    float cohesionStrength,
+    float maxCohesionForce,
+    float restDensity,
+    float poly6Coeff,
+    float viscLaplacianCoeff,
+    float smoothingRadius,
+    StructuredBuffer<uint> prevNeighborList,
+    StructuredBuffer<uint> prevNeighborCounts,
+    int particleCount,
+    int prevParticleCount,
+    RWStructuredBuffer<FGPUFluidParticle> particles)
+{
+    FForceAccumulationResult result;
+    result.CohesionAccel = float3(0.0f, 0.0f, 0.0f);
+    result.ViscosityCorrection = float3(0.0f, 0.0f, 0.0f);
+    result.LaplacianForce = float3(0.0f, 0.0f, 0.0f);
+    result.WeightSum = 0.0f;
+
+    float h_m = smoothingRadius * CM_TO_M;
+    float h2 = h_m * h_m;
+    float smoothingRadiusSq_cm = smoothingRadius * smoothingRadius;
+
+    float m_i = mass;
+    float rho_i = max(density, SMALL_NUMBER);
+    float3 cohesionForce = float3(0.0f, 0.0f, 0.0f);
+
+    float cacheValidMask = step((float)idx + 0.5f, (float)prevParticleCount);
+    uint safeIdx = min(idx, max((uint)prevParticleCount - 1, 0u));
+    uint cachedCount = prevNeighborCounts[safeIdx];
+    cachedCount = (uint)((float)cachedCount * cacheValidMask);
+    uint baseIdx = idx * MAX_NEIGHBORS_PER_PARTICLE;
+    uint maxSafeIdx = max((uint)particleCount - 1, 0u);
+
+    for (uint n = 0; n < cachedCount; ++n)
+    {
+        uint neighborIdx = prevNeighborList[baseIdx + n];
+
+        float selfMask = 1.0f - step((float)idx - 0.5f, (float)neighborIdx)
+                              * step((float)neighborIdx, (float)idx + 0.5f);
+        float boundsMask = step((float)neighborIdx + 0.5f, (float)particleCount);
+        float validMask = selfMask * boundsMask;
+
+        uint safeNeighborIdx = min(neighborIdx, maxSafeIdx);
+        FGPUFluidParticle neighbor = particles[safeNeighborIdx];
+        float attachedMask = 1.0f - (float)HasFlag(neighbor.Flags, GPU_PARTICLE_FLAG_IS_ATTACHED);
+        validMask *= attachedMask;
+
+        float3 r_cm = position - neighbor.Position;
+        float r2_cm = dot(r_cm, r_cm);
+        float distMinMask = step(SMALL_NUMBER, r2_cm);
+        float distMaxMask = step(r2_cm, smoothingRadiusSq_cm);
+        validMask *= distMinMask * distMaxMask;
+
+        float safeR2_cm = max(r2_cm, SMALL_NUMBER);
+        float rLenInv_cm = rsqrt(safeR2_cm);
+        float dist_cm = safeR2_cm * rLenInv_cm;
+        float dist_m = dist_cm * CM_TO_M;
+        float r2_m = dist_m * dist_m;
+        float kernelMask = step(dist_m + SMALL_NUMBER, h_m);
+        validMask *= kernelMask;
+
+        float m_j = neighbor.Mass;
+        float rho_j = max(neighbor.Density, SMALL_NUMBER);
+        float K_ij = (2.0f * restDensity) / (rho_i + rho_j);
+        K_ij = clamp(K_ij, 0.5f, 2.0f);
+
+        float cohesionWeight = CohesionKernel(dist_m, h_m);
+        float3 direction = -r_cm * rLenInv_cm;
+        float forceMag = m_i * m_j * cohesionWeight;
+        cohesionForce += K_ij * cohesionStrength * forceMag * direction * validMask;
+
+        float w = Poly6Kernel(r2_m, h2) * poly6Coeff;
+        float3 velDiff = neighbor.Velocity - velocity;
+        result.ViscosityCorrection += velDiff * w * validMask;
+        result.WeightSum += w * validMask;
+
+        float laplacian = ViscosityLaplacian(dist_m, h_m, viscLaplacianCoeff);
+        float neighborDensity = max(neighbor.Density, 0.001f);
+        result.LaplacianForce += velDiff * laplacian * neighbor.Mass / neighborDensity * validMask;
+    }
+
+    float forceLen = length(cohesionForce);
+    float clampScale = min(1.0f, maxCohesionForce / max(forceLen, SMALL_NUMBER));
+    cohesionForce *= clampScale;
+    result.CohesionAccel = (cohesionForce / max(m_i, SMALL_NUMBER)) * 100.0f;
+
+    return result;
+}
 
 //=============================================================================
 // Main Compute Shader
@@ -106,7 +218,6 @@ void PredictPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         MaxCohesionForce,
         RestDensity,
         // Viscosity params
-        ViscosityCoefficient,
         Poly6Coeff,
         ViscLaplacianCoeff,
         // Common params
