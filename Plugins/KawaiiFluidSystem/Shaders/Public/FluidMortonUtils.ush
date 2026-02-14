@@ -1,14 +1,11 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
-// Morton Code (Z-Order Curve) Utility Functions
-// Shared between FluidSolveDensityPressure.usf, FluidAnisotropyCompute.usf, etc.
-//
-// Z-Order Sorting Configuration (set via shader permutation):
-//   - Small:  6 bits per axis = 64³ = 262,144 cells
-//   - Medium: 7 bits per axis = 128³ = 2,097,152 cells
-//   - Large:  8 bits per axis = 256³ = 16,777,216 cells
-//
-// IMPORTANT: MORTON_GRID_AXIS_BITS must be set by C++ ModifyCompilationEnvironment
-// based on shader permutation (FGridResolutionDim).
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidMortonUtils.ush
+ * @brief Morton-code (Z-order) utilities for grid indexing and cell traversal.
+ *
+ * MORTON_GRID_AXIS_BITS is configured by C++ permutation setup
+ * (ModifyCompilationEnvironment / FGridResolutionDim).
+ */
 
 #pragma once
 

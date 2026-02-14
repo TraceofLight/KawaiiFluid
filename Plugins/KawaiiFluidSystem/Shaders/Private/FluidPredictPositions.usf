@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // GPU Fluid Physics - Predict Positions Pass
 //
 // Phase 2 of PBF/XPBD simulation:
@@ -40,7 +40,7 @@ float ViscosityCoefficient;  // Viscosity strength (0 = disabled)
 float Poly6Coeff;            // Poly6 kernel coefficient
 float ViscLaplacianCoeff;    // 45 / (PI * h^6) for Laplacian viscosity
 
-// Viscosity tuning constants (same as original FluidApplyViscosity.usf)
+// Viscosity tuning constants (legacy values retained for compatibility)
 #define LAPLACIAN_VISCOSITY_SCALE 0.0001f
 #define VELOCITY_DRAG_SCALE 5.0f
 

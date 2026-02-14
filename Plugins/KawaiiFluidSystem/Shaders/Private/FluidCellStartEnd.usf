@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // GPU Fluid Physics - Cell Start/End Index Computation
 //
 // After particles are sorted by Morton code, this shader computes the
@@ -117,55 +117,6 @@ void ComputeCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     if (idx == ParticleCountBuffer[6] - 1)
     {
         // Last particle always ends its cell
-        CellEnd[cellID] = idx;
-    }
-}
-
-//=============================================================================
-// [DEPRECATED] Alternative: Upper-bit Morton Code Cell Lookup
-// This was used for 10-bit per axis (30-bit Morton code) with 16-bit cell ID
-//
-// With 7-bit per axis (21-bit Morton code), Morton code = Cell ID directly,
-// so this function is no longer needed. Use ComputeCellStartEndCS instead.
-//=============================================================================
-
-// Legacy: 16-bit cell ID from 30-bit Morton code (NOT USED with 7-bit grid)
-#define MORTON_CELL_BITS 16
-
-[numthreads(THREAD_GROUP_SIZE, 1, 1)]
-void ComputeCellStartEndMortonCS(uint3 DispatchThreadId : SV_DispatchThreadID)
-{
-    // DEPRECATED: With 7-bit per axis, use ComputeCellStartEndCS instead
-    // This function remains for backward compatibility only
-
-    uint idx = DispatchThreadId.x;
-    if (idx >= ParticleCountBuffer[6])
-    {
-        return;
-    }
-
-    uint currentCode = SortedMortonCodes[idx];
-    // With 21-bit Morton code, use directly as cellID (no shift needed)
-    uint cellID = currentCode;  // Direct mapping for 7-bit grid
-
-    if (idx == 0)
-    {
-        CellStart[cellID] = idx;
-    }
-    else
-    {
-        uint prevCode = SortedMortonCodes[idx - 1];
-        uint prevCellID = prevCode;
-
-        if (cellID != prevCellID)
-        {
-            CellStart[cellID] = idx;
-            CellEnd[prevCellID] = idx - 1;
-        }
-    }
-
-    if (idx == ParticleCountBuffer[6] - 1)
-    {
         CellEnd[cellID] = idx;
     }
 }

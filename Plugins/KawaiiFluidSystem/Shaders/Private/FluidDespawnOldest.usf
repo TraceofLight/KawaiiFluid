@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Per-Source Oldest Despawn Shader - Removes N oldest particles per source using histogram approach
 // 3 kernels: BuildIDHistogramCS, FindOldestThresholdCS, MarkOldestParticlesCS
 // FilterSourceID selects which source to process

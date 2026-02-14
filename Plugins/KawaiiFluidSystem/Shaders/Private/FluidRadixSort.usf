@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // GPU Fluid Physics - Radix Sort for Morton Code Sorting
 //
 // Implements parallel radix sort on GPU for sorting particles by Morton code.

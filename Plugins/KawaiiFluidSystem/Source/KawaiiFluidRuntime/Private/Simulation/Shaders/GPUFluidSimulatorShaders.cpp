@@ -38,66 +38,6 @@ void FPredictPositionsCS::ModifyCompilationEnvironment(
 	OutEnvironment.SetDefine(TEXT("MAX_NEIGHBORS_PER_PARTICLE"), GPU_MAX_NEIGHBORS_PER_PARTICLE);
 }
 
-// [DEPRECATED] Use FSolveDensityPressureCS instead
-IMPLEMENT_GLOBAL_SHADER(FComputeDensityCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidComputeDensity.usf",
-	"ComputeDensityCS", SF_Compute);
-
-/**
- * @brief Check if compute density shader permutation should be compiled.
- * @param Parameters Shader permutation parameters.
- * @return True if permutation is supported.
- */
-bool FComputeDensityCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-{
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-}
-
-/**
- * @brief Modify compute density shader compilation environment.
- * @param Parameters Shader permutation parameters.
- * @param OutEnvironment Shader compiler environment to modify.
- */
-void FComputeDensityCS::ModifyCompilationEnvironment(
-	const FGlobalShaderPermutationParameters& Parameters,
-	FShaderCompilerEnvironment& OutEnvironment)
-{
-	FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
-	OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
-	OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
-	OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
-}
-
-// [DEPRECATED] Use FSolveDensityPressureCS instead
-IMPLEMENT_GLOBAL_SHADER(FSolvePressureCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidSolvePressure.usf",
-	"SolvePressureCS", SF_Compute);
-
-/**
- * @brief Check if solve pressure shader permutation should be compiled.
- * @param Parameters Shader permutation parameters.
- * @return True if permutation is supported.
- */
-bool FSolvePressureCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-{
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-}
-
-/**
- * @brief Modify solve pressure shader compilation environment.
- * @param Parameters Shader permutation parameters.
- * @param OutEnvironment Shader compiler environment to modify.
- */
-void FSolvePressureCS::ModifyCompilationEnvironment(
-	const FGlobalShaderPermutationParameters& Parameters,
-	FShaderCompilerEnvironment& OutEnvironment)
-{
-	FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
-	OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
-	OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
-	OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
-}
-
 IMPLEMENT_GLOBAL_SHADER(FSolveDensityPressureCS,
 	"/Plugin/KawaiiFluidSystem/Private/FluidSolveDensityPressure.usf",
 	"SolveDensityPressureCS", SF_Compute);
@@ -137,36 +77,6 @@ void FSolveDensityPressureCS::ModifyCompilationEnvironment(
 	OutEnvironment.SetDefine(TEXT("MORTON_GRID_AXIS_BITS"), AxisBits);
 	OutEnvironment.SetDefine(TEXT("MORTON_GRID_SIZE"), GridSize);
 	OutEnvironment.SetDefine(TEXT("MAX_CELLS"), MaxCells);
-}
-
-IMPLEMENT_GLOBAL_SHADER(FApplyViscosityCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidApplyViscosity.usf",
-	"ApplyViscosityCS", SF_Compute);
-
-/**
- * @brief Check if apply viscosity shader permutation should be compiled.
- * @param Parameters Shader permutation parameters.
- * @return True if permutation is supported.
- */
-bool FApplyViscosityCS::ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters)
-{
-	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
-}
-
-/**
- * @brief Modify apply viscosity shader compilation environment.
- * @param Parameters Shader permutation parameters.
- * @param OutEnvironment Shader compiler environment to modify.
- */
-void FApplyViscosityCS::ModifyCompilationEnvironment(
-	const FGlobalShaderPermutationParameters& Parameters,
-	FShaderCompilerEnvironment& OutEnvironment)
-{
-	FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
-	OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
-	OutEnvironment.SetDefine(TEXT("SPATIAL_HASH_SIZE"), GPU_SPATIAL_HASH_SIZE);
-	OutEnvironment.SetDefine(TEXT("MAX_PARTICLES_PER_CELL"), GPU_MAX_PARTICLES_PER_CELL);
-	OutEnvironment.SetDefine(TEXT("MAX_NEIGHBORS_PER_PARTICLE"), GPU_MAX_NEIGHBORS_PER_PARTICLE);
 }
 
 IMPLEMENT_GLOBAL_SHADER(FParticleSleepingCS,

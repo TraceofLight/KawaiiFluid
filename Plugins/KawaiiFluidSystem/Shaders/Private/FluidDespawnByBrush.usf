@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Brush-Based Despawn Shader - Marks particles within brush radius for removal
 
 #include "/Engine/Public/Platform.ush"

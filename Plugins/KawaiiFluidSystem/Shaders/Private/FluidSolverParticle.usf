@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Compact Solver Particle Extract/Update Shaders
 //
 // Memory bandwidth optimization: Extract only solver-needed data (24 bytes)

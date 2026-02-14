@@ -1,6 +1,12 @@
-﻿// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file KawaiiRenderParticle.ush
+ * @brief Render-particle buffer layout shared by fluid rendering shaders.
+ */
 
-// Particle structure for shader use
+/**
+ * @brief Particle structure used in GPU render buffers.
+ */
 struct FKawaiiRenderParticle
 {
     float3 Position;

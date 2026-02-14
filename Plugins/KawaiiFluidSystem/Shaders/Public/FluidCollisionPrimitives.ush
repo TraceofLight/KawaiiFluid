@@ -1,6 +1,8 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
-// GPU Collision Primitives - SDF Functions
-// Provides signed distance functions for collision primitives
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidCollisionPrimitives.ush
+ * @brief Defines GPU collision primitive data and SDF/collision helper functions.
+ */
 
 #ifndef FLUID_COLLISION_PRIMITIVES_USH
 #define FLUID_COLLISION_PRIMITIVES_USH

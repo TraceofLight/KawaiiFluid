@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 //
 // Flow Accumulation Shader
 // Accumulates screen-space velocity into UV offset for flow texture effects.

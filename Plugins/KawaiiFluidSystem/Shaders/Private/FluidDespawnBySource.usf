@@ -1,4 +1,4 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Source-Based Despawn Shader - Marks particles matching specific SourceIDs for removal
 
 #include "/Engine/Public/Platform.ush"

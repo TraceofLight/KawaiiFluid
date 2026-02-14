@@ -1,5 +1,8 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
-// SDF (Signed Distance Field) Common Functions for Ray Marching
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidSDFCommon.ush
+ * @brief Shared SDF primitives and operations for fluid surface ray-marching.
+ */
 
 #pragma once
 

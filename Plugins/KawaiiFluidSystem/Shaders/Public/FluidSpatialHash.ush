@@ -1,18 +1,11 @@
-// Copyright KawaiiFluid Team. All Rights Reserved.
-//
-// LEGACY: Traditional Spatial Hash Functions
-// ==========================================
-// This file implements traditional hash-table based spatial partitioning.
-// It is kept for backward compatibility (bUseZOrderSorting=false path).
-//
-// The RECOMMENDED approach is Z-Order (Morton Code) sorting via FluidMortonUtils.ush,
-// which provides cache-coherent memory access and no hash collisions.
-//
-// This file is used when:
-// - Z-Order sorting is disabled
-// - Legacy fallback mode is explicitly enabled
-//
-// For new features, prefer using Morton code functions in FluidMortonUtils.ush
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file FluidSpatialHash.ush
+ * @brief Legacy hash-table spatial partitioning helpers.
+ *
+ * Kept for backward compatibility when Z-order sorting is disabled.
+ * For new paths, prefer FluidMortonUtils.ush.
+ */
 
 #pragma once
 
