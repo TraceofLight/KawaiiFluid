@@ -324,7 +324,7 @@ void FExtractRenderDataSoACS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FCopyParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidCopyParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleSpawn.usf",
 	"CopyParticlesCS", SF_Compute);
 
 /**
@@ -351,7 +351,7 @@ void FCopyParticlesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FSpawnParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidSpawnParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleSpawn.usf",
 	"SpawnParticlesCS", SF_Compute);
 
 /**
@@ -378,7 +378,7 @@ void FSpawnParticlesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FInitAliveMaskCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidInitAliveMask.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"InitAliveMaskCS", SF_Compute);
 
 /**
@@ -403,7 +403,7 @@ void FInitAliveMaskCS::ModifyCompilationEnvironment(const FGlobalShaderPermutati
 }
 
 IMPLEMENT_GLOBAL_SHADER(FMarkDespawnByBrushCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnByBrush.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"MarkDespawnByBrushCS", SF_Compute);
 
 /**
@@ -428,7 +428,7 @@ void FMarkDespawnByBrushCS::ModifyCompilationEnvironment(const FGlobalShaderPerm
 }
 
 IMPLEMENT_GLOBAL_SHADER(FMarkDespawnBySourceCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnBySource.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"MarkDespawnBySourceCS", SF_Compute);
 
 /**
@@ -453,7 +453,7 @@ void FMarkDespawnBySourceCS::ModifyCompilationEnvironment(const FGlobalShaderPer
 }
 
 IMPLEMENT_GLOBAL_SHADER(FBuildIDHistogramCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnOldest.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"BuildIDHistogramCS", SF_Compute);
 
 /**
@@ -478,7 +478,7 @@ void FBuildIDHistogramCS::ModifyCompilationEnvironment(const FGlobalShaderPermut
 }
 
 IMPLEMENT_GLOBAL_SHADER(FFindOldestThresholdCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnOldest.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"FindOldestThresholdCS", SF_Compute);
 
 /**
@@ -492,7 +492,7 @@ bool FFindOldestThresholdCS::ShouldCompilePermutation(const FGlobalShaderPermuta
 }
 
 IMPLEMENT_GLOBAL_SHADER(FMarkOldestParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnOldest.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"MarkOldestParticlesCS", SF_Compute);
 
 /**
@@ -517,7 +517,7 @@ void FMarkOldestParticlesCS::ModifyCompilationEnvironment(const FGlobalShaderPer
 }
 
 IMPLEMENT_GLOBAL_SHADER(FComputePerSourceRecycleCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidComputePerSourceRecycle.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleCounters.usf",
 	"ComputePerSourceRecycleCS", SF_Compute);
 
 /**
@@ -531,7 +531,7 @@ bool FComputePerSourceRecycleCS::ShouldCompilePermutation(const FGlobalShaderPer
 }
 
 IMPLEMENT_GLOBAL_SHADER(FUpdateSourceCountersDespawnCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidUpdateSourceCountersDespawn.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"UpdateSourceCountersDespawnCS", SF_Compute);
 
 /**
@@ -637,7 +637,7 @@ void FAddBlockOffsetsCS_RDG::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FCompactParticlesCS_RDG,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"CompactParticlesCS", SF_Compute);
 
 /**
@@ -664,7 +664,7 @@ void FCompactParticlesCS_RDG::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FWriteTotalCountCS_RDG,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidDespawnParticles.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleDespawn.usf",
 	"WriteTotalCountCS", SF_Compute);
 
 /**
@@ -1516,7 +1516,7 @@ void FMergeSoAToAoSCS::ModifyCompilationEnvironment(const FGlobalShaderPermutati
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FWriteAliveCountAfterCompactionCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidUpdateParticleCount.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleCounters.usf",
 	"WriteAliveCountAfterCompactionCS", SF_Compute);
 
 /**
@@ -1530,7 +1530,7 @@ bool FWriteAliveCountAfterCompactionCS::ShouldCompilePermutation(const FGlobalSh
 }
 
 IMPLEMENT_GLOBAL_SHADER(FUpdateCountAfterSpawnCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidUpdateParticleCount.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleCounters.usf",
 	"UpdateCountAfterSpawnCS", SF_Compute);
 
 /**
@@ -1544,7 +1544,7 @@ bool FUpdateCountAfterSpawnCS::ShouldCompilePermutation(const FGlobalShaderPermu
 }
 
 IMPLEMENT_GLOBAL_SHADER(FCopyCountToSpawnCounterCS,
-	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/FluidCopyParticleCount.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Lifecycle/KawaiiFluidLifecycleCounters.usf",
 	"CopyCountToSpawnCounterCS", SF_Compute);
 
 /**
