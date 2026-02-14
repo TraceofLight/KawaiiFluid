@@ -41,14 +41,7 @@ Buffer<uint> InFlags;                    // [ParticleCount] uint
 // Input: Attachment buffer (for surface normal of attached particles)
 StructuredBuffer<FGPUParticleAttachment> InAttachments;
 
-// Spatial Hash buffers (for DensityBased mode)
-// TODO(KHJ): Remove legacy hash-based lookup - bUseZOrderSorting is always true
-// Legacy hash-based lookup (random access pattern)
-StructuredBuffer<uint> CellCounts;
-StructuredBuffer<uint> ParticleIndices;
-
-// Morton-sorted lookup (sequential access pattern, cache-friendly)
-// When bUseZOrderSorting=1, ParticleBuffer is already sorted by Morton code
+// Spatial lookup buffers (Morton-sorted sequential access pattern)
 // CellStart/CellEnd give contiguous ranges in the sorted buffer
 StructuredBuffer<uint> CellStart;           // CellStart[cellID] = first particle index in sorted array
 StructuredBuffer<uint> CellEnd;             // CellEnd[cellID] = last particle index in sorted array
@@ -72,8 +65,6 @@ float AnisotropyMax;
 float DensityWeight;  // For Hybrid mode
 float SmoothingRadius;
 float CellSize;
-// TODO(KHJ): Remove bUseZOrderSorting - always true, legacy path is dead code
-int bUseZOrderSorting;  // 1 = use Morton-sorted CellStart/End, 0 = use legacy CellCounts
 
 // Attached particle anisotropy params
 float AttachedFlattenScale;   // How flat (0.3 = 30% height along normal)
@@ -793,107 +784,54 @@ void CalculateDensityBased(
 	float SumW = 0.0f;
 	int NeighborCount = 0;
 
-	if (bUseZOrderSorting)
+	for (int dz = -CellRadius; dz <= CellRadius; ++dz)
 	{
-		for (int dz = -CellRadius; dz <= CellRadius; ++dz)
+		for (int dy = -CellRadius; dy <= CellRadius; ++dy)
 		{
-			for (int dy = -CellRadius; dy <= CellRadius; ++dy)
+			for (int dx = -CellRadius; dx <= CellRadius; ++dx)
 			{
-				for (int dx = -CellRadius; dx <= CellRadius; ++dx)
-				{
-					int3 NeighborCell = CenterCell + int3(dx, dy, dz);
-					uint CellID = GetMortonCellIDFromCellCoord_Aniso(NeighborCell);
-					uint Start = CellStart[CellID];
-					uint End = CellEnd[CellID];
+				int3 NeighborCell = CenterCell + int3(dx, dy, dz);
+				uint CellID = GetMortonCellIDFromCellCoord_Aniso(NeighborCell);
+				uint Start = CellStart[CellID];
+				uint End = CellEnd[CellID];
 
-					if (Start == INVALID_INDEX || End == INVALID_INDEX)
+				if (Start == INVALID_INDEX || End == INVALID_INDEX)
+				{
+					continue;
+				}
+
+				End = min(End, (uint)(ParticleCountBuffer[6] - 1));
+
+				for (uint NeighborIdx = Start; NeighborIdx <= End; ++NeighborIdx)
+				{
+					if (NeighborIdx >= ParticleCountBuffer[6])
 					{
 						continue;
 					}
 
-					End = min(End, (uint)(ParticleCountBuffer[6] - 1));
+					uint neighborIdx3 = NeighborIdx * 3;
+					float3 NeighborPos = float3(InPositions[neighborIdx3], InPositions[neighborIdx3 + 1], InPositions[neighborIdx3 + 2]);
+					float3 Diff = NeighborPos - CenterPos;
+					float Dist2 = dot(Diff, Diff);
 
-					for (uint NeighborIdx = Start; NeighborIdx <= End; ++NeighborIdx)
+					if (Dist2 < H2)
 					{
-						if (NeighborIdx >= ParticleCountBuffer[6])
+						float Dist = sqrt(Dist2);
+						float W = KernelWeight(Dist, SmoothingRadius);
+
+						if (W > 0.0001f)
 						{
-							continue;
-						}
+							// Accumulate for SmoothedCenter
+							SumWP += W * NeighborPos;
+							SumW += W;
+							NeighborCount++;
 
-						uint neighborIdx3 = NeighborIdx * 3;
-						float3 NeighborPos = float3(InPositions[neighborIdx3], InPositions[neighborIdx3 + 1], InPositions[neighborIdx3 + 2]);
-						float3 Diff = NeighborPos - CenterPos;
-						float Dist2 = dot(Diff, Diff);
-
-						if (Dist2 < H2)
-						{
-							float Dist = sqrt(Dist2);
-							float W = KernelWeight(Dist, SmoothingRadius);
-
-							if (W > 0.0001f)
+							// Cache for Pass 2 (avoid overflow)
+							if (CachedCount < MAX_CACHED_NEIGHBORS)
 							{
-								// Accumulate for SmoothedCenter
-								SumWP += W * NeighborPos;
-								SumW += W;
-								NeighborCount++;
-
-								// Cache for Pass 2 (avoid overflow)
-								if (CachedCount < MAX_CACHED_NEIGHBORS)
-								{
-									CachedPositions[CachedCount] = NeighborPos;
-									CachedWeights[CachedCount] = W;
-									CachedCount++;
-								}
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-	else
-	{
-		for (int dz = -CellRadius; dz <= CellRadius; ++dz)
-		{
-			for (int dy = -CellRadius; dy <= CellRadius; ++dy)
-			{
-				for (int dx = -CellRadius; dx <= CellRadius; ++dx)
-				{
-					int3 NeighborCell = CenterCell + int3(dx, dy, dz);
-					uint Hash = HashCell(NeighborCell);
-					uint Count = min(CellCounts[Hash], (uint)MAX_PARTICLES_PER_CELL);
-					uint BaseIdx = Hash * MAX_PARTICLES_PER_CELL;
-
-					for (uint i = 0; i < Count; ++i)
-					{
-						uint NeighborIdx = ParticleIndices[BaseIdx + i];
-						if (NeighborIdx >= ParticleCountBuffer[6])
-						{
-							continue;
-						}
-
-						uint neighborIdx3 = NeighborIdx * 3;
-						float3 NeighborPos = float3(InPositions[neighborIdx3], InPositions[neighborIdx3 + 1], InPositions[neighborIdx3 + 2]);
-						float3 Diff = NeighborPos - CenterPos;
-						float Dist2 = dot(Diff, Diff);
-
-						if (Dist2 < H2)
-						{
-							float Dist = sqrt(Dist2);
-							float W = KernelWeight(Dist, SmoothingRadius);
-
-							if (W > 0.0001f)
-							{
-								SumWP += W * NeighborPos;
-								SumW += W;
-								NeighborCount++;
-
-								if (CachedCount < MAX_CACHED_NEIGHBORS)
-								{
-									CachedPositions[CachedCount] = NeighborPos;
-									CachedWeights[CachedCount] = W;
-									CachedCount++;
-								}
+								CachedPositions[CachedCount] = NeighborPos;
+								CachedWeights[CachedCount] = W;
+								CachedCount++;
 							}
 						}
 					}

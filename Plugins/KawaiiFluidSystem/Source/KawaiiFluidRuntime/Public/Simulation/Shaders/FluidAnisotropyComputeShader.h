@@ -27,8 +27,6 @@ struct FGPUCollisionBox;
  * @param PackedVelocitiesSRV Packed velocity data.
  * @param FlagsSRV Particle status flags.
  * @param AttachmentsSRV Particle attachment data for surface normals.
- * @param CellCountsSRV Legacy hash-based spatial lookup cell counts.
- * @param ParticleIndicesSRV Legacy hash-based spatial lookup indices.
  * @param CellStartSRV Morton-sorted spatial lookup cell starts.
  * @param CellEndSRV Morton-sorted spatial lookup cell ends.
  * @param OutAxis1UAV Output axis 1 (direction + scale).
@@ -46,7 +44,6 @@ struct FGPUCollisionBox;
  * @param DensityWeight Balance in Hybrid mode.
  * @param SmoothingRadius Radius for neighborhood search.
  * @param CellSize Size of spatial hash cell.
- * @param bUseZOrderSorting Whether to use Morton-sorted sequential access.
  * @param MortonBoundsMin Origin for Morton code calculation.
  * @param GridResolutionPreset Resolution for spatial sorting.
  * @param AttachedFlattenScale Flattening factor for attached particles.
@@ -85,9 +82,6 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 	FRDGBufferSRVRef FlagsSRV = nullptr;
 	FRDGBufferSRVRef AttachmentsSRV = nullptr;
 
-	FRDGBufferSRVRef CellCountsSRV = nullptr;
-	FRDGBufferSRVRef ParticleIndicesSRV = nullptr;
-
 	FRDGBufferSRVRef CellStartSRV = nullptr;
 	FRDGBufferSRVRef CellEndSRV = nullptr;
 
@@ -112,7 +106,6 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 	float SmoothingRadius = 10.0f;
 	float CellSize = 10.0f;
 
-	bool bUseZOrderSorting = false;
 	FVector3f MortonBoundsMin = FVector3f::ZeroVector;
 
 	EGridResolutionPreset GridResolutionPreset = EGridResolutionPreset::Medium;
@@ -178,8 +171,6 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint2>, InPackedVelocities)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<uint>, InFlags)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUParticleAttachment>, InAttachments)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellStart)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellEnd)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FVector4f>, OutAnisotropyAxis1)
@@ -196,7 +187,6 @@ public:
 		SHADER_PARAMETER(float, DensityWeight)
 		SHADER_PARAMETER(float, SmoothingRadius)
 		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(int32, bUseZOrderSorting)
 		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
 		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 		SHADER_PARAMETER(float, AttachedFlattenScale)
