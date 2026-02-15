@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
  * @file KawaiiFluidAttachmentApply.usf
- * @brief Shader implementation for FluidApplyBoneTransform
+ * @brief Shader implementation for KawaiiFluidAttachmentApply
  */
 
 // GPU Fluid Physics - Apply Boundary Attachment Pass
@@ -10,7 +10,7 @@
 // DIRECTLY applies bone transforms to local positions - same as BoundarySkinningCS
 // This eliminates 1-frame delay by using the SAME bone transform buffer.
 //
-// Legacy approach: Use WorldBoundaryParticles[idx].Position (pre-computed)
+// Legacy approach: Use WorldBoundaryParticles[ParticleIndex].Position (pre-computed)
 // New approach: Apply BoneTransforms[BoneIndex] * LocalPosition directly
 //
 // Both BoundarySkinningCS and this pass now use the IDENTICAL bone transform data,
@@ -42,7 +42,7 @@ int BoundaryParticleCount;
 StructuredBuffer<float4x4> BoneTransforms;
 int BoneCount;
 
-// Fallback transform for static meshes (BoneIndex == -1)
+// Fallback Transform for static meshes (BoneIndex == -1)
 float4x4 ComponentTransform;
 
 // Time parameter for velocity calculation
@@ -58,27 +58,27 @@ float DeltaTime;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ApplyBoneTransformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint idx = DispatchThreadId.x;
-	if (idx >= ParticleCountBuffer[6])
+	uint ParticleIndex = DispatchThreadId.x;
+	if (ParticleIndex >= ParticleCountBuffer[6])
 	{
 		return;
 	}
 
-	// Read particle first to check NEAR_BOUNDARY flag
-	FGPUFluidParticle particle = Particles[idx];
+	// Read Particle first to check NEAR_BOUNDARY flag
+	FGPUFluidParticle Particle = Particles[ParticleIndex];
 
 	// CRITICAL: Only apply attachment to particles with NEAR_BOUNDARY flag
 	// This prevents non-attached (blue) particles from following boundaries
-	if (!HasFlag(particle.Flags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY))
+	if (!HasFlag(Particle.Flags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY))
 	{
 		return;
 	}
 
 	// Read attachment data
-	FGPUBoneDeltaAttachment attachment = BoneDeltaAttachments[idx];
+	FGPUBoneDeltaAttachment Attachment = BoneDeltaAttachments[ParticleIndex];
 
 	// Skip if not attached to a boundary particle
-	if (attachment.BoundaryParticleIndex < 0 || attachment.BoundaryParticleIndex >= BoundaryParticleCount)
+	if (Attachment.BoundaryParticleIndex < 0 || Attachment.BoundaryParticleIndex >= BoundaryParticleCount)
 	{
 		return;
 	}
@@ -92,29 +92,29 @@ void ApplyBoneTransformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// =========================================================================
 
 	// Get the local boundary particle data
-	FGPUBoundaryParticleLocal localParticle = LocalBoundaryParticles[attachment.BoundaryParticleIndex];
+	FGPUBoundaryParticleLocal LocalParticle = LocalBoundaryParticles[Attachment.BoundaryParticleIndex];
 
 	// Select the appropriate transform based on bone index
-	float4x4 transform;
-	if (localParticle.BoneIndex >= 0 && localParticle.BoneIndex < BoneCount)
+	float4x4 Transform;
+	if (LocalParticle.BoneIndex >= 0 && LocalParticle.BoneIndex < BoneCount)
 	{
 		// Skeletal mesh: use bone transform
-		transform = BoneTransforms[localParticle.BoneIndex];
+		Transform = BoneTransforms[LocalParticle.BoneIndex];
 	}
 	else
 	{
 		// Static mesh or invalid bone: use component transform
-		transform = ComponentTransform;
+		Transform = ComponentTransform;
 	}
 
 	// Transform local position to world space (row-major, Unreal convention)
-	float4 localPos4 = float4(localParticle.LocalPosition, 1.0f);
-	float3 boundaryWorldPos = mul(localPos4, transform).xyz;
+	float4 LocalPos4 = float4(LocalParticle.LocalPosition, 1.0f);
+	float3 BoundaryWorldPosition = mul(LocalPos4, Transform).xyz;
 
-	// Apply LocalOffset (stored in attachment)
+	// Apply LocalOffset (stored in Attachment)
 	// This allows physics to affect the particle while still following the boundary
-	float3 localOffset = attachment.LocalOffset;
-	float3 targetPos = boundaryWorldPos + localOffset;
+	float3 LocalOffset = Attachment.LocalOffset;
+	float3 TargetPosition = BoundaryWorldPosition + LocalOffset;
 
 	// =========================================================================
 	// VELOCITY-ONLY CORRECTION (Based on Bone Delta)
@@ -123,19 +123,19 @@ void ApplyBoneTransformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// =========================================================================
 
 	// Use bone position from previous frame (already stored in PreviousPosition)
-	// PreviousPosition = (boundaryWorldPos + localOffset) from previous frame
-	float3 prevTargetPos = attachment.PreviousPosition;
+	// PreviousPosition = (BoundaryWorldPosition + LocalOffset) from previous frame
+	float3 PreviousTargetPosition = Attachment.PreviousPosition;
 
 	// Bone movement velocity = (Current Bone Pos - Previous Bone Pos) / dt
-	float3 boneVelocity = float3(0, 0, 0);
+	float3 BoneVelocity = float3(0, 0, 0);
 	if (DeltaTime > 0.0001f)
 	{
-		boneVelocity = (targetPos - prevTargetPos) / DeltaTime;
+		BoneVelocity = (TargetPosition - PreviousTargetPosition) / DeltaTime;
 	}
 
 	// Set velocity to bone velocity (No position/PredictedPosition correction)
-	particle.Velocity = boneVelocity;
+	Particle.Velocity = BoneVelocity;
 
 	// Write back
-	Particles[idx] = particle;
+	Particles[ParticleIndex] = Particle;
 }

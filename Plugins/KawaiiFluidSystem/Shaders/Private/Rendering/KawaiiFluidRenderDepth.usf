@@ -195,75 +195,75 @@ bool RayEllipsoidIntersection(
 	float4 Axis1,          // Ellipsoid axis 1 (xyz = normalized direction, w = scale)
 	float4 Axis2,          // Ellipsoid axis 2 (xyz = normalized direction, w = scale)
 	float4 Axis3,          // Ellipsoid axis 3 (xyz = normalized direction, w = scale)
-	out float t,           // Output: distance along ray
+	out float OutT,        // Output: distance along ray
 	out float3 HitPoint)   // Output: hit point in view space
 {
 	// Extract directions and scales directly (no length() needed!)
-	float3 n1 = Axis1.xyz;
-	float3 n2 = Axis2.xyz;
-	float3 n3 = Axis3.xyz;
-	float s1 = Axis1.w;
-	float s2 = Axis2.w;
-	float s3 = Axis3.w;
+	float3 AxisDir1 = Axis1.xyz;
+	float3 AxisDir2 = Axis2.xyz;
+	float3 AxisDir3 = Axis3.xyz;
+	float AxisScale1 = Axis1.w;
+	float AxisScale2 = Axis2.w;
+	float AxisScale3 = Axis3.w;
 
 	// Prevent division by zero for degenerate ellipsoids
-	if (s1 < 1e-6 || s2 < 1e-6 || s3 < 1e-6)
+	if (AxisScale1 < 1e-6 || AxisScale2 < 1e-6 || AxisScale3 < 1e-6)
 	{
-		t = 0.0;
+		OutT = 0.0;
 		HitPoint = float3(0, 0, 0);
 		return false;
 	}
 
 	// Project ray origin and direction onto each axis (normalized by scale)
 	// o_i = (O · n_i) / s_i,  d_i = (D · n_i) / s_i
-	float o1 = dot(RayOrigin, n1) / s1;
-	float o2 = dot(RayOrigin, n2) / s2;
-	float o3 = dot(RayOrigin, n3) / s3;
+	float ProjectedOrigin1 = dot(RayOrigin, AxisDir1) / AxisScale1;
+	float ProjectedOrigin2 = dot(RayOrigin, AxisDir2) / AxisScale2;
+	float ProjectedOrigin3 = dot(RayOrigin, AxisDir3) / AxisScale3;
 
-	float d1 = dot(RayDir, n1) / s1;
-	float d2 = dot(RayDir, n2) / s2;
-	float d3 = dot(RayDir, n3) / s3;
+	float ProjectedDir1 = dot(RayDir, AxisDir1) / AxisScale1;
+	float ProjectedDir2 = dot(RayDir, AxisDir2) / AxisScale2;
+	float ProjectedDir3 = dot(RayDir, AxisDir3) / AxisScale3;
 
 	// Quadratic equation: A*t² + B*t + C = 0
 	// From: (o1 + t*d1)² + (o2 + t*d2)² + (o3 + t*d3)² = 1
-	float A = d1*d1 + d2*d2 + d3*d3;
-	float B = 2.0 * (o1*d1 + o2*d2 + o3*d3);
-	float C = o1*o1 + o2*o2 + o3*o3 - 1.0;
+	float A = ProjectedDir1 * ProjectedDir1 + ProjectedDir2 * ProjectedDir2 + ProjectedDir3 * ProjectedDir3;
+	float B = 2.0 * (ProjectedOrigin1 * ProjectedDir1 + ProjectedOrigin2 * ProjectedDir2 + ProjectedOrigin3 * ProjectedDir3);
+	float C = ProjectedOrigin1 * ProjectedOrigin1 + ProjectedOrigin2 * ProjectedOrigin2 + ProjectedOrigin3 * ProjectedOrigin3 - 1.0;
 
 	float Discriminant = B * B - 4.0 * A * C;
 
 	if (Discriminant < 0.0)
 	{
 		// No intersection
-		t = 0.0;
+		OutT = 0.0;
 		HitPoint = float3(0, 0, 0);
 		return false;
 	}
 
 	// Solve quadratic
 	float SqrtDisc = sqrt(Discriminant);
-	float t1 = (-B - SqrtDisc) / (2.0 * A);
-	float t2 = (-B + SqrtDisc) / (2.0 * A);
+	float NearIntersection = (-B - SqrtDisc) / (2.0 * A);
+	float FarIntersection = (-B + SqrtDisc) / (2.0 * A);
 
 	// Choose the intersection in front of the ray origin
-	if (t1 > 0.0)
+	if (NearIntersection > 0.0)
 	{
-		t = t1;
+		OutT = NearIntersection;
 	}
-	else if (t2 > 0.0)
+	else if (FarIntersection > 0.0)
 	{
-		t = t2;
+		OutT = FarIntersection;
 	}
 	else
 	{
 		// Both intersections behind ray origin
-		t = 0.0;
+		OutT = 0.0;
 		HitPoint = float3(0, 0, 0);
 		return false;
 	}
 
 	// Compute hit point in view space
-	HitPoint = RayOrigin + t * RayDir;
+	HitPoint = RayOrigin + OutT * RayDir;
 
 	return true;
 }
@@ -299,18 +299,18 @@ FPixelOutput MainPS(FVertexOutput Input)
 	// Invert: ray from center, shooting backwards to find surface
 	float3 RelativeRayOrigin = -Input.ParticleCenter; // Camera at origin, ellipsoid at ParticleCenter
 
-	float t;
+	float HitDistance;
 	float3 HitPoint;
-	bool Hit = RayEllipsoidIntersection(
+	bool bHit = RayEllipsoidIntersection(
 		RelativeRayOrigin,
 		RayDir,
 		Input.EllipsoidAxis1,
 		Input.EllipsoidAxis2,
 		Input.EllipsoidAxis3,
-		t,
+		HitDistance,
 		HitPoint);
 
-	if (!Hit)
+	if (!bHit)
 	{
 		discard;
 	}
@@ -324,19 +324,19 @@ FPixelOutput MainPS(FVertexOutput Input)
 	float2 UV = Input.UV * 2.0 - 1.0;
 
 	// Calculate UV distance (sphere radius = 1.0)
-	float r2 = dot(UV, UV);
+	float RadiusSquared = dot(UV, UV);
 
 	// Discard pixels outside circle (square to circle)
-	if (r2 > 1.0)
+	if (RadiusSquared > 1.0)
 	{
 		discard;
 	}
 
 	// Calculate Z offset on sphere surface
-	float z = sqrt(1.0 - r2);
+	float SphereZ = sqrt(1.0 - RadiusSquared);
 
 	// Calculate actual sphere surface position (View Space)
-	float3 IntersectionPoint = Input.ParticleCenter + float3(UV * Input.ParticleRadius, -z * Input.ParticleRadius);
+	float3 IntersectionPoint = Input.ParticleCenter + float3(UV * Input.ParticleRadius, -SphereZ * Input.ParticleRadius);
 #endif
 
 	// Calculate Linear Depth (convert view space Z to positive distance)

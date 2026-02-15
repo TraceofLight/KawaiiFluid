@@ -82,21 +82,21 @@ void NarrowRangeFilterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	}
 
 	// Sample neighbors to compute depth gradient for grazing angle detection
-	float zL = InputTexture.Load(int3(clamp(CenterCoord + int2(-1, 0), int2(0,0), int2(TextureSize)-1), 0));
-	float zR = InputTexture.Load(int3(clamp(CenterCoord + int2( 1, 0), int2(0,0), int2(TextureSize)-1), 0));
-	float zT = InputTexture.Load(int3(clamp(CenterCoord + int2( 0,-1), int2(0,0), int2(TextureSize)-1), 0));
-	float zB = InputTexture.Load(int3(clamp(CenterCoord + int2( 0, 1), int2(0,0), int2(TextureSize)-1), 0));
+	float DepthLeft = InputTexture.Load(int3(clamp(CenterCoord + int2(-1, 0), int2(0,0), int2(TextureSize)-1), 0));
+	float DepthRight = InputTexture.Load(int3(clamp(CenterCoord + int2( 1, 0), int2(0,0), int2(TextureSize)-1), 0));
+	float DepthTop = InputTexture.Load(int3(clamp(CenterCoord + int2( 0,-1), int2(0,0), int2(TextureSize)-1), 0));
+	float DepthBottom = InputTexture.Load(int3(clamp(CenterCoord + int2( 0, 1), int2(0,0), int2(TextureSize)-1), 0));
 
 	// Replace background with center depth for gradient calculation
-	zL = (zL > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zL;
-	zR = (zR > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zR;
-	zT = (zT > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zT;
-	zB = (zB > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zB;
+	DepthLeft = (DepthLeft > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthLeft;
+	DepthRight = (DepthRight > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthRight;
+	DepthTop = (DepthTop > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthTop;
+	DepthBottom = (DepthBottom > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthBottom;
 
 	// Compute depth gradient magnitude
-	float zx = (zR - zL) * 0.5f;
-	float zy = (zB - zT) * 0.5f;
-	float GradMag = sqrt(zx * zx + zy * zy);
+	float GradientX = (DepthRight - DepthLeft) * 0.5f;
+	float GradientY = (DepthBottom - DepthTop) * 0.5f;
+	float GradMag = sqrt(GradientX * GradientX + GradientY * GradientY);
 
 	// Grazing factor: large gradient = grazing angle
 	float GrazingFactor = saturate(GradMag / (ParticleRadius * 2.0f));
@@ -237,19 +237,19 @@ void NarrowRangeFilterLDS_CS(
 	}
 
 	// Compute gradient from LDS
-	float zL = LDS_Depth[LdsCenter.y][LdsCenter.x - 1];
-	float zR = LDS_Depth[LdsCenter.y][LdsCenter.x + 1];
-	float zT = LDS_Depth[LdsCenter.y - 1][LdsCenter.x];
-	float zB = LDS_Depth[LdsCenter.y + 1][LdsCenter.x];
+	float DepthLeft = LDS_Depth[LdsCenter.y][LdsCenter.x - 1];
+	float DepthRight = LDS_Depth[LdsCenter.y][LdsCenter.x + 1];
+	float DepthTop = LDS_Depth[LdsCenter.y - 1][LdsCenter.x];
+	float DepthBottom = LDS_Depth[LdsCenter.y + 1][LdsCenter.x];
 
-	zL = (zL > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zL;
-	zR = (zR > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zR;
-	zT = (zT > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zT;
-	zB = (zB > BACKGROUND_DEPTH_THRESH) ? CenterDepth : zB;
+	DepthLeft = (DepthLeft > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthLeft;
+	DepthRight = (DepthRight > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthRight;
+	DepthTop = (DepthTop > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthTop;
+	DepthBottom = (DepthBottom > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthBottom;
 
-	float zx = (zR - zL) * 0.5f;
-	float zy = (zB - zT) * 0.5f;
-	float GradMag = sqrt(zx * zx + zy * zy);
+	float GradientX = (DepthRight - DepthLeft) * 0.5f;
+	float GradientY = (DepthBottom - DepthTop) * 0.5f;
+	float GradMag = sqrt(GradientX * GradientX + GradientY * GradientY);
 	float GrazingFactor = saturate(GradMag / (ParticleRadius * 2.0f));
 
 	// Distance-based dynamic blur radius:
@@ -705,20 +705,20 @@ void DepthDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	int2 C01 = clamp(InCoord + int2(0, 1), int2(0, 0), FullResMax);
 	int2 C11 = clamp(InCoord + int2(1, 1), int2(0, 0), FullResMax);
 
-	float z00 = InputTexture.Load(int3(C00, 0));
-	float z10 = InputTexture.Load(int3(C10, 0));
-	float z01 = InputTexture.Load(int3(C01, 0));
-	float z11 = InputTexture.Load(int3(C11, 0));
+	float Depth00 = InputTexture.Load(int3(C00, 0));
+	float Depth10 = InputTexture.Load(int3(C10, 0));
+	float Depth01 = InputTexture.Load(int3(C01, 0));
+	float Depth11 = InputTexture.Load(int3(C11, 0));
 
 	// Count valid (non-background) samples
 	int ValidCount = 0;
 	float MinDepth = 1e30f;
 	float SumDepth = 0.0f;
 
-	if (z00 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, z00); SumDepth += z00; }
-	if (z10 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, z10); SumDepth += z10; }
-	if (z01 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, z01); SumDepth += z01; }
-	if (z11 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, z11); SumDepth += z11; }
+	if (Depth00 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth00); SumDepth += Depth00; }
+	if (Depth10 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth10); SumDepth += Depth10; }
+	if (Depth01 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth01); SumDepth += Depth01; }
+	if (Depth11 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth11); SumDepth += Depth11; }
 
 	float OutDepth;
 	if (ValidCount == 0)
@@ -782,31 +782,31 @@ void DepthUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	int2 HC01 = clamp(HalfCoord00 + int2(0, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
 	int2 HC11 = clamp(HalfCoord00 + int2(1, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
 
-	float z00 = InputTexture.Load(int3(HC00, 0));
-	float z10 = InputTexture.Load(int3(HC10, 0));
-	float z01 = InputTexture.Load(int3(HC01, 0));
-	float z11 = InputTexture.Load(int3(HC11, 0));
+	float Depth00 = InputTexture.Load(int3(HC00, 0));
+	float Depth10 = InputTexture.Load(int3(HC10, 0));
+	float Depth01 = InputTexture.Load(int3(HC01, 0));
+	float Depth11 = InputTexture.Load(int3(HC11, 0));
 
 	// Joint bilateral weights: bilinear * depth similarity
 	float DepthSigma = ParticleRadius * 2.0f;
 
-	float w00 = (1.0f - Frac.x) * (1.0f - Frac.y);
-	float w10 = Frac.x * (1.0f - Frac.y);
-	float w01 = (1.0f - Frac.x) * Frac.y;
-	float w11 = Frac.x * Frac.y;
+	float Weight00 = (1.0f - Frac.x) * (1.0f - Frac.y);
+	float Weight10 = Frac.x * (1.0f - Frac.y);
+	float Weight01 = (1.0f - Frac.x) * Frac.y;
+	float Weight11 = Frac.x * Frac.y;
 
 	// Apply depth-based weights (suppress samples with different depth)
-	if (z00 < BACKGROUND_DEPTH_THRESH) w00 *= exp(-abs(z00 - OriginalDepth) / DepthSigma); else w00 = 0.0f;
-	if (z10 < BACKGROUND_DEPTH_THRESH) w10 *= exp(-abs(z10 - OriginalDepth) / DepthSigma); else w10 = 0.0f;
-	if (z01 < BACKGROUND_DEPTH_THRESH) w01 *= exp(-abs(z01 - OriginalDepth) / DepthSigma); else w01 = 0.0f;
-	if (z11 < BACKGROUND_DEPTH_THRESH) w11 *= exp(-abs(z11 - OriginalDepth) / DepthSigma); else w11 = 0.0f;
+	if (Depth00 < BACKGROUND_DEPTH_THRESH) Weight00 *= exp(-abs(Depth00 - OriginalDepth) / DepthSigma); else Weight00 = 0.0f;
+	if (Depth10 < BACKGROUND_DEPTH_THRESH) Weight10 *= exp(-abs(Depth10 - OriginalDepth) / DepthSigma); else Weight10 = 0.0f;
+	if (Depth01 < BACKGROUND_DEPTH_THRESH) Weight01 *= exp(-abs(Depth01 - OriginalDepth) / DepthSigma); else Weight01 = 0.0f;
+	if (Depth11 < BACKGROUND_DEPTH_THRESH) Weight11 *= exp(-abs(Depth11 - OriginalDepth) / DepthSigma); else Weight11 = 0.0f;
 
-	float TotalWeight = w00 + w10 + w01 + w11;
+	float TotalWeight = Weight00 + Weight10 + Weight01 + Weight11;
 
 	float OutDepth;
 	if (TotalWeight > 0.001f)
 	{
-		OutDepth = (z00 * w00 + z10 * w10 + z01 * w01 + z11 * w11) / TotalWeight;
+		OutDepth = (Depth00 * Weight00 + Depth10 * Weight10 + Depth01 * Weight01 + Depth11 * Weight11) / TotalWeight;
 	}
 	else
 	{
@@ -929,13 +929,13 @@ void ThicknessDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	int2 C01 = clamp(InCoord + int2(0, 1), int2(0, 0), MaxCoord);
 	int2 C11 = clamp(InCoord + int2(1, 1), int2(0, 0), MaxCoord);
 
-	float t00 = InputTexture.Load(int3(C00, 0));
-	float t10 = InputTexture.Load(int3(C10, 0));
-	float t01 = InputTexture.Load(int3(C01, 0));
-	float t11 = InputTexture.Load(int3(C11, 0));
+	float Thickness00 = InputTexture.Load(int3(C00, 0));
+	float Thickness10 = InputTexture.Load(int3(C10, 0));
+	float Thickness01 = InputTexture.Load(int3(C01, 0));
+	float Thickness11 = InputTexture.Load(int3(C11, 0));
 
 	// Simple average for thickness
-	float OutThickness = (t00 + t10 + t01 + t11) * 0.25f;
+	float OutThickness = (Thickness00 + Thickness10 + Thickness01 + Thickness11) * 0.25f;
 
 	OutputTexture[OutCoord] = OutThickness;
 }
@@ -971,15 +971,15 @@ void ThicknessUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	int2 HC01 = clamp(HalfCoord00 + int2(0, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
 	int2 HC11 = clamp(HalfCoord00 + int2(1, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
 
-	float t00 = InputTexture.Load(int3(HC00, 0));
-	float t10 = InputTexture.Load(int3(HC10, 0));
-	float t01 = InputTexture.Load(int3(HC01, 0));
-	float t11 = InputTexture.Load(int3(HC11, 0));
+	float Thickness00 = InputTexture.Load(int3(HC00, 0));
+	float Thickness10 = InputTexture.Load(int3(HC10, 0));
+	float Thickness01 = InputTexture.Load(int3(HC01, 0));
+	float Thickness11 = InputTexture.Load(int3(HC11, 0));
 
 	// Bilinear interpolation
-	float t0 = lerp(t00, t10, Frac.x);
-	float t1 = lerp(t01, t11, Frac.x);
-	float OutThickness = lerp(t0, t1, Frac.y);
+	float ThicknessTop = lerp(Thickness00, Thickness10, Frac.x);
+	float ThicknessBottom = lerp(Thickness01, Thickness11, Frac.x);
+	float OutThickness = lerp(ThicknessTop, ThicknessBottom, Frac.y);
 
 	OutputTexture[OutCoord] = OutThickness;
 }

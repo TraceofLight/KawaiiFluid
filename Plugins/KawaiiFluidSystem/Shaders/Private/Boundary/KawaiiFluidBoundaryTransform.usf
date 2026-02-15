@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidBoundarySkinning.usf
- * @brief Shader implementation for FluidBoundarySkinning
+ * @file KawaiiFluidBoundaryTransform.usf
+ * @brief Shader implementation for KawaiiFluidBoundaryTransform
  */
 
 // GPU Boundary Particle Skinning
@@ -52,58 +52,58 @@ float DeltaTime;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void BoundarySkinningCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)BoundaryParticleCount)
+	uint ParticleIndex = DispatchThreadId.x;
+	if (ParticleIndex >= (uint)BoundaryParticleCount)
 	{
 		return;
 	}
 
-	FGPUBoundaryParticleLocal local = LocalBoundaryParticles[idx];
+	FGPUBoundaryParticleLocal LocalParticle = LocalBoundaryParticles[ParticleIndex];
 
-	float4x4 transform;
+	float4x4 Transform;
 
-	if (local.BoneIndex >= 0 && local.BoneIndex < BoneCount)
+	if (LocalParticle.BoneIndex >= 0 && LocalParticle.BoneIndex < BoneCount)
 	{
 		// Skeletal mesh: use bone transform
-		transform = BoneTransforms[local.BoneIndex];
+		Transform = BoneTransforms[LocalParticle.BoneIndex];
 	}
 	else
 	{
 		// Static mesh or invalid bone: use component transform
-		transform = ComponentTransform;
+		Transform = ComponentTransform;
 	}
 
 	// Transform position: WorldPos = LocalPos * Transform (row-major, Unreal convention)
-	float4 localPos4 = float4(local.LocalPosition, 1.0f);
-	float3 worldPos = mul(localPos4, transform).xyz;
+	float4 LocalPos4 = float4(LocalParticle.LocalPosition, 1.0f);
+	float3 WorldPosition = mul(LocalPos4, Transform).xyz;
 
 	// Transform normal (rotation only, no translation)
 	// Safety check: normalize(0) produces NaN, so fall back to up vector if LocalNormal is zero
-	float3x3 rotationMatrix = (float3x3)transform;
-	float3 transformedNormal = mul(local.LocalNormal, rotationMatrix);
-	float normalLen = length(transformedNormal);
-	float3 worldNormal = (normalLen > 0.001f) ? (transformedNormal / normalLen) : float3(0, 0, 1);
+	float3x3 RotationMatrix = (float3x3)Transform;
+	float3 TransformedNormal = mul(LocalParticle.LocalNormal, RotationMatrix);
+	float NormalLength = length(TransformedNormal);
+	float3 WorldNormal = (NormalLength > 0.001f) ? (TransformedNormal / NormalLength) : float3(0, 0, 1);
 
 	// Calculate velocity from position difference
-	float3 velocity = float3(0, 0, 0);
+	float3 Velocity = float3(0, 0, 0);
 	if (bHasPreviousFrame && DeltaTime > 0.0001f)
 	{
-		float3 prevPos = PreviousWorldBoundaryParticles[idx].Position;
-		velocity = (worldPos - prevPos) / DeltaTime;
+		float3 PreviousPosition = PreviousWorldBoundaryParticles[ParticleIndex].Position;
+		Velocity = (WorldPosition - PreviousPosition) / DeltaTime;
 	}
 
-	// Write output
-	FGPUBoundaryParticle output;
-	output.Position = worldPos;
-	output.Psi = local.Psi;
-	output.Normal = worldNormal;
-	output.OwnerID = OwnerID;
-	output.Velocity = velocity;
-	output.FrictionCoeff = local.FrictionCoeff;
-	output.BoneIndex = local.BoneIndex;  // Preserve bone index for attachment system
-	output.OriginalIndex = idx;          // Store original index for stable attachment after Z-Order sorting
-	output.Padding1 = 0;
-	output.Padding2 = 0;
+	// Write output particle
+	FGPUBoundaryParticle OutputParticle;
+	OutputParticle.Position = WorldPosition;
+	OutputParticle.Psi = LocalParticle.Psi;
+	OutputParticle.Normal = WorldNormal;
+	OutputParticle.OwnerID = OwnerID;
+	OutputParticle.Velocity = Velocity;
+	OutputParticle.FrictionCoeff = LocalParticle.FrictionCoeff;
+	OutputParticle.BoneIndex = LocalParticle.BoneIndex;  // Preserve bone index for attachment system
+	OutputParticle.OriginalIndex = ParticleIndex;          // Store original index for stable attachment after Z-Order sorting
+	OutputParticle.Padding1 = 0;
+	OutputParticle.Padding2 = 0;
 
-	WorldBoundaryParticles[idx] = output;
+	WorldBoundaryParticles[ParticleIndex] = OutputParticle;
 }

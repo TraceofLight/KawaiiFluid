@@ -262,23 +262,23 @@ float3 BlendNormalsRNM(float3 BaseNormal, float3 DetailNormal, float Strength)
 	float3 ScaledDetail = float3(DetailNormal.xy * Strength, DetailNormal.z);
 
 	// Ensure both normals are normalized
-	float3 n1 = normalize(BaseNormal);
-	float3 n2 = normalize(ScaledDetail);
+	float3 BaseNormalNormalized = normalize(BaseNormal);
+	float3 DetailNormalNormalized = normalize(ScaledDetail);
 
 	// RNM blend formula (correct version)
-	// This reorients n2 from tangent space to the coordinate frame defined by n1
-	float3 t = n1 + float3(0, 0, 1);
-	float3 u = n2 * float3(-1, -1, 1);
+	// This reorients detail normal from tangent space to the coordinate frame defined by base normal
+	float3 BlendTangent = BaseNormalNormalized + float3(0, 0, 1);
+	float3 BlendDetail = DetailNormalNormalized * float3(-1, -1, 1);
 
 	// Avoid division by zero when base normal is (0, 0, -1)
-	float tDotU = dot(t, u);
-	if (abs(t.z) < 0.0001f)
+	float TangentDotDetail = dot(BlendTangent, BlendDetail);
+	if (abs(BlendTangent.z) < 0.0001f)
 	{
 		// Fallback to simple lerp for edge case
-		return normalize(lerp(n1, n2, Strength));
+		return normalize(lerp(BaseNormalNormalized, DetailNormalNormalized, Strength));
 	}
 
-	return normalize(t * tDotU / t.z - u);
+	return normalize(BlendTangent * TangentDotDetail / BlendTangent.z - BlendDetail);
 }
 
 /**

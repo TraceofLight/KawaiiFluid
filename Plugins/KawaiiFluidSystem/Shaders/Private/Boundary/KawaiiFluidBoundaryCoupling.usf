@@ -1,0 +1,504 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file KawaiiFluidBoundaryCoupling.usf
+ * @brief Shader implementation for KawaiiFluidBoundaryCoupling
+ */
+
+// GPU Fluid Physics - Boundary Adhesion Pass
+// Applies adhesion forces between fluid particles and boundary particles
+// Based on Akinci 2012 "Versatile Rigid-Fluid Coupling"
+//
+// Two neighbor search modes:
+// 1. Z-Order Mode: O(K) neighbor search using Morton-sorted BoundaryCellStart/End
+// 2. Legacy Spatial Hash Mode: O(N) with potential hash collisions
+//
+// Z-Order mode provides collision-free neighbor lookup for better performance
+
+#include "/Engine/Public/Platform.ush"
+#include "/Engine/Private/Common.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryParticles.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidMortonUtils.ush"  // For Morton code functions and INVALID_INDEX
+
+//=============================================================================
+// Shader Parameters (SOA - Structure of Arrays)
+//=============================================================================
+
+// Fluid particle SOA buffers
+RWBuffer<float> Positions;              // float3 packed as 3 floats
+RWBuffer<uint2> PackedVelocities;       // B plan: half3 packed as uint2
+float UniformParticleMass;              // B plan: uniform ParticleMass (same for all particles)
+RWBuffer<uint> Flags;                   // uint
+int ParticleCount;
+StructuredBuffer<uint> ParticleCountBuffer;
+
+// Boundary particles
+StructuredBuffer<FGPUBoundaryParticle> BoundaryParticles;
+int BoundaryParticleCount;
+
+// Boundary Spatial Hash (Legacy mode)
+StructuredBuffer<uint> BoundaryCellCounts;
+StructuredBuffer<uint> BoundaryParticleIndices;
+float BoundaryCellSize;
+
+// Z-Order sorted boundary particles (new mode)
+StructuredBuffer<FGPUBoundaryParticle> SortedBoundaryParticles;
+StructuredBuffer<uint> BoundaryCellStart;  // BoundaryCellStart[mortonCode] = first BoundaryParticle index
+StructuredBuffer<uint> BoundaryCellEnd;    // BoundaryCellEnd[mortonCode] = last BoundaryParticle index
+int bUseBoundaryZOrder;                    // 1 = use Z-Order sorted boundary data, 0 = use legacy spatial hash
+
+// Z-Order bounds (must match fluid simulation)
+float3 MortonBoundsMin;
+float CellSize;  // Cell size for Morton code calculation
+int bUseHybridTiledZOrder;  // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton (bounded)
+
+// Parameters
+float AdhesionForceStrength;
+float AdhesionRadius;
+float CohesionStrength;
+float SmoothingRadius;
+float3 Gravity;
+float DeltaTime;
+float RestDensity;
+float Poly6Coeff;
+
+// Boundary Owner AABB for particle-level early-out
+// Skip adhesion calculation for particles far from BoundaryParticle AABB
+float3 BoundaryAABBMin;
+float3 BoundaryAABBMax;
+int bUseBoundaryAABBCulling;
+
+//=============================================================================
+// AABB Distance Function for Particle-Level Early-Out
+// Returns squared distance from position to AABB (0 if inside)
+//=============================================================================
+/**
+ * @brief Computes squared distance to an axis-aligned box
+ */
+float DistanceSquaredToAABB(float3 TestPosition, float3 AabbMin, float3 AabbMax)
+{
+	float3 ClosestPoint = clamp(TestPosition, AabbMin, AabbMax);
+	float3 Difference = TestPosition - ClosestPoint;
+	return dot(Difference, Difference);
+}
+
+//=============================================================================
+// SPH Kernels for Adhesion (Akinci 2013)
+// Note: AdhesionKernel and CohesionKernel are defined in KawaiiFluidParticleCore.ush
+//=============================================================================
+
+//=============================================================================
+// Z-Order Cell ID Calculation (must match FluidSolveDensityPressure.usf)
+// IMPORTANT: Result is truncated to fit CellStart/CellEnd buffer size (MAX_CELLS)
+//=============================================================================
+/**
+ * @brief Computes cell key for adhesion lookup
+ */
+uint GetMortonCellIDFromCellCoord_Adhesion(int3 CellCoord)
+{
+	// Hybrid mode: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
+	if (bUseHybridTiledZOrder)
+	{
+		// ComputeHybridTiledKey returns 21-bit key matching MAX_CELLS
+		// Mask is a no-op but kept for consistency
+		// Hash collisions (8 tile buckets) are filtered by distance check
+		return ComputeHybridTiledKey(CellCoord) & (MAX_CELLS - 1);
+	}
+
+	// Classic mode: Use bounded Morton code
+	// Compute grid minimum cell
+	int3 GridMin = int3(floor(MortonBoundsMin / CellSize));
+
+	// Offset cell coordinates to make them positive (relative to grid min)
+	int3 Offset = CellCoord - GridMin;
+
+	// Clamp to valid range for current preset
+	uint3 UOffset = uint3(max(Offset, int3(0, 0, 0)));
+	UOffset = min(UOffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+
+	// Compute Morton code using preset-specific function from KawaiiFluidMortonUtils.ush
+	return Morton3D(UOffset.x, UOffset.y, UOffset.z);
+}
+
+//=============================================================================
+// Pass 1: Clear Boundary Hash (Legacy mode only)
+//=============================================================================
+
+RWStructuredBuffer<uint> RWBoundaryCellCounts;
+RWStructuredBuffer<uint> RWBoundaryParticleIndices;
+
+/**
+ * @brief Compute shader entry point for ClearBoundaryHashCS
+ */
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void ClearBoundaryHashCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint CellIndex = DispatchThreadId.x;
+	if (CellIndex >= SPATIAL_HASH_SIZE)
+	{
+		return;
+	}
+	RWBoundaryCellCounts[CellIndex] = 0;
+}
+
+//=============================================================================
+// Pass 2: Build Boundary Hash
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for BuildBoundaryHashCS
+ */
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void BuildBoundaryHashCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint BoundaryParticleIndex = DispatchThreadId.x;
+	if (BoundaryParticleIndex >= (uint)BoundaryParticleCount)
+	{
+		return;
+	}
+
+	float3 Position = BoundaryParticles[BoundaryParticleIndex].Position;
+	int3 CellCoord = WorldToCell(Position, BoundaryCellSize);
+	uint CellHash = HashCell(CellCoord);
+
+	uint Slot;
+	InterlockedAdd(RWBoundaryCellCounts[CellHash], 1, Slot);
+
+	if (Slot < MAX_PARTICLES_PER_CELL)
+	{
+		uint BaseOffset = CellHash * MAX_PARTICLES_PER_CELL;
+		RWBoundaryParticleIndices[BaseOffset + Slot] = BoundaryParticleIndex;
+	}
+}
+
+//=============================================================================
+// Pass 3: Boundary Adhesion (Force-based, Akinci 2013)
+// Applies adhesion and cohesion forces from boundary particles to fluid
+//
+// Two modes:
+// 1. Z-Order Mode: O(K) neighbor search using Morton-sorted BoundaryCellStart/End
+// 2. Legacy Spatial Hash Mode: Uses BoundaryCellCounts/BoundaryParticleIndices
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for BoundaryAdhesionCS
+ */
+[numthreads(THREAD_GROUP_SIZE, 1, 1)]
+void BoundaryAdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint ParticleIndex = DispatchThreadId.x;
+	if (ParticleIndex >= ParticleCountBuffer[6])
+	{
+		return;
+	}
+
+	// Read from SOA buffers
+	uint PositionBaseIndex = ParticleIndex * 3;
+	uint ParticleFlags = Flags[ParticleIndex];
+	float ParticleMass = UniformParticleMass;
+
+	// Skip if already attached to primitive (existing adhesion system handles this)
+	if (HasFlag(ParticleFlags, GPU_PARTICLE_FLAG_IS_ATTACHED))
+	{
+		return;
+	}
+
+	// Boundary-attached particles still receive adhesion force
+	// They need adhesion to stay attracted to the boundary surface
+	// The attachment system only handles character movement (bone delta)
+
+	// Use particle position for neighbor search (not PredictedPosition for boundary adhesion)
+	float3 Position = float3(Positions[PositionBaseIndex], Positions[PositionBaseIndex + 1], Positions[PositionBaseIndex + 2]);
+
+	// =========================================================================
+	// PARTICLE-LEVEL EARLY-OUT: Skip if particle is far from boundary AABB
+	// This reduces unnecessary neighbor searches for particles outside boundary region
+	// =========================================================================
+	if (bUseBoundaryAABBCulling)
+	{
+		float DistanceSquaredToAabb = DistanceSquaredToAABB(Position, BoundaryAABBMin, BoundaryAABBMax);
+		// Note: BoundaryAABB is already expanded by AdhesionRadius on CPU side
+		// So we just check if particle is outside the expanded AABB
+		if (DistanceSquaredToAabb > 0.0001f)  // Small epsilon to handle floating point precision
+		{
+			return;  // Particle is outside expanded AABB, no boundary interaction possible
+		}
+	}
+
+	float3 AdhesionForce = float3(0, 0, 0);
+	float3 CohesionForce = float3(0, 0, 0);
+	float3 NormalAccum = float3(0, 0, 0);
+	float NormalWeightSum = 0.0f;
+	float FrictionWeightSum = 0.0f;  // Coulomb friction coefficient weighted sum
+	float InteractionRadius = AdhesionRadius;  // Use AdhesionRadius for tighter adhesion range
+
+	// Position-based follow: accumulate bone delta
+	float3 TotalBoneDelta = float3(0, 0, 0);
+	float TotalDeltaWeight = 0.0f;
+
+	if (bUseBoundaryZOrder)
+	{
+		//=====================================================================
+		// Z-Order Mode: O(K) neighbor search using Morton code
+		// SortedBoundaryParticles are sorted by Morton code
+		//=====================================================================
+		int3 CenterCell = WorldToCell(Position, CellSize);
+		int CellRadius = (int)ceil(AdhesionRadius / CellSize);  // Use AdhesionRadius
+
+		for (int ZOffset = -CellRadius; ZOffset <= CellRadius; ++ZOffset)
+		{
+			for (int YOffset = -CellRadius; YOffset <= CellRadius; ++YOffset)
+			{
+				for (int XOffset = -CellRadius; XOffset <= CellRadius; ++XOffset)
+				{
+					int3 NeighborCell = CenterCell + int3(XOffset, YOffset, ZOffset);
+					uint CellID = GetMortonCellIDFromCellCoord_Adhesion(NeighborCell);
+					uint BoundaryCellStartIndex = BoundaryCellStart[CellID];
+					uint BoundaryCellEndIndex = BoundaryCellEnd[CellID];
+
+					// Skip empty cells
+					if (BoundaryCellStartIndex == INVALID_INDEX || BoundaryCellEndIndex == INVALID_INDEX) continue;
+
+					// Traverse boundary particles in this cell
+					uint MaxBoundaryIndex = min(BoundaryCellEndIndex, (uint)(BoundaryParticleCount - 1));
+					for (uint BoundaryIndex = BoundaryCellStartIndex; BoundaryIndex <= MaxBoundaryIndex; ++BoundaryIndex)
+					{
+						FGPUBoundaryParticle BoundaryParticle = SortedBoundaryParticles[BoundaryIndex];
+						float3 DisplacementVector = Position - BoundaryParticle.Position;
+						float Distance = length(DisplacementVector);
+
+						if (Distance > 0.0001f && Distance < InteractionRadius)
+						{
+							float3 DisplacementDirection = DisplacementVector / Distance;
+
+							// Distance-based strength: exponential decay
+							// Distance=0 → CloseFactor=50.0, very strong at close range
+							// Distance=InteractionRadius → CloseFactor≈18.4, still has significant influence at boundary
+							float CloseFactor = 50.0 * exp(-Distance / InteractionRadius);
+
+							// Adhesion force (Akinci 2013)
+							// F_adhesion = -beta * m_i * psi_b * A(Distance,InteractionRadius) * DisplacementDirection
+							float A = AdhesionKernel(Distance, InteractionRadius);
+							AdhesionForce -= AdhesionForceStrength * ParticleMass * CloseFactor * A * DisplacementDirection;
+
+							// Cohesion force (surface tension at boundary)
+							// F_cohesion = -gamma * m_i * psi_b * C(Distance,InteractionRadius) * DisplacementDirection
+							float C = CohesionKernel(Distance, InteractionRadius);
+							CohesionForce -= CohesionStrength * ParticleMass * CloseFactor * C * DisplacementDirection;
+
+							// Accumulate weighted normal and friction for Coulomb friction
+							float NormalWeight = A * CloseFactor;
+							NormalAccum += BoundaryParticle.Normal * NormalWeight;
+							NormalWeightSum += NormalWeight;
+							FrictionWeightSum += BoundaryParticle.FrictionCoeff * NormalWeight;
+
+							// Accumulate bone delta for position-based follow
+							float3 BoneDelta = BoundaryParticle.Velocity * DeltaTime;
+							float DeltaWeight = 1.0f;  // Full follow within adhesion radius
+							TotalBoneDelta += BoneDelta * DeltaWeight;
+							TotalDeltaWeight += DeltaWeight;
+						}
+					}
+				}
+			}
+		}
+	}
+	else
+	{
+		//=====================================================================
+		// Legacy Spatial Hash Mode: Uses BoundaryCellCounts/BoundaryParticleIndices
+		//=====================================================================
+		int3 CellCoord = WorldToCell(Position, BoundaryCellSize);
+
+		// Search neighboring cells in boundary spatial hash
+		for (int XOffset = -1; XOffset <= 1; ++XOffset)
+		{
+			for (int YOffset = -1; YOffset <= 1; ++YOffset)
+			{
+				for (int ZOffset = -1; ZOffset <= 1; ++ZOffset)
+				{
+					int3 NeighborCell = CellCoord + int3(XOffset, YOffset, ZOffset);
+					uint CellHash = HashCell(NeighborCell);
+					uint CellCount = min(BoundaryCellCounts[CellHash], MAX_PARTICLES_PER_CELL);
+					uint BaseOffset = CellHash * MAX_PARTICLES_PER_CELL;
+
+					for (uint CellSlotIndex = 0; CellSlotIndex < CellCount; ++CellSlotIndex)
+					{
+						uint BoundaryIndex = BoundaryParticleIndices[BaseOffset + CellSlotIndex];
+						if (BoundaryIndex >= (uint)BoundaryParticleCount) continue;
+
+						FGPUBoundaryParticle BoundaryParticle = BoundaryParticles[BoundaryIndex];
+						float3 DisplacementVector = Position - BoundaryParticle.Position;
+						float Distance = length(DisplacementVector);
+
+						if (Distance > 0.0001f && Distance < InteractionRadius)
+						{
+							float3 DisplacementDirection = DisplacementVector / Distance;
+
+							// Distance-based strength: exponential decay
+							// Distance=0 → CloseFactor=50.0, very strong at close range
+							// Distance=InteractionRadius → CloseFactor≈18.4, still has significant influence at boundary
+							float CloseFactor = 50.0 * exp(-Distance / InteractionRadius);
+
+							// Adhesion force (Akinci 2013)
+							// F_adhesion = -beta * m_i * psi_b * A(Distance,InteractionRadius) * DisplacementDirection
+							float A = AdhesionKernel(Distance, InteractionRadius);
+							AdhesionForce -= AdhesionForceStrength * ParticleMass * CloseFactor * A * DisplacementDirection;
+
+							// Cohesion force (surface tension at boundary)
+							// F_cohesion = -gamma * m_i * psi_b * C(Distance,InteractionRadius) * DisplacementDirection
+							float C = CohesionKernel(Distance, InteractionRadius);
+							CohesionForce -= CohesionStrength * ParticleMass * CloseFactor * C * DisplacementDirection;
+
+							// Accumulate weighted normal and friction for Coulomb friction
+							float NormalWeight = A * CloseFactor;
+							NormalAccum += BoundaryParticle.Normal * NormalWeight;
+							NormalWeightSum += NormalWeight;
+							FrictionWeightSum += BoundaryParticle.FrictionCoeff * NormalWeight;
+
+							// Accumulate bone delta for position-based follow
+							float3 BoneDelta = BoundaryParticle.Velocity * DeltaTime;
+							float DeltaWeight = 1.0f;  // Full follow within adhesion radius
+							TotalBoneDelta += BoneDelta * DeltaWeight;
+							TotalDeltaWeight += DeltaWeight;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	//=========================================================================
+	// Position-Based Follow: Move particles with bone movement
+	// Directly adjusts position by bone delta (not force-based)
+	// [DISABLED FOR TESTING] - Test for detachment issues during rotation
+	// =========================================================================
+	// if (TotalDeltaWeight > SMALL_NUMBER)
+	// {
+	// 	float3 avgBoneDelta = TotalBoneDelta / TotalDeltaWeight;
+	// 	particle.Position += avgBoneDelta;
+	// 	particle.PredictedPosition += avgBoneDelta;
+	// }
+
+	// Note: Force normalization removed to allow proper force accumulation
+	// Previously divided by a weight sum which caused weak adhesion with many boundary particles
+	// Now forces accumulate naturally - more neighbors = stronger adhesion
+
+	//=========================================================================
+	// Ceiling Detection: Reduce adhesion when boundary normal points down
+	// (e.g., bottom of capsule, underside of objects)
+	//=========================================================================
+	float CeilingFactor = 1.0f;
+	float3 AverageNormal = float3(0, 0, 1);
+	float AverageFrictionCoeff = 0.6f;
+
+	if (NormalWeightSum > SMALL_NUMBER)
+	{
+		AverageNormal = normalize(NormalAccum / NormalWeightSum);
+		AverageFrictionCoeff = FrictionWeightSum / NormalWeightSum;
+
+		// Surface angle detection: vary adhesion based on surface orientation
+		// z > 0.7: top (floor-like) → 100%
+		// 0.3 < z <= 0.7: upper slope → 70%
+		// -0.3 <= z <= 0.3: side wall → 50%
+		// -0.7 <= z < -0.3: lower slope → 30%
+		// z < -0.7: bottom (ceiling-like) → 10%
+		if (AverageNormal.z < -0.7f)
+		{
+			// Bottom (ceiling): particles should fall
+			CeilingFactor = 0.1f;
+			AverageFrictionCoeff *= 0.1f;
+		}
+		else if (AverageNormal.z < -0.3f)
+		{
+			// Lower slope: particles slide down
+			CeilingFactor = 0.3f;
+			AverageFrictionCoeff *= 0.3f;
+		}
+		else if (AverageNormal.z < 0.3f)
+		{
+			// Side wall: particles slide down
+			CeilingFactor = 0.5f;
+			AverageFrictionCoeff *= 0.5f;
+		}
+		else if (AverageNormal.z < 0.7f)
+		{
+			// Upper slope: particles slide slowly
+			CeilingFactor = 0.7f;
+			AverageFrictionCoeff *= 0.7f;
+		}
+		// else: top (floor-like) → CeilingFactor = 1.0 (default)
+	}
+
+	// Read current Velocity from SOA
+	float3 Velocity = UnpackVelocity(PackedVelocities[ParticleIndex]);
+
+	// Apply forces to Velocity (with ceiling factor applied to adhesion)
+	float3 TotalForce = (AdhesionForce + CohesionForce) * CeilingFactor;
+
+	// Clamp force magnitude to prevent instability
+	float ForceMagnitude = length(TotalForce);
+	float MaxForce = 10000.0f;  // Maximum force magnitude
+	if (ForceMagnitude > MaxForce)
+	{
+		TotalForce = TotalForce * (MaxForce / ForceMagnitude);
+	}
+
+	// Apply as Velocity change (F = ma, dv = F/m * dt)
+	Velocity += TotalForce / ParticleMass * DeltaTime;
+
+	//=========================================================================
+	// Set NEAR_BOUNDARY flag if particle is near boundary (for debug visualization)
+	// This allows debug view to show which particles are interacting with boundary
+	// Note: Uses NEAR_BOUNDARY flag (not IS_ATTACHED) so physics is not skipped
+	//=========================================================================
+	if (NormalWeightSum > SMALL_NUMBER)
+	{
+		ParticleFlags = SetFlag(ParticleFlags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY);
+	}
+	else
+	{
+		ParticleFlags = ClearFlag(ParticleFlags, GPU_PARTICLE_FLAG_NEAR_BOUNDARY);
+	}
+
+	//=========================================================================
+	// Coulomb Friction Model (replaces old gravity cancellation)
+	// Slows down tangential Velocity based on friction coefficient
+	//=========================================================================
+	if (NormalWeightSum > SMALL_NUMBER)
+	{
+		// Decompose Velocity into normal and tangential components
+		float3 CurrentVelocity = Velocity;
+		float VelocityNormalMagnitude = dot(CurrentVelocity, AverageNormal);
+		float3 VelocityNormal = VelocityNormalMagnitude * AverageNormal;
+		float3 VelocityTangential = CurrentVelocity - VelocityNormal;
+		float TangentialSpeed = length(VelocityTangential);
+
+		// Apply Coulomb friction to tangential Velocity
+		if (TangentialSpeed > 0.01f)
+		{
+			// Friction direction: opposite to sliding
+			float3 FrictionDirection = -VelocityTangential / TangentialSpeed;
+
+			// Normal force: independent of adhesion force magnitude
+			// Uses NormalWeightSum (contact strength) instead of ForceMagnitude
+			float NormalForce = NormalWeightSum * 100.0f * CeilingFactor;
+
+			// Coulomb friction: F = μ × N
+			float MaxFrictionForce = AverageFrictionCoeff * NormalForce;
+
+			// Force required to stop (80% safety factor to prevent oscillation)
+			float RequiredForce = TangentialSpeed * ParticleMass / DeltaTime * 0.8f;
+			float FrictionForceMagnitude = min(MaxFrictionForce, RequiredForce);
+
+			// Apply friction as Velocity change
+			float3 FrictionAcceleration = FrictionDirection * FrictionForceMagnitude / ParticleMass;
+			Velocity += FrictionAcceleration * DeltaTime;
+		}
+	}
+
+	// Write back to SOA buffers
+	PackedVelocities[ParticleIndex] = PackVelocity(Velocity);
+	Flags[ParticleIndex] = ParticleFlags;
+}

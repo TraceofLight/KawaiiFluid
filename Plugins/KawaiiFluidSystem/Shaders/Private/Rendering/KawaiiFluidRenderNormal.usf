@@ -68,7 +68,7 @@ void ReconstructNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     float3 PositionCenter = ReconstructViewPositionFromDepth(UV, CenterDepth, InverseProjectionMatrix);
 
     // X-axis derivative (central difference with adaptive fallback)
-    float3 ddx;
+    float3 DerivativeX;
     {
         float3 PositionLeft = PositionCenter;
         float3 PositionRight = PositionCenter;
@@ -95,38 +95,38 @@ void ReconstructNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
             if (DepthDiffLeft > DepthThreshold && DepthDiffRight <= DepthThreshold)
             {
                 // Left is discontinuous, use right (forward difference)
-                ddx = PositionRight - PositionCenter;
+                DerivativeX = PositionRight - PositionCenter;
             }
             else if (DepthDiffRight > DepthThreshold && DepthDiffLeft <= DepthThreshold)
             {
                 // Right is discontinuous, use left (backward difference)
-                ddx = PositionCenter - PositionLeft;
+                DerivativeX = PositionCenter - PositionLeft;
             }
             else
             {
                 // Both valid or both discontinuous - use central difference
-                ddx = (PositionRight - PositionLeft) * 0.5;
+                DerivativeX = (PositionRight - PositionLeft) * 0.5;
             }
         }
         else if (bRightValid)
         {
             // Forward difference (only right valid)
-            ddx = PositionRight - PositionCenter;
+            DerivativeX = PositionRight - PositionCenter;
         }
         else if (bLeftValid)
         {
             // Backward difference (only left valid)
-            ddx = PositionCenter - PositionLeft;
+            DerivativeX = PositionCenter - PositionLeft;
         }
         else
         {
             // Both invalid - default
-            ddx = float3(0, 0, 0);
+            DerivativeX = float3(0, 0, 0);
         }
     }
 
     // Y-axis derivative (central difference with adaptive fallback)
-    float3 ddy;
+    float3 DerivativeY;
     {
         float3 PositionTop = PositionCenter;
         float3 PositionBottom = PositionCenter;
@@ -153,46 +153,46 @@ void ReconstructNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
             if (DepthDiffTop > DepthThreshold && DepthDiffBottom <= DepthThreshold)
             {
                 // Top is discontinuous, use bottom (forward difference)
-                ddy = PositionBottom - PositionCenter;
+                DerivativeY = PositionBottom - PositionCenter;
             }
             else if (DepthDiffBottom > DepthThreshold && DepthDiffTop <= DepthThreshold)
             {
                 // Bottom is discontinuous, use top (backward difference)
-                ddy = PositionCenter - PositionTop;
+                DerivativeY = PositionCenter - PositionTop;
             }
             else
             {
                 // Both valid or both discontinuous - use central difference
-                ddy = (PositionBottom - PositionTop) * 0.5;
+                DerivativeY = (PositionBottom - PositionTop) * 0.5;
             }
         }
         else if (bBottomValid)
         {
             // Forward difference (only bottom valid)
-            ddy = PositionBottom - PositionCenter;
+            DerivativeY = PositionBottom - PositionCenter;
         }
         else if (bTopValid)
         {
             // Backward difference (only top valid)
-            ddy = PositionCenter - PositionTop;
+            DerivativeY = PositionCenter - PositionTop;
         }
         else
         {
             // Both invalid - default
-            ddy = float3(0, 0, 0);
+            DerivativeY = float3(0, 0, 0);
         }
     }
 
     // Normal calculation with NaN protection
-    // When ddx and ddy are parallel or zero, cross product returns zero vector
+    // When DerivativeX and DerivativeY are parallel or zero, cross product returns zero vector
     // normalize(zero) causes division by zero, resulting in NaN
-    float3 CrossProduct = cross(ddx, ddy);
+    float3 CrossProduct = cross(DerivativeX, DerivativeY);
     float CrossLength = length(CrossProduct);
 
     float3 Normal;
     if (CrossLength < 1e-8)
     {
-        // Degenerate case: ddx and ddy are parallel or zero
+        // Degenerate case: DerivativeX and DerivativeY are parallel or zero
         // Use default camera-facing normal (camera at origin, looking down -Z)
         // Surface normal should point toward camera = +Z direction
         Normal = float3(0, 0, 1);

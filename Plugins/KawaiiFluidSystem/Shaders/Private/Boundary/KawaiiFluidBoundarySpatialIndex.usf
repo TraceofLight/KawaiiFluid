@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidBoundaryZOrder.usf
- * @brief Shader implementation for FluidBoundaryZOrder
+ * @file KawaiiFluidBoundarySpatialIndex.usf
+ * @brief Shader implementation for KawaiiFluidBoundarySpatialIndex
  */
 
 // GPU Fluid Physics - Boundary Particle Z-Order Sorting
@@ -37,41 +37,41 @@ RWStructuredBuffer<uint> BoundaryParticleIndices;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeBoundaryMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)BoundaryParticleCount)
+	uint ParticleIndex = DispatchThreadId.x;
+	if (ParticleIndex >= (uint)BoundaryParticleCount)
 	{
 		return;
 	}
 
-	float3 pos = BoundaryParticlesIn[idx].Position;
+	float3 Position = BoundaryParticlesIn[ParticleIndex].Position;
 
 	// Compute cell coordinates
-	int3 cellCoord = int3(floor(pos / CellSize));
+	int3 CellCoord = int3(floor(Position / CellSize));
 
-	uint sortKey;
+	uint SortKey;
 	if (bUseHybridTiledZOrder)
 	{
 		// Hybrid Tiled Z-Order: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
 		// Must match fluid particle key computation in FluidMortonCode.usf
-		sortKey = ComputeHybridTiledKey(cellCoord);
+		SortKey = ComputeHybridTiledKey(CellCoord);
 	}
 	else
 	{
 		// Classic Morton code: bounded range
-		// Compute grid offset relative to bounds minimum
-		int3 gridMin = int3(floor(BoundsMin / CellSize));
-		int3 offset = cellCoord - gridMin;
+		// Compute grid Offset relative to bounds minimum
+		int3 GridMin = int3(floor(BoundsMin / CellSize));
+		int3 Offset = CellCoord - GridMin;
 
 		// Clamp to valid Morton code range
-		uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
-		uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+		uint3 UOffset = uint3(max(Offset, int3(0, 0, 0)));
+		UOffset = min(UOffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
 		// Compute Morton code
-		sortKey = Morton3D(uoffset.x, uoffset.y, uoffset.z);
+		SortKey = Morton3D(UOffset.x, UOffset.y, UOffset.z);
 	}
 
-	BoundaryMortonCodes[idx] = sortKey;
-	BoundaryParticleIndices[idx] = idx;
+	BoundaryMortonCodes[ParticleIndex] = SortKey;
+	BoundaryParticleIndices[ParticleIndex] = ParticleIndex;
 }
 
 //=============================================================================
@@ -88,14 +88,14 @@ RWStructuredBuffer<uint> BoundaryCellEnd;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ClearBoundaryCellIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint cellIdx = DispatchThreadId.x;
-	if (cellIdx >= MAX_CELLS)
+	uint CellIndex = DispatchThreadId.x;
+	if (CellIndex >= MAX_CELLS)
 	{
 		return;
 	}
 
-	BoundaryCellStart[cellIdx] = INVALID_INDEX;
-	BoundaryCellEnd[cellIdx] = INVALID_INDEX;
+	BoundaryCellStart[CellIndex] = INVALID_INDEX;
+	BoundaryCellEnd[CellIndex] = INVALID_INDEX;
 }
 
 //=============================================================================
@@ -113,14 +113,14 @@ RWStructuredBuffer<FGPUBoundaryParticle> SortedBoundaryParticles;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ReorderBoundaryParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)BoundaryParticleCount)
+	uint ParticleIndex = DispatchThreadId.x;
+	if (ParticleIndex >= (uint)BoundaryParticleCount)
 	{
 		return;
 	}
 
-	uint oldIdx = SortedBoundaryIndices[idx];
-	SortedBoundaryParticles[idx] = OldBoundaryParticles[oldIdx];
+	uint OldIndex = SortedBoundaryIndices[ParticleIndex];
+	SortedBoundaryParticles[ParticleIndex] = OldBoundaryParticles[OldIndex];
 }
 
 //=============================================================================
@@ -137,41 +137,40 @@ StructuredBuffer<uint> SortedBoundaryMortonCodes;
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ComputeBoundaryCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint idx = DispatchThreadId.x;
-	if (idx >= (uint)BoundaryParticleCount)
+	uint ParticleIndex = DispatchThreadId.x;
+	if (ParticleIndex >= (uint)BoundaryParticleCount)
 	{
 		return;
 	}
 
-	uint currentMorton = SortedBoundaryMortonCodes[idx];
+	uint CurrentMorton = SortedBoundaryMortonCodes[ParticleIndex];
 
 	// In Hybrid mode, key is 21-bit matching MAX_CELLS (mask is a no-op)
 	// Hash collisions (8 tile buckets) are filtered by distance check
-	uint currentCellID = currentMorton & (MAX_CELLS - 1);
+	uint CurrentCellID = CurrentMorton & (MAX_CELLS - 1);
 
 	// First particle or different from previous - this is a cell start
-	if (idx == 0)
+	if (ParticleIndex == 0)
 	{
-		BoundaryCellStart[currentCellID] = idx;
+		BoundaryCellStart[CurrentCellID] = ParticleIndex;
 	}
 	else
 	{
-		uint prevMorton = SortedBoundaryMortonCodes[idx - 1];
-		uint prevCellID = prevMorton & (MAX_CELLS - 1);
+		uint PreviousMorton = SortedBoundaryMortonCodes[ParticleIndex - 1];
+		uint PreviousCellID = PreviousMorton & (MAX_CELLS - 1);
 
-		if (currentCellID != prevCellID)
+		if (CurrentCellID != PreviousCellID)
 		{
 			// End of previous cell
-			BoundaryCellEnd[prevCellID] = idx - 1;
+			BoundaryCellEnd[PreviousCellID] = ParticleIndex - 1;
 			// Start of current cell
-			BoundaryCellStart[currentCellID] = idx;
+			BoundaryCellStart[CurrentCellID] = ParticleIndex;
 		}
 	}
 
 	// Last particle - this is a cell end
-	if (idx == (uint)(BoundaryParticleCount - 1))
+	if (ParticleIndex == (uint)(BoundaryParticleCount - 1))
 	{
-		BoundaryCellEnd[currentCellID] = idx;
+		BoundaryCellEnd[CurrentCellID] = ParticleIndex;
 	}
 }
-

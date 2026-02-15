@@ -146,19 +146,19 @@ float2 ProjectToScreenUV(float3 ViewPos)
  * Models the angular distribution of scattered light.
  *
  * @param CosTheta Cosine of angle between view and light directions (dot(V, -L))
- * @param g Anisotropy parameter: -1 = backscatter, 0 = isotropic, +1 = forward scatter
+ * @param Anisotropy Anisotropy parameter: -1 = backscatter, 0 = isotropic, +1 = forward scatter
  * @return Phase function value (probability density)
  */
-float HenyeyGreenstein(float CosTheta, float g)
+float HenyeyGreenstein(float CosTheta, float Anisotropy)
 {
-	// Prevent division by zero when g approaches ±1
-	float g2 = g * g;
-	float denom = 1.0 + g2 - 2.0 * g * CosTheta;
+	// Prevent division by zero when anisotropy approaches ±1
+	float AnisotropySquared = Anisotropy * Anisotropy;
+	float Denominator = 1.0 + AnisotropySquared - 2.0 * Anisotropy * CosTheta;
 
 	// Avoid numerical issues
-	denom = max(denom, 0.0001);
+	Denominator = max(Denominator, 0.0001);
 
-	return (1.0 - g2) / (4.0 * PI * pow(denom, 1.5));
+	return (1.0 - AnisotropySquared) / (4.0 * PI * pow(Denominator, 1.5));
 }
 
 /**
@@ -166,14 +166,14 @@ float HenyeyGreenstein(float CosTheta, float g)
  * Use when performance is critical.
  *
  * @param CosTheta Cosine of angle between view and light directions
- * @param g Anisotropy parameter
+ * @param Anisotropy Anisotropy parameter
  * @return Phase function value
  */
-float SchlickPhase(float CosTheta, float g)
+float SchlickPhase(float CosTheta, float Anisotropy)
 {
-	float k = 1.55 * g - 0.55 * g * g * g;
-	float tmp = 1.0 + k * CosTheta;
-	return (1.0 - k * k) / (4.0 * PI * tmp * tmp + 0.0001);
+	float K = 1.55 * Anisotropy - 0.55 * Anisotropy * Anisotropy * Anisotropy;
+	float Tmp = 1.0 + K * CosTheta;
+	return (1.0 - K * K) / (4.0 * PI * Tmp * Tmp + 0.0001);
 }
 
 // -----------------------------------------------------------------------------
@@ -190,12 +190,12 @@ float SchlickPhase(float CosTheta, float g)
  */
 float D_GGX(float NoH, float Roughness)
 {
-	float a = Roughness * Roughness;
-	float a2 = a * a;
+	float Alpha = Roughness * Roughness;
+	float AlphaSquared = Alpha * Alpha;
 	float NoH2 = NoH * NoH;
 
-	float denom = NoH2 * (a2 - 1.0) + 1.0;
-	return a2 / (PI * denom * denom + 0.0001);
+	float Denominator = NoH2 * (AlphaSquared - 1.0) + 1.0;
+	return AlphaSquared / (PI * Denominator * Denominator + 0.0001);
 }
 
 /**
@@ -208,10 +208,10 @@ float D_GGX(float NoH, float Roughness)
  */
 float G_SchlickGGX(float NoX, float Roughness)
 {
-	float r = Roughness + 1.0;
-	float k = (r * r) / 8.0;  // Direct lighting remapping
+	float RoughnessRemapped = Roughness + 1.0;
+	float K = (RoughnessRemapped * RoughnessRemapped) / 8.0;  // Direct lighting remapping
 
-	return NoX / (NoX * (1.0 - k) + k + 0.0001);
+	return NoX / (NoX * (1.0 - K) + K + 0.0001);
 }
 
 /**
@@ -270,10 +270,10 @@ float3 CookTorranceBRDF(float NoV, float NoL, float NoH, float HoV, float Roughn
 
 	// Cook-Torrance specular BRDF
 	// f_spec = DGF / (4 * NoV * NoL)
-	float3 numerator = D * G * OutFresnel;
-	float denominator = 4.0 * NoV * NoL + 0.0001;
+	float3 Numerator = D * G * OutFresnel;
+	float Denominator = 4.0 * NoV * NoL + 0.0001;
 
-	return numerator / denominator;
+	return Numerator / Denominator;
 }
 
 // -----------------------------------------------------------------------------
@@ -286,10 +286,10 @@ float3 CookTorranceBRDF(float NoV, float NoL, float NoH, float HoV, float Roughn
 float2 CalculateRefractedFloorHit(float3 SurfacePos, float3 Normal, float3 ViewDir, float FloorZ, float IOR)
 {
 	// Snell's law: n1 * sin(theta1) = n2 * sin(theta2)
-	float eta = 1.0 / IOR;
+	float Eta = 1.0 / IOR;
 
 	float CosThetaI = dot(Normal, ViewDir);
-	float Sin2ThetaT = eta * eta * (1.0 - CosThetaI * CosThetaI);
+	float Sin2ThetaT = Eta * Eta * (1.0 - CosThetaI * CosThetaI);
 
 	// Total internal reflection check
 	if (Sin2ThetaT > 1.0)
@@ -298,7 +298,7 @@ float2 CalculateRefractedFloorHit(float3 SurfacePos, float3 Normal, float3 ViewD
 	}
 
 	float CosThetaT = sqrt(1.0 - Sin2ThetaT);
-	float3 RefractDir = eta * (-ViewDir) + (eta * CosThetaI - CosThetaT) * Normal;
+	float3 RefractDir = Eta * (-ViewDir) + (Eta * CosThetaI - CosThetaT) * Normal;
 	RefractDir = normalize(RefractDir);
 
 	if (abs(RefractDir.z) < 0.001)
@@ -306,13 +306,13 @@ float2 CalculateRefractedFloorHit(float3 SurfacePos, float3 Normal, float3 ViewD
 		return SurfacePos.xy;
 	}
 
-	float t = (FloorZ - SurfacePos.z) / RefractDir.z;
-	if (t < 0.0)
+	float TravelDistance = (FloorZ - SurfacePos.z) / RefractDir.z;
+	if (TravelDistance < 0.0)
 	{
 		return SurfacePos.xy;
 	}
 
-	float3 HitPos = SurfacePos + t * RefractDir;
+	float3 HitPos = SurfacePos + TravelDistance * RefractDir;
 	return HitPos.xy;
 }
 
@@ -403,26 +403,26 @@ float CalculateCausticJacobian(
 	}
 
 	// Cardinal Jacobian
-	float2 dHit_du_cardinal = (Hits[0] - Hits[4]) / (2.0 * Offset.x);
-	float2 dHit_dv_cardinal = (Hits[2] - Hits[6]) / (2.0 * Offset.y);
-	float J_cardinal = abs(dHit_du_cardinal.x * dHit_dv_cardinal.y - dHit_du_cardinal.y * dHit_dv_cardinal.x);
+	float2 DHitDuCardinal = (Hits[0] - Hits[4]) / (2.0 * Offset.x);
+	float2 DHitDvCardinal = (Hits[2] - Hits[6]) / (2.0 * Offset.y);
+	float JCardinal = abs(DHitDuCardinal.x * DHitDvCardinal.y - DHitDuCardinal.y * DHitDvCardinal.x);
 
-	float2 dOrig_du_cardinal = (OrigPos[0] - OrigPos[4]) / (2.0 * Offset.x);
-	float2 dOrig_dv_cardinal = (OrigPos[2] - OrigPos[6]) / (2.0 * Offset.y);
-	float OrigJ_cardinal = abs(dOrig_du_cardinal.x * dOrig_dv_cardinal.y - dOrig_du_cardinal.y * dOrig_dv_cardinal.x);
+	float2 DOrigDuCardinal = (OrigPos[0] - OrigPos[4]) / (2.0 * Offset.x);
+	float2 DOrigDvCardinal = (OrigPos[2] - OrigPos[6]) / (2.0 * Offset.y);
+	float OrigJCardinal = abs(DOrigDuCardinal.x * DOrigDvCardinal.y - DOrigDuCardinal.y * DOrigDvCardinal.x);
 
 	// Diagonal Jacobian
 	float DiagScale = 1.414;
-	float2 dHit_du_diag = (Hits[1] - Hits[5]) / (2.0 * Offset.x * DiagScale);
-	float2 dHit_dv_diag = (Hits[3] - Hits[7]) / (2.0 * Offset.y * DiagScale);
-	float J_diag = abs(dHit_du_diag.x * dHit_dv_diag.y - dHit_du_diag.y * dHit_dv_diag.x);
+	float2 DHitDuDiag = (Hits[1] - Hits[5]) / (2.0 * Offset.x * DiagScale);
+	float2 DHitDvDiag = (Hits[3] - Hits[7]) / (2.0 * Offset.y * DiagScale);
+	float JDiag = abs(DHitDuDiag.x * DHitDvDiag.y - DHitDuDiag.y * DHitDvDiag.x);
 
-	float2 dOrig_du_diag = (OrigPos[1] - OrigPos[5]) / (2.0 * Offset.x * DiagScale);
-	float2 dOrig_dv_diag = (OrigPos[3] - OrigPos[7]) / (2.0 * Offset.y * DiagScale);
-	float OrigJ_diag = abs(dOrig_du_diag.x * dOrig_dv_diag.y - dOrig_du_diag.y * dOrig_dv_diag.x);
+	float2 DOrigDuDiag = (OrigPos[1] - OrigPos[5]) / (2.0 * Offset.x * DiagScale);
+	float2 DOrigDvDiag = (OrigPos[3] - OrigPos[7]) / (2.0 * Offset.y * DiagScale);
+	float OrigJDiag = abs(DOrigDuDiag.x * DOrigDvDiag.y - DOrigDuDiag.y * DOrigDvDiag.x);
 
-	float J = (J_cardinal + J_diag) * 0.5;
-	float OrigJ = (OrigJ_cardinal + OrigJ_diag) * 0.5;
+	float J = (JCardinal + JDiag) * 0.5;
+	float OrigJ = (OrigJCardinal + OrigJDiag) * 0.5;
 
 	float AreaRatio = OrigJ / max(J, 0.0001);
 	AreaRatio = clamp(AreaRatio, 0.2, 5.0);
@@ -469,8 +469,8 @@ float TraceSSR(float3 RayOrigin, float3 RayDir, out float2 OutHitUV, out float3 
 	// Clamp end point to not go behind camera
 	if (RayEnd.z > -0.1)
 	{
-		float t = (-0.1 - RayOrigin.z) / (RayEnd.z - RayOrigin.z);
-		RayEnd = RayOrigin + (RayEnd - RayOrigin) * max(t, 0.01);
+		float ClampT = (-0.1 - RayOrigin.z) / (RayEnd.z - RayOrigin.z);
+		RayEnd = RayOrigin + (RayEnd - RayOrigin) * max(ClampT, 0.01);
 	}
 
 	// Project start and end to clip space
@@ -510,10 +510,10 @@ float TraceSSR(float3 RayOrigin, float3 RayDir, out float2 OutHitUV, out float3 
 
 	for (int i = 1; i <= StepCount; i++)
 	{
-		float t = float(i) * InvStepCount;
+		float StepT = float(i) * InvStepCount;
 
 		// Correct perspective interpolation: lerp in clip space, then perspective divide
-		float4 ClipPos = lerp(StartClip, EndClip, t);
+		float4 ClipPos = lerp(StartClip, EndClip, StepT);
 		float2 UV = float2(
 			ClipPos.x / ClipPos.w * 0.5 + 0.5,
 			-ClipPos.y / ClipPos.w * 0.5 + 0.5
@@ -525,7 +525,7 @@ float TraceSSR(float3 RayOrigin, float3 RayDir, out float2 OutHitUV, out float3 
 		}
 
 		// Depth: linear interpolation in view space (RayOrigin.z to RayEnd.z)
-		float RayDepth = lerp(StartDepth, EndDepth, t);
+		float RayDepth = lerp(StartDepth, EndDepth, StepT);
 
 		float2 SampleUV = UV * SceneUVScale;
 		float SceneDeviceZ = SceneDepthTexture.SampleLevel(PointClampSampler, SampleUV, 0).r;
@@ -549,21 +549,21 @@ float TraceSSR(float3 RayOrigin, float3 RayDir, out float2 OutHitUV, out float3 
 			if (Penetration < MaxThickness)
 			{
 				// Binary search refinement
-				float tLo = float(i - 1) * InvStepCount;
-				float tHi = t;
+				float TLo = float(i - 1) * InvStepCount;
+				float THi = StepT;
 				float2 HitUV = UV;
 
 				for (int j = 0; j < 8; j++)
 				{
-					float tMid = (tLo + tHi) * 0.5;
+					float TMid = (TLo + THi) * 0.5;
 
 					// Clip space interpolation (same as main loop)
-					float4 MidClip = lerp(StartClip, EndClip, tMid);
+					float4 MidClip = lerp(StartClip, EndClip, TMid);
 					float2 MidUV = float2(
 						MidClip.x / MidClip.w * 0.5 + 0.5,
 						-MidClip.y / MidClip.w * 0.5 + 0.5
 					);
-					float MidRayDepth = lerp(StartDepth, EndDepth, tMid);
+					float MidRayDepth = lerp(StartDepth, EndDepth, TMid);
 
 					float2 MidSampleUV = MidUV * SceneUVScale;
 					float MidSceneDepth = ConvertFromDeviceZ(
@@ -572,12 +572,12 @@ float TraceSSR(float3 RayOrigin, float3 RayDir, out float2 OutHitUV, out float3 
 
 					if (MidRayDepth > MidSceneDepth)
 					{
-						tHi = tMid;
+						THi = TMid;
 						HitUV = MidUV;
 					}
 					else
 					{
-						tLo = tMid;
+						TLo = TMid;
 					}
 				}
 
@@ -586,7 +586,7 @@ float TraceSSR(float3 RayOrigin, float3 RayDir, out float2 OutHitUV, out float3 
 
 				float2 ScreenEdgeDist = min(HitUV, 1.0 - HitUV);
 				float EdgeFade = saturate(min(ScreenEdgeDist.x, ScreenEdgeDist.y) / max(ScreenSpaceReflectionEdgeFade, 0.01));
-				float DistFade = 1.0 - smoothstep(0.5, 1.0, t);
+				float DistFade = 1.0 - smoothstep(0.5, 1.0, StepT);
 				float AngleFade = saturate(-RayDir.z * 2.5);
 
 				return EdgeFade * DistFade * AngleFade;
@@ -773,8 +773,8 @@ void CalculatePBRLighting(FFluidSurfaceData Surface, out FLightingResult OutLigh
 		OutLighting.Specular += SpecularBRDF * LightColor * NoL * SpecularStrength;
 
 		// Energy-conserving diffuse
-		float3 kD = 1.0 - SpecularFresnel;
-		OutLighting.Diffuse += kD * NoL * LightColor;
+		float3 DiffuseWeight = 1.0 - SpecularFresnel;
+		OutLighting.Diffuse += DiffuseWeight * NoL * LightColor;
 	}
 
 	// Apply lighting scale
@@ -901,10 +901,10 @@ void CalculateRefraction(
 	{
 		// Intersect refracted ray with a plane at the sampled background depth.
 		float TargetViewZ = -SceneLinearDepth;
-		float t = (TargetViewZ - Surface.ViewPos.z) / RefractDir.z;
-		t = max(t, 0.0);
+		float TravelDistance = (TargetViewZ - Surface.ViewPos.z) / RefractDir.z;
+		TravelDistance = max(TravelDistance, 0.0);
 
-		float3 RefractedHitPos = Surface.ViewPos + RefractDir * t;
+		float3 RefractedHitPos = Surface.ViewPos + RefractDir * TravelDistance;
 		float2 RefractedUVPhysical = ProjectToScreenUV(RefractedHitPos);
 		RefractOffset = (RefractedUVPhysical - UV) * RefractionStrength * Transmission;
 	}
@@ -1001,10 +1001,10 @@ void CalculateRefraction(
 			float2 NeighborSceneUV = NeighborUV * SceneUVScale;
 			float NeighborSceneDepth = ConvertFromDeviceZ(SceneDepthTexture.SampleLevel(PointClampSampler, NeighborSceneUV, 0).r);
 			float NeighborTargetViewZ = -NeighborSceneDepth;
-			float tNeighbor = (NeighborTargetViewZ - NeighborFluidViewPos.z) / NeighborRefractDir.z;
-			tNeighbor = max(tNeighbor, 0.0);
+			float NeighborTravelDistance = (NeighborTargetViewZ - NeighborFluidViewPos.z) / NeighborRefractDir.z;
+			NeighborTravelDistance = max(NeighborTravelDistance, 0.0);
 
-			float3 NeighborHitPos = NeighborFluidViewPos + NeighborRefractDir * tNeighbor;
+			float3 NeighborHitPos = NeighborFluidViewPos + NeighborRefractDir * NeighborTravelDistance;
 			float2 NeighborRefractedUVPhysical = ProjectToScreenUV(NeighborHitPos);
 			NeighborRefractOffset = (NeighborRefractedUVPhysical - NeighborUV) * RefractionStrength * NeighborTransmission;
 		}

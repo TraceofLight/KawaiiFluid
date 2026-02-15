@@ -701,15 +701,15 @@ IMPLEMENT_GLOBAL_SHADER(FStackPressureCS,
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FClearBoundaryHashCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundaryCoupling.usf",
 	"ClearBoundaryHashCS", SF_Compute);
 
 IMPLEMENT_GLOBAL_SHADER(FBuildBoundaryHashCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundaryCoupling.usf",
 	"BuildBoundaryHashCS", SF_Compute);
 
 IMPLEMENT_GLOBAL_SHADER(FBoundaryAdhesionCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryAdhesion.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundaryCoupling.usf",
 	"BoundaryAdhesionCS", SF_Compute);
 
 //=============================================================================
@@ -718,7 +718,7 @@ IMPLEMENT_GLOBAL_SHADER(FBoundaryAdhesionCS,
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FBoundarySkinningCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundarySkinning.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundaryTransform.usf",
 	"BoundarySkinningCS", SF_Compute);
 
 //=============================================================================
@@ -1041,7 +1041,7 @@ void FComputeCellStartEndCS::ModifyCompilationEnvironment(
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FComputeBoundaryMortonCodesCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundarySpatialIndex.usf",
 	"ComputeBoundaryMortonCodesCS", SF_Compute);
 
 /**
@@ -1079,7 +1079,7 @@ void FComputeBoundaryMortonCodesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FClearBoundaryCellIndicesCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundarySpatialIndex.usf",
 	"ClearBoundaryCellIndicesCS", SF_Compute);
 
 /**
@@ -1115,7 +1115,7 @@ void FClearBoundaryCellIndicesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FReorderBoundaryParticlesCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundarySpatialIndex.usf",
 	"ReorderBoundaryParticlesCS", SF_Compute);
 
 /**
@@ -1142,7 +1142,7 @@ void FReorderBoundaryParticlesCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FComputeBoundaryCellStartEndCS,
-	"/Plugin/KawaiiFluidSystem/Private/Boundary/FluidBoundaryZOrder.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Boundary/KawaiiFluidBoundarySpatialIndex.usf",
 	"ComputeBoundaryCellStartEndCS", SF_Compute);
 
 /**
@@ -1556,4 +1556,6 @@ bool FCopyCountToSpawnCounterCS::ShouldCompilePermutation(const FGlobalShaderPer
 {
 	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
 }
+
+
 

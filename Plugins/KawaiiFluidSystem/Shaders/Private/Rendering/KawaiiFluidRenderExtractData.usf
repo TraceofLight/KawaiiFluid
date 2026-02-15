@@ -56,36 +56,36 @@ groupshared float3 SharedMax[BOUNDS_THREAD_GROUP_SIZE];
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ExtractRenderDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint idx = DispatchThreadId.x;
+	uint ParticleIndex = DispatchThreadId.x;
 	uint ParticleCount = ParticleCountBuffer[6];
-	if (idx >= ParticleCount)
+	if (ParticleIndex >= ParticleCount)
 	{
 		return;
 	}
 
-	FGPUFluidParticle physics = PhysicsParticles[idx];
+	FGPUFluidParticle PhysicsParticle = PhysicsParticles[ParticleIndex];
 
 	// Validate position - skip particles with invalid/extreme positions
-	float3 pos = physics.Position;
-	bool bValidPosition = !any(isnan(pos)) && !any(isinf(pos)) &&
-						  abs(pos.x) < 1e10 && abs(pos.y) < 1e10 && abs(pos.z) < 1e10;
+	float3 Position = PhysicsParticle.Position;
+	bool bValidPosition = !any(isnan(Position)) && !any(isinf(Position)) &&
+						  abs(Position.x) < 1e10 && abs(Position.y) < 1e10 && abs(Position.z) < 1e10;
 
-	FRenderParticle render;
+	FRenderParticle RenderParticle;
 	if (bValidPosition)
 	{
-		render.Position = pos;
-		render.Velocity = physics.Velocity;
+		RenderParticle.Position = Position;
+		RenderParticle.Velocity = PhysicsParticle.Velocity;
 	}
 	else
 	{
 		// Invalid particle - place at infinity so it won't be rendered
-		render.Position = float3(1e20, 1e20, 1e20);
-		render.Velocity = float3(0, 0, 0);
+		RenderParticle.Position = float3(1e20, 1e20, 1e20);
+		RenderParticle.Velocity = float3(0, 0, 0);
 	}
-	render.Radius = ParticleRadius;
-	render.Padding = 0.0f;
+	RenderParticle.Radius = ParticleRadius;
+	RenderParticle.Padding = 0.0f;
 
-	RenderParticles[idx] = render;
+	RenderParticles[ParticleIndex] = RenderParticle;
 }
 
 //=============================================================================
@@ -99,32 +99,32 @@ void ExtractRenderDataCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 [numthreads(THREAD_GROUP_SIZE, 1, 1)]
 void ExtractRenderDataSoACS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-	uint idx = DispatchThreadId.x;
+	uint ParticleIndex = DispatchThreadId.x;
 	uint ParticleCount = ParticleCountBuffer[6];
-	if (idx >= ParticleCount)
+	if (ParticleIndex >= ParticleCount)
 	{
 		return;
 	}
 
-	FGPUFluidParticle physics = PhysicsParticles[idx];
+	FGPUFluidParticle PhysicsParticle = PhysicsParticles[ParticleIndex];
 
 	// Validate position - skip particles with invalid/extreme positions
-	float3 pos = physics.Position;
-	float3 vel = physics.Velocity;
+	float3 Position = PhysicsParticle.Position;
+	float3 Velocity = PhysicsParticle.Velocity;
 
-	bool bValidPosition = !any(isnan(pos)) && !any(isinf(pos)) &&
-						  abs(pos.x) < 1e10 && abs(pos.y) < 1e10 && abs(pos.z) < 1e10;
+	bool bValidPosition = !any(isnan(Position)) && !any(isinf(Position)) &&
+						  abs(Position.x) < 1e10 && abs(Position.y) < 1e10 && abs(Position.z) < 1e10;
 
 	if (!bValidPosition)
 	{
 		// Invalid particle - place at infinity so it won't be rendered
-		pos = float3(1e20, 1e20, 1e20);
-		vel = float3(0, 0, 0);
+		Position = float3(1e20, 1e20, 1e20);
+		Velocity = float3(0, 0, 0);
 	}
 
 	// SoA output - Store each attribute in separate buffer
-	RenderPositions[idx] = pos;
-	RenderVelocities[idx] = vel;
+	RenderPositions[ParticleIndex] = Position;
+	RenderVelocities[ParticleIndex] = Velocity;
 }
 
 //=============================================================================
@@ -142,8 +142,8 @@ void ExtractRenderDataWithBoundsCS(uint3 GroupId : SV_GroupID, uint3 DTid : SV_D
 	uint ParticleCount = ParticleCountBuffer[6];
 
 	// Initialize bounds with extreme values
-	float3 localMin = float3(1e10, 1e10, 1e10);
-	float3 localMax = float3(-1e10, -1e10, -1e10);
+	float3 LocalMin = float3(1e10, 1e10, 1e10);
+	float3 LocalMax = float3(-1e10, -1e10, -1e10);
 
 	// Handle empty particle case
 	if (ParticleCount == 0)
@@ -159,55 +159,55 @@ void ExtractRenderDataWithBoundsCS(uint3 GroupId : SV_GroupID, uint3 DTid : SV_D
 	// Grid-stride loop: each thread processes particles at indices GI, GI+256, GI+512, ...
 	const float MAX_VALID_COORD = 100000.0f;
 
-	for (uint i = GI; i < ParticleCount; i += BOUNDS_THREAD_GROUP_SIZE)
+	for (uint ParticleIndex = GI; ParticleIndex < ParticleCount; ParticleIndex += BOUNDS_THREAD_GROUP_SIZE)
 	{
-		FGPUFluidParticle physics = PhysicsParticles[i];
-		float3 pos = physics.Position;
+		FGPUFluidParticle PhysicsParticle = PhysicsParticles[ParticleIndex];
+		float3 Position = PhysicsParticle.Position;
 
 		// Validate position
-		bool bValidPosition = !any(isnan(pos)) && !any(isinf(pos)) &&
-							  abs(pos.x) < MAX_VALID_COORD &&
-							  abs(pos.y) < MAX_VALID_COORD &&
-							  abs(pos.z) < MAX_VALID_COORD;
+		bool bValidPosition = !any(isnan(Position)) && !any(isinf(Position)) &&
+							  abs(Position.x) < MAX_VALID_COORD &&
+							  abs(Position.y) < MAX_VALID_COORD &&
+							  abs(Position.z) < MAX_VALID_COORD;
 
 		// Create render particle
-		FRenderParticle render;
+		FRenderParticle RenderParticle;
 		if (bValidPosition)
 		{
-			render.Position = pos;
-			render.Velocity = physics.Velocity;
+			RenderParticle.Position = Position;
+			RenderParticle.Velocity = PhysicsParticle.Velocity;
 
 			// Update local bounds
-			localMin = min(localMin, pos);
-			localMax = max(localMax, pos);
+			LocalMin = min(LocalMin, Position);
+			LocalMax = max(LocalMax, Position);
 		}
 		else
 		{
 			// Invalid particle - place at infinity so it won't be rendered
-			render.Position = float3(1e20, 1e20, 1e20);
-			render.Velocity = float3(0, 0, 0);
+			RenderParticle.Position = float3(1e20, 1e20, 1e20);
+			RenderParticle.Velocity = float3(0, 0, 0);
 		}
-		render.Radius = ParticleRadius;
-		render.Padding = 0.0f;
+		RenderParticle.Radius = ParticleRadius;
+		RenderParticle.Padding = 0.0f;
 
 		// Write render particle
-		RenderParticles[i] = render;
+		RenderParticles[ParticleIndex] = RenderParticle;
 	}
 
 	// Store local bounds in shared memory
-	SharedMin[GI] = localMin;
-	SharedMax[GI] = localMax;
+	SharedMin[GI] = LocalMin;
+	SharedMax[GI] = LocalMax;
 
 	GroupMemoryBarrierWithGroupSync();
 
 	// Parallel reduction within work group (log2(256) = 8 iterations)
 	[unroll]
-	for (uint s = BOUNDS_THREAD_GROUP_SIZE / 2; s > 0; s >>= 1)
+	for (uint Stride = BOUNDS_THREAD_GROUP_SIZE / 2; Stride > 0; Stride >>= 1)
 	{
-		if (GI < s)
+		if (GI < Stride)
 		{
-			SharedMin[GI] = min(SharedMin[GI], SharedMin[GI + s]);
-			SharedMax[GI] = max(SharedMax[GI], SharedMax[GI + s]);
+			SharedMin[GI] = min(SharedMin[GI], SharedMin[GI + Stride]);
+			SharedMax[GI] = max(SharedMax[GI], SharedMax[GI + Stride]);
 		}
 		GroupMemoryBarrierWithGroupSync();
 	}
@@ -215,17 +215,17 @@ void ExtractRenderDataWithBoundsCS(uint3 GroupId : SV_GroupID, uint3 DTid : SV_D
 	// Thread 0 writes final result with margin expansion
 	if (GI == 0)
 	{
-		float3 finalMin = SharedMin[0];
-		float3 finalMax = SharedMax[0];
+		float3 FinalMin = SharedMin[0];
+		float3 FinalMax = SharedMax[0];
 
 		// Check if we found any valid particles
-		bool hasValidBounds = (finalMin.x < 1e9) && (finalMax.x > -1e9);
+		bool bHasValidBounds = (FinalMin.x < 1e9) && (FinalMax.x > -1e9);
 
-		if (hasValidBounds)
+		if (bHasValidBounds)
 		{
-			float expansion = ParticleRadius + BoundsMargin;
-			OutputBounds[0] = finalMin - float3(expansion, expansion, expansion);
-			OutputBounds[1] = finalMax + float3(expansion, expansion, expansion);
+			float Expansion = ParticleRadius + BoundsMargin;
+			OutputBounds[0] = FinalMin - float3(Expansion, Expansion, Expansion);
+			OutputBounds[1] = FinalMax + float3(Expansion, Expansion, Expansion);
 		}
 		else
 		{
