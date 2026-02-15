@@ -1,0 +1,985 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+
+/**
+ * @file KawaiiFluidRenderSmoothing.usf
+ * @brief Shader implementation for KawaiiFluidRenderSmoothing
+ */
+
+#include "/Engine/Private/Common.ush"
+
+// IO Resources
+Texture2D<float> InputTexture;
+RWTexture2D<float> OutputTexture;
+
+// Blur Params
+float2 TextureSize;
+float BlurRadius;
+float BlurDepthFalloff;
+float ParticleRadius;  // For Narrow-Range Filter threshold calculation
+
+// Background depth threshold (set to match Depth Pass clear value)
+#define BACKGROUND_DEPTH_THRESH 3.0e30f
+
+// Additional parameters for Downsample/Upsample
+Texture2D<float> FullResTexture;
+float2 FullResTextureSize;
+float2 HalfResTextureSize;
+
+// Narrow-Range Filter parameters (set in editor)
+float NarrowRangeThresholdRatio;  // threshold = ParticleRadius * ThresholdRatio
+float NarrowRangeClampRatio;      // clamp = ParticleRadius * ClampRatio
+float NarrowRangeGrazingBoost;    // Grazing angle boost (0 = none, 1 = 2x at grazing)
+
+// Distance-based dynamic smoothing parameters
+float SmoothingWorldScale;        // Blur radius as multiple of particle screen size
+float SmoothingMinRadius;         // Minimum blur radius in pixels
+float SmoothingMaxRadius;         // Maximum blur radius in pixels
+float FocalLengthPixels;          // Focal length in pixels for projection
+
+/**
+ * @brief Gaussian weight calculation function
+ */
+float GetGaussianWeight(float Distance, float Sigma)
+{
+	// Prevent division by zero
+	if (Sigma <= 0.0001)
+	{
+		return 0.0f;
+	}
+
+	float Exponent = -(Distance * Distance) / (2.0 * Sigma * Sigma);
+	return exp(Exponent);
+}
+
+//=============================================================================
+// Narrow-Range Filter (Truong & Yuksel, i3D 2018)
+// "A Narrow-Range Filter for Screen-Space Fluid Rendering"
+//
+// Key idea: Instead of continuous Gaussian range weighting (bilateral),
+// use hard threshold with dynamic range expansion for better edge preservation
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void NarrowRangeFilterCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Bounds check
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+	float CenterDepth = InputTexture.Load(int3(CenterCoord, 0));
+
+	// Background: pass through
+	if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[CenterCoord] = CenterDepth;
+		return;
+	}
+
+	// Sample neighbors to compute depth gradient for grazing angle detection
+	float DepthLeft = InputTexture.Load(int3(clamp(CenterCoord + int2(-1, 0), int2(0,0), int2(TextureSize)-1), 0));
+	float DepthRight = InputTexture.Load(int3(clamp(CenterCoord + int2( 1, 0), int2(0,0), int2(TextureSize)-1), 0));
+	float DepthTop = InputTexture.Load(int3(clamp(CenterCoord + int2( 0,-1), int2(0,0), int2(TextureSize)-1), 0));
+	float DepthBottom = InputTexture.Load(int3(clamp(CenterCoord + int2( 0, 1), int2(0,0), int2(TextureSize)-1), 0));
+
+	// Replace background with center depth for gradient calculation
+	DepthLeft = (DepthLeft > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthLeft;
+	DepthRight = (DepthRight > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthRight;
+	DepthTop = (DepthTop > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthTop;
+	DepthBottom = (DepthBottom > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthBottom;
+
+	// Compute depth gradient magnitude
+	float GradientX = (DepthRight - DepthLeft) * 0.5f;
+	float GradientY = (DepthBottom - DepthTop) * 0.5f;
+	float GradMag = sqrt(GradientX * GradientX + GradientY * GradientY);
+
+	// Grazing factor: large gradient = grazing angle
+	float GrazingFactor = saturate(GradMag / (ParticleRadius * 2.0f));
+
+	// Narrow-Range Filter parameters with grazing-aware threshold
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 3.0f;
+	const float BaseThreshold = ParticleRadius * NarrowRangeThresholdRatio;
+	const float Threshold = BaseThreshold * (1.0f + NarrowRangeGrazingBoost * GrazingFactor);
+	const float ClampThreshold = ParticleRadius * NarrowRangeClampRatio * (1.0f + NarrowRangeGrazingBoost * GrazingFactor);
+
+	// Dynamic range bounds - start from center depth
+	float Upper = CenterDepth + Threshold;
+	float Lower = CenterDepth - Threshold;
+
+	float TotalWeight = 0.0f;
+	float TotalWeightedDepth = 0.0f;
+
+	// 2D kernel iteration
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
+	{
+		for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+		{
+			int2 SampleCoord = CenterCoord + int2(OffsetX, OffsetY);
+			SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
+
+			float SampleDepth = InputTexture.Load(int3(SampleCoord, 0));
+
+			// Skip background
+			if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			{
+				continue;
+			}
+
+			// Spatial Gaussian weight
+			float SpatialDist = length(float2(OffsetX, OffsetY));
+			float SpatialWeight = GetGaussianWeight(SpatialDist, Sigma);
+
+			// Narrow-Range logic: hard threshold with dynamic expansion
+			if (SampleDepth > Upper)
+			{
+				// Too far (behind): exclude completely
+				continue;
+			}
+			else if (SampleDepth < Lower)
+			{
+				// Too close (in front): clamp to lower bound
+				// This prevents holes but allows surface to extend forward
+				SampleDepth = max(SampleDepth, CenterDepth - ClampThreshold);
+			}
+			else
+			{
+				// Within range: dynamically expand bounds
+				Upper = max(Upper, SampleDepth + Threshold);
+				Lower = min(Lower, SampleDepth - Threshold);
+			}
+
+			TotalWeightedDepth += SampleDepth * SpatialWeight;
+			TotalWeight += SpatialWeight;
+		}
+	}
+
+	float FinalDepth = CenterDepth;
+	if (TotalWeight > 0.0f)
+	{
+		FinalDepth = TotalWeightedDepth / TotalWeight;
+	}
+
+	OutputTexture[CenterCoord] = FinalDepth;
+}
+
+//=============================================================================
+// Narrow-Range Filter with LDS (Local Data Share) Optimization
+//
+// Uses shared memory to reduce redundant texture fetches.
+// Each thread group loads a tile + padding into LDS, then filters from LDS.
+//
+// Performance: ~3-4x faster than naive implementation due to:
+// 1. Coalesced memory access when loading to LDS
+// 2. No redundant texture fetches for overlapping kernel regions
+// 3. LDS has much lower latency than texture cache misses
+//=============================================================================
+
+#define NR_TILE_SIZE 16
+#define NR_MAX_RADIUS 32
+#define NR_LDS_SIZE (NR_TILE_SIZE + 2 * NR_MAX_RADIUS)  // 80
+
+groupshared float LDS_Depth[NR_LDS_SIZE][NR_LDS_SIZE];
+
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterLDS_CS
+ */
+[numthreads(NR_TILE_SIZE, NR_TILE_SIZE, 1)]
+void NarrowRangeFilterLDS_CS(
+	uint3 GroupId : SV_GroupID,
+	uint3 GroupThreadId : SV_GroupThreadID,
+	uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Tile origin in texture space
+	int2 TileOrigin = int2(GroupId.xy) * NR_TILE_SIZE - NR_MAX_RADIUS;
+
+	// Each thread loads multiple pixels to fill LDS (48x48 = 2304 pixels, 256 threads)
+	// Each thread loads ceil(2304/256) = 9 pixels
+	uint ThreadIndex = GroupThreadId.y * NR_TILE_SIZE + GroupThreadId.x;
+	uint TotalLDSPixels = NR_LDS_SIZE * NR_LDS_SIZE;
+	uint ThreadCount = NR_TILE_SIZE * NR_TILE_SIZE;
+
+	for (uint i = ThreadIndex; i < TotalLDSPixels; i += ThreadCount)
+	{
+		uint LdsX = i % NR_LDS_SIZE;
+		uint LdsY = i / NR_LDS_SIZE;
+
+		int2 SampleCoord = TileOrigin + int2(LdsX, LdsY);
+		SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
+
+		LDS_Depth[LdsY][LdsX] = InputTexture.Load(int3(SampleCoord, 0));
+	}
+
+	// Synchronize - all threads must finish loading before filtering
+	GroupMemoryBarrierWithGroupSync();
+
+	// Bounds check for output
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+	if (any(CenterCoord >= int2(TextureSize)))
+	{
+		return;
+	}
+
+	// LDS coordinates for this thread's center pixel
+	int2 LdsCenter = int2(GroupThreadId.xy) + NR_MAX_RADIUS;
+	float CenterDepth = LDS_Depth[LdsCenter.y][LdsCenter.x];
+
+	// Background: pass through
+	if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[CenterCoord] = CenterDepth;
+		return;
+	}
+
+	// Compute gradient from LDS
+	float DepthLeft = LDS_Depth[LdsCenter.y][LdsCenter.x - 1];
+	float DepthRight = LDS_Depth[LdsCenter.y][LdsCenter.x + 1];
+	float DepthTop = LDS_Depth[LdsCenter.y - 1][LdsCenter.x];
+	float DepthBottom = LDS_Depth[LdsCenter.y + 1][LdsCenter.x];
+
+	DepthLeft = (DepthLeft > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthLeft;
+	DepthRight = (DepthRight > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthRight;
+	DepthTop = (DepthTop > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthTop;
+	DepthBottom = (DepthBottom > BACKGROUND_DEPTH_THRESH) ? CenterDepth : DepthBottom;
+
+	float GradientX = (DepthRight - DepthLeft) * 0.5f;
+	float GradientY = (DepthBottom - DepthTop) * 0.5f;
+	float GradMag = sqrt(GradientX * GradientX + GradientY * GradientY);
+	float GrazingFactor = saturate(GradMag / (ParticleRadius * 2.0f));
+
+	// Distance-based dynamic blur radius:
+	// PixelRadius = WorldRadius * FocalLength / Depth
+	// WorldRadius = ParticleRadius * SmoothingWorldScale
+	// Close objects get larger blur, distant objects get smaller blur
+	float WorldBlurRadius = ParticleRadius * SmoothingWorldScale;
+	float DynamicRadius = WorldBlurRadius * FocalLengthPixels / CenterDepth;
+	float EffectiveBlurRadius = clamp(DynamicRadius, SmoothingMinRadius, SmoothingMaxRadius);
+
+	// Clamp kernel radius to LDS bounds
+	const int KernelRadius = min(int(EffectiveBlurRadius), NR_MAX_RADIUS);
+	const float Sigma = EffectiveBlurRadius / 3.0f;
+	const float BaseThreshold = ParticleRadius * NarrowRangeThresholdRatio;
+	const float Threshold = BaseThreshold * (1.0f + NarrowRangeGrazingBoost * GrazingFactor);
+	const float ClampThreshold = ParticleRadius * NarrowRangeClampRatio * (1.0f + NarrowRangeGrazingBoost * GrazingFactor);
+
+	float Upper = CenterDepth + Threshold;
+	float Lower = CenterDepth - Threshold;
+
+	float TotalWeight = 0.0f;
+	float TotalWeightedDepth = 0.0f;
+
+	// Filter from LDS - no texture fetches in this loop!
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
+	{
+		for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+		{
+			int2 LdsSample = LdsCenter + int2(OffsetX, OffsetY);
+			float SampleDepth = LDS_Depth[LdsSample.y][LdsSample.x];
+
+			if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			{
+				continue;
+			}
+
+			float SpatialDist = length(float2(OffsetX, OffsetY));
+			float SpatialWeight = GetGaussianWeight(SpatialDist, Sigma);
+
+			if (SampleDepth > Upper)
+			{
+				continue;
+			}
+			else if (SampleDepth < Lower)
+			{
+				SampleDepth = max(SampleDepth, CenterDepth - ClampThreshold);
+			}
+			else
+			{
+				Upper = max(Upper, SampleDepth + Threshold);
+				Lower = min(Lower, SampleDepth - Threshold);
+			}
+
+			TotalWeightedDepth += SampleDepth * SpatialWeight;
+			TotalWeight += SpatialWeight;
+		}
+	}
+
+	float FinalDepth = CenterDepth;
+	if (TotalWeight > 0.0f)
+	{
+		FinalDepth = TotalWeightedDepth / TotalWeight;
+	}
+
+	OutputTexture[CenterCoord] = FinalDepth;
+}
+
+//=============================================================================
+// Separable Narrow-Range Filter (Horizontal Pass)
+// 32x faster than 2D version: O(2n) instead of O(n²)
+// 65×65 = 4,225 iterations → 65+65 = 130 iterations
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterHorizontalCS
+ */
+[numthreads(256, 1, 1)]
+void NarrowRangeFilterHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 CenterCoord = int2(DispatchThreadId.x, DispatchThreadId.y);
+	if (any(CenterCoord >= int2(TextureSize)))
+		return;
+
+	float CenterDepth = InputTexture.Load(int3(CenterCoord, 0));
+
+	// Background: pass through
+	if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[CenterCoord] = CenterDepth;
+		return;
+	}
+
+	// Distance-based dynamic blur radius
+	float WorldBlurRadius = ParticleRadius * SmoothingWorldScale;
+	float DynamicRadius = WorldBlurRadius * FocalLengthPixels / CenterDepth;
+	float EffectiveBlurRadius = clamp(DynamicRadius, SmoothingMinRadius, SmoothingMaxRadius);
+
+	const int KernelRadius = int(EffectiveBlurRadius);
+	const float Sigma = EffectiveBlurRadius / 3.0f;
+	const float Threshold = ParticleRadius * NarrowRangeThresholdRatio;
+	const float ClampThreshold = ParticleRadius * NarrowRangeClampRatio;
+
+	float Upper = CenterDepth + Threshold;
+	float Lower = CenterDepth - Threshold;
+	float TotalWeight = 0.0f;
+	float TotalWeightedDepth = 0.0f;
+
+	// 1D Horizontal only - O(n) instead of O(n²)
+	for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+	{
+		int SampleX = clamp(CenterCoord.x + OffsetX, 0, int(TextureSize.x) - 1);
+		float SampleDepth = InputTexture.Load(int3(SampleX, CenterCoord.y, 0));
+
+		if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			continue;
+
+		float SpatialWeight = GetGaussianWeight(abs(float(OffsetX)), Sigma);
+
+		if (SampleDepth > Upper)
+		{
+			continue;
+		}
+		else if (SampleDepth < Lower)
+		{
+			SampleDepth = max(SampleDepth, CenterDepth - ClampThreshold);
+		}
+		else
+		{
+			Upper = max(Upper, SampleDepth + Threshold);
+			Lower = min(Lower, SampleDepth - Threshold);
+		}
+
+		TotalWeightedDepth += SampleDepth * SpatialWeight;
+		TotalWeight += SpatialWeight;
+	}
+
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedDepth / TotalWeight) : CenterDepth;
+}
+
+//=============================================================================
+// Separable Narrow-Range Filter (Vertical Pass)
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterVerticalCS
+ */
+[numthreads(1, 256, 1)]
+void NarrowRangeFilterVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	int2 CenterCoord = int2(DispatchThreadId.x, DispatchThreadId.y);
+	if (any(CenterCoord >= int2(TextureSize)))
+		return;
+
+	float CenterDepth = InputTexture.Load(int3(CenterCoord, 0));
+
+	// Background: pass through
+	if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[CenterCoord] = CenterDepth;
+		return;
+	}
+
+	// Distance-based dynamic blur radius
+	float WorldBlurRadius = ParticleRadius * SmoothingWorldScale;
+	float DynamicRadius = WorldBlurRadius * FocalLengthPixels / CenterDepth;
+	float EffectiveBlurRadius = clamp(DynamicRadius, SmoothingMinRadius, SmoothingMaxRadius);
+
+	const int KernelRadius = int(EffectiveBlurRadius);
+	const float Sigma = EffectiveBlurRadius / 3.0f;
+	const float Threshold = ParticleRadius * NarrowRangeThresholdRatio;
+	const float ClampThreshold = ParticleRadius * NarrowRangeClampRatio;
+
+	float Upper = CenterDepth + Threshold;
+	float Lower = CenterDepth - Threshold;
+	float TotalWeight = 0.0f;
+	float TotalWeightedDepth = 0.0f;
+
+	// 1D Vertical only - O(n) instead of O(n²)
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
+	{
+		int SampleY = clamp(CenterCoord.y + OffsetY, 0, int(TextureSize.y) - 1);
+		float SampleDepth = InputTexture.Load(int3(CenterCoord.x, SampleY, 0));
+
+		if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			continue;
+
+		float SpatialWeight = GetGaussianWeight(abs(float(OffsetY)), Sigma);
+
+		if (SampleDepth > Upper)
+		{
+			continue;
+		}
+		else if (SampleDepth < Lower)
+		{
+			SampleDepth = max(SampleDepth, CenterDepth - ClampThreshold);
+		}
+		else
+		{
+			Upper = max(Upper, SampleDepth + Threshold);
+			Lower = min(Lower, SampleDepth - Threshold);
+		}
+
+		TotalWeightedDepth += SampleDepth * SpatialWeight;
+		TotalWeight += SpatialWeight;
+	}
+
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedDepth / TotalWeight) : CenterDepth;
+}
+
+//=============================================================================
+// Separable Narrow-Range Filter (Diagonal1 Pass: ↘ direction)
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterDiagonal1CS
+ */
+[numthreads(256, 1, 1)]
+void NarrowRangeFilterDiagonal1CS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint LinearIdx = DispatchThreadId.x + DispatchThreadId.y * uint(TextureSize.x);
+	int2 CenterCoord = int2(LinearIdx % uint(TextureSize.x), LinearIdx / uint(TextureSize.x));
+
+	if (any(CenterCoord >= int2(TextureSize)))
+		return;
+
+	float CenterDepth = InputTexture.Load(int3(CenterCoord, 0));
+
+	if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[CenterCoord] = CenterDepth;
+		return;
+	}
+
+	float WorldBlurRadius = ParticleRadius * SmoothingWorldScale;
+	float DynamicRadius = WorldBlurRadius * FocalLengthPixels / CenterDepth;
+	float EffectiveBlurRadius = clamp(DynamicRadius, SmoothingMinRadius, SmoothingMaxRadius);
+
+	// Diagonal needs shorter radius (√2 factor for same coverage)
+	const int KernelRadius = int(EffectiveBlurRadius * 0.707f);
+	const float Sigma = EffectiveBlurRadius * 0.707f / 3.0f;
+	const float Threshold = ParticleRadius * NarrowRangeThresholdRatio;
+	const float ClampThreshold = ParticleRadius * NarrowRangeClampRatio;
+
+	float Upper = CenterDepth + Threshold;
+	float Lower = CenterDepth - Threshold;
+	float TotalWeight = 0.0f;
+	float TotalWeightedDepth = 0.0f;
+
+	// Diagonal ↘ direction (+x, +y)
+	for (int Offset = -KernelRadius; Offset <= KernelRadius; ++Offset)
+	{
+		int2 SampleCoord = CenterCoord + int2(Offset, Offset);
+		SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
+
+		float SampleDepth = InputTexture.Load(int3(SampleCoord, 0));
+
+		if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			continue;
+
+		float SpatialDist = abs(float(Offset)) * 1.414f; // √2 for diagonal
+		float SpatialWeight = GetGaussianWeight(SpatialDist, Sigma);
+
+		if (SampleDepth > Upper)
+			continue;
+		else if (SampleDepth < Lower)
+			SampleDepth = max(SampleDepth, CenterDepth - ClampThreshold);
+		else
+		{
+			Upper = max(Upper, SampleDepth + Threshold);
+			Lower = min(Lower, SampleDepth - Threshold);
+		}
+
+		TotalWeightedDepth += SampleDepth * SpatialWeight;
+		TotalWeight += SpatialWeight;
+	}
+
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedDepth / TotalWeight) : CenterDepth;
+}
+
+//=============================================================================
+// Separable Narrow-Range Filter (Diagonal2 Pass: ↙ direction)
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for NarrowRangeFilterDiagonal2CS
+ */
+[numthreads(256, 1, 1)]
+void NarrowRangeFilterDiagonal2CS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint LinearIdx = DispatchThreadId.x + DispatchThreadId.y * uint(TextureSize.x);
+	int2 CenterCoord = int2(LinearIdx % uint(TextureSize.x), LinearIdx / uint(TextureSize.x));
+
+	if (any(CenterCoord >= int2(TextureSize)))
+		return;
+
+	float CenterDepth = InputTexture.Load(int3(CenterCoord, 0));
+
+	if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[CenterCoord] = CenterDepth;
+		return;
+	}
+
+	float WorldBlurRadius = ParticleRadius * SmoothingWorldScale;
+	float DynamicRadius = WorldBlurRadius * FocalLengthPixels / CenterDepth;
+	float EffectiveBlurRadius = clamp(DynamicRadius, SmoothingMinRadius, SmoothingMaxRadius);
+
+	const int KernelRadius = int(EffectiveBlurRadius * 0.707f);
+	const float Sigma = EffectiveBlurRadius * 0.707f / 3.0f;
+	const float Threshold = ParticleRadius * NarrowRangeThresholdRatio;
+	const float ClampThreshold = ParticleRadius * NarrowRangeClampRatio;
+
+	float Upper = CenterDepth + Threshold;
+	float Lower = CenterDepth - Threshold;
+	float TotalWeight = 0.0f;
+	float TotalWeightedDepth = 0.0f;
+
+	// Diagonal ↙ direction (+x, -y)
+	for (int Offset = -KernelRadius; Offset <= KernelRadius; ++Offset)
+	{
+		int2 SampleCoord = CenterCoord + int2(Offset, -Offset);
+		SampleCoord = clamp(SampleCoord, int2(0, 0), int2(TextureSize) - 1);
+
+		float SampleDepth = InputTexture.Load(int3(SampleCoord, 0));
+
+		if (SampleDepth > BACKGROUND_DEPTH_THRESH)
+			continue;
+
+		float SpatialDist = abs(float(Offset)) * 1.414f;
+		float SpatialWeight = GetGaussianWeight(SpatialDist, Sigma);
+
+		if (SampleDepth > Upper)
+			continue;
+		else if (SampleDepth < Lower)
+			SampleDepth = max(SampleDepth, CenterDepth - ClampThreshold);
+		else
+		{
+			Upper = max(Upper, SampleDepth + Threshold);
+			Lower = min(Lower, SampleDepth - Threshold);
+		}
+
+		TotalWeightedDepth += SampleDepth * SpatialWeight;
+		TotalWeight += SpatialWeight;
+	}
+
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedDepth / TotalWeight) : CenterDepth;
+}
+
+//=============================================================================
+// Separable Gaussian Blur for Thickness
+//
+// Split into Horizontal + Vertical passes for O(2n) instead of O(n²)
+// 41x41 = 1,681 samples → 41+41 = 82 samples (20x faster)
+//
+// Unlike depth smoothing, thickness uses simple Gaussian blur because:
+// 1. Thickness values are additive (no sharp edges to preserve)
+// 2. Background is 0.0, not a large value
+// 3. We want to smooth out individual particle profiles
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for ThicknessGaussianBlurHorizontalCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void ThicknessGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 2.0f;
+
+	float TotalWeight = 0.0f;
+	float TotalWeightedThickness = 0.0f;
+
+	// Horizontal 1D Gaussian blur
+	for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+	{
+		int SampleX = clamp(CenterCoord.x + OffsetX, 0, int(TextureSize.x) - 1);
+		float SampleThickness = InputTexture.Load(int3(SampleX, CenterCoord.y, 0));
+
+		float Weight = GetGaussianWeight(abs(float(OffsetX)), Sigma);
+		TotalWeightedThickness += SampleThickness * Weight;
+		TotalWeight += Weight;
+	}
+
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedThickness / TotalWeight) : 0.0f;
+}
+
+/**
+ * @brief Compute shader entry point for ThicknessGaussianBlurVerticalCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void ThicknessGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 2.0f;
+
+	float TotalWeight = 0.0f;
+	float TotalWeightedThickness = 0.0f;
+
+	// Vertical 1D Gaussian blur
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
+	{
+		int SampleY = clamp(CenterCoord.y + OffsetY, 0, int(TextureSize.y) - 1);
+		float SampleThickness = InputTexture.Load(int3(CenterCoord.x, SampleY, 0));
+
+		float Weight = GetGaussianWeight(abs(float(OffsetY)), Sigma);
+		TotalWeightedThickness += SampleThickness * Weight;
+		TotalWeight += Weight;
+	}
+
+	OutputTexture[CenterCoord] = (TotalWeight > 0.0f) ? (TotalWeightedThickness / TotalWeight) : 0.0f;
+}
+
+//=============================================================================
+// Depth-Aware Downsample (2x2 -> 1)
+// Min-Depth selection to preserve silhouettes
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for DepthDownsampleCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void DepthDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Half-res output coordinate (TextureSize = half-res output size)
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 OutCoord = int2(DispatchThreadId.xy);
+	int2 InCoord = OutCoord * 2;
+
+	// Full-res input bounds (FullResTextureSize is passed separately)
+	int2 FullResMax = int2(FullResTextureSize) - 1;
+
+	// Sample 2x2 block from full resolution with clamping
+	int2 C00 = clamp(InCoord + int2(0, 0), int2(0, 0), FullResMax);
+	int2 C10 = clamp(InCoord + int2(1, 0), int2(0, 0), FullResMax);
+	int2 C01 = clamp(InCoord + int2(0, 1), int2(0, 0), FullResMax);
+	int2 C11 = clamp(InCoord + int2(1, 1), int2(0, 0), FullResMax);
+
+	float Depth00 = InputTexture.Load(int3(C00, 0));
+	float Depth10 = InputTexture.Load(int3(C10, 0));
+	float Depth01 = InputTexture.Load(int3(C01, 0));
+	float Depth11 = InputTexture.Load(int3(C11, 0));
+
+	// Count valid (non-background) samples
+	int ValidCount = 0;
+	float MinDepth = 1e30f;
+	float SumDepth = 0.0f;
+
+	if (Depth00 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth00); SumDepth += Depth00; }
+	if (Depth10 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth10); SumDepth += Depth10; }
+	if (Depth01 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth01); SumDepth += Depth01; }
+	if (Depth11 < BACKGROUND_DEPTH_THRESH) { ValidCount++; MinDepth = min(MinDepth, Depth11); SumDepth += Depth11; }
+
+	float OutDepth;
+	if (ValidCount == 0)
+	{
+		// All background
+		OutDepth = BACKGROUND_DEPTH_THRESH * 2.0f;
+	}
+	else if (ValidCount == 4)
+	{
+		// All valid - use average for smooth surfaces
+		OutDepth = SumDepth / 4.0f;
+	}
+	else
+	{
+		// Mixed - use min depth to preserve silhouette edges
+		OutDepth = MinDepth;
+	}
+
+	OutputTexture[OutCoord] = OutDepth;
+}
+
+//=============================================================================
+// Depth-Aware Upsample (1 -> 2x2)
+// Joint Bilateral Upsample: uses full-res depth as guide
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for DepthUpsampleCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void DepthUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	// Full-res output coordinate
+	if (any(DispatchThreadId.xy >= uint2(FullResTextureSize)))
+	{
+		return;
+	}
+
+	int2 OutCoord = int2(DispatchThreadId.xy);
+
+	// Original full-res depth (guide)
+	float OriginalDepth = FullResTexture.Load(int3(OutCoord, 0));
+
+	// Background: pass through original
+	if (OriginalDepth > BACKGROUND_DEPTH_THRESH)
+	{
+		OutputTexture[OutCoord] = OriginalDepth;
+		return;
+	}
+
+	// Half-res coordinate (bilinear position)
+	float2 HalfCoord = (float2(OutCoord) + 0.5f) * 0.5f - 0.5f;
+	int2 HalfCoord00 = int2(floor(HalfCoord));
+
+	// Bilinear weights
+	float2 Frac = HalfCoord - float2(HalfCoord00);
+
+	// Sample 2x2 from half-res filtered result
+	int2 HC00 = clamp(HalfCoord00, int2(0, 0), int2(HalfResTextureSize) - 1);
+	int2 HC10 = clamp(HalfCoord00 + int2(1, 0), int2(0, 0), int2(HalfResTextureSize) - 1);
+	int2 HC01 = clamp(HalfCoord00 + int2(0, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
+	int2 HC11 = clamp(HalfCoord00 + int2(1, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
+
+	float Depth00 = InputTexture.Load(int3(HC00, 0));
+	float Depth10 = InputTexture.Load(int3(HC10, 0));
+	float Depth01 = InputTexture.Load(int3(HC01, 0));
+	float Depth11 = InputTexture.Load(int3(HC11, 0));
+
+	// Joint bilateral weights: bilinear * depth similarity
+	float DepthSigma = ParticleRadius * 2.0f;
+
+	float Weight00 = (1.0f - Frac.x) * (1.0f - Frac.y);
+	float Weight10 = Frac.x * (1.0f - Frac.y);
+	float Weight01 = (1.0f - Frac.x) * Frac.y;
+	float Weight11 = Frac.x * Frac.y;
+
+	// Apply depth-based weights (suppress samples with different depth)
+	if (Depth00 < BACKGROUND_DEPTH_THRESH) Weight00 *= exp(-abs(Depth00 - OriginalDepth) / DepthSigma); else Weight00 = 0.0f;
+	if (Depth10 < BACKGROUND_DEPTH_THRESH) Weight10 *= exp(-abs(Depth10 - OriginalDepth) / DepthSigma); else Weight10 = 0.0f;
+	if (Depth01 < BACKGROUND_DEPTH_THRESH) Weight01 *= exp(-abs(Depth01 - OriginalDepth) / DepthSigma); else Weight01 = 0.0f;
+	if (Depth11 < BACKGROUND_DEPTH_THRESH) Weight11 *= exp(-abs(Depth11 - OriginalDepth) / DepthSigma); else Weight11 = 0.0f;
+
+	float TotalWeight = Weight00 + Weight10 + Weight01 + Weight11;
+
+	float OutDepth;
+	if (TotalWeight > 0.001f)
+	{
+		OutDepth = (Depth00 * Weight00 + Depth10 * Weight10 + Depth01 * Weight01 + Depth11 * Weight11) / TotalWeight;
+	}
+	else
+	{
+		// Fallback to original if all samples are bad
+		OutDepth = OriginalDepth;
+	}
+
+	OutputTexture[OutCoord] = OutDepth;
+}
+
+//=============================================================================
+// Separable Gaussian Blur for Velocity (float2)
+//
+// Smooths velocity texture to soften foam boundaries between particles.
+// Without smoothing, foam edges appear sharp at particle boundaries
+// because each particle has a constant velocity across its sprite.
+//
+// Uses same separable approach as thickness blur for O(2n) complexity.
+//=============================================================================
+
+// Velocity-specific resources (float2 instead of float)
+Texture2D<float2> VelocityInputTexture;
+RWTexture2D<float2> VelocityOutputTexture;
+
+/**
+ * @brief Compute shader entry point for VelocityGaussianBlurHorizontalCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void VelocityGaussianBlurHorizontalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+	float2 CenterVelocity = VelocityInputTexture.Load(int3(CenterCoord, 0));
+
+	// Skip background pixels (zero velocity is valid, but we still process them)
+	// We use depth-aware weighting to avoid blurring across fluid boundaries
+
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 2.0f;
+
+	float TotalWeight = 0.0f;
+	float2 TotalWeightedVelocity = float2(0.0f, 0.0f);
+
+	// Horizontal 1D Gaussian blur
+	for (int OffsetX = -KernelRadius; OffsetX <= KernelRadius; ++OffsetX)
+	{
+		int SampleX = clamp(CenterCoord.x + OffsetX, 0, int(TextureSize.x) - 1);
+		float2 SampleVelocity = VelocityInputTexture.Load(int3(SampleX, CenterCoord.y, 0));
+
+		float Weight = GetGaussianWeight(abs(float(OffsetX)), Sigma);
+		TotalWeightedVelocity += SampleVelocity * Weight;
+		TotalWeight += Weight;
+	}
+
+	float2 Result = (TotalWeight > 0.0f) ? (TotalWeightedVelocity / TotalWeight) : float2(0.0f, 0.0f);
+	VelocityOutputTexture[CenterCoord] = Result;
+}
+
+/**
+ * @brief Compute shader entry point for VelocityGaussianBlurVerticalCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void VelocityGaussianBlurVerticalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 CenterCoord = int2(DispatchThreadId.xy);
+
+	const int KernelRadius = int(BlurRadius);
+	const float Sigma = BlurRadius / 2.0f;
+
+	float TotalWeight = 0.0f;
+	float2 TotalWeightedVelocity = float2(0.0f, 0.0f);
+
+	// Vertical 1D Gaussian blur
+	for (int OffsetY = -KernelRadius; OffsetY <= KernelRadius; ++OffsetY)
+	{
+		int SampleY = clamp(CenterCoord.y + OffsetY, 0, int(TextureSize.y) - 1);
+		float2 SampleVelocity = VelocityInputTexture.Load(int3(CenterCoord.x, SampleY, 0));
+
+		float Weight = GetGaussianWeight(abs(float(OffsetY)), Sigma);
+		TotalWeightedVelocity += SampleVelocity * Weight;
+		TotalWeight += Weight;
+	}
+
+	float2 Result = (TotalWeight > 0.0f) ? (TotalWeightedVelocity / TotalWeight) : float2(0.0f, 0.0f);
+	VelocityOutputTexture[CenterCoord] = Result;
+}
+
+//=============================================================================
+// Thickness Downsample (2x2 -> 1)
+// Uses average (not min) because thickness is additive
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for ThicknessDownsampleCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void ThicknessDownsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(TextureSize)))
+	{
+		return;
+	}
+
+	int2 OutCoord = int2(DispatchThreadId.xy);
+	int2 InCoord = OutCoord * 2;
+
+	// Clamp to valid range
+	int2 MaxCoord = int2(FullResTextureSize) - 1;
+	int2 C00 = clamp(InCoord, int2(0, 0), MaxCoord);
+	int2 C10 = clamp(InCoord + int2(1, 0), int2(0, 0), MaxCoord);
+	int2 C01 = clamp(InCoord + int2(0, 1), int2(0, 0), MaxCoord);
+	int2 C11 = clamp(InCoord + int2(1, 1), int2(0, 0), MaxCoord);
+
+	float Thickness00 = InputTexture.Load(int3(C00, 0));
+	float Thickness10 = InputTexture.Load(int3(C10, 0));
+	float Thickness01 = InputTexture.Load(int3(C01, 0));
+	float Thickness11 = InputTexture.Load(int3(C11, 0));
+
+	// Simple average for thickness
+	float OutThickness = (Thickness00 + Thickness10 + Thickness01 + Thickness11) * 0.25f;
+
+	OutputTexture[OutCoord] = OutThickness;
+}
+
+//=============================================================================
+// Thickness Upsample (1 -> 2x2)
+// Simple bilinear interpolation (no joint bilateral needed for thickness)
+//=============================================================================
+
+/**
+ * @brief Compute shader entry point for ThicknessUpsampleCS
+ */
+[numthreads(THREADGROUP_SIZE, THREADGROUP_SIZE, 1)]
+void ThicknessUpsampleCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	if (any(DispatchThreadId.xy >= uint2(FullResTextureSize)))
+	{
+		return;
+	}
+
+	int2 OutCoord = int2(DispatchThreadId.xy);
+
+	// Half-res coordinate (bilinear position)
+	float2 HalfCoord = (float2(OutCoord) + 0.5f) * 0.5f - 0.5f;
+	int2 HalfCoord00 = int2(floor(HalfCoord));
+
+	// Bilinear weights
+	float2 Frac = HalfCoord - float2(HalfCoord00);
+
+	// Sample 2x2 from half-res
+	int2 HC00 = clamp(HalfCoord00, int2(0, 0), int2(HalfResTextureSize) - 1);
+	int2 HC10 = clamp(HalfCoord00 + int2(1, 0), int2(0, 0), int2(HalfResTextureSize) - 1);
+	int2 HC01 = clamp(HalfCoord00 + int2(0, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
+	int2 HC11 = clamp(HalfCoord00 + int2(1, 1), int2(0, 0), int2(HalfResTextureSize) - 1);
+
+	float Thickness00 = InputTexture.Load(int3(HC00, 0));
+	float Thickness10 = InputTexture.Load(int3(HC10, 0));
+	float Thickness01 = InputTexture.Load(int3(HC01, 0));
+	float Thickness11 = InputTexture.Load(int3(HC11, 0));
+
+	// Bilinear interpolation
+	float ThicknessTop = lerp(Thickness00, Thickness10, Frac.x);
+	float ThicknessBottom = lerp(Thickness01, Thickness11, Frac.x);
+	float OutThickness = lerp(ThicknessTop, ThicknessBottom, Frac.y);
+
+	OutputTexture[OutCoord] = OutThickness;
+}

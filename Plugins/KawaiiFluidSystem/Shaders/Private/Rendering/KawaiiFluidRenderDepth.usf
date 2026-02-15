@@ -1,0 +1,360 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+
+/**
+ * @file KawaiiFluidRenderDepth.usf
+ * @brief Shader implementation for KawaiiFluidRenderDepth
+ */
+
+#include "/Engine/Private/Common.ush"
+#include "/Engine/Private/ScreenPass.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidRenderCommon.ush"
+
+//-----------------------------------------------------------------------------
+// Parameters
+//-----------------------------------------------------------------------------
+
+// Particle data buffer
+StructuredBuffer<float3> ParticlePositions;
+StructuredBuffer<float3> ParticleVelocities;
+StructuredBuffer<float3> RenderOffset;  // Surface particle render offset
+
+// Rendering parameters
+float ParticleRadius;
+float4x4 ViewMatrix;
+float4x4 ProjectionMatrix;
+float4x4 ViewProjectionMatrix;
+
+// Scene Depth for occlusion test
+Texture2D SceneDepthTexture;
+SamplerState SceneDepthSampler;
+
+// Parameters for SceneDepth UV transformation
+float2 SceneViewRect;    // SceneDepth valid area size (Screen Percentage applied)
+float2 SceneTextureSize; // SceneDepth texture total size
+
+#if USE_ANISOTROPY
+// Anisotropy axes (float4 = direction.xyz + scale.w)
+StructuredBuffer<float4> AnisotropyAxis1;
+StructuredBuffer<float4> AnisotropyAxis2;
+StructuredBuffer<float4> AnisotropyAxis3;
+#endif
+
+//-----------------------------------------------------------------------------
+// Vertex Shader
+//-----------------------------------------------------------------------------
+
+/**
+ * @brief Data layout for FVertexInput
+ */
+struct FVertexInput
+{
+	uint InstanceId : SV_InstanceID;
+	uint VertexId : SV_VertexID;
+};
+
+/**
+ * @brief Data layout for FVertexOutput
+ */
+struct FVertexOutput
+{
+	float4 Position : SV_POSITION;
+	float2 UV : TEXCOORD0; // UV coordinates
+	float3 ViewSpacePosition : TEXCOORD1;
+	float3 ParticleCenter : TEXCOORD2;
+	float ParticleRadius : TEXCOORD3;
+	uint InstanceId : TEXCOORD4;
+	float4 ScreenPosition : TEXCOORD5; // Screen space position for depth comparison
+	float2 WorldXYVelocity : TEXCOORD6; // World-space XY velocity for flow texture
+#if USE_ANISOTROPY
+	// Ellipsoid axes in view space (xyz = normalized direction, w = scale)
+	float4 EllipsoidAxis1 : TEXCOORD7;
+	float4 EllipsoidAxis2 : TEXCOORD8;
+	float4 EllipsoidAxis3 : TEXCOORD9;
+#endif
+};
+
+// Billboard quad vertices
+static const float2 QuadVertices[4] =
+{
+	float2(-1.0, -1.0),
+	float2( 1.0, -1.0),
+	float2(-1.0,  1.0),
+	float2( 1.0,  1.0)
+};
+
+// Billboard UV
+static const float2 QuadUVs[4] =
+{
+	float2(0.0, 1.0),
+	float2(1.0, 1.0),
+	float2(0.0, 0.0),
+	float2(1.0, 0.0)
+};
+
+/**
+ * @brief Vertex shader entry point
+ */
+FVertexOutput MainVS(FVertexInput Input)
+{
+	FVertexOutput Output;
+
+	// Get particle world position + render offset (Surface particles are pulled toward neighbors)
+	float3 ParticleWorldPosition = ParticlePositions[Input.InstanceId] + RenderOffset[Input.InstanceId];
+
+	// Transform to view space
+	float4 ParticleViewPosition = mul(float4(ParticleWorldPosition, 1.0), ViewMatrix);
+
+#if USE_ANISOTROPY
+	// Read anisotropy axes (world space direction.xyz + scale.w)
+	float4 Axis1WS = AnisotropyAxis1[Input.InstanceId];
+	float4 Axis2WS = AnisotropyAxis2[Input.InstanceId];
+	float4 Axis3WS = AnisotropyAxis3[Input.InstanceId];
+
+	// Transform directions to view space (rotation only, no translation)
+	// Directions are already normalized in the buffer
+	float3 Axis1Dir = mul(float4(Axis1WS.xyz, 0.0), ViewMatrix).xyz;
+	float3 Axis2Dir = mul(float4(Axis2WS.xyz, 0.0), ViewMatrix).xyz;
+	float3 Axis3Dir = mul(float4(Axis3WS.xyz, 0.0), ViewMatrix).xyz;
+
+	// Calculate scales (w component * ParticleRadius)
+	float Scale1 = Axis1WS.w * ParticleRadius;
+	float Scale2 = Axis2WS.w * ParticleRadius;
+	float Scale3 = Axis3WS.w * ParticleRadius;
+
+	// Calculate maximum extent for billboard sizing
+	float MaxExtent = max(max(Scale1, Scale2), Scale3);
+
+	// Use maximum scale for billboard size with margin (FleX style)
+	// Extra margin ensures ellipsoid edges aren't clipped
+	float BillboardRadius = MaxExtent * 1.5f;
+
+	// Pass normalized direction (xyz) and scale (w) separately
+	// This avoids expensive length() calls in pixel shader
+	Output.EllipsoidAxis1 = float4(Axis1Dir, Scale1);
+	Output.EllipsoidAxis2 = float4(Axis2Dir, Scale2);
+	Output.EllipsoidAxis3 = float4(Axis3Dir, Scale3);
+#else
+	float BillboardRadius = ParticleRadius;
+#endif
+
+	// Generate billboard quad offset
+	float2 QuadOffset = QuadVertices[Input.VertexId] * BillboardRadius;
+
+	// Apply quad offset in view space (facing camera)
+	float3 ViewSpacePosition = ParticleViewPosition.xyz;
+	ViewSpacePosition.xy += QuadOffset;
+
+	// Projection
+	Output.Position = mul(float4(ViewSpacePosition, 1.0), ProjectionMatrix);
+	Output.UV = QuadUVs[Input.VertexId];
+	Output.ViewSpacePosition = ViewSpacePosition;
+	Output.ParticleCenter = ParticleViewPosition.xyz;
+	Output.ParticleRadius = ParticleRadius;
+	Output.InstanceId = Input.InstanceId;
+	Output.ScreenPosition = Output.Position; // Screen position for depth comparison
+
+	// Output world-space XY velocity for flow texture
+	// This is used with world-space UV texturing (WorldPos.xy)
+	// Stored unscaled - scaling is applied in flow accumulation pass
+	float3 WorldVelocity = ParticleVelocities[Input.InstanceId];
+	Output.WorldXYVelocity = WorldVelocity.xy;
+
+	return Output;
+}
+
+//-----------------------------------------------------------------------------
+// Pixel Shader
+//-----------------------------------------------------------------------------
+
+/**
+ * @brief Data layout for FPixelOutput
+ */
+struct FPixelOutput
+{
+	float LinearDepth : SV_Target0;
+	float2 WorldXYVelocity : SV_Target1;  // World-space XY velocity for flow texture
+	float OcclusionMask : SV_Target2;     // 1.0 = visible (in front of scene), 0.0 = occluded (behind scene)
+	float DeviceDepth : SV_Depth;
+};
+
+#if USE_ANISOTROPY
+//-----------------------------------------------------------------------------
+// Ray-Ellipsoid Intersection using Quadric Form (Optimized)
+// No matrix inverse needed - directly solve the quadric equation
+// Direction and scale are passed separately to avoid expensive length() calls
+//
+// Ellipsoid defined by: (P·n1/s1)² + (P·n2/s2)² + (P·n3/s3)² = 1
+// where n_i = axis_i.xyz (normalized direction), s_i = axis_i.w (scale)
+//-----------------------------------------------------------------------------
+/**
+ * @brief Solves ray and ellipsoid intersection
+ */
+bool RayEllipsoidIntersection(
+	float3 RayOrigin,      // Ray origin in view space (relative to ellipsoid center)
+	float3 RayDir,         // Ray direction in view space (normalized)
+	float4 Axis1,          // Ellipsoid axis 1 (xyz = normalized direction, w = scale)
+	float4 Axis2,          // Ellipsoid axis 2 (xyz = normalized direction, w = scale)
+	float4 Axis3,          // Ellipsoid axis 3 (xyz = normalized direction, w = scale)
+	out float OutT,        // Output: distance along ray
+	out float3 HitPoint)   // Output: hit point in view space
+{
+	// Extract directions and scales directly (no length() needed!)
+	float3 AxisDir1 = Axis1.xyz;
+	float3 AxisDir2 = Axis2.xyz;
+	float3 AxisDir3 = Axis3.xyz;
+	float AxisScale1 = Axis1.w;
+	float AxisScale2 = Axis2.w;
+	float AxisScale3 = Axis3.w;
+
+	// Prevent division by zero for degenerate ellipsoids
+	if (AxisScale1 < 1e-6 || AxisScale2 < 1e-6 || AxisScale3 < 1e-6)
+	{
+		OutT = 0.0;
+		HitPoint = float3(0, 0, 0);
+		return false;
+	}
+
+	// Project ray origin and direction onto each axis (normalized by scale)
+	// o_i = (O · n_i) / s_i,  d_i = (D · n_i) / s_i
+	float ProjectedOrigin1 = dot(RayOrigin, AxisDir1) / AxisScale1;
+	float ProjectedOrigin2 = dot(RayOrigin, AxisDir2) / AxisScale2;
+	float ProjectedOrigin3 = dot(RayOrigin, AxisDir3) / AxisScale3;
+
+	float ProjectedDir1 = dot(RayDir, AxisDir1) / AxisScale1;
+	float ProjectedDir2 = dot(RayDir, AxisDir2) / AxisScale2;
+	float ProjectedDir3 = dot(RayDir, AxisDir3) / AxisScale3;
+
+	// Quadratic equation: A*t² + B*t + C = 0
+	// From: (o1 + t*d1)² + (o2 + t*d2)² + (o3 + t*d3)² = 1
+	float A = ProjectedDir1 * ProjectedDir1 + ProjectedDir2 * ProjectedDir2 + ProjectedDir3 * ProjectedDir3;
+	float B = 2.0 * (ProjectedOrigin1 * ProjectedDir1 + ProjectedOrigin2 * ProjectedDir2 + ProjectedOrigin3 * ProjectedDir3);
+	float C = ProjectedOrigin1 * ProjectedOrigin1 + ProjectedOrigin2 * ProjectedOrigin2 + ProjectedOrigin3 * ProjectedOrigin3 - 1.0;
+
+	float Discriminant = B * B - 4.0 * A * C;
+
+	if (Discriminant < 0.0)
+	{
+		// No intersection
+		OutT = 0.0;
+		HitPoint = float3(0, 0, 0);
+		return false;
+	}
+
+	// Solve quadratic
+	float SqrtDisc = sqrt(Discriminant);
+	float NearIntersection = (-B - SqrtDisc) / (2.0 * A);
+	float FarIntersection = (-B + SqrtDisc) / (2.0 * A);
+
+	// Choose the intersection in front of the ray origin
+	if (NearIntersection > 0.0)
+	{
+		OutT = NearIntersection;
+	}
+	else if (FarIntersection > 0.0)
+	{
+		OutT = FarIntersection;
+	}
+	else
+	{
+		// Both intersections behind ray origin
+		OutT = 0.0;
+		HitPoint = float3(0, 0, 0);
+		return false;
+	}
+
+	// Compute hit point in view space
+	HitPoint = RayOrigin + OutT * RayDir;
+
+	return true;
+}
+#endif
+
+/**
+ * @brief Pixel shader entry point
+ */
+FPixelOutput MainPS(FVertexOutput Input)
+{
+	FPixelOutput Output;
+
+	// Calculate screen UV for depth sampling
+	float2 ScreenUV = Input.ScreenPosition.xy / Input.ScreenPosition.w;
+	ScreenUV = ScreenUV * 0.5 + 0.5;
+	ScreenUV.y = 1.0 - ScreenUV.y;
+
+	// SceneDepth UV transformation: Map ScreenUV to SceneDepth valid area
+	// SceneViewRect = SceneDepth valid area, SceneTextureSize = SceneDepth total texture size
+	float2 SceneUV = ScreenUV * (SceneViewRect / SceneTextureSize);
+
+	// Sample scene depth for occlusion mask calculation (no early discard)
+	// Occlusion will be determined after actual sphere/ellipsoid intersection
+	float SceneDeviceDepth = SceneDepthTexture.Sample(SceneDepthSampler, SceneUV).r;
+
+#if USE_ANISOTROPY
+	// Ray-ellipsoid intersection
+	// Ray origin: camera position (0,0,0 in view space)
+	// Ray direction: towards the pixel (ViewSpacePosition normalized)
+	float3 RayDir = normalize(Input.ViewSpacePosition);
+	float3 RayOrigin = Input.ParticleCenter; // Relative to ellipsoid center is just -ParticleCenter for camera at origin
+
+	// Invert: ray from center, shooting backwards to find surface
+	float3 RelativeRayOrigin = -Input.ParticleCenter; // Camera at origin, ellipsoid at ParticleCenter
+
+	float HitDistance;
+	float3 HitPoint;
+	bool bHit = RayEllipsoidIntersection(
+		RelativeRayOrigin,
+		RayDir,
+		Input.EllipsoidAxis1,
+		Input.EllipsoidAxis2,
+		Input.EllipsoidAxis3,
+		HitDistance,
+		HitPoint);
+
+	if (!bHit)
+	{
+		discard;
+	}
+
+	// HitPoint is relative to ellipsoid center, convert to view space
+	float3 IntersectionPoint = Input.ParticleCenter + HitPoint;
+
+#else
+	// Billboard-Sphere method: Render circular shape using UV
+	// Transform UV to (-1, 1) range
+	float2 UV = Input.UV * 2.0 - 1.0;
+
+	// Calculate UV distance (sphere radius = 1.0)
+	float RadiusSquared = dot(UV, UV);
+
+	// Discard pixels outside circle (square to circle)
+	if (RadiusSquared > 1.0)
+	{
+		discard;
+	}
+
+	// Calculate Z offset on sphere surface
+	float SphereZ = sqrt(1.0 - RadiusSquared);
+
+	// Calculate actual sphere surface position (View Space)
+	float3 IntersectionPoint = Input.ParticleCenter + float3(UV * Input.ParticleRadius, -SphereZ * Input.ParticleRadius);
+#endif
+
+	// Calculate Linear Depth (convert view space Z to positive distance)
+	// View Space uses -Z for forward direction, so convert negative to positive
+	Output.LinearDepth = -IntersectionPoint.z;
+
+	// World XY velocity (passed from vertex shader, same for entire particle)
+	Output.WorldXYVelocity = Input.WorldXYVelocity;
+
+	// Calculate Device Depth (clip space)
+	float4 ClipPosition = mul(float4(IntersectionPoint, 1.0), ProjectionMatrix);
+	Output.DeviceDepth = ClipPosition.z / ClipPosition.w;
+
+	// Calculate OcclusionMask: Compare actual intersection point's device depth with SceneDepth
+	// Reversed-Z: Larger value = closer
+	// Fluid in front of scene geometry (DeviceDepth >= SceneDeviceDepth) is visible (1.0)
+	// Fluid behind scene geometry (DeviceDepth < SceneDeviceDepth) is occluded (0.0)
+	Output.OcclusionMask = (Output.DeviceDepth >= SceneDeviceDepth) ? 1.0 : 0.0;
+
+	return Output;
+}

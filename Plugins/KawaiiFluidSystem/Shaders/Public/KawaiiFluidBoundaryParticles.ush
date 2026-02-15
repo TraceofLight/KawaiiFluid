@@ -1,0 +1,47 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file KawaiiFluidBoundaryParticles.ush
+ * @brief Shared boundary particle structures used by skinning, adhesion, and attachment passes.
+ */
+
+#pragma once
+
+#include "/Engine/Public/Platform.ush"
+
+//=============================================================================
+// Local Boundary Particle Structure (must match C++ FGPUBoundaryParticleLocal)
+//=============================================================================
+
+/**
+ * @brief Data layout for FGPUBoundaryParticleLocal
+ */
+struct FGPUBoundaryParticleLocal
+{
+	float3 LocalPosition;   // 12 bytes - Bone-local position
+	float Psi;              // 4 bytes - Volume contribution
+	float3 LocalNormal;     // 12 bytes - Bone-local surface normal
+	float FrictionCoeff;    // 4 bytes - Coulomb friction coefficient
+	int BoneIndex;          // 4 bytes - Skeleton bone index (-1 for static mesh)
+	float3 Padding;         // 12 bytes - Alignment padding (total: 48)
+};
+
+//=============================================================================
+// World Boundary Particle Structure (must match C++ FGPUBoundaryParticle)
+//=============================================================================
+
+/**
+ * @brief Data layout for FGPUBoundaryParticle
+ */
+struct FGPUBoundaryParticle
+{
+	float3 Position;        // 12 bytes - World position
+	float Psi;              // 4 bytes - Boundary particle volume contribution (total: 16)
+	float3 Normal;          // 12 bytes - World-space normal
+	int OwnerID;            // 4 bytes - Boundary owner ID (total: 32)
+	float3 Velocity;        // 12 bytes - World-space velocity
+	float FrictionCoeff;    // 4 bytes - Coulomb friction coefficient (total: 48)
+	int BoneIndex;          // 4 bytes - Skeleton bone index (-1 for static mesh)
+	int OriginalIndex;      // 4 bytes - Pre-sort index for stable attachment
+	float Padding1;         // 4 bytes - Alignment padding
+	float Padding2;         // 4 bytes - Alignment padding (total: 64)
+};

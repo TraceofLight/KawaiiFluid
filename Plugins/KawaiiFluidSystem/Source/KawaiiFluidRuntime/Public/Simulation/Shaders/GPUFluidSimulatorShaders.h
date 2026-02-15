@@ -11,7 +11,7 @@
 #include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment (NEW bone-following system)
 #include "Core/KawaiiFluidSimulationTypes.h"  // For EGridResolutionPreset
 
-// Spatial hash constants (must match FluidSpatialHash.ush)
+// Spatial hash constants (must match KawaiiFluidSpatialHash.ush)
 #define GPU_SPATIAL_HASH_SIZE 65536
 #define GPU_MAX_PARTICLES_PER_CELL 16
 
@@ -127,100 +127,6 @@ public:
 		SHADER_PARAMETER(int32, bUsePrevNeighborCache)
 		SHADER_PARAMETER(int32, PrevParticleCount)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
-	END_SHADER_PARAMETER_STRUCT()
-
-	static constexpr int32 ThreadGroupSize = 256;
-
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
-
-	static void ModifyCompilationEnvironment(
-		const FGlobalShaderPermutationParameters& Parameters,
-		FShaderCompilerEnvironment& OutEnvironment);
-};
-
-/**
- * @class FComputeDensityCS
- * @brief [DEPRECATED] Pass 3: Calculate density and lambda using spatial hash.
- * 
- * @param Particles Read-write access to particle buffer.
- * @param CellCounts Legacy hash table cell counts.
- * @param ParticleIndices Legacy hash table particle indices.
- * @param ParticleCount Number of particles to process.
- * @param SmoothingRadius SPH smoothing radius.
- * @param RestDensity Target rest density.
- * @param Poly6Coeff Precomputed Poly6 kernel coefficient.
- * @param SpikyCoeff Precomputed Spiky kernel coefficient.
- * @param CellSize Spatial hash cell size.
- * @param Compliance XPBD compliance.
- * @param DeltaTimeSq Precomputed DeltaTime squared.
- */
-class FComputeDensityCS : public FGlobalShader
-{
-public:
-	DECLARE_GLOBAL_SHADER(FComputeDensityCS);
-	SHADER_USE_PARAMETER_STRUCT(FComputeDensityCS, FGlobalShader);
-
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
-		SHADER_PARAMETER(int32, ParticleCount)
-		SHADER_PARAMETER(float, SmoothingRadius)
-		SHADER_PARAMETER(float, RestDensity)
-		SHADER_PARAMETER(float, Poly6Coeff)
-		SHADER_PARAMETER(float, SpikyCoeff)
-		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(float, Compliance)
-		SHADER_PARAMETER(float, DeltaTimeSq)
-	END_SHADER_PARAMETER_STRUCT()
-
-	static constexpr int32 ThreadGroupSize = 256;
-
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
-
-	static void ModifyCompilationEnvironment(
-		const FGlobalShaderPermutationParameters& Parameters,
-		FShaderCompilerEnvironment& OutEnvironment);
-};
-
-/**
- * @class FSolvePressureCS
- * @brief [DEPRECATED] Pass 4: Apply position corrections based on density constraints.
- * 
- * @param Particles Read-write access to particle buffer.
- * @param CellCounts Legacy hash table cell counts.
- * @param ParticleIndices Legacy hash table particle indices.
- * @param ParticleCount Number of particles to process.
- * @param SmoothingRadius SPH smoothing radius.
- * @param RestDensity Target rest density.
- * @param SpikyCoeff Precomputed Spiky kernel coefficient.
- * @param Poly6Coeff Precomputed Poly6 kernel coefficient.
- * @param CellSize Spatial hash cell size.
- * @param bEnableTensileInstability Enable tensile instability correction.
- * @param TensileK Scaled strength k for tensile stability.
- * @param TensileN Exponent n for tensile stability.
- * @param InvW_DeltaQ Precomputed 1/W(Δq, h).
- */
-class FSolvePressureCS : public FGlobalShader
-{
-public:
-	DECLARE_GLOBAL_SHADER(FSolvePressureCS);
-	SHADER_USE_PARAMETER_STRUCT(FSolvePressureCS, FGlobalShader);
-
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
-		SHADER_PARAMETER(int32, ParticleCount)
-		SHADER_PARAMETER(float, SmoothingRadius)
-		SHADER_PARAMETER(float, RestDensity)
-		SHADER_PARAMETER(float, SpikyCoeff)
-		SHADER_PARAMETER(float, Poly6Coeff)
-		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(int32, bEnableTensileInstability)
-		SHADER_PARAMETER(float, TensileK)
-		SHADER_PARAMETER(int32, TensileN)
-		SHADER_PARAMETER(float, InvW_DeltaQ)
 	END_SHADER_PARAMETER_STRUCT()
 
 	static constexpr int32 ThreadGroupSize = 256;
@@ -378,85 +284,6 @@ public:
 };
 
 /**
- * @class FApplyViscosityCS
- * @brief [DEPRECATED] Pass 5: Apply XSPH viscosity.
- * 
- * @param Particles Read-write access to particle buffer.
- * @param CellCounts Legacy hash table cell counts.
- * @param ParticleIndices Legacy hash table particle indices.
- * @param NeighborList Neighbor list cache buffer.
- * @param NeighborCounts Neighbor count cache buffer.
- * @param ParticleCount Number of particles to process.
- * @param SmoothingRadius SPH smoothing radius.
- * @param ViscosityCoefficient XSPH viscosity coefficient.
- * @param Poly6Coeff Precomputed Poly6 kernel coefficient.
- * @param ViscLaplacianCoeff Precomputed Laplacian viscosity coefficient.
- * @param DeltaTime Substep delta time.
- * @param CellSize Spatial hash cell size.
- * @param bUseNeighborCache Whether to use cached neighbor list.
- * @param BoundaryParticles World-space boundary particles buffer.
- * @param BoundaryParticleCount Number of boundary particles.
- * @param bUseBoundaryViscosity Whether to include boundary viscosity.
- * @param AdhesionForceStrength Akinci 2013 adhesion force strength.
- * @param AdhesionVelocityStrength Velocity transfer strength.
- * @param AdhesionRadius Boundary adhesion influence radius.
- * @param SortedBoundaryParticles Sorted world-space boundary particles.
- * @param BoundaryCellStart Sorted boundary cell start indices.
- * @param BoundaryCellEnd Sorted boundary cell end indices.
- * @param bUseBoundaryZOrder Whether to use sorted boundary search.
- * @param MortonBoundsMin Minimum bounds for Morton code calculation.
- * @param BoundaryVelocityTransferStrength Factor for boundary following.
- * @param BoundaryDetachSpeedThreshold Speed where detachment begins.
- * @param BoundaryMaxDetachSpeed Speed for full detachment.
- * @param ParticleCountBuffer GPU-accurate particle count buffer.
- */
-class FApplyViscosityCS : public FGlobalShader
-{
-public:
-	DECLARE_GLOBAL_SHADER(FApplyViscosityCS);
-	SHADER_USE_PARAMETER_STRUCT(FApplyViscosityCS, FGlobalShader);
-
-	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleIndices)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborList)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborCounts)
-		SHADER_PARAMETER(int32, ParticleCount)
-		SHADER_PARAMETER(float, SmoothingRadius)
-		SHADER_PARAMETER(float, ViscosityCoefficient)
-		SHADER_PARAMETER(float, Poly6Coeff)
-		SHADER_PARAMETER(float, ViscLaplacianCoeff)
-		SHADER_PARAMETER(float, DeltaTime)
-		SHADER_PARAMETER(float, CellSize)
-		SHADER_PARAMETER(int32, bUseNeighborCache)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, BoundaryParticles)
-		SHADER_PARAMETER(int32, BoundaryParticleCount)
-		SHADER_PARAMETER(int32, bUseBoundaryViscosity)
-		SHADER_PARAMETER(float, AdhesionForceStrength)
-		SHADER_PARAMETER(float, AdhesionVelocityStrength)
-		SHADER_PARAMETER(float, AdhesionRadius)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUBoundaryParticle>, SortedBoundaryParticles)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellStart)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, BoundaryCellEnd)
-		SHADER_PARAMETER(int32, bUseBoundaryZOrder)
-		SHADER_PARAMETER(FVector3f, MortonBoundsMin)
-		SHADER_PARAMETER(float, BoundaryVelocityTransferStrength)
-		SHADER_PARAMETER(float, BoundaryDetachSpeedThreshold)
-		SHADER_PARAMETER(float, BoundaryMaxDetachSpeed)
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
-	END_SHADER_PARAMETER_STRUCT()
-
-	static constexpr int32 ThreadGroupSize = 256;
-
-	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
-
-	static void ModifyCompilationEnvironment(
-		const FGlobalShaderPermutationParameters& Parameters,
-		FShaderCompilerEnvironment& OutEnvironment);
-};
-
-/**
  * @class FParticleSleepingCS
  * @brief NVIDIA Flex stabilization technique: sleep low-velocity particles.
  * 
@@ -477,7 +304,7 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FParticleSleepingCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, SleepingParticles)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, SleepCounters)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborList)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborCounts)
@@ -1245,8 +1072,8 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FExtractPositionsCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, Particles)
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float3>, Positions)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, ExtractParticles)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float3>, ExtractedPositions)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(int32, bUsePredictedPosition)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
@@ -1761,10 +1588,10 @@ public:
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		// SOA particle buffers
-		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, Positions)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, StackPositions)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint2>, PackedVelocities)  // B plan: half3 packed
 		SHADER_PARAMETER(float, UniformParticleMass)  // B plan: uniform mass
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUParticleAttachment>, Attachments)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUParticleAttachment>, StackAttachments)
 
 		// Spatial hash for neighbor search
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
@@ -1837,7 +1664,7 @@ public:
 //   - SimulationBounds = ±1280cm (25.6m total)
 //=============================================================================
 
-// Morton grid constants (must match FluidMortonCode.usf and FluidCellStartEnd.usf)
+// Morton grid constants (must match KawaiiFluidSortingPipeline.usf and KawaiiFluidSortingPipeline.usf)
 // 7 bits per axis → 21-bit Morton code → 2M cells max
 #define GPU_MORTON_GRID_AXIS_BITS 7
 #define GPU_MORTON_GRID_SIZE (1 << GPU_MORTON_GRID_AXIS_BITS)  // 128 (2^7)
@@ -1847,7 +1674,7 @@ public:
 // Build grid lookup structure from sorted Morton codes
 //=============================================================================
 
-// MAX_CELLS = GridResolution^3 (must match FluidCellStartEnd.usf)
+// MAX_CELLS = GridResolution^3 (must match KawaiiFluidSortingPipeline.usf)
 // 128^3 = 2,097,152 cells (21-bit Morton code = Cell ID)
 #define GPU_MAX_CELLS (GPU_MORTON_GRID_SIZE * GPU_MORTON_GRID_SIZE * GPU_MORTON_GRID_SIZE)  // 2,097,152
 
@@ -1862,8 +1689,7 @@ public:
  * @param MortonCodes Output Morton codes buffer.
  * @param ParticleIndices Output particle original indices.
  * @param ParticleCount Number of particles to process.
- * @param BoundsMin Minimum simulation bounds for normalization.
- * @param BoundsExtent Bounds size for normalization.
+ * @param BoundsMin Minimum simulation bounds for classic Morton mode.
  * @param CellSize Spatial hash cell size.
  * @param bUseHybridTiledZOrder Whether to use unlimited range tiling.
  * @param ParticleCountBuffer GPU-accurate particle count buffer.
@@ -1883,7 +1709,6 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<uint>, ParticleIndices)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(FVector3f, BoundsMin)
-		SHADER_PARAMETER(FVector3f, BoundsExtent)
 		SHADER_PARAMETER(float, CellSize)
 		SHADER_PARAMETER(int32, bUseHybridTiledZOrder)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
@@ -2210,7 +2035,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
-	// Increased to 512 to match FluidCellStartEnd.usf
+	// Increased to 512 to match KawaiiFluidSortingPipeline.usf
 	static constexpr int32 ThreadGroupSize = 512;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
@@ -2646,3 +2471,5 @@ public:
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
+
+

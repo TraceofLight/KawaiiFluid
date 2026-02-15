@@ -11,7 +11,7 @@
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FCompactStatsCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidStatsCompact.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/KawaiiFluidSimulationDataLayout.usf",
 	"CompactStatsCS", SF_Compute);
 
 /**
@@ -34,7 +34,7 @@ void FCompactStatsCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FCompactStatsExCS,
-	"/Plugin/KawaiiFluidSystem/Private/FluidStatsCompact.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/KawaiiFluidSimulationDataLayout.usf",
 	"CompactStatsExCS", SF_Compute);
 
 /**

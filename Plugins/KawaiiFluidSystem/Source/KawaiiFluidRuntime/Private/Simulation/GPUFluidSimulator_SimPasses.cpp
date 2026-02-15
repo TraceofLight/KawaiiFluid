@@ -157,8 +157,8 @@ void FGPUFluidSimulator::AddExtractPositionsPass(
 	TShaderMapRef<FExtractPositionsCS> ComputeShader(ShaderMap);
 
 	FExtractPositionsCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FExtractPositionsCS::FParameters>();
-	PassParameters->Particles = ParticlesSRV;
-	PassParameters->Positions = PositionsUAV;
+	PassParameters->ExtractParticles = ParticlesSRV;
+	PassParameters->ExtractedPositions = PositionsUAV;
 	PassParameters->ParticleCount = ParticleCount;
 	if (CurrentIndirectArgsBuffer)
 	{
@@ -259,7 +259,7 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	PassParameters->CellEnd = InCellEndSRV;
 	// Use Z-Order sorting only when manager is valid AND enabled
 	PassParameters->bUseZOrderSorting = bUseZOrderSorting ? 1 : 0;
-	// Morton bounds for Z-Order cell ID calculation (must match FluidMortonCode.usf)
+	// Morton bounds for Z-Order cell ID calculation (must match KawaiiFluidSortingPipeline.usf)
 	PassParameters->MortonBoundsMin = SimulationBoundsMin;
 	PassParameters->MortonBoundsExtent = SimulationBoundsMax - SimulationBoundsMin;
 	// Hybrid Tiled Z-Order mode for unlimited simulation range
@@ -472,7 +472,7 @@ void FGPUFluidSimulator::AddParticleSleepingPass(
 	TShaderMapRef<FParticleSleepingCS> ComputeShader(ShaderMap);
 
 	FParticleSleepingCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FParticleSleepingCS::FParameters>();
-	PassParameters->Particles = InParticlesUAV;
+	PassParameters->SleepingParticles = InParticlesUAV;
 	PassParameters->SleepCounters = InSleepCountersUAV;
 	PassParameters->NeighborList = InNeighborListSRV;
 	PassParameters->NeighborCounts = InNeighborCountsSRV;
@@ -783,4 +783,5 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
 	}
 }
+
 

@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/Passes/KawaiiFluidFlowAccumulationPass.h"
 #include "RenderGraphBuilder.h"
@@ -54,7 +54,7 @@ class FFluidFlowAccumulationCS : public FGlobalShader
 	}
 };
 
-IMPLEMENT_GLOBAL_SHADER(FFluidFlowAccumulationCS, "/Plugin/KawaiiFluidSystem/Private/FluidFlowAccumulation.usf", "FlowAccumulationCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FFluidFlowAccumulationCS, "/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderFlowAccumulation.usf", "FlowAccumulationCS", SF_Compute);
 
 //=============================================================================
 // Pass Implementation
@@ -148,3 +148,4 @@ void KawaiiFluidRenderer::RenderFlowAccumulationPass(
 		PassParameters,
 		GroupCount);
 }
+

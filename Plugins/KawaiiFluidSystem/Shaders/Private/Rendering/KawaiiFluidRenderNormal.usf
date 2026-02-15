@@ -1,0 +1,221 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+
+/**
+ * @file KawaiiFluidRenderNormal.usf
+ * @brief Shader implementation for KawaiiFluidRenderNormal
+ */
+
+#include "/Engine/Private/Common.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidRenderCommon.ush"
+
+// IO
+Texture2D<float> InputDepthTexture;
+RWTexture2D<float4> OutputNormalTexture;
+
+float2 TextureSize;
+float2 InverseTextureSize;
+
+float4x4 ProjectionMatrix;
+float4x4 InverseProjectionMatrix;
+
+// Background depth threshold
+#define BACKGROUND_DEPTH_THRESH 3.0e30f
+
+/**
+ * @brief Compute shader entry point for ReconstructNormalCS
+ */
+
+[numthreads(8, 8, 1)]
+void ReconstructNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    uint2 PixelPosition = DispatchThreadId.xy;
+    if (PixelPosition.x >= (uint)TextureSize.x || PixelPosition.y >= (uint)TextureSize.y)
+    {
+        return;
+    }
+
+    float CenterDepth = InputDepthTexture.Load(int3(PixelPosition, 0));
+
+    // Background check
+    if (CenterDepth > BACKGROUND_DEPTH_THRESH)
+    {
+        OutputNormalTexture[PixelPosition] = float4(0, 0, 0, 0);
+        return;
+    }
+
+    // Calculate UV
+    float2 UV = (float2(PixelPosition) + 0.5) * InverseTextureSize;
+
+    // Neighbor pixel coordinates (4 directions for central difference)
+    int2 LeftPosition = max(PixelPosition - int2(1, 0), int2(0, 0));
+    int2 RightPosition = min(PixelPosition + int2(1, 0), int2(TextureSize) - 1);
+    int2 TopPosition = max(PixelPosition - int2(0, 1), int2(0, 0));
+    int2 BottomPosition = min(PixelPosition + int2(0, 1), int2(TextureSize) - 1);
+
+    // Load neighbor depths (4 directions)
+    float DepthLeft = InputDepthTexture.Load(int3(LeftPosition, 0));
+    float DepthRight = InputDepthTexture.Load(int3(RightPosition, 0));
+    float DepthTop = InputDepthTexture.Load(int3(TopPosition, 0));
+    float DepthBottom = InputDepthTexture.Load(int3(BottomPosition, 0));
+
+    // Determine validity (not background)
+    bool bLeftValid = (DepthLeft <= BACKGROUND_DEPTH_THRESH);
+    bool bRightValid = (DepthRight <= BACKGROUND_DEPTH_THRESH);
+    bool bTopValid = (DepthTop <= BACKGROUND_DEPTH_THRESH);
+    bool bBottomValid = (DepthBottom <= BACKGROUND_DEPTH_THRESH);
+
+    // Reconstruct center view position
+    float3 PositionCenter = ReconstructViewPositionFromDepth(UV, CenterDepth, InverseProjectionMatrix);
+
+    // X-axis derivative (central difference with adaptive fallback)
+    float3 DerivativeX;
+    {
+        float3 PositionLeft = PositionCenter;
+        float3 PositionRight = PositionCenter;
+
+        if (bLeftValid)
+        {
+            float2 UVLeft = (float2(LeftPosition) + 0.5) * InverseTextureSize;
+            PositionLeft = ReconstructViewPositionFromDepth(UVLeft, DepthLeft, InverseProjectionMatrix);
+        }
+        if (bRightValid)
+        {
+            float2 UVRight = (float2(RightPosition) + 0.5) * InverseTextureSize;
+            PositionRight = ReconstructViewPositionFromDepth(UVRight, DepthRight, InverseProjectionMatrix);
+        }
+
+        if (bLeftValid && bRightValid)
+        {
+            // Central difference (both sides valid)
+            // Depth discontinuity detection: use the continuous side if one is discontinuous
+            float DepthDiffLeft = abs(DepthLeft - CenterDepth);
+            float DepthDiffRight = abs(DepthRight - CenterDepth);
+            float DepthThreshold = CenterDepth * 0.1; // 10% threshold
+
+            if (DepthDiffLeft > DepthThreshold && DepthDiffRight <= DepthThreshold)
+            {
+                // Left is discontinuous, use right (forward difference)
+                DerivativeX = PositionRight - PositionCenter;
+            }
+            else if (DepthDiffRight > DepthThreshold && DepthDiffLeft <= DepthThreshold)
+            {
+                // Right is discontinuous, use left (backward difference)
+                DerivativeX = PositionCenter - PositionLeft;
+            }
+            else
+            {
+                // Both valid or both discontinuous - use central difference
+                DerivativeX = (PositionRight - PositionLeft) * 0.5;
+            }
+        }
+        else if (bRightValid)
+        {
+            // Forward difference (only right valid)
+            DerivativeX = PositionRight - PositionCenter;
+        }
+        else if (bLeftValid)
+        {
+            // Backward difference (only left valid)
+            DerivativeX = PositionCenter - PositionLeft;
+        }
+        else
+        {
+            // Both invalid - default
+            DerivativeX = float3(0, 0, 0);
+        }
+    }
+
+    // Y-axis derivative (central difference with adaptive fallback)
+    float3 DerivativeY;
+    {
+        float3 PositionTop = PositionCenter;
+        float3 PositionBottom = PositionCenter;
+
+        if (bTopValid)
+        {
+            float2 UVTop = (float2(TopPosition) + 0.5) * InverseTextureSize;
+            PositionTop = ReconstructViewPositionFromDepth(UVTop, DepthTop, InverseProjectionMatrix);
+        }
+        if (bBottomValid)
+        {
+            float2 UVBottom = (float2(BottomPosition) + 0.5) * InverseTextureSize;
+            PositionBottom = ReconstructViewPositionFromDepth(UVBottom, DepthBottom, InverseProjectionMatrix);
+        }
+
+        if (bTopValid && bBottomValid)
+        {
+            // Central difference (both sides valid)
+            // Depth discontinuity detection
+            float DepthDiffTop = abs(DepthTop - CenterDepth);
+            float DepthDiffBottom = abs(DepthBottom - CenterDepth);
+            float DepthThreshold = CenterDepth * 0.1; // 10% threshold
+
+            if (DepthDiffTop > DepthThreshold && DepthDiffBottom <= DepthThreshold)
+            {
+                // Top is discontinuous, use bottom (forward difference)
+                DerivativeY = PositionBottom - PositionCenter;
+            }
+            else if (DepthDiffBottom > DepthThreshold && DepthDiffTop <= DepthThreshold)
+            {
+                // Bottom is discontinuous, use top (backward difference)
+                DerivativeY = PositionCenter - PositionTop;
+            }
+            else
+            {
+                // Both valid or both discontinuous - use central difference
+                DerivativeY = (PositionBottom - PositionTop) * 0.5;
+            }
+        }
+        else if (bBottomValid)
+        {
+            // Forward difference (only bottom valid)
+            DerivativeY = PositionBottom - PositionCenter;
+        }
+        else if (bTopValid)
+        {
+            // Backward difference (only top valid)
+            DerivativeY = PositionCenter - PositionTop;
+        }
+        else
+        {
+            // Both invalid - default
+            DerivativeY = float3(0, 0, 0);
+        }
+    }
+
+    // Normal calculation with NaN protection
+    // When DerivativeX and DerivativeY are parallel or zero, cross product returns zero vector
+    // normalize(zero) causes division by zero, resulting in NaN
+    float3 CrossProduct = cross(DerivativeX, DerivativeY);
+    float CrossLength = length(CrossProduct);
+
+    float3 Normal;
+    if (CrossLength < 1e-8)
+    {
+        // Degenerate case: DerivativeX and DerivativeY are parallel or zero
+        // Use default camera-facing normal (camera at origin, looking down -Z)
+        // Surface normal should point toward camera = +Z direction
+        Normal = float3(0, 0, 1);
+    }
+    else
+    {
+        Normal = CrossProduct / CrossLength;
+
+        // Flip normal to face camera
+        // In view space: camera at origin, PositionCenter is the vector from camera to surface
+        // If dot(Normal, PositionCenter) > 0, normal is facing away from camera -> flip it
+        if (dot(Normal, PositionCenter) > 0.0)
+        {
+            Normal = -Normal;
+        }
+    }
+
+    // Final NaN check (safety net)
+    if (any(isnan(Normal)) || any(isinf(Normal)))
+    {
+        Normal = float3(0, 0, 1);
+    }
+
+    // Output
+    OutputNormalTexture[PixelPosition] = float4(Normal, 1.0);
+}

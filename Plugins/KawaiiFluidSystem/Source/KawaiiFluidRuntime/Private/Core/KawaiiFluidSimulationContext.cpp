@@ -623,7 +623,7 @@ FGPUFluidSimulationParams UKawaiiFluidSimulationContext::BuildGPUSimParams(
 
 	// Fluid Cohesion (Akinci 2013 force-based)
 	// Uses C(r) spline kernel with K_ij particle deficiency correction
-	// Applied in PredictPositions pass (Phase 2) via FluidForceAccumulation.ush
+	// Applied in PredictPositions pass (Phase 2)
 	GPUParams.CohesionStrength = Preset->Cohesion;  // From Physics|Material (0~50)
 
 	// Surface Tension / Cohesion max correction

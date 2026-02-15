@@ -1,0 +1,357 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file KawaiiFluidParticleCore.ush
+ * @brief Core SPH GPU particle structures, constants, and shared math helpers.
+ */
+
+#pragma once
+
+#include "/Engine/Public/Platform.ush"
+
+//=============================================================================
+// GPU Particle Structure (must match FGPUFluidParticle in C++)
+//=============================================================================
+
+/**
+ * @brief Data layout for FGPUFluidParticle
+ */
+struct FGPUFluidParticle
+{
+	float3 Position;           // 12 bytes
+	float Mass;                // 4 bytes (total: 16)
+
+	float3 PredictedPosition;  // 12 bytes
+	float Density;             // 4 bytes (total: 32)
+
+	float3 Velocity;           // 12 bytes
+	float Lambda;              // 4 bytes (total: 48)
+
+	int ParticleID;            // 4 bytes
+	int SourceID;              // 4 bytes - Source Component ID (-1 = invalid)
+	uint Flags;                // 4 bytes
+	uint NeighborCount;        // 4 bytes (total: 64)
+};
+
+//=============================================================================
+// GPU Particle Flags
+//=============================================================================
+
+#define GPU_PARTICLE_FLAG_NONE                0
+#define GPU_PARTICLE_FLAG_IS_ATTACHED         (1 << 0)
+#define GPU_PARTICLE_FLAG_IS_SURFACE          (1 << 1)
+#define GPU_PARTICLE_FLAG_JUST_DETACHED       (1 << 2)  // Must match C++ EGPUParticleFlags::JustDetached
+#define GPU_PARTICLE_FLAG_NEAR_GROUND         (1 << 3)  // Must match C++ EGPUParticleFlags::NearGround
+#define GPU_PARTICLE_FLAG_HAS_COLLIDED        (1 << 4)  // Must match C++ EGPUParticleFlags::HasCollided
+#define GPU_PARTICLE_FLAG_IS_SLEEPING         (1 << 5)  // Must match C++ EGPUParticleFlags::IsSleeping
+#define GPU_PARTICLE_FLAG_NEAR_BOUNDARY       (1 << 6)  // Must match C++ EGPUParticleFlags::NearBoundary
+
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+#ifndef PI
+#define PI 3.14159265359f
+#endif
+
+#ifndef SMALL_NUMBER
+#define SMALL_NUMBER 0.0001f
+#endif
+
+//=============================================================================
+// Unit Conversion Constants
+// Unreal uses centimeters, SPH physics uses meters
+// Kernel coefficients are precomputed in meters (C++ side)
+//=============================================================================
+#define CM_TO_M 0.01f
+#define CM_TO_M_SQ 0.0001f  // (0.01)^2
+
+//=============================================================================
+// SPH Kernel Functions
+// Based on: Müller et al. "Particle-Based Fluid Simulation for Interactive Applications"
+//=============================================================================
+
+/**
+ * @brief Poly6 kernel (for density calculation)
+ * W(r, h) = 315 / (64 * PI * h^9) * (h^2 - r^2)^3
+ *
+ * @param R2 - Squared distance between particles
+ * @param H2 - Squared smoothing radius
+ * @return Kernel value (NOT multiplied by coefficient)
+ */
+float Poly6Kernel(float R2, float H2)
+{
+	float Diff = H2 - R2;
+	return (Diff > 0.0f) ? Diff * Diff * Diff : 0.0f;
+}
+
+/**
+ * @brief Optimized Spiky gradient using rsqrt (faster inverse square root)
+ * Uses rsqrt(r2) instead of sqrt(r2) for better GPU performance
+ *
+ * @param R - Vector from neighbor to particle (particle.pos - neighbor.pos)
+ * @param R2 - Squared length of R (pre-computed)
+ * @param H - Smoothing radius
+ * @param H2 - Squared smoothing radius (pre-computed)
+ * @return Gradient vector (NOT multiplied by coefficient)
+ */
+float3 SpikyGradientFast(float3 R, float R2, float H, float H2)
+{
+	// Early exit for particles too close (avoid div by zero)
+	if (R2 < SMALL_NUMBER * SMALL_NUMBER)
+	{
+		return float3(0.0f, 0.0f, 0.0f);
+	}
+
+	// rsqrt is faster than sqrt on GPU (uses special function unit)
+	// rLenInv = 1 / sqrt(r2)
+	float RLenInv = rsqrt(R2);
+	float RLen = R2 * RLenInv;  // rLen = r2 / sqrt(r2) = sqrt(r2)
+
+	float Diff = H - RLen;
+	if (Diff <= 0.0f)
+	{
+		return float3(0.0f, 0.0f, 0.0f);
+	}
+
+	// Normalized direction using rsqrt: r * (1/|r|) = r * rsqrt(r2)
+	float3 Dir = R * RLenInv;
+	return Dir * (Diff * Diff);
+}
+
+/**
+ * @brief Viscosity kernel Laplacian (for viscosity calculation)
+ * ∇²W(r, h) = 45 / (PI * h^6) * (h - |r|)
+ *
+ * @param RLen - Distance between particles
+ * @param H - Smoothing radius
+ * @param Coeff - Precomputed coefficient (45 / (PI * h^6))
+ */
+float ViscosityLaplacian(float RLen, float H, float Coeff)
+{
+	float Diff = H - RLen;
+	return (Diff > 0.0f) ? Coeff * Diff : 0.0f;
+}
+
+//=============================================================================
+// Cohesion / Adhesion Kernels (Akinci et al. 2013)
+// "Versatile Surface Tension and Adhesion for SPH Fluids"
+//=============================================================================
+
+/**
+ * @brief Akinci Cohesion Spline Function C(r)
+ * Provides attraction at h/2 and repulsion at close range
+ *
+ * C(r) = 32/(πh^9) * {
+ *   (h-r)³ * r³                    if h/2 < r ≤ h   (attraction)
+ *   2*(h-r)³ * r³ - h⁶/64          if 0 < r ≤ h/2   (repulsion)
+ * }
+ *
+ * Key properties:
+ * - Maximum attraction at r ≈ h/2 (particle rest distance)
+ * - Repulsion at close range prevents clustering
+ * - Smooth transition, no discontinuities
+ *
+ * @param RLen - Distance between particles
+ * @param H - Smoothing radius
+ * @return Spline value (positive = attraction, negative = repulsion)
+ */
+float AkinciCohesionSpline(float RLen, float H)
+{
+	if (RLen > H || RLen < SMALL_NUMBER)
+	{
+		return 0.0f;
+	}
+
+	float H2 = H * H;
+	float H3 = H2 * H;
+	float H6 = H3 * H3;
+	float H9 = H6 * H3;
+	float Coeff = 32.0f / (PI * H9);
+
+	float HalfH = H * 0.5f;
+	float Diff = H - RLen;
+	float Diff3 = Diff * Diff * Diff;
+	float R3 = RLen * RLen * RLen;
+
+	if (RLen > HalfH)
+	{
+		// Attraction region: (h-r)³ * r³
+		return Coeff * Diff3 * R3;
+	}
+	else
+	{
+		// Repulsion region: 2*(h-r)³ * r³ - h⁶/64
+		return Coeff * (2.0f * Diff3 * R3 - H6 / 64.0f);
+	}
+}
+
+/**
+ * @brief Legacy cohesion kernel (kept for compatibility)
+ */
+float CohesionKernel(float RLen, float H)
+{
+	return AkinciCohesionSpline(RLen, H);
+}
+
+/**
+ * @brief Simple adhesion kernel for boundary adhesion (legacy)
+ * Linear falloff: r=0 → max, r=h → 0
+ */
+float AdhesionKernel(float RLen, float H)
+{
+	if (RLen > H || RLen < 0.0001f)
+	{
+		return 0.0f;
+	}
+
+	// Linear falloff: r=0 → 1 (max), r=h → 0 (escape)
+	return 1.0f - (RLen / H);
+}
+
+/**
+ * @brief Convert flag check to bool
+ */
+bool HasFlag(uint Flags, uint Flag)
+{
+	return (Flags & Flag) != 0;
+}
+
+/**
+ * @brief Set flag
+ */
+uint SetFlag(uint Flags, uint Flag)
+{
+	return Flags | Flag;
+}
+
+/**
+ * @brief Clear flag
+ */
+uint ClearFlag(uint Flags, uint Flag)
+{
+	return Flags & ~Flag;
+}
+
+//=============================================================================
+// GPU Collision Feedback Structure (must match FGPUCollisionFeedback in C++)
+// Used for particle -> player interaction readback
+// 80 bytes total for drag-based force calculation + impact offset
+//=============================================================================
+
+/**
+ * @brief Data layout for FGPUCollisionFeedback
+ */
+struct FGPUCollisionFeedback
+{
+	// Row 1: 16 bytes
+	int ParticleIndex;       // 4 bytes - Index of the colliding particle
+	int ColliderIndex;       // 4 bytes - Index of the collider
+	int ColliderType;        // 4 bytes - 0=Sphere, 1=Capsule, 2=Box, 3=Convex
+	float Density;           // 4 bytes - Particle density at collision time
+
+	// Row 2: 16 bytes
+	float3 ImpactNormal;     // 12 bytes - Collision surface normal
+	float Penetration;       // 4 bytes - Penetration depth (cm)
+
+	// Row 3: 16 bytes
+	float3 ParticleVelocity; // 12 bytes - Particle velocity (for drag calculation)
+	int ColliderOwnerID;     // 4 bytes - Unique ID of collider owner (actor/component)
+
+	// Row 4: 16 bytes 
+	int ParticleSourceID;    // 4 bytes - Particle's SourceID (PresetIndex | ComponentIndex << 16)
+	int ParticleActorID;     // 4 bytes - Unique ID of particle's owner actor (reserved)
+	int BoneIndex;           // 4 bytes - Bone index for per-bone force calculation (-1 = no bone)
+	int Padding1;            // 4 bytes - Alignment padding
+
+	// Row 5: 16 bytes
+	float3 ImpactOffset;     // 12 bytes - Impact position in bone-local space
+	int Padding2;            // 4 bytes - Alignment padding
+
+	// Row 6: 16 bytes
+	float3 ParticlePosition; // 12 bytes - Particle world position (for buoyancy center)
+	int Padding3;            // 4 bytes - Alignment padding
+
+};
+
+// Collision primitive type constants
+#define COLLIDER_TYPE_SPHERE   0
+#define COLLIDER_TYPE_CAPSULE  1
+#define COLLIDER_TYPE_BOX      2
+#define COLLIDER_TYPE_CONVEX   3
+
+//=============================================================================
+// Half Precision Packing Utilities (B Plan Bandwidth Optimization)
+// Used by SoA buffers to reduce memory bandwidth by 50%
+//=============================================================================
+
+/**
+ * @brief Pack two floats into one uint (2x float16)
+ * @param V - float2 to pack
+ * @return Packed uint containing two half-precision values
+ */
+uint PackHalf2(float2 V)
+{
+	return f32tof16(V.x) | (f32tof16(V.y) << 16);
+}
+
+/**
+ * @brief Unpack one uint into two floats
+ * @param Packed - uint containing two half-precision values
+ * @return float2 with unpacked values
+ */
+float2 UnpackHalf2(uint Packed)
+{
+	return float2(f16tof32(Packed), f16tof32(Packed >> 16));
+}
+
+/**
+ * @brief Pack float3 velocity into uint2 (half4: xy in .x, z+padding in .y)
+ * Total: 12 bytes → 8 bytes (33% bandwidth reduction)
+ * @param Velocity - float3 velocity to pack
+ * @return uint2 with packed half-precision velocity
+ */
+uint2 PackVelocity(float3 Velocity)
+{
+	uint2 Packed;
+	Packed.x = PackHalf2(float2(Velocity.x, Velocity.y));
+	Packed.y = PackHalf2(float2(Velocity.z, 0.0f));
+	return Packed;
+}
+
+/**
+ * @brief Unpack uint2 into float3 velocity
+ * @param Packed - uint2 containing packed velocity
+ * @return float3 unpacked velocity
+ */
+float3 UnpackVelocity(uint2 Packed)
+{
+	float2 XY = UnpackHalf2(Packed.x);
+	float2 ZW = UnpackHalf2(Packed.y);
+	return float3(XY.x, XY.y, ZW.x);
+}
+
+/**
+ * @brief Pack Density + Lambda into one uint (half2)
+ * Total: 8 bytes → 4 bytes (50% bandwidth reduction)
+ * @param Density - particle density
+ * @param Lambda - PBF lambda constraint multiplier
+ * @return uint with packed half-precision values
+ */
+uint PackDensityLambda(float Density, float Lambda)
+{
+	return PackHalf2(float2(Density, Lambda));
+}
+
+/**
+ * @brief Unpack uint into Density and Lambda
+ * @param Packed - uint containing packed density/lambda
+ * @param OutDensity - output density
+ * @param OutLambda - output lambda
+ */
+void UnpackDensityLambda(uint Packed, out float OutDensity, out float OutLambda)
+{
+	float2 DensityLambda = UnpackHalf2(Packed);
+	OutDensity = DensityLambda.x;
+	OutLambda = DensityLambda.y;
+}

@@ -1999,7 +1999,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					GraphBuilder, CurrentParticleCount, Axis1Buffer, Axis2Buffer, Axis3Buffer);
 			}
 
-			if (Axis1Buffer && Axis2Buffer && Axis3Buffer && SpatialData.CellCountsBuffer && SpatialData.ParticleIndicesBuffer)
+			if (Axis1Buffer && Axis2Buffer && Axis3Buffer && SpatialData.CellStartSRV && SpatialData.CellEndSRV)
 			{
 				FAnisotropyComputeParams AnisotropyParams;
 				// SoA particle buffers
@@ -2022,16 +2022,16 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					AnisotropyParams.AttachmentsSRV = GraphBuilder.CreateSRV(Dummy);
 				}
 
-				AnisotropyParams.CellCountsSRV = GraphBuilder.CreateSRV(SpatialData.CellCountsBuffer);
-				AnisotropyParams.ParticleIndicesSRV = GraphBuilder.CreateSRV(SpatialData.ParticleIndicesBuffer);
+				AnisotropyParams.CellStartSRV = SpatialData.CellStartSRV;
+				AnisotropyParams.CellEndSRV = SpatialData.CellEndSRV;
 				AnisotropyParams.OutAxis1UAV = GraphBuilder.CreateUAV(Axis1Buffer);
 				AnisotropyParams.OutAxis2UAV = GraphBuilder.CreateUAV(Axis2Buffer);
 				AnisotropyParams.OutAxis3UAV = GraphBuilder.CreateUAV(Axis3Buffer);
 				AnisotropyParams.ParticleCount = CurrentParticleCount;
-			if (CurrentIndirectArgsBuffer)
-			{
-				AnisotropyParams.ParticleCountBufferSRV = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
-			}
+				if (CurrentIndirectArgsBuffer)
+				{
+					AnisotropyParams.ParticleCountBufferSRV = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
+				}
 
 				// Render offset for surface particles (pulled toward neighbors)
 				FRDGBufferRef RenderOffsetBuffer = GraphBuilder.CreateBuffer(
@@ -2055,13 +2055,9 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 				AnisotropyParams.CellSize = Params.CellSize;
 
 				// Morton-sorted spatial lookup (cache-friendly sequential access)
-				const bool bAnisotropyUseZOrder = ZOrderSortManager.IsValid() && ZOrderSortManager->IsZOrderSortingEnabled();
-				AnisotropyParams.bUseZOrderSorting = bAnisotropyUseZOrder;
-				if (bAnisotropyUseZOrder)
+				AnisotropyParams.MortonBoundsMin = SimulationBoundsMin;
+				if (ZOrderSortManager.IsValid())
 				{
-					AnisotropyParams.CellStartSRV = SpatialData.CellStartSRV;
-					AnisotropyParams.CellEndSRV = SpatialData.CellEndSRV;
-					AnisotropyParams.MortonBoundsMin = SimulationBoundsMin;
 					// CRITICAL: Use GetEffectiveGridResolutionPreset() - Hybrid mode is preset-independent (always Medium/21-bit)
 					// In Hybrid mode, Morton codes use 21-bit keys regardless of Volume size
 					AnisotropyParams.GridResolutionPreset = ZOrderSortManager->GetEffectiveGridResolutionPreset();

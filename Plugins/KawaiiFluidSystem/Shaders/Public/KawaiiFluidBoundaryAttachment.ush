@@ -1,0 +1,45 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+/**
+ * @file KawaiiFluidBoundaryAttachment.ush
+ * @brief Declares GPU bone-delta attachment data and helper functions.
+ *
+ * Shared by KawaiiFluidAttachmentApply.usf and KawaiiFluidAttachmentUpdate.usf.
+ */
+
+#pragma once
+
+#include "/Engine/Public/Platform.ush"
+
+//=============================================================================
+// FGPUBoneDeltaAttachment Structure (must match C++ in GPUBoundaryAttachment.h)
+// 48 bytes, 16-byte aligned
+//=============================================================================
+
+/**
+ * @brief Data layout for FGPUBoneDeltaAttachment
+ */
+struct FGPUBoneDeltaAttachment
+{
+	int BoundaryParticleIndex;  // 4 bytes - Index into WorldBoundaryParticles (-1 = not attached)
+	float Padding1;             // 4 bytes - Alignment padding (total: 8)
+
+	float3 LocalNormal;         // 12 bytes - Surface normal in world space (for anisotropy)
+	float Padding2;             // 4 bytes - Alignment padding (total: 24)
+
+	float3 PreviousPosition;    // 12 bytes - Previous frame position (for detach check)
+	float Padding3;             // 4 bytes - Alignment padding (total: 40)
+
+	float3 LocalOffset;         // 12 bytes - Offset from boundary position (physics drift)
+	float Padding4;             // 4 bytes - Alignment padding (total: 56)
+
+	// Additional padding to reach 64 bytes (16-byte aligned)
+	float Padding5;             // 4 bytes
+	float Padding6;             // 4 bytes (total: 64)
+};
+
+//=============================================================================
+// Constants
+//=============================================================================
+
+// Invalid boundary particle index (not attached)
+#define BONE_DELTA_INVALID_INDEX -1

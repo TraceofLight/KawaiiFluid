@@ -1,0 +1,1429 @@
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+
+/**
+ * @file KawaiiFluidSimulationAnisotropy.usf
+ * @brief Shader implementation for KawaiiFluidSimulationAnisotropy
+ */
+
+#include "/Engine/Private/Common.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"  // Half precision packing utilities (UnpackVelocity, etc.)
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryParticles.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryAttachment.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidMortonUtils.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidCollisionPrimitives.ush"  // Contains FGPUParticleAttachment, FGPUCollisionSphere/Capsule/Box, quaternion utils
+
+//-----------------------------------------------------------------------------
+// Anisotropy Compute Shader
+// Calculates ellipsoid orientation and scale for each particle
+// Based on NVIDIA FleX and Yu & Turk 2013
+//-----------------------------------------------------------------------------
+
+// NOTE: FGPUParticleAttachment is now defined in KawaiiFluidCollisionPrimitives.ush
+
+// Particle Flags (must match EGPUParticleFlags in C++ and KawaiiFluidParticleCore.ush)
+#define FLAG_IS_ATTACHED (1 << 0)
+#define FLAG_IS_SURFACE (1 << 1)
+#define FLAG_JUST_DETACHED (1 << 2)
+#define FLAG_NEAR_GROUND (1 << 3)
+#define FLAG_HAS_COLLIDED (1 << 4)
+#define FLAG_IS_SLEEPING (1 << 5)
+#define FLAG_NEAR_BOUNDARY (1 << 6)
+
+// Anisotropy Mode
+#define MODE_VELOCITY_BASED 0
+#define MODE_DENSITY_BASED 1
+#define MODE_HYBRID 2
+
+// SoA (Structure of Arrays) Particle Buffers
+Buffer<float> InPositions;               // [ParticleCount * 3] float3 as 3 consecutive floats
+Buffer<uint2> InPackedVelocities;        // B plan: half3 packed as uint2
+Buffer<uint> InFlags;                    // [ParticleCount] uint
+
+// Input: Attachment buffer (for surface normal of attached particles)
+StructuredBuffer<FGPUParticleAttachment> InAttachments;
+
+// Spatial lookup buffers (Morton-sorted sequential access pattern)
+// CellStart/CellEnd give contiguous ranges in the sorted buffer
+StructuredBuffer<uint> CellStart;           // CellStart[cellID] = first particle index in sorted array
+StructuredBuffer<uint> CellEnd;             // CellEnd[cellID] = last particle index in sorted array
+
+// Output: Anisotropy SoA buffers (float4 = direction.xyz + scale.w)
+RWStructuredBuffer<float4> OutAnisotropyAxis1;
+RWStructuredBuffer<float4> OutAnisotropyAxis2;
+RWStructuredBuffer<float4> OutAnisotropyAxis3;
+
+// Output: Render offset for surface particles (pull toward neighbors for rendering)
+RWStructuredBuffer<float3> OutRenderOffset;
+float ParticleRadius;
+
+// Parameters (GPU-accurate particle count from ParticleCountBuffer[6])
+StructuredBuffer<uint> ParticleCountBuffer;
+uint AnisotropyMode;  // 0=Velocity, 1=Density, 2=Hybrid
+float VelocityStretchFactor;
+float AnisotropyScale;
+float AnisotropyMin;
+float AnisotropyMax;
+float DensityWeight;  // For Hybrid mode
+float SmoothingRadius;
+float CellSize;
+
+// Attached particle anisotropy params
+float AttachedFlattenScale;   // How flat (0.3 = 30% height along normal)
+float AttachedStretchScale;   // Perpendicular stretch (1.5 = 150%)
+
+// Morton code parameters (for Z-Order sorting mode)
+float3 MortonBoundsMin;       // Grid origin for Morton code calculation
+int bUseHybridTiledZOrder;    // 1 = Hybrid Tiled Z-Order (unlimited range), 0 = Classic Morton
+
+//-----------------------------------------------------------------------------
+// Boundary Particles for anisotropy calculation (Akinci 2012 style)
+//-----------------------------------------------------------------------------
+
+// Legacy brute-force mode
+StructuredBuffer<FGPUBoundaryParticle> BoundaryParticles;
+int BoundaryParticleCount;
+int bUseBoundaryAnisotropy;
+
+// Z-Order sorted mode (cache-friendly)
+StructuredBuffer<FGPUBoundaryParticle> SortedBoundaryParticles;
+StructuredBuffer<uint> BoundaryCellStart;
+StructuredBuffer<uint> BoundaryCellEnd;
+int bUseBoundaryZOrder;
+float BoundaryWeight;
+
+// Temporal Smoothing
+StructuredBuffer<float4> PrevAnisotropyAxis1;
+StructuredBuffer<float4> PrevAnisotropyAxis2;
+StructuredBuffer<float4> PrevAnisotropyAxis3;
+int bEnableTemporalSmoothing;
+float TemporalSmoothFactor;
+int bHasPreviousFrame;
+
+// Volume Preservation mode
+// 1 = Yu & Turk style (log-space, volume = 1.0)
+// 0 = FleX style (raw eigenvalues, no volume constraint)
+int bPreserveVolume;
+
+// Non-preserved render scale (only used when bPreserveVolume = 0)
+// Controls overall ellipsoid size when volume preservation is disabled
+float NonPreservedRenderScale;
+
+StructuredBuffer<FGPUBoneDeltaAttachment> InBoneDeltaAttachments;
+
+// Surface Normal Anisotropy enable flag
+int bEnableSurfaceNormalAnisotropy;  // 1 = use surface normal for NEAR_BOUNDARY particles
+
+//-----------------------------------------------------------------------------
+// Collision Primitives for direct surface normal calculation
+// NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
+//-----------------------------------------------------------------------------
+StructuredBuffer<FGPUCollisionSphere> CollisionSpheres;
+StructuredBuffer<FGPUCollisionCapsule> CollisionCapsules;
+StructuredBuffer<FGPUCollisionBox> CollisionBoxes;
+int SphereCount;
+int CapsuleCount;
+int BoxCount;
+float ColliderSearchRadius;
+
+//-----------------------------------------------------------------------------
+// Z-Order Cell ID Calculation (uses shader parameters)
+// Morton code functions are provided by KawaiiFluidMortonUtils.ush
+//-----------------------------------------------------------------------------
+
+/**
+ * @brief Compute cell ID from cell coordinates (integer)
+ * Supports both Hybrid Tiled Z-Order (unlimited range) and Classic Morton (bounded)
+ * This version uses shader parameters (MortonBoundsMin, CellSize, bUseHybridTiledZOrder) directly.
+ */
+uint GetMortonCellIDFromCellCoord_Aniso(int3 CellCoord)
+{
+	if (bUseHybridTiledZOrder)
+	{
+		// Hybrid Tiled Z-Order: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
+		// Matches MAX_CELLS, so mask is a no-op but kept for consistency
+		// Hash collisions (8 tile buckets) are filtered by distance check
+		return ComputeHybridTiledKey(CellCoord) & (MAX_CELLS - 1);
+	}
+	else
+	{
+		// Classic Morton code: bounded range
+		// Compute grid minimum cell (same as in KawaiiFluidSortingPipeline.usf)
+		int3 GridMin = int3(floor(MortonBoundsMin / CellSize));
+
+		// Offset cell coordinates to make them positive (relative to grid min)
+		int3 Offset = CellCoord - GridMin;
+
+		// Clamp to valid range for current preset
+		uint3 UOffset = uint3(max(Offset, int3(0, 0, 0)));
+		UOffset = min(UOffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+
+		// Compute Morton code using preset-specific function from KawaiiFluidMortonUtils.ush
+		return Morton3D(UOffset.x, UOffset.y, UOffset.z);
+	}
+}
+
+//-----------------------------------------------------------------------------
+// FleX / Yu & Turk Style Constants
+//-----------------------------------------------------------------------------
+
+// Eigenvalue ratio clamping (prevents too-thin ellipsoids)
+// kr = 4 means minimum scale is 25% of maximum (FleX style, more rounded)
+#define K_R 4.0f
+
+// Minimum neighbors for covariance calculation (PCA requires at least 4)
+#define MIN_NEIGHBORS_FOR_ANISOTROPY 4
+
+// Neighbor count for full anisotropy (surface particles typically have ~6+)
+// At MIN(4): sphere, At FULL(6): complete anisotropy
+#define FULL_NEIGHBORS_FOR_ANISOTROPY 6
+
+// Stretch multiplier to make ellipsoids visually elongated
+// FleX uses 1.0 (no extra multiplier) - higher values cause edge artifacts
+#define STRETCH_MULTIPLIER 1.0f
+
+//-----------------------------------------------------------------------------
+// Helper: Build orthonormal basis from direction (Frisvad's method)
+//-----------------------------------------------------------------------------
+/**
+ * @brief Builds an orthonormal basis from a direction
+ */
+void BuildOrthonormalBasis(float3 N, out float3 T, out float3 B)
+{
+	if (N.z < -0.9999999f)
+	{
+		T = float3(0.0f, -1.0f, 0.0f);
+		B = float3(-1.0f, 0.0f, 0.0f);
+	}
+	else
+	{
+		float A = 1.0f / (1.0f + N.z);
+		float D = -N.x * N.y * A;
+		T = float3(1.0f - N.x * N.x * A, D, -N.x);
+		B = float3(D, 1.0f - N.y * N.y * A, -N.y);
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Collider Surface Normal Calculation
+// Finds the closest bone collider (Sphere/Capsule/Box) and returns surface normal
+// NOTE: Colliders are ALREADY in world space (transformed by C++ before upload)
+//-----------------------------------------------------------------------------
+
+/**
+ * @brief Returns the nearest collider surface normal
+ */
+float3 GetClosestColliderNormal(float3 Pos, float SearchRadius)
+{
+	float ClosestDist = SearchRadius;
+	float3 ClosestNormal = float3(0, 0, 0);  // Zero = not found
+	bool bFoundCollider = false;
+
+	// Check spheres
+	for (int Si = 0; Si < SphereCount; ++Si)
+	{
+		FGPUCollisionSphere Sphere = CollisionSpheres[Si];
+
+		float3 ToPoint = Pos - Sphere.Center;
+		float Dist = length(ToPoint);
+		float SignedDist = Dist - Sphere.Radius;
+
+		if (abs(SignedDist) < ClosestDist)
+		{
+			ClosestDist = abs(SignedDist);
+			ClosestNormal = (Dist > 0.001f) ? (ToPoint / Dist) : float3(0, 0, 1);
+			bFoundCollider = true;
+		}
+	}
+
+	// Check capsules
+	for (int Ci = 0; Ci < CapsuleCount; ++Ci)
+	{
+		FGPUCollisionCapsule Capsule = CollisionCapsules[Ci];
+
+		float3 CapsuleAxis = Capsule.End - Capsule.Start;
+		float CapsuleAxisLengthSq = dot(CapsuleAxis, CapsuleAxis);
+		float AxisT = (CapsuleAxisLengthSq > 0.0001f) ? saturate(dot(Pos - Capsule.Start, CapsuleAxis) / CapsuleAxisLengthSq) : 0.0f;
+		float3 ClosestOnAxis = Capsule.Start + AxisT * CapsuleAxis;
+		float3 ToPoint = Pos - ClosestOnAxis;
+		float Dist = length(ToPoint);
+		float SignedDist = Dist - Capsule.Radius;
+
+		if (abs(SignedDist) < ClosestDist)
+		{
+			ClosestDist = abs(SignedDist);
+			ClosestNormal = (Dist > 0.001f) ? (ToPoint / Dist) : float3(0, 0, 1);
+			bFoundCollider = true;
+		}
+	}
+
+	// Check boxes
+	for (int Bi = 0; Bi < BoxCount; ++Bi)
+	{
+		FGPUCollisionBox Box = CollisionBoxes[Bi];
+
+		// Transform to Box local space
+		float3 LocalP = InverseRotateByQuat(Pos - Box.Center, Box.Rotation);
+
+		// Clamp to Box surface
+		float3 Clamped = clamp(LocalP, -Box.Extent, Box.Extent);
+
+		// Find Which face is closest
+		float3 LocalNormal = float3(0, 0, 1);
+		float3 Diff = LocalP - Clamped;
+		float DiffLen = length(Diff);
+
+		if (DiffLen > 0.001f)
+		{
+			// Outside Box: normal points from surface to point
+			LocalNormal = Diff / DiffLen;
+		}
+		else
+		{
+			// Inside Box: find closest face
+			float3 DistToFace = Box.Extent - abs(LocalP);
+			if (DistToFace.x <= DistToFace.y && DistToFace.x <= DistToFace.z)
+				LocalNormal = float3(sign(LocalP.x), 0, 0);
+			else if (DistToFace.y <= DistToFace.z)
+				LocalNormal = float3(0, sign(LocalP.y), 0);
+			else
+				LocalNormal = float3(0, 0, sign(LocalP.z));
+		}
+
+		// Transform normal back to world space
+		float3 WorldNormal = RotateByQuat(LocalNormal, Box.Rotation);
+		float SignedDist = DiffLen;
+
+		if (SignedDist < ClosestDist)
+		{
+			ClosestDist = SignedDist;
+			ClosestNormal = WorldNormal;
+			bFoundCollider = true;
+		}
+	}
+
+	return bFoundCollider ? normalize(ClosestNormal) : float3(0, 0, 0);
+}
+
+//-----------------------------------------------------------------------------
+// Surface Normal-Based Anisotropy for NEAR_BOUNDARY Particles
+// Creates a "pancake" shape flattened against the bone collider surface
+// Calculates surface normal directly from Collision Primitives (Sphere/Capsule/Box)
+//-----------------------------------------------------------------------------
+
+/**
+ * @brief Calculate anisotropy for NEAR_BOUNDARY particles using bone collider surface normal
+ * Directly queries collision primitives instead of reading stored normal
+ *
+ * @param ParticleIndex - Particle index
+ * @param ParticlePos - Particle world position
+ * @param Axis1, Axis2, Axis3 - Output orthonormal basis
+ * @param Scale1, Scale2, Scale3 - Output ellipsoid scales (volume-preserving)
+ * @return true if successfully calculated, false if no collider found
+ */
+bool CalculateBoundaryAnisotropy(
+	uint ParticleIndex,
+	float3 ParticlePos,
+	out float3 Axis1, out float3 Axis2, out float3 Axis3,
+	out float Scale1, out float Scale2, out float Scale3)
+{
+	// Default: sphere (identity)
+	Axis1 = float3(1, 0, 0);
+	Axis2 = float3(0, 1, 0);
+	Axis3 = float3(0, 0, 1);
+	Scale1 = Scale2 = Scale3 = 1.0f;
+
+	// Fallback To sphere if no colliders
+	if (SphereCount == 0 && CapsuleCount == 0 && BoxCount == 0)
+	{
+		return false;
+	}
+
+	// Calculate surface normal from closest collider
+	float3 WorldNormal = GetClosestColliderNormal(ParticlePos, ColliderSearchRadius);
+
+	// Fallback if normal not found (collider out of range)
+	if (length(WorldNormal) < 0.001f)
+	{
+		return false;
+	}
+	WorldNormal = normalize(WorldNormal);
+
+	// Build orthonormal basis: Axis3 = surface normal (flatten direction)
+	Axis3 = WorldNormal;
+	BuildOrthonormalBasis(Axis3, Axis1, Axis2);
+
+	// Pancake shape with custom aspect ratio and volume
+	// Aspect ratio (width:height) = 4:1, target volume = 3.0
+	float AspectRatio = 4.0f;   // width/height ratio
+	float TargetVolume = 3.0f;  // target volume
+
+	// Calculation: Scale1 = Scale2 = AspectRatio * Scale3
+	// Volume = aspectRatio² × Scale3³ = TargetVolume
+	// Scale3 = (TargetVolume / aspectRatio²)^(1/3)
+	Scale3 = pow(TargetVolume / (AspectRatio * AspectRatio), 1.0f / 3.0f);
+	Scale1 = AspectRatio * Scale3;
+	Scale2 = Scale1;
+
+	// Clamp To valid range
+	Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+	Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+	Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+
+	return true;
+}
+
+//-----------------------------------------------------------------------------
+// Helper: SPH Kernel weight (cubic spline)
+//-----------------------------------------------------------------------------
+/**
+ * @brief Computes anisotropy kernel weight
+ */
+float KernelWeight(float Distance, float H)
+{
+	if (Distance >= H)
+	{
+		return 0.0f;
+	}
+
+	float Q = Distance / H;
+	if (Q < 0.5f)
+	{
+		return 1.0f - 6.0f * Q * Q + 6.0f * Q * Q * Q;
+	}
+	else
+	{
+		float OneMinusQ = 1.0f - Q;
+		return 2.0f * OneMinusQ * OneMinusQ * OneMinusQ;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Helper: 3x3 Symmetric Eigenvalue Decomposition (Analytical - Cardano's formula)
+// OPTIMIZED: No iteration, direct analytical solution
+// Reference: "Eigenvalues of a 3x3 symmetric matrix" - Kopp (2008)
+//-----------------------------------------------------------------------------
+
+/**
+ * @brief Compute eigenvector for a given eigenvalue using cross product method
+ */
+float3 ComputeEigenvector(float3x3 A, float Eigenvalue)
+{
+	// (A - λI) should have rank 2, so we find null space
+	float3 Row0 = float3(A[0][0] - Eigenvalue, A[0][1], A[0][2]);
+	float3 Row1 = float3(A[1][0], A[1][1] - Eigenvalue, A[1][2]);
+	float3 Row2 = float3(A[2][0], A[2][1], A[2][2] - Eigenvalue);
+
+	// Cross product of two rows gives eigenvector (perpendicular to both)
+	float3 Cross01 = cross(Row0, Row1);
+	float3 Cross12 = cross(Row1, Row2);
+	float3 Cross02 = cross(Row0, Row2);
+
+	// Pick the cross product with largest magnitude For numerical stability
+	float Len01 = dot(Cross01, Cross01);
+	float Len12 = dot(Cross12, Cross12);
+	float Len02 = dot(Cross02, Cross02);
+
+	float3 Eigenvec;
+	if (Len01 >= Len12 && Len01 >= Len02)
+	{
+		Eigenvec = Cross01;
+	}
+	else if (Len12 >= Len01 && Len12 >= Len02)
+	{
+		Eigenvec = Cross12;
+	}
+	else
+	{
+		Eigenvec = Cross02;
+	}
+
+	float Len = length(Eigenvec);
+	if (Len > 1e-10f)
+	{
+		return Eigenvec / Len;
+	}
+
+	// Fallback For degenerate case
+	return float3(1, 0, 0);
+}
+
+/**
+ * @brief Solves eigen decomposition for a symmetric 3x3 matrix
+ */
+void SymmetricEigen3x3(
+	float3x3 M,
+	out float3 EigenValues,
+	out float3 EigenVec0,
+	out float3 EigenVec1,
+	out float3 EigenVec2)
+{
+	// Diagonal and off-diagonal elements
+	float M00 = M[0][0], m11 = M[1][1], m22 = M[2][2];
+	float M01 = M[0][1], m02 = M[0][2], m12 = M[1][2];
+
+	// Check if already diagonal (common case for sparse distributions)
+	float OffDiagSq = M01*M01 + m02*m02 + m12*m12;
+	if (OffDiagSq < 1e-12f)
+	{
+		// Already diagonal - eigenvalues are diagonal elements
+		// Sort descending
+		if (M00 >= m11 && M00 >= m22)
+		{
+			EigenValues.x = M00;
+			EigenVec0 = float3(1, 0, 0);
+			if (m11 >= m22)
+			{
+				EigenValues.y = m11;
+				EigenValues.z = m22;
+				EigenVec1 = float3(0, 1, 0);
+				EigenVec2 = float3(0, 0, 1);
+			}
+			else
+			{
+				EigenValues.y = m22;
+				EigenValues.z = m11;
+				EigenVec1 = float3(0, 0, 1);
+				EigenVec2 = float3(0, 1, 0);
+			}
+		}
+		else if (m11 >= M00 && m11 >= m22)
+		{
+			EigenValues.x = m11;
+			EigenVec0 = float3(0, 1, 0);
+			if (M00 >= m22)
+			{
+				EigenValues.y = M00;
+				EigenValues.z = m22;
+				EigenVec1 = float3(1, 0, 0);
+				EigenVec2 = float3(0, 0, 1);
+			}
+			else
+			{
+				EigenValues.y = m22;
+				EigenValues.z = M00;
+				EigenVec1 = float3(0, 0, 1);
+				EigenVec2 = float3(1, 0, 0);
+			}
+		}
+		else
+		{
+			EigenValues.x = m22;
+			EigenVec0 = float3(0, 0, 1);
+			if (M00 >= m11)
+			{
+				EigenValues.y = M00;
+				EigenValues.z = m11;
+				EigenVec1 = float3(1, 0, 0);
+				EigenVec2 = float3(0, 1, 0);
+			}
+			else
+			{
+				EigenValues.y = m11;
+				EigenValues.z = M00;
+				EigenVec1 = float3(0, 1, 0);
+				EigenVec2 = float3(1, 0, 0);
+			}
+		}
+		return;
+	}
+
+	// =========================================================================
+	// Cardano's formula for eigenvalues of 3x3 Symmetric matrix
+	// Characteristic polynomial: λ³ - c2*λ² + c1*λ - c0 = 0
+	// =========================================================================
+
+	// Invariants of the matrix
+	float Trace = M00 + m11 + m22;
+	float Q = Trace / 3.0f;
+
+	// Shift matrix by Q to make it traceless: B = A - Q*I
+	float B00 = M00 - Q;
+	float B11 = m11 - Q;
+	float B22 = m22 - Q;
+
+	// p² = (1/6) * (sum of squares of B elements) * 2
+	// For Symmetric: p² = (1/6) * (b00² + b11² + b22² + 2*(m01² + m02² + m12²))
+	float P2 = (B00*B00 + B11*B11 + B22*B22 + 2.0f * OffDiagSq) / 6.0f;
+
+	if (P2 < 1e-12f)
+	{
+		// Matrix is Q*I (all eigenvalues equal)
+		EigenValues = float3(Q, Q, Q);
+		EigenVec0 = float3(1, 0, 0);
+		EigenVec1 = float3(0, 1, 0);
+		EigenVec2 = float3(0, 0, 1);
+		return;
+	}
+
+	float P = sqrt(P2);
+
+	// Determinant of B/P (scaled shifted matrix)
+	// det(B) = B00*(B11*B22 - m12²) - M01*(M01*B22 - m12*m02) + m02*(M01*m12 - B11*m02)
+	float DetB = B00 * (B11*B22 - m12*m12)
+	           - M01 * (M01*B22 - m12*m02)
+	           + m02 * (M01*m12 - B11*m02);
+
+	// R = det(B/P) / 2 = det(B) / (2 * p³)
+	float R = DetB / (2.0f * P * P * P);
+
+	// Clamp R to [-1, 1] for numerical stability
+	R = clamp(R, -1.0f, 1.0f);
+
+	// Angle for Cardano's formula
+	float Phi = acos(R) / 3.0f;
+
+	// Three eigenvalues (sorted descending)
+	// λk = Q + 2*P*cos(φ + 2πk/3) for k = 0, 1, 2
+	const float TWO_PI_OVER_3 = 2.0943951f;  // 2π/3
+
+	float Lambda0 = Q + 2.0f * P * cos(Phi);
+	float Lambda2 = Q + 2.0f * P * cos(Phi + TWO_PI_OVER_3);
+	float Lambda1 = 3.0f * Q - Lambda0 - Lambda2;  // Trace = sum of eigenvalues
+
+	// Eigenvalues are already sorted: Lambda0 >= Lambda1 >= Lambda2
+	EigenValues = float3(Lambda0, Lambda1, Lambda2);
+
+	// =========================================================================
+	// Compute eigenvectors using cross product method
+	// =========================================================================
+	EigenVec0 = ComputeEigenvector(M, Lambda0);
+
+	// For Second eigenvector, ensure orthogonality to first
+	EigenVec1 = ComputeEigenvector(M, Lambda1);
+	// Gram-Schmidt orthogonalization
+	EigenVec1 = EigenVec1 - dot(EigenVec1, EigenVec0) * EigenVec0;
+	float Len1 = length(EigenVec1);
+	if (Len1 > 1e-10f)
+	{
+		EigenVec1 /= Len1;
+	}
+	else
+	{
+		// Degenerate: build orthogonal vector
+		BuildOrthonormalBasis(EigenVec0, EigenVec1, EigenVec2);
+		return;
+	}
+
+	// Third eigenvector is cross product of first two (guaranteed orthogonal)
+	EigenVec2 = cross(EigenVec0, EigenVec1);
+}
+
+//-----------------------------------------------------------------------------
+// Velocity-Based Anisotropy (with explicit velocity parameter)
+// Supports both volume-preserving (Yu & Turk) and FleX style
+//-----------------------------------------------------------------------------
+/**
+ * @brief Calculates velocity-based anisotropy with relative velocity
+ */
+void CalculateVelocityBasedWithVelocity(
+	float3 Velocity,
+	out float3 Axis1, out float3 Axis2, out float3 Axis3,
+	out float Scale1, out float Scale2, out float Scale3)
+{
+	// Default: identity (sphere)
+	Axis1 = float3(1, 0, 0);
+	Axis2 = float3(0, 1, 0);
+	Axis3 = float3(0, 0, 1);
+	Scale1 = Scale2 = Scale3 = 1.0f;
+
+	float Speed = length(Velocity);
+
+	if (Speed > 0.001f)
+	{
+		Axis1 = Velocity / Speed;
+		BuildOrthonormalBasis(Axis1, Axis2, Axis3);
+
+		float Stretch = VelocityStretchFactor * AnisotropyScale;
+		float RawScale1 = 1.0f + Speed * Stretch;
+
+		if (bPreserveVolume)
+		{
+			// =========================================================================
+			// Volume-preserving using log-space processing
+			// Stretch along velocity: LogScale1 = log(1 + Speed * Stretch)
+			// Perpendicular compression: LogScale2 = LogScale3 = -LogScale1 / 2 (volume = 1.0)
+			// =========================================================================
+
+			// Convert to log space
+			float LogScale1 = log(max(RawScale1, 0.001f));
+			// Volume preservation: LogScale1 + 2*LogScale2 = 0 => LogScale2 = -LogScale1/2
+			float LogScale2 = -LogScale1 * 0.5f;
+			float LogScale3 = LogScale2;
+
+			// Re-center logs to maintain volume = 1.0
+			float LogSum = LogScale1 + LogScale2 + LogScale3;
+			float LogAvg = LogSum / 3.0f;
+			LogScale1 -= LogAvg;
+			LogScale2 -= LogAvg;
+			LogScale3 -= LogAvg;
+
+			// Final Clamp in log space (only once, after all operations)
+			float LogMin = log(max(AnisotropyMin, 0.001f));
+			float LogMax = log(max(AnisotropyMax, 0.001f));
+			LogScale1 = clamp(LogScale1, LogMin, LogMax);
+			LogScale2 = clamp(LogScale2, LogMin, LogMax);
+			LogScale3 = clamp(LogScale3, LogMin, LogMax);
+
+			// Convert back to linear space
+			Scale1 = exp(LogScale1);
+			Scale2 = exp(LogScale2);
+			Scale3 = exp(LogScale3);
+		}
+		else
+		{
+			// =========================================================================
+			// Non-Preserved Style: No volume preservation
+			// Stretch along velocity direction, perpendicular axes scaled by NonPreservedRenderScale
+			// =========================================================================
+			Scale1 = clamp(RawScale1 * NonPreservedRenderScale, AnisotropyMin, AnisotropyMax);
+			Scale2 = NonPreservedRenderScale;
+			Scale3 = NonPreservedRenderScale;
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Density-Based Anisotropy (Covariance Matrix)
+// NVIDIA FleX Style with Local Caching Optimization
+// Pass 1: Single memory traversal - cache neighbors + compute SmoothedCenter
+// Pass 2: Compute covariance from LOCAL CACHE (no memory access)
+// This prevents jittering and avoids double memory traversal
+//-----------------------------------------------------------------------------
+
+// Maximum cached neighbors per particle (typical PBF has ~20-40 neighbors)
+// NOTE: Keep this small (32) to avoid GPU register spilling. 64 causes ~50% slowdown.
+#define MAX_CACHED_NEIGHBORS 32
+
+/**
+ * @brief Calculates density-based anisotropy
+ */
+void CalculateDensityBased(
+	uint ParticleIndex,
+	out float3 Axis1, out float3 Axis2, out float3 Axis3,
+	out float Scale1, out float Scale2, out float Scale3,
+	out int OutNeighborCount,
+	out float3 OutSmoothedCenter)  // Weighted average position of neighbors (for render offset)
+{
+	// Default: identity (sphere with Scale 1.0, NOT AnisotropyScale)
+	Axis1 = float3(1, 0, 0);
+	Axis2 = float3(0, 1, 0);
+	Axis3 = float3(0, 0, 1);
+	Scale1 = Scale2 = Scale3 = 1.0f;
+	OutNeighborCount = 0;
+	OutSmoothedCenter = float3(0, 0, 0);  // initialize
+
+	uint Idx3 = ParticleIndex * 3;
+	float3 CenterPos = float3(InPositions[Idx3], InPositions[Idx3 + 1], InPositions[Idx3 + 2]);
+
+	int3 CenterCell = WorldToCell(CenterPos, CellSize);
+	int CellRadius = (int)ceil(SmoothingRadius / CellSize);
+	float H2 = SmoothingRadius * SmoothingRadius;
+
+	// =========================================================================
+	// Local cache for neighbor data (avoids second memory traversal)
+	// =========================================================================
+	float3 CachedPositions[MAX_CACHED_NEIGHBORS];
+	float CachedWeights[MAX_CACHED_NEIGHBORS];
+	int CachedCount = 0;
+
+	// =========================================================================
+	// PASS 1: Single memory traversal - cache neighbors + compute SmoothedCenter
+	// =========================================================================
+	float3 SumWP = float3(0, 0, 0);
+	float SumW = 0.0f;
+	int NeighborCount = 0;
+
+	for (int Dz = -CellRadius; Dz <= CellRadius; ++Dz)
+	{
+		for (int Dy = -CellRadius; Dy <= CellRadius; ++Dy)
+		{
+			for (int Dx = -CellRadius; Dx <= CellRadius; ++Dx)
+			{
+				int3 NeighborCell = CenterCell + int3(Dx, Dy, Dz);
+				uint CellID = GetMortonCellIDFromCellCoord_Aniso(NeighborCell);
+				uint Start = CellStart[CellID];
+				uint End = CellEnd[CellID];
+
+				if (Start == INVALID_INDEX || End == INVALID_INDEX)
+				{
+					continue;
+				}
+
+				End = min(End, (uint)(ParticleCountBuffer[6] - 1));
+
+				for (uint NeighborIdx = Start; NeighborIdx <= End; ++NeighborIdx)
+				{
+					if (NeighborIdx >= ParticleCountBuffer[6])
+					{
+						continue;
+					}
+
+					uint NeighborIdx3 = NeighborIdx * 3;
+					float3 NeighborPos = float3(InPositions[NeighborIdx3], InPositions[NeighborIdx3 + 1], InPositions[NeighborIdx3 + 2]);
+					float3 Diff = NeighborPos - CenterPos;
+					float Dist2 = dot(Diff, Diff);
+
+					if (Dist2 < H2)
+					{
+						float Dist = sqrt(Dist2);
+						float W = KernelWeight(Dist, SmoothingRadius);
+
+						if (W > 0.0001f)
+						{
+							// Accumulate for SmoothedCenter
+							SumWP += W * NeighborPos;
+							SumW += W;
+							NeighborCount++;
+
+							// Cache for Pass 2 (avoid overflow)
+							if (CachedCount < MAX_CACHED_NEIGHBORS)
+							{
+								CachedPositions[CachedCount] = NeighborPos;
+								CachedWeights[CachedCount] = W;
+								CachedCount++;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	OutNeighborCount = NeighborCount;
+
+	// Need minimum neighbors for reliable covariance
+	if (NeighborCount < MIN_NEIGHBORS_FOR_ANISOTROPY || SumW < 0.0001f)
+	{
+		return;
+	}
+
+	// Compute Smoothed Position (weighted average)
+	float3 SmoothedCenter = SumWP / SumW;
+	OutSmoothedCenter = SmoothedCenter;  // return for render offset calculation
+
+	// =========================================================================
+	// PASS 2: Compute Covariance from LOCAL CACHE (no memory access!)
+	// This is the key optimization - we read from registers/local memory
+	// =========================================================================
+	float SumWXX_00 = 0, SumWXX_01 = 0, SumWXX_02 = 0;
+	float SumWXX_11 = 0, SumWXX_12 = 0, SumWXX_22 = 0;
+	float TotalWeight = 0.0f;
+
+	for (int Ci = 0; Ci < CachedCount; ++Ci)
+	{
+		float3 NeighborPos = CachedPositions[Ci];
+		float W = CachedWeights[Ci];
+
+		// Use offset from SmoothedCenter (FleX Style)
+		float3 Offset = NeighborPos - SmoothedCenter;
+
+		TotalWeight += W;
+
+		SumWXX_00 += W * Offset.x * Offset.x;
+		SumWXX_01 += W * Offset.x * Offset.y;
+		SumWXX_02 += W * Offset.x * Offset.z;
+		SumWXX_11 += W * Offset.y * Offset.y;
+		SumWXX_12 += W * Offset.y * Offset.z;
+		SumWXX_22 += W * Offset.z * Offset.z;
+	}
+
+	// =========================================================================
+	// Boundary Particle contribution to covariance (Akinci 2012 Style + FleX)
+	// Boundary particles contribute to the covariance matrix to influence
+	// ellipsoid orientation near surfaces
+	// Also Uses SmoothedCenter for stability
+	// =========================================================================
+	if (bUseBoundaryAnisotropy && BoundaryParticleCount > 0)
+	{
+		if (bUseBoundaryZOrder)
+		{
+			// =================================================================
+			// Z-Order Mode: O(K) neighbor search using Morton code
+			// =================================================================
+			for (int Dz = -CellRadius; Dz <= CellRadius; ++Dz)
+			{
+				for (int Dy = -CellRadius; Dy <= CellRadius; ++Dy)
+				{
+					for (int Dx = -CellRadius; Dx <= CellRadius; ++Dx)
+					{
+						int3 NeighborCell = CenterCell + int3(Dx, Dy, Dz);
+						uint CellID = GetMortonCellIDFromCellCoord_Aniso(NeighborCell);
+						uint BStart = BoundaryCellStart[CellID];
+						uint BEnd = BoundaryCellEnd[CellID];
+
+						// Skip empty cells
+						if (BStart == INVALID_INDEX || BEnd == INVALID_INDEX)
+						{
+							continue;
+						}
+
+						// Sequential access through sorted Boundary particles
+						for (uint Bi = BStart; Bi <= BEnd; ++Bi)
+						{
+							FGPUBoundaryParticle Boundary = SortedBoundaryParticles[Bi];
+							float3 Diff = Boundary.Position - CenterPos;
+							float Dist2 = dot(Diff, Diff);
+
+							if (Dist2 < H2)
+							{
+								float Dist = sqrt(Dist2);
+								float W = KernelWeight(Dist, SmoothingRadius) * BoundaryWeight;
+
+								if (W > 0.0001f)
+								{
+									// Use offset from SmoothedCenter (FleX Style)
+									float3 Offset = Boundary.Position - SmoothedCenter;
+
+									TotalWeight += W;
+
+									SumWXX_00 += W * Offset.x * Offset.x;
+									SumWXX_01 += W * Offset.x * Offset.y;
+									SumWXX_02 += W * Offset.x * Offset.z;
+									SumWXX_11 += W * Offset.y * Offset.y;
+									SumWXX_12 += W * Offset.y * Offset.z;
+									SumWXX_22 += W * Offset.z * Offset.z;
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+		else
+		{
+			// =================================================================
+			// Legacy Mode: O(M) brute-force
+			// =================================================================
+			for (int Bi = 0; Bi < BoundaryParticleCount; ++Bi)
+			{
+				FGPUBoundaryParticle Boundary = BoundaryParticles[Bi];
+				float3 Diff = Boundary.Position - CenterPos;
+				float Dist2 = dot(Diff, Diff);
+
+				if (Dist2 < H2)
+				{
+					float Dist = sqrt(Dist2);
+					float W = KernelWeight(Dist, SmoothingRadius) * BoundaryWeight;
+
+					if (W > 0.0001f)
+					{
+						// Use offset from SmoothedCenter (FleX Style)
+						float3 Offset = Boundary.Position - SmoothedCenter;
+
+						TotalWeight += W;
+
+						SumWXX_00 += W * Offset.x * Offset.x;
+						SumWXX_01 += W * Offset.x * Offset.y;
+						SumWXX_02 += W * Offset.x * Offset.z;
+						SumWXX_11 += W * Offset.y * Offset.y;
+						SumWXX_12 += W * Offset.y * Offset.z;
+						SumWXX_22 += W * Offset.z * Offset.z;
+					}
+				}
+			}
+		}
+	}
+
+	// Need minimum weight for reliable covariance
+	if (TotalWeight < 0.0001f)
+	{
+		return;
+	}
+
+	// =========================================================================
+	// FleX Style: Covariance already computed relative to SmoothedCenter
+	// No need for parallel variance formula - direct covariance matrix
+	// =========================================================================
+	float InvW = 1.0f / TotalWeight;
+
+	// Covariance = Σ(wi * Offset * Offset^T) / Σwi
+	// Offset is already relative to SmoothedCenter, so this is the covariance directly
+	float3x3 CovMatrix;
+	CovMatrix[0][0] = SumWXX_00 * InvW;
+	CovMatrix[0][1] = SumWXX_01 * InvW;
+	CovMatrix[0][2] = SumWXX_02 * InvW;
+	CovMatrix[1][0] = CovMatrix[0][1];  // Symmetric
+	CovMatrix[1][1] = SumWXX_11 * InvW;
+	CovMatrix[1][2] = SumWXX_12 * InvW;
+	CovMatrix[2][0] = CovMatrix[0][2];  // Symmetric
+	CovMatrix[2][1] = CovMatrix[1][2];  // Symmetric
+	CovMatrix[2][2] = SumWXX_22 * InvW;
+
+	// Eigenvalue decomposition
+	float3 EigenValues;
+	float3 EV0, EV1, EV2;
+	SymmetricEigen3x3(CovMatrix, EigenValues, EV0, EV1, EV2);
+
+	// Convert to standard deviations
+	float Sigma0 = sqrt(max(EigenValues.x, 0.0001f));
+	float Sigma1 = sqrt(max(EigenValues.y, 0.0001f));
+	float Sigma2 = sqrt(max(EigenValues.z, 0.0001f));
+
+	// Yu & Turk eigenvalue ratio clamping (prevent too thin ellipsoids)
+	float MinSigma = Sigma0 / K_R;
+	Sigma1 = max(Sigma1, MinSigma);
+	Sigma2 = max(Sigma2, MinSigma);
+
+	// Neighbor-count based blend factor (used in both modes)
+	// Surface particles (fewer neighbors) get partial anisotropy
+	// Internal particles (more neighbors) get full anisotropy
+	float BlendFactor = saturate(
+		(float)(NeighborCount - MIN_NEIGHBORS_FOR_ANISOTROPY) /
+		(float)(FULL_NEIGHBORS_FOR_ANISOTROPY - MIN_NEIGHBORS_FOR_ANISOTROPY)
+	);
+
+	if (bPreserveVolume)
+	{
+		// =========================================================================
+		// Yu & Turk Volume-Preserving Scale Calculation
+		// Use geometric mean normalization: Scale1 * Scale2 * Scale3 = 1.0
+		// =========================================================================
+		float GeoMean = pow(Sigma0 * Sigma1 * Sigma2, 1.0f / 3.0f);
+
+		// Prevent division by zero
+		if (GeoMean < 0.0001f)
+		{
+			GeoMean = 1.0f;
+		}
+
+		// Normalized scales (volume = 1.0 guaranteed)
+		float EllipsoidScale1 = Sigma0 / GeoMean;
+		float EllipsoidScale2 = Sigma1 / GeoMean;
+		float EllipsoidScale3 = Sigma2 / GeoMean;
+
+		// =========================================================================
+		// Volume-Preserving Log-Space Processing
+		// All operations in log space preserve geometric mean (volume = 1.0)
+		// Key insight: log(a) + log(b) + log(c) = 0  <=>  a * b * c = 1.0
+		// =========================================================================
+
+		// Step 1: Convert to log space
+		float LogScale1 = log(max(EllipsoidScale1, 0.001f));
+		float LogScale2 = log(max(EllipsoidScale2, 0.001f));
+		float LogScale3 = log(max(EllipsoidScale3, 0.001f));
+
+		// Step 2: Apply AnisotropyScale (amplify/dampen ratios)
+		// - AnisotropyScale = 0: sphere (all logs become 0)
+		// - AnisotropyScale = 1: original ratios
+		// - AnisotropyScale > 1: more extreme anisotropy
+		LogScale1 *= AnisotropyScale;
+		LogScale2 *= AnisotropyScale;
+		LogScale3 *= AnisotropyScale;
+
+		// Step 3: Re-center logs to maintain volume = 1.0 (sum of logs = 0)
+		float LogSum = LogScale1 + LogScale2 + LogScale3;
+		float LogAvg = LogSum / 3.0f;
+		LogScale1 -= LogAvg;
+		LogScale2 -= LogAvg;
+		LogScale3 -= LogAvg;
+
+		// Step 4: Neighbor-count based blending
+		// Lerp in log space: sphere has log scales of (0, 0, 0)
+		LogScale1 *= BlendFactor;
+		LogScale2 *= BlendFactor;
+		LogScale3 *= BlendFactor;
+
+		// Step 5: Final Clamp in log space (only once, after all operations)
+		float LogMin = log(max(AnisotropyMin, 0.001f));
+		float LogMax = log(max(AnisotropyMax, 0.001f));
+		LogScale1 = clamp(LogScale1, LogMin, LogMax);
+		LogScale2 = clamp(LogScale2, LogMin, LogMax);
+		LogScale3 = clamp(LogScale3, LogMin, LogMax);
+
+		// Step 6: Convert back to linear space
+		Scale1 = exp(LogScale1);
+		Scale2 = exp(LogScale2);
+		Scale3 = exp(LogScale3);
+	}
+	else
+	{
+		// =========================================================================
+		// NVIDIA FleX Reference Style: No volume preservation
+		// Uses smoothingRadius / sigma formula with relative minimum clamping
+		// =========================================================================
+
+		// Step 1: Find Maximum eigenvalue (standard deviation)
+		float MaxSigma = max(Sigma0, max(Sigma1, Sigma2));
+
+		// Step 2: Clamp minimum eigenvalue relative to Maximum (prevents extremely flat ellipsoids)
+		// FleX Uses AnisotropyMin as relative ratio, not absolute value
+		float MinSigmaThreshold = MaxSigma * AnisotropyMin;
+		float ClampedSigma0 = max(Sigma0, MinSigmaThreshold);
+		float ClampedSigma1 = max(Sigma1, MinSigmaThreshold);
+		float ClampedSigma2 = max(Sigma2, MinSigmaThreshold);
+
+		// Step 3: FleX Scale formula - smoothingRadius / sigma
+		// Larger sigma = smaller Scale (more stretched along that axis in covariance = thinner ellipsoid)
+		// Prevent division by zero
+		float Epsilon = 0.0001f;
+		Scale1 = SmoothingRadius / max(ClampedSigma0, Epsilon);
+		Scale2 = SmoothingRadius / max(ClampedSigma1, Epsilon);
+		Scale3 = SmoothingRadius / max(ClampedSigma2, Epsilon);
+
+		// Step 3.5: Apply NonPreservedRenderScale (overall ellipsoid size control)
+		Scale1 *= NonPreservedRenderScale;
+		Scale2 *= NonPreservedRenderScale;
+		Scale3 *= NonPreservedRenderScale;
+
+		// Step 4: Apply AnisotropyScale as intensity control
+		// Scale > 1: more anisotropic, Scale < 1: more spherical
+		Scale1 = lerp(1.0f, Scale1, AnisotropyScale);
+		Scale2 = lerp(1.0f, Scale2, AnisotropyScale);
+		Scale3 = lerp(1.0f, Scale3, AnisotropyScale);
+
+		// Step 5: Blend toward sphere based on neighbor count (low neighbors = more spherical)
+		Scale1 = lerp(1.0f, Scale1, BlendFactor);
+		Scale2 = lerp(1.0f, Scale2, BlendFactor);
+		Scale3 = lerp(1.0f, Scale3, BlendFactor);
+
+		// Step 6: Final Clamp to valid range
+		Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+		Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+		Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+	}
+
+	// Eigenvectors as axes
+	Axis1 = normalize(EV0);
+	Axis2 = normalize(EV1);
+	Axis3 = normalize(EV2);
+}
+
+//-----------------------------------------------------------------------------
+// Apply Velocity Stretching to existing ellipsoid
+// Stretches the ellipsoid along velocity direction (Yu & Turk style)
+//-----------------------------------------------------------------------------
+/**
+ * @brief Applies velocity stretching to anisotropy axes
+ */
+void ApplyVelocityStretching(
+	uint ParticleIndex,
+	inout float3 Axis1, inout float3 Axis2, inout float3 Axis3,
+	inout float Scale1, inout float Scale2, inout float Scale3)
+{
+	uint Idx3 = ParticleIndex * 3;
+	float3 Velocity = UnpackVelocity(InPackedVelocities[ParticleIndex]);
+	float Speed = length(Velocity);
+
+	if (Speed < 0.001f)
+	{
+		return;
+	}
+
+	float3 VelDir = Velocity / Speed;
+
+	// Calculate Velocity stretch factor
+	float VelStretch = 1.0f + Speed * VelocityStretchFactor * AnisotropyScale;
+	VelStretch = clamp(VelStretch, 1.0f, AnisotropyMax);
+
+	// Project Velocity onto each axis and stretch accordingly
+	float Proj1 = abs(dot(VelDir, Axis1));
+	float Proj2 = abs(dot(VelDir, Axis2));
+	float Proj3 = abs(dot(VelDir, Axis3));
+
+	// Apply stretch proportionally to projection
+	Scale1 *= lerp(1.0f, VelStretch, Proj1);
+	Scale2 *= lerp(1.0f, VelStretch, Proj2);
+	Scale3 *= lerp(1.0f, VelStretch, Proj3);
+
+	// Re-clamp scales
+	Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+	Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+	Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+
+	// Volume preservation after Velocity stretching
+	float VelVolume = Scale1 * Scale2 * Scale3;
+	if (VelVolume > 0.001f && abs(VelVolume - 1.0f) > 0.001f)
+	{
+		float VelVolumeNorm = pow(VelVolume, 1.0f / 3.0f);
+		Scale1 /= VelVolumeNorm;
+		Scale2 /= VelVolumeNorm;
+		Scale3 /= VelVolumeNorm;
+	}
+}
+
+//-----------------------------------------------------------------------------
+// Attached Particle Anisotropy (DISABLED - SurfaceNormal not in struct)
+// TODO: Add SurfaceNormal to FGPUParticleAttachment if needed
+//-----------------------------------------------------------------------------
+/*
+void CalculateAttachedAnisotropy(
+	uint ParticleIndex,
+	out float3 Axis1, out float3 Axis2, out float3 Axis3,
+	out float Scale1, out float Scale2, out float Scale3)
+{
+	// Default: identity (sphere)
+	Axis1 = float3(1, 0, 0);
+	Axis2 = float3(0, 1, 0);
+	Axis3 = float3(0, 0, 1);
+	Scale1 = Scale2 = Scale3 = 1.0f;
+
+	// Read surface normal from attachment data
+	FGPUParticleAttachment Attachment = InAttachments[ParticleIndex];
+	float3 SurfaceNormal = Attachment.SurfaceNormal;
+
+	// Validate normal
+	float NormalLen = length(SurfaceNormal);
+	if (NormalLen < 0.001f)
+	{
+		// Invalid normal, use up vector as fallback
+		SurfaceNormal = float3(0, 0, 1);
+	}
+	else
+	{
+		SurfaceNormal = SurfaceNormal / NormalLen;
+	}
+
+	// Build orthonormal basis with normal as Axis3 (shortest axis)
+	// Normal direction = flattened direction (smallest scale)
+	Axis3 = SurfaceNormal;
+	BuildOrthonormalBasis(Axis3, Axis1, Axis2);
+
+	// Apply flattening: normal direction gets smaller scale
+	// AttachedFlattenScale = 0.3 means 30% of original height
+	Scale3 = clamp(AttachedFlattenScale * AnisotropyScale, AnisotropyMin, AnisotropyMax);
+
+	// Perpendicular directions get stretched to compensate (volume preservation)
+	// AttachedStretchScale = 1.5 means 150% in perpendicular directions
+	Scale1 = clamp(AttachedStretchScale * AnisotropyScale, AnisotropyMin, AnisotropyMax);
+	Scale2 = Scale1;
+
+	// Volume preservation: Scale1 * Scale2 * Scale3 = 1.0
+	float Volume = Scale1 * Scale2 * Scale3;
+	if (Volume > 0.001f && abs(Volume - 1.0f) > 0.001f)
+	{
+		float VolumeNorm = pow(Volume, 1.0f / 3.0f);
+		Scale1 /= VolumeNorm;
+		Scale2 /= VolumeNorm;
+		Scale3 /= VolumeNorm;
+	}
+}
+*/
+
+//-----------------------------------------------------------------------------
+// Main Compute Shader
+//-----------------------------------------------------------------------------
+/**
+ * @brief Compute shader entry point for MainCS
+ */
+[numthreads(THREADGROUP_SIZE, 1, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+	uint Idx = DispatchThreadId.x;
+	if (Idx >= ParticleCountBuffer[6])
+	{
+		return;
+	}
+
+	float3 Axis1, Axis2, Axis3;
+	float Scale1, Scale2, Scale3;
+	int NeighborCount = 0;
+	float3 SmoothedCenter = float3(0, 0, 0);  // weighted average position of neighbors
+	float3 RenderOffset = float3(0, 0, 0);    // Surface particle render offset
+
+	// Read particle data (SOA)
+	uint Idx3 = Idx * 3;
+	uint Flags = InFlags[Idx];
+	float3 Velocity = UnpackVelocity(InPackedVelocities[Idx]);
+	bool bIsAttached = (Flags & FLAG_IS_ATTACHED) != 0;
+	// Note: FLAG_NEAR_BOUNDARY From SoA_Flags may be stale (split before UpdateBoneDeltaAttachment)
+	// So we check BoneDeltaAttachment directly below
+
+	// Get effective Velocity for anisotropy calculation
+	// For Attached particles: use Velocity relative to bone (excludes player movement)
+	// For Detached particles: use actual particle Velocity
+	float3 EffectiveVelocity = Velocity;
+	if (bIsAttached)
+	{
+		FGPUParticleAttachment Attachment = InAttachments[Idx];
+		EffectiveVelocity = Attachment.RelativeVelocity;
+	}
+
+	// =========================================================================
+	// Surface Normal Anisotropy for NEAR_BOUNDARY particles
+	// Creates "pancake" shape flattened against the bone collider surface
+	// Calculates surface normal directly From Collision Primitives (Capsule/Box)
+	// =========================================================================
+	bool bUsedSurfaceNormal = false;
+	if (bEnableSurfaceNormalAnisotropy)
+	{
+		// Read particle position
+		float3 ParticlePos = float3(InPositions[Idx3], InPositions[Idx3 + 1], InPositions[Idx3 + 2]);
+
+		// Check NEAR_BOUNDARY flag
+		bool bIsNearBoundary = (Flags & FLAG_NEAR_BOUNDARY) != 0;
+
+		// Calculate collider normal only for NEAR_BOUNDARY particles (expensive if applied to all)
+		if (bIsNearBoundary)
+		{
+			bUsedSurfaceNormal = CalculateBoundaryAnisotropy(Idx, ParticlePos, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3);
+		}
+	}
+
+	// Select anisotropy calculation based on mode (skip if surface normal was used)
+	if (bUsedSurfaceNormal)
+	{
+		// Surface normal anisotropy was used, now add subtle Velocity-based stretch
+		// Subtle stretch along Velocity direction (not too strong)
+		float Speed = length(EffectiveVelocity);
+
+		if (Speed > 0.1f)  // minimum speed threshold
+		{
+			float3 VelDir = EffectiveVelocity / Speed;
+
+			// Weak Velocity stretch (0.002 = very subtle)
+			float BoundaryVelStretchFactor = 0.002f;  // very weak
+			float VelStretch = 1.0f + Speed * BoundaryVelStretchFactor;
+			VelStretch = clamp(VelStretch, 1.0f, 1.3f);  // max 30% stretch
+
+			// Apply stretch by projecting Velocity direction onto each axis
+			float Proj1 = abs(dot(VelDir, Axis1));
+			float Proj2 = abs(dot(VelDir, Axis2));
+			float Proj3 = abs(dot(VelDir, Axis3));
+
+			Scale1 *= lerp(1.0f, VelStretch, Proj1);
+			Scale2 *= lerp(1.0f, VelStretch, Proj2);
+			Scale3 *= lerp(1.0f, VelStretch, Proj3);
+
+			// Apply Clamp
+			Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+			Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+			Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+		}
+	}
+	// Apply Clamp
+	else if (AnisotropyMode == MODE_VELOCITY_BASED)
+	{
+		// Pure Velocity-based: axes From Velocity direction
+		CalculateVelocityBasedWithVelocity(EffectiveVelocity, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3);
+	}
+	else if (AnisotropyMode == MODE_DENSITY_BASED)
+	{
+		// Pure density-based: axes From covariance only
+		CalculateDensityBased(Idx, Axis1, Axis2, Axis3, Scale1, Scale2, Scale3, NeighborCount, SmoothedCenter);
+	}
+	else // MODE_HYBRID
+	{
+		// Hybrid: blend between density-based and Velocity-based using DensityWeight
+		// DensityWeight = 1.0: pure density, DensityWeight = 0.0: pure Velocity
+
+		// Calculate density-based anisotropy
+		float3 DensityAxis1, DensityAxis2, DensityAxis3;
+		float DensityScale1, DensityScale2, DensityScale3;
+		CalculateDensityBased(Idx, DensityAxis1, DensityAxis2, DensityAxis3,
+		                      DensityScale1, DensityScale2, DensityScale3, NeighborCount, SmoothedCenter);
+
+		// Calculate Velocity-based anisotropy
+		float3 VelocityAxis1, VelocityAxis2, VelocityAxis3;
+		float VelocityScale1, VelocityScale2, VelocityScale3;
+		CalculateVelocityBasedWithVelocity(EffectiveVelocity,
+		                                   VelocityAxis1, VelocityAxis2, VelocityAxis3,
+		                                   VelocityScale1, VelocityScale2, VelocityScale3);
+
+		if (bPreserveVolume)
+		{
+			// Volume-preserving: Blend scales in log space
+			float LogDens1 = log(max(DensityScale1, 0.001f));
+			float LogDens2 = log(max(DensityScale2, 0.001f));
+			float LogDens3 = log(max(DensityScale3, 0.001f));
+			float LogVel1 = log(max(VelocityScale1, 0.001f));
+			float LogVel2 = log(max(VelocityScale2, 0.001f));
+			float LogVel3 = log(max(VelocityScale3, 0.001f));
+
+			float LogScale1 = lerp(LogVel1, LogDens1, DensityWeight);
+			float LogScale2 = lerp(LogVel2, LogDens2, DensityWeight);
+			float LogScale3 = lerp(LogVel3, LogDens3, DensityWeight);
+
+			// Final Clamp in log space
+			float LogMin = log(max(AnisotropyMin, 0.001f));
+			float LogMax = log(max(AnisotropyMax, 0.001f));
+			LogScale1 = clamp(LogScale1, LogMin, LogMax);
+			LogScale2 = clamp(LogScale2, LogMin, LogMax);
+			LogScale3 = clamp(LogScale3, LogMin, LogMax);
+
+			Scale1 = exp(LogScale1);
+			Scale2 = exp(LogScale2);
+			Scale3 = exp(LogScale3);
+		}
+		else
+		{
+			// FleX Style: Blend scales in linear space (no volume preservation)
+			Scale1 = lerp(VelocityScale1, DensityScale1, DensityWeight);
+			Scale2 = lerp(VelocityScale2, DensityScale2, DensityWeight);
+			Scale3 = lerp(VelocityScale3, DensityScale3, DensityWeight);
+
+			// Final Clamp in linear space
+			Scale1 = clamp(Scale1, AnisotropyMin, AnisotropyMax);
+			Scale2 = clamp(Scale2, AnisotropyMin, AnisotropyMax);
+			Scale3 = clamp(Scale3, AnisotropyMin, AnisotropyMax);
+		}
+
+		// Blend axes: use density axes when DensityWeight > 0.5, Velocity axes otherwise
+		// This provides a hard transition to avoid axis interpolation artifacts
+		if (DensityWeight > 0.5f)
+		{
+			Axis1 = DensityAxis1;
+			Axis2 = DensityAxis2;
+			Axis3 = DensityAxis3;
+		}
+		else
+		{
+			Axis1 = VelocityAxis1;
+			Axis2 = VelocityAxis2;
+			Axis3 = VelocityAxis3;
+		}
+	}
+
+	// =========================================================================
+	// Temporal Smoothing: Blend with previous frame (NVIDIA FleX Style)
+	// - Handle eigenvector sign ambiguity (v and -v are both valid)
+	// - Blend scales in log space for volume preservation
+	// =========================================================================
+	if (bEnableTemporalSmoothing && bHasPreviousFrame)
+	{
+		float4 Prev1 = PrevAnisotropyAxis1[Idx];
+		float4 Prev2 = PrevAnisotropyAxis2[Idx];
+		float4 Prev3 = PrevAnisotropyAxis3[Idx];
+
+		// Handle eigenvector sign ambiguity (flip if pointing opposite direction)
+		if (dot(Axis1, Prev1.xyz) < 0.0f) Axis1 = -Axis1;
+		if (dot(Axis2, Prev2.xyz) < 0.0f) Axis2 = -Axis2;
+		if (dot(Axis3, Prev3.xyz) < 0.0f) Axis3 = -Axis3;
+
+		// Blend axes (normalized lerp)
+		Axis1 = normalize(lerp(Axis1, Prev1.xyz, TemporalSmoothFactor));
+		Axis2 = normalize(lerp(Axis2, Prev2.xyz, TemporalSmoothFactor));
+		Axis3 = normalize(lerp(Axis3, Prev3.xyz, TemporalSmoothFactor));
+
+		// Blend scales in log space (volume preservation)
+		float LogScale1 = lerp(log(max(Scale1, 0.001f)), log(max(Prev1.w, 0.001f)), TemporalSmoothFactor);
+		float LogScale2 = lerp(log(max(Scale2, 0.001f)), log(max(Prev2.w, 0.001f)), TemporalSmoothFactor);
+		float LogScale3 = lerp(log(max(Scale3, 0.001f)), log(max(Prev3.w, 0.001f)), TemporalSmoothFactor);
+		Scale1 = exp(LogScale1);
+		Scale2 = exp(LogScale2);
+		Scale3 = exp(LogScale3);
+	}
+
+	//-----------------------------------------------------------------------------
+	// Surface particle render offset by SmoothedCenter (DISABLED)
+	// TODO: Re-enable after behavior validation with current boundary/attachment rules
+	//-----------------------------------------------------------------------------
+	/*
+	if (!bUsedSurfaceNormal && NeighborCount >= 1)
+	{
+		float3 CenterPos = float3(InPositions[Idx3], InPositions[Idx3 + 1], InPositions[Idx3 + 2]);
+		float3 ToNeighbors = SmoothedCenter - CenterPos;
+		float Dist = length(ToNeighbors);
+		if (Dist > 0.001f)
+		{
+			RenderOffset = (ToNeighbors / Dist) * (ParticleRadius * 2.0f);  // pull by diameter
+		}
+	}
+	*/
+
+	// Write output (direction.xyz + scale.w)
+	OutAnisotropyAxis1[Idx] = float4(Axis1, Scale1);
+	OutAnisotropyAxis2[Idx] = float4(Axis2, Scale2);
+	OutAnisotropyAxis3[Idx] = float4(Axis3, Scale3);
+	OutRenderOffset[Idx] = RenderOffset;
+}
