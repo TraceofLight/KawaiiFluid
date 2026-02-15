@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Modules/KawaiiFluidRenderingModule.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Rendering/KawaiiFluidProxyRenderer.h"
 #include "Rendering/KawaiiFluidRenderer.h"
 #include "Core/KawaiiFluidParticle.h"
@@ -35,7 +36,7 @@ void UKawaiiFluidRenderingModule::PostDuplicate(bool bDuplicateForPIE)
 		MetaballRenderer->Cleanup();
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidRenderingModule::PostDuplicate - Cleared stale pointers (PIE=%d)"),
+	KF_LOG_DEV(Log, TEXT("UKawaiiFluidRenderingModule: PostDuplicate - Cleared stale pointers (PIE=%d)"),
 		bDuplicateForPIE ? 1 : 0);
 }
 
@@ -72,7 +73,7 @@ void UKawaiiFluidRenderingModule::Initialize(UWorld* InWorld, USceneComponent* I
 		MetaballRenderer->Initialize(InWorld, InOwnerComponent, InPreset);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("RenderingModule: Initialized (ISM: %s, Metaball: %s)"),
+	KF_LOG_DEV(Log, TEXT("RenderingModule: Initialized (ISM: %s, Metaball: %s)"),
 		ISMRenderer && ISMRenderer->IsEnabled() ? TEXT("Enabled") : TEXT("Disabled"),
 		MetaballRenderer && MetaballRenderer->IsEnabled() ? TEXT("Enabled") : TEXT("Disabled"));
 }

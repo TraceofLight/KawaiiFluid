@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Components/KawaiiFluidEmitterComponent.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Actors/KawaiiFluidEmitter.h"
 #include "Actors/KawaiiFluidVolume.h"
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
@@ -131,7 +132,7 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 		if (!TargetVolume)
 		{
 			bPendingVolumeSearch = true;
-			UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Volume not found, deferring search to next tick"),
+			KF_LOG_DEV(Log, TEXT("EmitterComponent: Volume not found, deferring search to next tick (Component=%s)"),
 				*GetName());
 		}
 	}
@@ -142,8 +143,8 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 		if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
 		{
 			CachedSourceID = Subsystem->AllocateSourceID();
-			UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Allocated SourceID = %d"),
-				*GetName(), CachedSourceID);
+			KF_LOG_DEV(Log, TEXT("EmitterComponent: Allocated SourceID=%d (Component=%s)"),
+				CachedSourceID, *GetName());
 		}
 	}
 
@@ -162,8 +163,8 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: BeginPlay - TargetVolume=%s"),
-		*GetName(), TargetVolume ? *TargetVolume->GetName() : TEXT("None"));
+	KF_LOG_DEV(Log, TEXT("EmitterComponent: BeginPlay TargetVolume=%s (Component=%s)"),
+		TargetVolume ? *TargetVolume->GetName() : TEXT("None"), *GetName());
 
 	// Distance optimization: Check initial activation state
 	if (bUseDistanceOptimization)
@@ -195,17 +196,17 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 			// Initially inactive if reference is outside activation distance
 			bDistanceActivated = (DistanceSq <= ActivationDistance * ActivationDistance);
 
-			UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Distance Optimization - Initial state: %s (Distance: %.1f cm, Threshold: %.1f cm)"),
-				*GetName(),
+			KF_LOG_DEV(Log, TEXT("EmitterComponent: Distance optimization initial state=%s (Distance=%.1f cm, Threshold=%.1f cm, Component=%s)"),
 				bDistanceActivated ? TEXT("Active") : TEXT("Inactive"),
 				FMath::Sqrt(DistanceSq),
-				ActivationDistance);
+				ActivationDistance,
+				*GetName());
 		}
 		else
 		{
 			// Reference not found yet, defer check to tick
 			bDistanceActivated = false;
-			UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Distance Optimization - Reference not found, starting inactive"),
+			KF_LOG_DEV(Log, TEXT("EmitterComponent: Distance optimization reference not found, starting inactive (Component=%s)"),
 				*GetName());
 		}
 	}
@@ -216,7 +217,7 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 		// Skip if distance optimization is enabled and we're outside range
 		if (bUseDistanceOptimization && !bDistanceActivated)
 		{
-			UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Skipping auto spawn - outside activation distance"),
+			KF_LOG_DEV(Log, TEXT("EmitterComponent: Skipping auto spawn, outside activation distance (Component=%s)"),
 				*GetName());
 		}
 		else
@@ -262,8 +263,8 @@ void UKawaiiFluidEmitterComponent::EndPlay(const EEndPlayReason::Type EndPlayRea
 			if (UKawaiiFluidSimulatorSubsystem* Subsystem = World->GetSubsystem<UKawaiiFluidSimulatorSubsystem>())
 			{
 				Subsystem->ReleaseSourceID(CachedSourceID);
-				UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Released SourceID = %d"),
-					*GetName(), CachedSourceID);
+				KF_LOG_DEV(Log, TEXT("EmitterComponent: Released SourceID=%d (Component=%s)"),
+					CachedSourceID, *GetName());
 			}
 		}
 		CachedSourceID = -1;
@@ -301,8 +302,8 @@ void UKawaiiFluidEmitterComponent::TickComponent(float DeltaTime, ELevelTick Tic
 
 			if (TargetVolume)
 			{
-				UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Deferred volume search found TargetVolume=%s"),
-					*GetName(), *TargetVolume->GetName());
+				KF_LOG_DEV(Log, TEXT("EmitterComponent: Deferred volume search found TargetVolume=%s (Component=%s)"),
+					*TargetVolume->GetName(), *GetName());
 
 				// Register to the newly found volume
 				RegisterToVolume();
@@ -313,7 +314,7 @@ void UKawaiiFluidEmitterComponent::TickComponent(float DeltaTime, ELevelTick Tic
 					// Skip if distance optimization is enabled and we're outside range
 					if (bUseDistanceOptimization && !bDistanceActivated)
 					{
-						UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Skipping deferred auto spawn - outside activation distance"),
+						KF_LOG_DEV(Log, TEXT("EmitterComponent: Skipping deferred auto spawn, outside activation distance (Component=%s)"),
 							*GetName());
 					}
 					else
@@ -331,7 +332,7 @@ void UKawaiiFluidEmitterComponent::TickComponent(float DeltaTime, ELevelTick Tic
 			}
 			else
 			{
-				UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent [%s]: Deferred volume search failed - no volume found"),
+				KF_LOG(Warning, TEXT("EmitterComponent: Deferred volume search failed, no volume found (Component=%s)"),
 					*GetName());
 			}
 		}
@@ -427,14 +428,14 @@ void UKawaiiFluidEmitterComponent::StartStreamSpawn()
 {
 	if (!IsStreamMode())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent::StartStreamSpawn - Not in Stream mode"));
+		KF_LOG(Warning, TEXT("EmitterComponent: StartStreamSpawn called in non-stream mode (Component=%s)"), *GetName());
 		return;
 	}
 
 	// Distance optimization guard: prevent spawning when culled
 	if (bUseDistanceOptimization && !bDistanceActivated)
 	{
-		UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::StartStreamSpawn - Ignored (distance culled)"));
+		KF_LOG_DEV(Log, TEXT("EmitterComponent: StartStreamSpawn ignored (distance culled, Component=%s)"), *GetName());
 		return;
 	}
 
@@ -462,7 +463,7 @@ void UKawaiiFluidEmitterComponent::SpawnFill()
 	// Distance optimization guard: prevent spawning when culled
 	if (bUseDistanceOptimization && !bDistanceActivated)
 	{
-		UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::SpawnFill - Ignored (distance culled)"));
+		KF_LOG_DEV(Log, TEXT("EmitterComponent: SpawnFill ignored (distance culled, Component=%s)"), *GetName());
 		return;
 	}
 
@@ -474,7 +475,7 @@ void UKawaiiFluidEmitterComponent::SpawnFill()
 	AKawaiiFluidVolume* Volume = GetTargetVolume();
 	if (!Volume)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UKawaiiFluidEmitterComponent::SpawnFill - No target Volume available"));
+		KF_LOG(Warning, TEXT("EmitterComponent: SpawnFill failed, no target volume available (Component=%s)"), *GetName());
 		return;
 	}
 
@@ -512,7 +513,7 @@ void UKawaiiFluidEmitterComponent::SpawnFill()
 		break;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent::SpawnFill - Spawned %d particles"), SpawnedCount);
+	KF_LOG_DEV(Log, TEXT("EmitterComponent: SpawnFill spawned %d particles (Component=%s)"), SpawnedCount, *GetName());
 }
 
 /**
@@ -1350,15 +1351,15 @@ void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 		const int32 CancelledCount = SpawnMgr->CancelPendingSpawnsForSource(CachedSourceID);
 		if (CancelledCount > 0)
 		{
-			UE_LOG(LogTemp, Log, TEXT("EmitterComponent [%s]: Cancelled %d pending spawns from GPUSpawnManager (SourceID=%d)"),
-				*GetName(), CancelledCount, CachedSourceID);
+			KF_LOG_DEV(Verbose, TEXT("EmitterComponent: Cancelled %d pending spawns from GPUSpawnManager (SourceID=%d, Component=%s)"),
+				CancelledCount, CachedSourceID, *GetName());
 		}
 	}
 
 	// GPU-driven despawn: remove all particles with this emitter's SourceID
 	GPUSim->AddGPUDespawnSourceRequest(CachedSourceID);
-	UE_LOG(LogTemp, Log, TEXT("EmitterComponent [%s]: GPU despawn by source (SourceID=%d)"),
-		*GetName(), CachedSourceID);
+	KF_LOG_DEV(Verbose, TEXT("EmitterComponent: GPU despawn by source (SourceID=%d, Component=%s)"),
+		CachedSourceID, *GetName());
 }
 
 /**
@@ -1513,7 +1514,7 @@ void UKawaiiFluidEmitterComponent::OnDistanceActivationChanged(bool bNewState)
 	if (bNewState)
 	{
 		// === ACTIVATING ===
-		UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Distance Activation - Activating (entered range)"),
+		KF_LOG_DEV(Log, TEXT("EmitterComponent: Distance activation activating (entered range, Component=%s)"),
 			*GetName());
 
 		if (IsStreamMode())
@@ -1542,7 +1543,7 @@ void UKawaiiFluidEmitterComponent::OnDistanceActivationChanged(bool bNewState)
 	else
 	{
 		// === DEACTIVATING ===
-		UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: Distance Activation - Deactivating (player left range)"),
+		KF_LOG_DEV(Log, TEXT("EmitterComponent: Distance activation deactivating (player left range, Component=%s)"),
 			*GetName());
 
 		if (IsStreamMode())
@@ -1586,8 +1587,8 @@ void UKawaiiFluidEmitterComponent::DespawnAllParticles()
 	Module->DespawnBySourceGPU(CachedSourceID);
 	SpawnedParticleCount = 0;
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidEmitterComponent [%s]: DespawnAllParticles - GPU despawn by source (SourceID=%d)"),
-		*GetName(), CachedSourceID);
+	KF_LOG_DEV(Verbose, TEXT("EmitterComponent: DespawnAllParticles GPU despawn by source (SourceID=%d, Component=%s)"),
+		CachedSourceID, *GetName());
 }
 
 /**

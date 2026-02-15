@@ -2,6 +2,7 @@
 // GPUFluidSimulator - Simulation Pass Functions
 
 #include "Simulation/GPUFluidSimulator.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "Simulation/Managers/GPUBoundarySkinningManager.h"
@@ -325,7 +326,7 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	// static int32 BoundaryDebugCounter = 0;
 	// if (++BoundaryDebugCounter % 120 == 1)
 	// {
-	// 	UE_LOG(LogTemp, Warning, TEXT("[BoundaryDebug] Skinned=%d (Count=%d), Static=%d (Count=%d)"),
+	// 	KF_LOG(Warning, TEXT("BoundaryDebug: Skinned=%d (Count=%d), Static=%d (Count=%d)"),
 	// 		bHasSkinnedBoundary ? 1 : 0, SpatialData.SkinnedBoundaryParticleCount,
 	// 		bHasStaticBoundary ? 1 : 0, SpatialData.StaticBoundaryParticleCount);
 	// }
@@ -418,7 +419,7 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	// 		(bHasStaticBoundary ? TEXT("Static") : TEXT("NONE"));
 	// 	const TCHAR* ZOrderPath = bUseSkinnedZOrder ? TEXT("Skinned") :
 	// 		(bUseStaticZOrder ? TEXT("Static") : TEXT("Disabled"));
-	// 	UE_LOG(LogTemp, Warning, TEXT("[BoundaryDebug] BoundaryPath=%s, ZOrderPath=%s, BoundaryCount=%d, bUseDensity=%d, bUseZOrder=%d"),
+	// 	KF_LOG(Warning, TEXT("BoundaryDebug: BoundaryPath=%s, ZOrderPath=%s, BoundaryCount=%d, bUseDensity=%d, bUseZOrder=%d"),
 	// 		BoundaryPath, ZOrderPath, PassParameters->BoundaryParticleCount, PassParameters->bUseBoundaryDensity, PassParameters->bUseBoundaryZOrder);
 	// }
 
@@ -715,21 +716,21 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 	static int32 ColliderDebugCounter = 0;
 	if (++ColliderDebugCounter % 120 == 1)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("[BoneDeltaAttachment] Colliders: Spheres=%d, Capsules=%d, Boxes=%d, Bones=%d"),
+		KF_LOG_DEV(VeryVerbose, TEXT("BoneDeltaAttachment: Colliders: Spheres=%d, Capsules=%d, Boxes=%d, Bones=%d"),
 			CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedBoneTransforms.Num());
 
 		// Log first capsule position
 		if (CachedCapsules.Num() > 0)
 		{
 			const FGPUCollisionCapsule& Cap = CachedCapsules[0];
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("  Capsule[0]: Start=(%.1f, %.1f, %.1f), End=(%.1f, %.1f, %.1f), Radius=%.1f"),
+			KF_LOG_DEV(VeryVerbose, TEXT("  Capsule[0]: Start=(%.1f, %.1f, %.1f), End=(%.1f, %.1f, %.1f), Radius=%.1f"),
 				Cap.Start.X, Cap.Start.Y, Cap.Start.Z, Cap.End.X, Cap.End.Y, Cap.End.Z, Cap.Radius);
 		}
 		// Log first box position
 		if (CachedBoxes.Num() > 0)
 		{
 			const FGPUCollisionBox& Box = CachedBoxes[0];
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("  Box[0]: Center=(%.1f, %.1f, %.1f), Extent=(%.1f, %.1f, %.1f)"),
+			KF_LOG_DEV(VeryVerbose, TEXT("  Box[0]: Center=(%.1f, %.1f, %.1f), Extent=(%.1f, %.1f, %.1f)"),
 				Box.Center.X, Box.Center.Y, Box.Center.Z, Box.Extent.X, Box.Extent.Y, Box.Extent.Z);
 		}
 	}
@@ -783,5 +784,3 @@ void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 			ComputeShader, PassParameters, FIntVector(NumGroups, 1, 1));
 	}
 }
-
-

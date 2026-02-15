@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/KawaiiFluidProxyRenderer.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Core/IKawaiiFluidDataProvider.h"
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidPresetDataAsset.h"
@@ -28,22 +29,22 @@ void UKawaiiFluidProxyRenderer::Initialize(UWorld* InWorld, USceneComponent* InO
 
 	if (!CachedWorld)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer::Initialize - No world context provided"));
+		KF_LOG(Warning, TEXT("KawaiiFluidProxyRenderer: Initialize - No world context provided"));
 	}
 
 	if (!CachedOwnerComponent)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer::Initialize - No owner component provided"));
+		KF_LOG(Warning, TEXT("KawaiiFluidProxyRenderer: Initialize - No owner component provided"));
 	}
 
 	if (!CachedPreset)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer::Initialize - No preset provided"));
+		KF_LOG(Warning, TEXT("KawaiiFluidProxyRenderer: Initialize - No preset provided"));
 	}
 
 	InitializeISM();
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidProxyRenderer: Initialized (Mesh: %s)"),
+	KF_LOG_DEV(Log, TEXT("KawaiiFluidProxyRenderer: Initialized (Mesh: %s)"),
 		ISMComponent && ISMComponent->GetStaticMesh() ? *ISMComponent->GetStaticMesh()->GetName() : TEXT("None"));
 }
 
@@ -95,13 +96,13 @@ void UKawaiiFluidProxyRenderer::UpdateRendering(const IKawaiiFluidDataProvider* 
 
 	if (!ISMComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ProxyRenderer::UpdateRendering - ISMComponent is NULL!"));
+		KF_LOG(Error, TEXT("ProxyRenderer: UpdateRendering - ISMComponent is NULL!"));
 		return;
 	}
 
 	if (!DataProvider)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ProxyRenderer::UpdateRendering - DataProvider is NULL!"));
+		KF_LOG(Error, TEXT("ProxyRenderer: UpdateRendering - DataProvider is NULL!"));
 		return;
 	}
 
@@ -155,7 +156,7 @@ void UKawaiiFluidProxyRenderer::UpdateRendering(const IKawaiiFluidDataProvider* 
 
 	if (bShouldLog)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("=== Proxy Debug: Particles=%d, Registered=%d, Visible=%d, Mesh=%s, Material=%s, InstanceCount=%d ==="),
+		KF_LOG_DEV(VeryVerbose, TEXT("ProxyDebug: Particles=%d, Registered=%d, Visible=%d, Mesh=%s, Material=%s, InstanceCount=%d"),
 			Positions.Num(),
 			ISMComponent->IsRegistered() ? 1 : 0,
 			ISMComponent->IsVisible() ? 1 : 0,
@@ -240,7 +241,7 @@ void UKawaiiFluidProxyRenderer::InitializeISM()
 {
 	if (!CachedOwnerComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: No owner component"));
+		KF_LOG(Error, TEXT("KawaiiFluidProxyRenderer: No owner component"));
 		return;
 	}
 
@@ -253,7 +254,7 @@ void UKawaiiFluidProxyRenderer::InitializeISM()
 
 	if (!ISMComponent)
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: Failed to create ISM component"));
+		KF_LOG(Error, TEXT("KawaiiFluidProxyRenderer: Failed to create ISM component"));
 		return;
 	}
 
@@ -271,7 +272,7 @@ void UKawaiiFluidProxyRenderer::InitializeISM()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: Failed to load default sphere mesh"));
+		KF_LOG(Error, TEXT("KawaiiFluidProxyRenderer: Failed to load default sphere mesh"));
 		return;
 	}
 
@@ -283,7 +284,7 @@ void UKawaiiFluidProxyRenderer::InitializeISM()
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidProxyRenderer: Failed to load default material"));
+		KF_LOG(Warning, TEXT("KawaiiFluidProxyRenderer: Failed to load default material"));
 	}
 
 	// Performance and visibility properties
@@ -299,7 +300,7 @@ void UKawaiiFluidProxyRenderer::InitializeISM()
 
 	if (!ISMComponent->IsRegistered())
 	{
-		UE_LOG(LogTemp, Error, TEXT("KawaiiFluidProxyRenderer: RegisterComponent() failed!"));
+		KF_LOG(Error, TEXT("KawaiiFluidProxyRenderer: RegisterComponent() failed!"));
 		return;
 	}
 
@@ -309,7 +310,7 @@ void UKawaiiFluidProxyRenderer::InitializeISM()
 		ISMComponent->NumCustomDataFloats = 4; // RGBA
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidProxyRenderer: Internal ISM component initialized"));
+	KF_LOG_DEV(Log, TEXT("KawaiiFluidProxyRenderer: Internal ISM component initialized"));
 }
 
 UStaticMesh* UKawaiiFluidProxyRenderer::GetDefaultParticleMesh()
@@ -322,7 +323,7 @@ UStaticMesh* UKawaiiFluidProxyRenderer::GetDefaultParticleMesh()
 
 	if (!SphereMesh)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidISMRenderer: Failed to load default sphere mesh"));
+		KF_LOG_DEV(Verbose, TEXT("ProxyRenderer: Failed to load default sphere mesh (helper)"));
 	}
 
 	return SphereMesh;
@@ -338,7 +339,7 @@ UMaterialInterface* UKawaiiFluidProxyRenderer::GetDefaultParticleMaterial()
 
 	if (!DefaultMaterial)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidISMRenderer: Failed to load default material"));
+		KF_LOG_DEV(Verbose, TEXT("ProxyRenderer: Failed to load default material (helper)"));
 	}
 
 	return DefaultMaterial;

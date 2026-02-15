@@ -148,4 +148,3 @@ void KawaiiFluidRenderer::RenderFlowAccumulationPass(
 		PassParameters,
 		GroupCount);
 }
-

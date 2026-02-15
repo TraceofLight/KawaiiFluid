@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Simulation/GPUFluidSimulator.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "Simulation/Shaders/FluidAnisotropyComputeShader.h"
@@ -87,7 +88,7 @@ void FGPUFluidSimulator::Initialize(int32 InMaxParticleCount)
 {
 	if (InMaxParticleCount <= 0)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("Initialize called with invalid particle count: %d"), InMaxParticleCount);
+		KF_LOG(Error, TEXT("Initialize called with invalid particle count: %d"), InMaxParticleCount);
 		return;
 	}
 
@@ -122,7 +123,7 @@ void FGPUFluidSimulator::Initialize(int32 InMaxParticleCount)
 
 	bIsInitialized = true;
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("GPU Fluid Simulator initialized with capacity: %d particles"), MaxParticleCount);
+	KF_LOG_DEV(Log, TEXT("GPU Fluid Simulator initialized with capacity: %d particles"), MaxParticleCount);
 }
 
 /**
@@ -219,7 +220,7 @@ void FGPUFluidSimulator::Release()
 	CachedGPUParticles.Empty();
 	PersistentParticleBuffer = nullptr;
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("GPU Fluid Simulator released"));
+	KF_LOG_DEV(Log, TEXT("GPU Fluid Simulator released"));
 }
 
 //=============================================================================
@@ -376,7 +377,7 @@ void FGPUFluidSimulator::ResizeBuffers(FRHICommandListBase& RHICmdList, int32 Ne
 	CachedGPUParticles.Empty();
 	CachedGPUParticles.Reserve(NewCapacity);
 
-	UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Resized GPU buffers to capacity: %d"), NewCapacity);
+	KF_LOG_DEV(Verbose, TEXT("Resized GPU buffers to capacity: %d"), NewCapacity);
 }
 
 //=============================================================================
@@ -397,7 +398,7 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 	// Must call BeginFrame() before SimulateSubstep()
 	if (!bFrameActive)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("SimulateSubstep called without BeginFrame! Call BeginFrame first."));
+		KF_LOG(Error, TEXT("SimulateSubstep called without BeginFrame! Call BeginFrame first."));
 		return;
 	}
 
@@ -426,15 +427,15 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 			static int32 RenderFrameCounter = 0;
 			const bool bLogThisFrame = (RenderFrameCounter++ < 10);
 
-			// if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RENDER COMMAND START (Frame %d)"), RenderFrameCounter);
+			// if (bLogThisFrame) KF_LOG_DEV(Log, TEXT(">>> RENDER COMMAND START (Frame %d)"), RenderFrameCounter);
 
 			// Build and execute RDG
 			FRDGBuilder GraphBuilder(RHICmdList);
 			Self->SimulateSubstep_RDG(GraphBuilder, ParamsCopy);
 
-			// if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE START"));
+			// if (bLogThisFrame) KF_LOG_DEV(Log, TEXT(">>> RDG EXECUTE START"));
 			GraphBuilder.Execute();
-			// if (bLogThisFrame) UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> RDG EXECUTE COMPLETE"));
+			// if (bLogThisFrame) KF_LOG_DEV(Log, TEXT(">>> RDG EXECUTE COMPLETE"));
 
 			// Mark that we have valid GPU results
 			Self->bHasValidGPUResults.store(true);
@@ -483,7 +484,7 @@ void FGPUFluidSimulator::ExecutePendingSimulations_RenderThread(FRDGBuilder& Gra
 
 	if (bLogThisFrame)
 	{
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT(">>> ExecutePendingSimulations_RenderThread: %d substeps (Frame %d)"),
+		KF_LOG_DEV(Log, TEXT(">>> ExecutePendingSimulations_RenderThread: %d substeps (Frame %d)"),
 			ParamsToExecute.Num(), RenderFrameCounter);
 	}
 
@@ -571,7 +572,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 		static int32 BoundarySkinningDebugCounter = 0;
 		if (++BoundarySkinningDebugCounter % 120 == 1)
 		{
-			UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDelta] BoundarySkinningManager: Valid=%d, Enabled=%d"),
+			KF_LOG_DEV(Log, TEXT("BoneDelta: BoundarySkinningManager: Valid=%d, Enabled=%d"),
 				BoundarySkinningManager.IsValid() ? 1 : 0,
 				(BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled()) ? 1 : 0);
 		}
@@ -590,7 +591,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 			static int32 SkinningOutputDebugCounter = 0;
 			if (++SkinningOutputDebugCounter % 120 == 1)
 			{
-				UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDelta] Skinning Output: Buffer=%d, Count=%d"),
+				KF_LOG_DEV(Log, TEXT("BoneDelta: Skinning Output: Buffer=%d, Count=%d"),
 					WorldBoundaryParticlesBuffer != nullptr ? 1 : 0, WorldBoundaryParticleCount);
 			}
 		}
@@ -629,7 +630,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 			static int32 BoneAttachDebugCounter = 0;
 			if (++BoneAttachDebugCounter % 60 == 0)
 			{
-				UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDeltaAttachment] ApplyBoneTransform: BoundaryCount=%d, BoneCount=%d"),
+				KF_LOG_DEV(Log, TEXT("BoneDeltaAttachment: ApplyBoneTransform: BoundaryCount=%d, BoneCount=%d"),
 					WorldBoundaryParticleCount, SkinningOutputs.BoneCount);
 			}
 		}
@@ -836,7 +837,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 			static int32 UpdateAttachDebugCounter = 0;
 			if (++UpdateAttachDebugCounter % 60 == 0)
 			{
-				UE_LOG(LogGPUFluidSimulator, Log, TEXT("[BoneDeltaAttachment] UpdatePass: BoundaryCount=%d, WorldBoundaryCount=%d, AttachRadius=%.1f"),
+				KF_LOG_DEV(Log, TEXT("BoneDeltaAttachment: UpdatePass: BoundaryCount=%d, WorldBoundaryCount=%d, AttachRadius=%.1f"),
 					BoundaryCount, WorldBoundaryParticleCount, Params.SmoothingRadius);
 			}
 		}
@@ -846,7 +847,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 			static int32 SkipDebugCounter = 0;
 			if (++SkipDebugCounter % 60 == 0)
 			{
-				UE_LOG(LogGPUFluidSimulator, Warning, TEXT("[BoneDeltaAttachment] UpdatePass SKIPPED: BoundarySRV=%d, CellStartSRV=%d, BoundaryCount=%d"),
+				KF_LOG_DEV(VeryVerbose, TEXT("BoneDeltaAttachment: UpdatePass SKIPPED: BoundarySRV=%d, CellStartSRV=%d, BoundaryCount=%d"),
 					BoundarySRV != nullptr, CellStartSRV != nullptr, BoundaryCount);
 			}
 		}
@@ -882,7 +883,7 @@ void FGPUFluidSimulator::RunInitializationSimulation(const FGPUFluidSimulationPa
 	// Wait for initialization simulation to complete
 	FlushRenderingCommands();
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("RunInitializationSimulation: Completed for %d particles"), CurrentParticleCount);
+	KF_LOG_DEV(Log, TEXT("RunInitializationSimulation: Completed for %d particles"), CurrentParticleCount);
 }
 
 //=============================================================================
@@ -901,7 +902,7 @@ void FGPUFluidSimulator::BeginFrame()
 
 	if (bFrameActive)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("BeginFrame called while frame already active! Call EndFrame first."));
+		KF_LOG(Error, TEXT("BeginFrame called while frame already active! Call EndFrame first."));
 		return;
 	}
 
@@ -1181,7 +1182,7 @@ void FGPUFluidSimulator::EndFrame()
 
 	if (!bFrameActive)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("EndFrame called without BeginFrame!"));
+		KF_LOG(Error, TEXT("EndFrame called without BeginFrame!"));
 		return;
 	}
 
@@ -1446,7 +1447,7 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		if (bShouldCapture)
 		{
 			GFluidCapturedFrame = TargetFrame;
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT(">>> TRIGGERING RENDERDOC CAPTURE ON GPU SIMULATION FRAME %d <<<"), DebugFrameCounter);
+			KF_LOG_DEV(Verbose, TEXT("RenderDocCapture: Triggered on GPU simulation frame %d"), DebugFrameCounter);
 
 			AsyncTask(ENamedThreads::GameThread, []()
 			{
@@ -1467,8 +1468,8 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 	// Render thread log disabled for performance
 	// if (bShouldLog)
 	// {
-	// 	UE_LOG(LogGPUFluidSimulator, Log, TEXT("=== PrepareParticleBuffer (Frame %d) ==="), DebugFrameCounter);
-	// 	UE_LOG(LogGPUFluidSimulator, Log, TEXT("  CurrentParticleCount: %d, bNeedsFullUpload: %s"),
+	// 	KF_LOG_DEV(Log, TEXT("=== PrepareParticleBuffer (Frame %d) ==="), DebugFrameCounter);
+	// 	KF_LOG_DEV(Log, TEXT("  CurrentParticleCount: %d, bNeedsFullUpload: %s"),
 	// 		CurrentParticleCount, bNeedsFullUpload ? TEXT("TRUE") : TEXT("FALSE"));
 	// }
 
@@ -1493,7 +1494,7 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 		PreviousParticleCount = CurrentParticleCount;
 		bNeedsFullUpload = false;
 
-		// UE_LOG(LogGPUFluidSimulator, Log, TEXT("PATH 1 (CPU Upload): Uploaded %d particles from CPU to GPU"), BufferCapacity);
+		// KF_LOG_DEV(Log, TEXT("PATH 1 (CPU Upload): Uploaded %d particles from CPU to GPU"), BufferCapacity);
 	}
 	// =====================================================
 	// PATH 2: Reuse PersistentParticleBuffer
@@ -1960,8 +1961,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 		const bool bWillCompute = (AnisotropyFrameCounter >= UpdateInterval || !PersistentAnisotropyAxis1Buffer.IsValid());
 		// if (++AnisoDebugCounter % 30 == 1)
 		// {
-		// 	UE_LOG(LogGPUFluidSimulator, Warning,
-		// 		TEXT("[ANISO_COMPUTE] UpdateInterval=%d, FrameCounter=%d, WillCompute=%s"),
+		// 	KF_LOG(Warning, // 		TEXT("ANISO_COMPUTE: UpdateInterval=%d, FrameCounter=%d, WillCompute=%s"),
 		// 		UpdateInterval, AnisotropyFrameCounter, bWillCompute ? TEXT("YES") : TEXT("NO"));
 		// }
 
@@ -2121,7 +2121,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					static int32 SurfaceNormalAnisoDebugCounter = 0;
 					if (++SurfaceNormalAnisoDebugCounter % 120 == 1)
 					{
-						UE_LOG(LogGPUFluidSimulator, Log, TEXT("[Anisotropy] Surface Normal Anisotropy ENABLED - BoneDeltaAttachmentBuffer valid"));
+						KF_LOG_DEV(Log, TEXT("Anisotropy: Surface Normal Anisotropy ENABLED - BoneDeltaAttachmentBuffer valid"));
 					}
 				}
 				else
@@ -2130,7 +2130,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					static int32 SurfaceNormalAnisoDisabledDebugCounter = 0;
 					if (++SurfaceNormalAnisoDisabledDebugCounter % 120 == 1)
 					{
-						UE_LOG(LogGPUFluidSimulator, Warning, TEXT("[Anisotropy] Surface Normal Anisotropy DISABLED - BoneDeltaAttachmentBuffer is NULL"));
+						KF_LOG_DEV(VeryVerbose, TEXT("Anisotropy: Surface normal anisotropy disabled because BoneDeltaAttachmentBuffer is null"));
 					}
 				}
 
@@ -2192,7 +2192,7 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 					static int32 AnisotropyColliderDebugCounter = 0;
 					if (++AnisotropyColliderDebugCounter % 120 == 1)
 					{
-						UE_LOG(LogGPUFluidSimulator, Log, TEXT("[Anisotropy] Colliders bound: Spheres=%d, Capsules=%d, Boxes=%d, SearchRadius=%.1f"),
+						KF_LOG_DEV(Log, TEXT("Anisotropy: Colliders bound: Spheres=%d, Capsules=%d, Boxes=%d, SearchRadius=%.1f"),
 							AnisotropyParams.SphereCount, AnisotropyParams.CapsuleCount, AnisotropyParams.BoxCount, AnisotropyParams.ColliderSearchRadius);
 					}
 				}
@@ -2233,7 +2233,7 @@ void FGPUFluidSimulator::ExtractPersistentBuffers(
 	// static int32 ExtractLogCounter = 0;
 	// if (++ExtractLogCounter % 60 == 0)
 	// {
-	// 	UE_LOG(LogTemp, Log, TEXT("[ExtractBuffers] bUseZOrderSorting=%d, CellStartBuffer=%s, CellEndBuffer=%s"),
+	// 	KF_LOG_DEV(Log, TEXT("ExtractBuffers: bUseZOrderSorting=%d, CellStartBuffer=%s, CellEndBuffer=%s"),
 	// 		bUseZOrderSorting ? 1 : 0,
 	// 		SpatialData.CellStartBuffer ? TEXT("Valid") : TEXT("NULL"),
 	// 		SpatialData.CellEndBuffer ? TEXT("Valid") : TEXT("NULL"));
@@ -2518,7 +2518,7 @@ void FGPUFluidSimulator::GenerateStaticBoundaryParticles(float SmoothingRadius, 
 			BoundarySkinningManager->UploadStaticBoundaryParticles(StaticParticles);
 			BoundarySkinningManager->SetStaticBoundaryEnabled(true);
 
-			UE_LOG(LogGPUFluidSimulator, Log, TEXT("Static boundary particles uploaded to GPU: %d particles"), StaticParticles.Num());
+			KF_LOG_DEV(Log, TEXT("Static boundary particles uploaded to GPU: %d particles"), StaticParticles.Num());
 		}
 		else
 		{
@@ -2544,7 +2544,7 @@ void FGPUFluidSimulator::ClearStaticBoundaryParticles()
 		BoundarySkinningManager->SetStaticBoundaryEnabled(false);
 	}
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Static boundary particles cleared"));
+	KF_LOG_DEV(Log, TEXT("Static boundary particles cleared"));
 }
 
 void FGPUFluidSimulator::AddBoundaryAdhesionPass(FRDGBuilder& GraphBuilder, const FSimulationSpatialData& SpatialData, const FGPUFluidSimulationParams& Params)
@@ -2669,13 +2669,13 @@ FRDGBufferRef FGPUFluidSimulator::EnsureBoneDeltaAttachmentBuffer(
 				0, // SrcOffset
 				CopyCount * sizeof(FGPUBoneDeltaAttachment));
 				
-			UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Preserved %d attachment records during resize"), CopyCount);
+			KF_LOG_DEV(Verbose, TEXT("Preserved %d attachment records during resize"), CopyCount);
 		}
 
 		// Update capacity tracking
 		BoneDeltaAttachmentCapacity = RequiredCapacity;
 
-		UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("Created new BoneDeltaAttachment buffer with capacity: %d (initialized with BoneIndex=-1)"), RequiredCapacity);
+		KF_LOG_DEV(Verbose, TEXT("Created new BoneDeltaAttachment buffer with capacity: %d (initialized with BoneIndex=-1)"), RequiredCapacity);
 
 		return NewBuffer;
 	}
@@ -2776,7 +2776,7 @@ void FGPUFluidSimulator::ConvertFromGPU(FKawaiiFluidParticle& OutCPUParticle, co
 		static bool bLoggedOnce = false;
 		if (!bLoggedOnce)
 		{
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("ConvertFromGPU: Invalid data detected (NaN or extreme values) - skipping update"));
+			KF_LOG(Warning, TEXT("ConvertFromGPU: Invalid data detected (NaN or extreme values) - skipping update"));
 			bLoggedOnce = true;
 		}
 		return;
@@ -2800,7 +2800,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPU
 {
 	if (!bIsInitialized)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("UploadParticles: Simulator not initialized"));
+		KF_LOG(Error, TEXT("UploadParticles: Simulator not initialized"));
 		return;
 	}
 
@@ -2829,8 +2829,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPU
 
 		if (TotalAfterAppend > MaxParticleCount)
 		{
-			UE_LOG(LogGPUFluidSimulator, Warning,
-				TEXT("UploadParticles (Append): Total count (%d + %d = %d) exceeds capacity (%d)"),
+			KF_LOG(Warning, TEXT("UploadParticles (Append): Total count (%d + %d = %d) exceeds capacity (%d)"),
 				AppendOffset, NewCount, TotalAfterAppend, MaxParticleCount);
 			return;
 		}
@@ -2845,8 +2844,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPU
 			CachedGPUParticles[OldNum + i] = ConvertToGPU(CPUParticles[i]);
 		}, NewCount < 2048);
 
-		UE_LOG(LogGPUFluidSimulator, Log,
-			TEXT("UploadParticles (Append): Added %d particles at offset %d (total: %d)"),
+		KF_LOG_DEV(Log, TEXT("UploadParticles (Append): Added %d particles at offset %d (total: %d)"),
 			NewCount, AppendOffset, TotalAfterAppend);
 
 		// Don't call CreateImmediatePersistentBuffer() yet
@@ -2859,7 +2857,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPU
 	//=========================================================================
 	if (NewCount > MaxParticleCount)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("UploadParticles: Particle count (%d) exceeds capacity (%d)"),
+		KF_LOG(Warning, TEXT("UploadParticles: Particle count (%d) exceeds capacity (%d)"),
 			NewCount, MaxParticleCount);
 		return;
 	}
@@ -2884,7 +2882,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPU
 
 		NewParticleCount = NumNewParticles;
 
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Appending %d new particles (total: %d)"),
+		KF_LOG_DEV(Log, TEXT("UploadParticles: Appending %d new particles (total: %d)"),
 			NumNewParticles, NewCount);
 	}
 	else
@@ -2901,7 +2899,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPU
 
 		// Simulation bounds for Morton code (Z-Order sorting) are set via SetSimulationBounds()
 		// from SimulateGPU before this call (preset bounds + component location offset)
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("UploadParticles: Using bounds: Min(%.1f, %.1f, %.1f) Max(%.1f, %.1f, %.1f)"),
+		KF_LOG_DEV(Log, TEXT("UploadParticles: Using bounds: Min(%.1f, %.1f, %.1f) Max(%.1f, %.1f, %.1f)"),
 			SimulationBoundsMin.X, SimulationBoundsMin.Y, SimulationBoundsMin.Z,
 			SimulationBoundsMax.X, SimulationBoundsMax.Y, SimulationBoundsMax.Z);
 
@@ -2930,7 +2928,7 @@ void FGPUFluidSimulator::FinalizeUpload()
 
 		if (CachedGPUParticles.Num() == 0)
 		{
-			UE_LOG(LogGPUFluidSimulator, Log, TEXT("FinalizeUpload: No particles to upload"));
+			KF_LOG_DEV(Log, TEXT("FinalizeUpload: No particles to upload"));
 			return;
 		}
 
@@ -2961,13 +2959,13 @@ void FGPUFluidSimulator::FinalizeUpload()
 		}
 
 		bHasValidGPUResults.store(true);
-		UE_LOG(LogGPUFluidSimulator, Log, TEXT("FinalizeUpload: Built readback cache for %d particles"), ParticleCount);
+		KF_LOG_DEV(Log, TEXT("FinalizeUpload: Built readback cache for %d particles"), ParticleCount);
 	}
 	// ═══════════════════════════════════════════════════
 	// Lock released - FlushRenderingCommands is now safe
 	// ═══════════════════════════════════════════════════
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("FinalizeUpload: Creating persistent buffer for %d particles"), ParticleCount);
+	KF_LOG_DEV(Log, TEXT("FinalizeUpload: Creating persistent buffer for %d particles"), ParticleCount);
 
 	// Create GPU buffer (using copy, no lock needed)
 	CreateImmediatePersistentBufferFromCopy(ParticlesCopy, ParticleCount);
@@ -3013,7 +3011,7 @@ void FGPUFluidSimulator::ClearCachedParticles()
 	bEverHadParticles = false;
 	PersistentParticleCountBuffer = nullptr;
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("ClearCachedParticles: Cleared cached particles"));
+	KF_LOG_DEV(Log, TEXT("ClearCachedParticles: Cleared cached particles"));
 }
 
 void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
@@ -3054,8 +3052,7 @@ void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
 			// Execute immediately
 			GraphBuilder.Execute();
 			
-			// UE_LOG(LogGPUFluidSimulator, Log,
-			// 	TEXT("CreateImmediatePersistentBuffer: Created buffer with %d particles"), Self->CurrentParticleCount);
+			// KF_LOG_DEV(Log, // 	TEXT("CreateImmediatePersistentBuffer: Created buffer with %d particles"), Self->CurrentParticleCount);
 		}
 	);
 
@@ -3109,8 +3106,7 @@ void FGPUFluidSimulator::CreateImmediatePersistentBufferFromCopy(const TArray<FG
 			// Execute immediately
 			GraphBuilder.Execute();
 			
-			// UE_LOG(LogGPUFluidSimulator, Log,
-			// 	TEXT("CreateImmediatePersistentBufferFromCopy: Created buffer with %d particles"), ParticleCount);
+			// KF_LOG_DEV(Log, // 	TEXT("CreateImmediatePersistentBufferFromCopy: Created buffer with %d particles"), ParticleCount);
 		}
 	);
 
@@ -3142,7 +3138,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUP
 		static bool bLoggedOnce = false;
 		if (!bLoggedOnce)
 		{
-			UE_LOG(LogGPUFluidSimulator, Log, TEXT("DownloadParticles: No valid GPU results yet, skipping"));
+			KF_LOG_DEV(Log, TEXT("DownloadParticles: No valid GPU results yet, skipping"));
 			bLoggedOnce = true;
 		}
 		return;
@@ -3200,7 +3196,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUP
 
 		if (!bSuccess)
 		{
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("DownloadParticles: Sync readback failed"));
+			KF_LOG(Warning, TEXT("DownloadParticles: Sync readback failed"));
 			ParticleBuffer.Empty();
 			Count = 0;
 		}
@@ -3226,7 +3222,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUP
 	// if (DebugFrameCounter++ % 60 == 0)
 	// {
 	// 	const FGPUFluidParticle& P = ParticleBuffer[0];
-	// 	UE_LOG(LogGPUFluidSimulator, Log, TEXT("DownloadParticles: GPUCount=%d, CPUCount=%d, Readback[0] Pos=(%.2f, %.2f, %.2f)"),
+	// 	KF_LOG_DEV(Log, TEXT("DownloadParticles: GPUCount=%d, CPUCount=%d, Readback[0] Pos=(%.2f, %.2f, %.2f)"),
 	// 		Count, OutCPUParticles.Num(), P.Position.X, P.Position.Y, P.Position.Z);
 	// }
 
@@ -3263,8 +3259,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUP
 	if (OutOfBoundsCount > Count / 10 && (GFrameCounter - LastBoundsWarningFrame) > 300)  // >10% near edge, warn every 5 sec
 	{
 		LastBoundsWarningFrame = GFrameCounter;
-		UE_LOG(LogGPUFluidSimulator, Warning,
-			TEXT("Z-Order WARNING: %d/%d particles (%.1f%%) are near simulation bounds edge! "
+		KF_LOG(Warning, TEXT("Z-Order WARNING: %d/%d particles (%.1f%%) are near simulation bounds edge! "
 			     "This may cause Black Hole Cell problem with Z-Order sorting. "
 			     "Bounds: Min(%.1f, %.1f, %.1f) Max(%.1f, %.1f, %.1f)"),
 			OutOfBoundsCount, Count, 100.0f * OutOfBoundsCount / Count,
@@ -3272,7 +3267,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUP
 			SimulationBoundsMax.X, SimulationBoundsMax.Y, SimulationBoundsMax.Z);
 	}
 
-	UE_LOG(LogGPUFluidSimulator, Verbose, TEXT("DownloadParticles: Updated %d/%d particles"), UpdatedCount, Count);
+	KF_LOG_DEV(Verbose, TEXT("DownloadParticles: Updated %d/%d particles"), UpdatedCount, Count);
 }
 
 bool FGPUFluidSimulator::GetAllGPUParticles(TArray<FKawaiiFluidParticle>& OutParticles)
@@ -3390,7 +3385,7 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FKawaiiFluidParticle>& Ou
 		}
 	}
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("GetAllGPUParticlesSync: Retrieved %d particles (sync readback)"), Count);
+	KF_LOG_DEV(Log, TEXT("GetAllGPUParticlesSync: Retrieved %d particles (sync readback)"), Count);
 
 	return true;
 }
@@ -3453,7 +3448,7 @@ bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FKawaiiFl
 
 		if (!bSuccess)
 		{
-			UE_LOG(LogGPUFluidSimulator, Warning, TEXT("GetParticlesBySourceID: Sync readback failed"));
+			KF_LOG(Warning, TEXT("GetParticlesBySourceID: Sync readback failed"));
 			ParticleBuffer.Empty();
 			Count = 0;
 		}
@@ -3617,7 +3612,7 @@ void FGPUFluidSimulator::AllocateAnisotropyReadbackObjects(FRHICommandListImmedi
 		}
 	}
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Anisotropy readback objects allocated (NumBuffers=%d)"), NUM_ANISOTROPY_READBACK_BUFFERS);
+	KF_LOG_DEV(Log, TEXT("Anisotropy readback objects allocated (NumBuffers=%d)"), NUM_ANISOTROPY_READBACK_BUFFERS);
 }
 
 /**
@@ -3900,7 +3895,7 @@ void FGPUFluidSimulator::AllocateStatsReadbackObjects(FRHICommandListImmediate& 
 		StatsReadbackParticleCounts[i] = 0;
 	}
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Stats readback objects allocated (NumBuffers=%d)"), NUM_STATS_READBACK_BUFFERS);
+	KF_LOG_DEV(Log, TEXT("Stats readback objects allocated (NumBuffers=%d)"), NUM_STATS_READBACK_BUFFERS);
 }
 
 void FGPUFluidSimulator::ReleaseStatsReadbackObjects()
@@ -3932,8 +3927,7 @@ void FGPUFluidSimulator::EnqueueStatsReadback(FRHICommandListImmediate& RHICmdLi
 	const uint32 RequiredSize = ParticleCount * ElementSize;
 	if (RequiredSize > SourceBufferSize)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning,
-			TEXT("EnqueueStatsReadback: CopySize (%u) exceeds SourceBuffer size (%u). ParticleCount=%d, Compact=%d, Skipping."),
+		KF_LOG_DEV(Verbose, TEXT("EnqueueStatsReadback: CopySize (%u) exceeds SourceBuffer size (%u). ParticleCount=%d, Compact=%d, Skipping."),
 			RequiredSize, SourceBufferSize, ParticleCount, bCompactMode ? 1 : 0);
 		return;
 	}
@@ -4385,8 +4379,7 @@ bool FGPUFluidSimulator::GetShadowDataWithAnisotropy(
 		// static int32 MismatchLogCounter = 0;
 		// if (++MismatchLogCounter % 10 == 1)
 		// {
-		// 	UE_LOG(LogGPUFluidSimulator, Warning,
-		// 		TEXT("[ANISO_MISMATCH] Position=%d, Aniso1=%d, Aniso2=%d, Aniso3=%d → Using default W=1.0"),
+		// 	KF_LOG(Warning, // 		TEXT("ANISO_MISMATCH: Position=%d, Aniso1=%d, Aniso2=%d, Aniso3=%d → Using default W=1.0"),
 		// 		Count, ReadyShadowAnisotropyAxis1.Num(), ReadyShadowAnisotropyAxis2.Num(), ReadyShadowAnisotropyAxis3.Num());
 		// }
 
@@ -4435,7 +4428,7 @@ void FGPUFluidSimulator::AllocateDebugIndexReadbackObjects(FRHICommandListImmedi
 		DebugIndexReadbackParticleCounts[i] = 0;
 	}
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Debug Z-Order index readback objects allocated (NumBuffers=%d)"), NUM_DEBUG_INDEX_READBACK_BUFFERS);
+	KF_LOG_DEV(Log, TEXT("Debug Z-Order index readback objects allocated (NumBuffers=%d)"), NUM_DEBUG_INDEX_READBACK_BUFFERS);
 }
 
 void FGPUFluidSimulator::ReleaseDebugIndexReadbackObjects()
@@ -4466,8 +4459,7 @@ void FGPUFluidSimulator::EnqueueDebugIndexReadback(FRHICommandListImmediate& RHI
 	const uint32 RequiredSize = ParticleCount * ElementSize;
 	if (RequiredSize > SourceBufferSize)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning,
-			TEXT("EnqueueDebugIndexReadback: CopySize (%u) exceeds SourceBuffer size (%u). ParticleCount=%d, Skipping."),
+		KF_LOG_DEV(VeryVerbose, TEXT("EnqueueDebugIndexReadback: CopySize (%u) exceeds SourceBuffer size (%u). ParticleCount=%d, Skipping."),
 			RequiredSize, SourceBufferSize, ParticleCount);
 		return;
 	}
@@ -4533,7 +4525,7 @@ void FGPUFluidSimulator::ProcessDebugIndexReadback()
 
 	if (IndexData == nullptr)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("Debug Index Readback: Failed to lock buffer"));
+		KF_LOG_DEV(VeryVerbose, TEXT("DebugIndexReadback: Failed to lock buffer"));
 		return;
 	}
 
@@ -4632,7 +4624,7 @@ void FGPUFluidSimulator::AllocateParticleBoundsReadbackObjects(FRHICommandListIm
 		ParticleBoundsReadbackFrameNumbers[i] = 0;
 	}
 
-	UE_LOG(LogGPUFluidSimulator, Log, TEXT("Particle bounds readback objects allocated (NumBuffers=%d)"), NUM_PARTICLE_BOUNDS_READBACK_BUFFERS);
+	KF_LOG_DEV(Log, TEXT("Particle bounds readback objects allocated (NumBuffers=%d)"), NUM_PARTICLE_BOUNDS_READBACK_BUFFERS);
 }
 
 void FGPUFluidSimulator::ReleaseParticleBoundsReadbackObjects()
@@ -4663,8 +4655,7 @@ void FGPUFluidSimulator::EnqueueParticleBoundsReadback(FRHICommandListImmediate&
 	const uint32 SourceBufferSize = SourceBuffer->GetSize();
 	if (SourceBufferSize < BoundsBufferSize)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning,
-			TEXT("EnqueueParticleBoundsReadback: SourceBuffer size (%u) less than required (%u). Skipping."),
+		KF_LOG_DEV(VeryVerbose, TEXT("EnqueueParticleBoundsReadback: SourceBuffer size (%u) less than required (%u). Skipping."),
 			SourceBufferSize, BoundsBufferSize);
 		return;
 	}
@@ -4722,7 +4713,7 @@ void FGPUFluidSimulator::ProcessParticleBoundsReadback()
 
 	if (BoundsData == nullptr)
 	{
-		UE_LOG(LogGPUFluidSimulator, Warning, TEXT("Particle Bounds Readback: Failed to lock buffer"));
+		KF_LOG_DEV(VeryVerbose, TEXT("ParticleBoundsReadback: Failed to lock buffer"));
 		return;
 	}
 

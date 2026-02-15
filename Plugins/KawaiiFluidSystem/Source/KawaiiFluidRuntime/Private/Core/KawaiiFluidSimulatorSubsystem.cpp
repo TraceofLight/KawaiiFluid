@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Core/KawaiiFluidSimulationContext.h"
 #include "Core/KawaiiFluidSpatialHash.h"
 #include "Core/KawaiiFluidPresetDataAsset.h"
@@ -68,7 +69,7 @@ void UKawaiiFluidSimulatorSubsystem::Initialize(FSubsystemCollectionBase& Collec
 	OnPostActorTickHandle = FWorldDelegates::OnWorldPostActorTick.AddUObject(
 		this, &UKawaiiFluidSimulatorSubsystem::HandlePostActorTick);
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidSimulatorSubsystem initialized (simulation runs post-actor tick)"));
+	KF_LOG_DEV(Log, TEXT("KawaiiFluidSimulatorSubsystem initialized (simulation runs post-actor tick)"));
 }
 
 /**
@@ -111,7 +112,7 @@ void UKawaiiFluidSimulatorSubsystem::Deinitialize()
 
 	Super::Deinitialize();
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidSimulatorSubsystem deinitialized"));
+	KF_LOG_DEV(Log, TEXT("KawaiiFluidSimulatorSubsystem deinitialized"));
 }
 
 /**
@@ -254,7 +255,7 @@ void UKawaiiFluidSimulatorSubsystem::RegisterModule(UKawaiiFluidSimulationModule
 			}
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("SimulationModule registered: SourceID=%d, GPUActive=%d"),
+		KF_LOG_DEV(Log, TEXT("SimulationModule registered: SourceID=%d, GPUActive=%d"),
 			NewSourceID, Module->IsGPUSimulationActive() ? 1 : 0);
 	}
 }
@@ -276,7 +277,7 @@ void UKawaiiFluidSimulatorSubsystem::UnregisterModule(UKawaiiFluidSimulationModu
 	}
 
 	AllModules.Remove(Module);
-	UE_LOG(LogTemp, Verbose, TEXT("SimulationModule unregistered"));
+	KF_LOG_DEV(Verbose, TEXT("SimulationModule unregistered"));
 }
 
 /**
@@ -301,7 +302,7 @@ int32 UKawaiiFluidSimulatorSubsystem::AllocateSourceID()
 		}
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("Subsystem::AllocateSourceID FAILED - all %d slots in use!"), EGPUParticleSource::MaxSourceCount);
+	KF_LOG(Warning, TEXT("Subsystem: AllocateSourceID FAILED - all %d slots in use!"), EGPUParticleSource::MaxSourceCount);
 	return EGPUParticleSource::InvalidSourceID;
 }
 
@@ -326,7 +327,7 @@ void UKawaiiFluidSimulatorSubsystem::RegisterVolume(AKawaiiFluidVolume* Volume)
 	if (Volume && !AllVolumes.Contains(Volume))
 	{
 		AllVolumes.Add(Volume);
-		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidVolume registered: %s"), *Volume->GetName());
+		KF_LOG_DEV(Log, TEXT("KawaiiFluidVolume registered: %s"), *Volume->GetName());
 	}
 }
 
@@ -348,7 +349,7 @@ void UKawaiiFluidSimulatorSubsystem::RegisterVolumeComponent(UKawaiiFluidVolumeC
 	if (VolumeComponent && !AllVolumeComponents.Contains(VolumeComponent))
 	{
 		AllVolumeComponents.Add(VolumeComponent);
-		UE_LOG(LogTemp, Log, TEXT("VolumeComponent registered: %s"), *VolumeComponent->GetName());
+		KF_LOG_DEV(Log, TEXT("VolumeComponent registered: %s"), *VolumeComponent->GetName());
 	}
 }
 

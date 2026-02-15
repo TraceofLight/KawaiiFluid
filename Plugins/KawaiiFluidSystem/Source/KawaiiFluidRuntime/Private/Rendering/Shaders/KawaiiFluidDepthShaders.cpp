@@ -7,4 +7,3 @@
 // Shader implementation
 IMPLEMENT_GLOBAL_SHADER(FKawaiiFluidDepthVS, "/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderDepth.usf", "MainVS", SF_Vertex);
 IMPLEMENT_GLOBAL_SHADER(FKawaiiFluidDepthPS, "/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderDepth.usf", "MainPS", SF_Pixel);
-

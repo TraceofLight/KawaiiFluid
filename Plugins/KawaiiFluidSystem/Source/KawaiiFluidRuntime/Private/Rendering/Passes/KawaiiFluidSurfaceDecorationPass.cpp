@@ -455,4 +455,3 @@ void KawaiiFluidRenderer::RenderSurfaceDecorationPass(
 		PassParameters,
 		FComputeShaderUtils::GetGroupCount(TextureSize, 8));
 }
-

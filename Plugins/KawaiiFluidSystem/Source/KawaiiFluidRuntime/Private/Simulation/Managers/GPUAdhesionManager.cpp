@@ -1,6 +1,7 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Simulation/Managers/GPUAdhesionManager.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Managers/GPUCollisionManager.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
@@ -38,12 +39,12 @@ void FGPUAdhesionManager::Initialize()
 {
 	if (bIsInitialized)
 	{
-		UE_LOG(LogGPUAdhesionManager, Warning, TEXT("Already initialized"));
+		KF_LOG_DEV(Verbose, TEXT("Already initialized"));
 		return;
 	}
 
 	bIsInitialized = true;
-	UE_LOG(LogGPUAdhesionManager, Log, TEXT("GPU Adhesion Manager initialized"));
+	KF_LOG_DEV(Log, TEXT("GPU Adhesion Manager initialized"));
 }
 
 /**
@@ -63,7 +64,7 @@ void FGPUAdhesionManager::Release()
 	AttachmentBufferSize = 0;
 
 	bIsInitialized = false;
-	UE_LOG(LogGPUAdhesionManager, Log, TEXT("GPU Adhesion Manager released"));
+	KF_LOG_DEV(Log, TEXT("GPU Adhesion Manager released"));
 }
 
 //=============================================================================

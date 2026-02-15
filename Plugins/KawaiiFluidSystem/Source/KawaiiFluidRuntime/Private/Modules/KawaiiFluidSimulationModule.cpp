@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Modules/KawaiiFluidSimulationModule.h"
+#include "Logging/KawaiiFluidLog.h"
 
 #include "KawaiiFluidSimulationContext.h"
 #include "Core/KawaiiFluidSpatialHash.h"
@@ -93,7 +94,7 @@ void UKawaiiFluidSimulationModule::PostDuplicate(bool bDuplicateForPIE)
 
 	bIsInitialized = false;
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidSimulationModule::PostDuplicate - Preserved %d particles, cleared stale pointers (PIE=%d)"),
+	KF_LOG_DEV(Log, TEXT("UKawaiiFluidSimulationModule: PostDuplicate - Preserved %d particles, cleared stale pointers (PIE=%d)"),
 		PreservedParticleCount, bDuplicateForPIE ? 1 : 0);
 }
 
@@ -152,7 +153,7 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (!GPUSim || !GPUSim->IsReady())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("UploadCPUParticlesToGPU: GPUSimulator not ready, %d particles waiting"), Particles.Num());
+		KF_LOG_DEV(Verbose, TEXT("UploadCPUParticlesToGPU: GPUSimulator not ready, %d particles waiting"), Particles.Num());
 		return;
 	}
 
@@ -209,12 +210,12 @@ void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 	if (UploadCount > 0)
 	{
 		Particles.Empty();
-		UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: Uploaded %d particles (SourceID=%d, IDs=%d~%d) to GPU"),
+		KF_LOG_DEV(Log, TEXT("UploadCPUParticlesToGPU: Uploaded %d particles (SourceID=%d, IDs=%d~%d) to GPU"),
 			UploadCount, CachedSourceID, StartID, StartID + UploadCount - 1);
 	}
 	else
 	{
-		UE_LOG(LogTemp, Log, TEXT("UploadCPUParticlesToGPU: No particles to upload, ran initialization simulation for collision/landscape preload"));
+		KF_LOG_DEV(Log, TEXT("UploadCPUParticlesToGPU: No particles to upload, ran initialization simulation for collision/landscape preload"));
 	}
 }
 
@@ -248,7 +249,7 @@ void UKawaiiFluidSimulationModule::OnPreBeginPIE(bool bIsSimulating)
 {
 	SyncGPUParticlesToCPU();
 
-	UE_LOG(LogTemp, Log, TEXT("OnPreBeginPIE: Synced %d particles for PIE transfer"), Particles.Num());
+	KF_LOG_DEV(Log, TEXT("OnPreBeginPIE: Synced %d particles for PIE transfer"), Particles.Num());
 }
 #endif
 
@@ -405,7 +406,7 @@ void UKawaiiFluidSimulationModule::Initialize(UKawaiiFluidPresetDataAsset* InPre
 
 	bIsInitialized = true;
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidSimulationModule initialized"));
+	KF_LOG_DEV(Log, TEXT("UKawaiiFluidSimulationModule initialized"));
 }
 
 /**
@@ -428,7 +429,7 @@ void UKawaiiFluidSimulationModule::Shutdown()
 
 	bIsInitialized = false;
 
-	UE_LOG(LogTemp, Log, TEXT("UKawaiiFluidSimulationModule shutdown"));
+	KF_LOG_DEV(Log, TEXT("UKawaiiFluidSimulationModule shutdown"));
 }
 
 /**
@@ -1437,7 +1438,7 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 			SpawnMgr->CancelPendingSpawnsForSource(CachedSourceID);
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("ClearAllParticles: SourceID=%d (GPU despawn by source)"), CachedSourceID);
+		KF_LOG_DEV(Log, TEXT("ClearAllParticles: SourceID=%d (GPU despawn by source)"), CachedSourceID);
 	}
 }
 
@@ -2005,7 +2006,7 @@ void UKawaiiFluidSimulationModule::ResolveContainmentCollisions()
 void UKawaiiFluidSimulationModule::SetSourceID(int32 InSourceID)
 {
 	CachedSourceID = InSourceID;
-	UE_LOG(LogTemp, Log, TEXT("SimulationModule::SetSourceID = %d"), CachedSourceID);
+	KF_LOG_DEV(Log, TEXT("SimulationModule: SetSourceID = %d"), CachedSourceID);
 }
 
 //========================================
@@ -2149,12 +2150,12 @@ void UKawaiiFluidSimulationModule::RecalculateVolumeBounds()
 			const float RotatedAABB = FMath::Max3(ComputeRotatedAABBHalfExtent(OriginalHalfExtent).X,
 			                                       ComputeRotatedAABBHalfExtent(OriginalHalfExtent).Y,
 			                                       ComputeRotatedAABBHalfExtent(OriginalHalfExtent).Z);
-			UE_LOG(LogTemp, Warning, TEXT("VolumeSize adjusted: Rotated AABB (%.1f cm) exceeds limit (%.1f cm). Size scaled from (%s) to (%s)"),
+			KF_LOG(Warning, TEXT("VolumeSize adjusted: Rotated AABB (%.1f cm) exceeds limit (%.1f cm). Size scaled from (%s) to (%s)"),
 				RotatedAABB * 2.0f, LargeMaxHalfExtent * 2.0f, *OriginalSize.ToString(), *NewSize.ToString());
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("VolumeSize exceeds limit (%.1f cm per axis). Clamped from (%s) to (%s)"),
+			KF_LOG(Warning, TEXT("VolumeSize exceeds limit (%.1f cm per axis). Clamped from (%s) to (%s)"),
 				LargeMaxHalfExtent * 2.0f, *OriginalSize.ToString(), *NewSize.ToString());
 		}
 
@@ -2397,7 +2398,7 @@ void UKawaiiFluidSimulationModule::OnObjectsReplaced(const TMap<UObject*, UObjec
 		{
 			UKawaiiFluidPresetDataAsset* NewPreset = Cast<UKawaiiFluidPresetDataAsset>(*NewPresetPtr);
 
-			UE_LOG(LogTemp, Log, TEXT("SimulationModule: Preset replaced via reload (Old=%p, New=%p)"),
+			KF_LOG_DEV(Log, TEXT("SimulationModule: Preset replaced via reload (Old=%p, New=%p)"),
 				Preset.Get(), NewPreset);
 
 			UnbindFromPresetPropertyChanged();

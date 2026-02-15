@@ -2,6 +2,7 @@
 // FGPUCollisionManager Implementation
 
 #include "Simulation/Managers/GPUCollisionManager.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
@@ -45,7 +46,7 @@ void FGPUCollisionManager::Initialize()
 	FeedbackManager->Initialize();
 
 	bIsInitialized = true;
-	UE_LOG(LogGPUCollisionManager, Log, TEXT("FGPUCollisionManager initialized"));
+	KF_LOG_DEV(Log, TEXT("FGPUCollisionManager initialized"));
 }
 
 /**
@@ -81,7 +82,7 @@ void FGPUCollisionManager::Release()
 	bBoneTransformsValid = false;
 	bIsInitialized = false;
 
-	UE_LOG(LogGPUCollisionManager, Log, TEXT("FGPUCollisionManager released"));
+	KF_LOG_DEV(Log, TEXT("FGPUCollisionManager released"));
 }
 
 //=============================================================================
@@ -120,7 +121,7 @@ void FGPUCollisionManager::UploadCollisionPrimitives(const FGPUCollisionPrimitiv
 	bCollisionPrimitivesValid = true;
 	bBoneTransformsValid = CachedBoneTransforms.Num() > 0;
 
-	UE_LOG(LogGPUCollisionManager, Verbose, TEXT("Cached collision primitives: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d, Planes=%d, BoneTransforms=%d"),
+	KF_LOG_DEV(Verbose, TEXT("Cached collision primitives: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d, Planes=%d, BoneTransforms=%d"),
 		CachedSpheres.Num(), CachedCapsules.Num(), CachedBoxes.Num(), CachedConvexHeaders.Num(), CachedConvexPlanes.Num(), CachedBoneTransforms.Num());
 }
 
@@ -691,7 +692,7 @@ int32 FGPUCollisionManager::GetContactCountForOwner(int32 OwnerID) const
 
 	if (bLogThisFrame && MatchedColliders > 0)
 	{
-		UE_LOG(LogGPUCollisionManager, Log, TEXT("[ContactCountForOwner] OwnerID=%d, MatchedColliders=%d, TotalCount=%d"),
+		KF_LOG_DEV(VeryVerbose, TEXT("ContactCountForOwner: OwnerID=%d, MatchedColliders=%d, TotalCount=%d"),
 			OwnerID, MatchedColliders, TotalCount);
 	}
 
@@ -717,7 +718,7 @@ void FGPUCollisionManager::UploadHeightmapTexture(const TArray<float>& HeightDat
 
 	if (HeightData.Num() != Width * Height)
 	{
-		UE_LOG(LogGPUCollisionManager, Warning, TEXT("Heightmap data size mismatch: %d != %d x %d"), HeightData.Num(), Width, Height);
+		KF_LOG(Warning, TEXT("Heightmap data size mismatch: %d != %d x %d"), HeightData.Num(), Width, Height);
 		bHeightmapDataValid = false;
 		return;
 	}
@@ -756,7 +757,7 @@ void FGPUCollisionManager::UploadHeightmapTexture(const TArray<float>& HeightDat
 
 			if (!TexturePtr->IsValid())
 			{
-				UE_LOG(LogGPUCollisionManager, Error, TEXT("Failed to create heightmap texture"));
+				KF_LOG(Error, TEXT("Failed to create heightmap texture"));
 				*ValidPtr = false;
 				return;
 			}
@@ -778,17 +779,17 @@ void FGPUCollisionManager::UploadHeightmapTexture(const TArray<float>& HeightDat
 				RHIUnlockTexture2D(*TexturePtr, 0, false);
 				*ValidPtr = true;
 
-				UE_LOG(LogGPUCollisionManager, Log, TEXT("Uploaded heightmap texture: %dx%d"), Width, Height);
+				KF_LOG_DEV(Log, TEXT("Uploaded heightmap texture: %dx%d"), Width, Height);
 			}
 			else
 			{
-				UE_LOG(LogGPUCollisionManager, Error, TEXT("Failed to lock heightmap texture"));
+				KF_LOG(Error, TEXT("Failed to lock heightmap texture"));
 				TexturePtr->SafeRelease();
 				*ValidPtr = false;
 			}
 		});
 
-	UE_LOG(LogGPUCollisionManager, Log, TEXT("Enqueued heightmap texture upload: %dx%d, WorldBounds: (%.1f,%.1f,%.1f) - (%.1f,%.1f,%.1f)"),
+	KF_LOG_DEV(Log, TEXT("Enqueued heightmap texture upload: %dx%d, WorldBounds: (%.1f,%.1f,%.1f) - (%.1f,%.1f,%.1f)"),
 		Width, Height,
 		HeightmapParams.WorldMin.X, HeightmapParams.WorldMin.Y, HeightmapParams.WorldMin.Z,
 		HeightmapParams.WorldMax.X, HeightmapParams.WorldMax.Y, HeightmapParams.WorldMax.Z);

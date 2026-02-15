@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Simulation/Physics/KawaiiFluidAdhesionSolver.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Physics/KawaiiFluidSPHKernels.h"
 #include "Simulation/Collision/KawaiiFluidCollider.h"
 #include "Async/ParallelFor.h"
@@ -34,7 +35,7 @@ void FKawaiiFluidAdhesionSolver::Apply(
 	// static int32 ApplyDebugCounter = 0;
 	// if (++ApplyDebugCounter % 1000 == 0)
 	// {
-	// 	UE_LOG(LogTemp, Warning, TEXT("AdhesionSolver::Apply - Colliders: %d, Strength: %.2f, Radius: %.2f"),
+	// 	KF_LOG(Warning, TEXT("AdhesionSolver: Apply - Colliders: %d, Strength: %.2f, Radius: %.2f"),
 	// 		Colliders.Num(), AdhesionStrength, AdhesionRadius);
 	// }
 
@@ -325,7 +326,7 @@ void FKawaiiFluidAdhesionSolver::UpdateAttachmentState(
 	// {
 	// 	if (++DetachLogCounter % 100 == 1)
 	// 	{
-	// 		UE_LOG(LogTemp, Warning, TEXT("[Detach] Particle %d detached! Was on bone: %s"),
+	// 		KF_LOG(Warning, TEXT("Detach: Particle %d detached! Was on bone: %s"),
 	// 			Particle.ParticleID, *Particle.AttachedBoneName.ToString());
 	// 	}
 	// }

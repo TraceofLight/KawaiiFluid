@@ -1,6 +1,7 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ClearQuad.h"
@@ -68,7 +69,7 @@ bool FKawaiiFluidRenderResource::NeedsResize(int32 NewCount) const
 
 	if (bNeedGrow)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("RenderResource: Buffer resize needed (Count %d > Capacity %d)"),
+		KF_LOG_DEV(Verbose, TEXT("RenderResource: Buffer resize needed (Count %d > Capacity %d)"),
 			NewCount, BufferCapacity);
 	}
 

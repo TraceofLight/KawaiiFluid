@@ -1,7 +1,8 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUCollisionFeedbackManager - Collision feedback system with async GPU readback
 
 #include "Simulation/Managers/GPUCollisionFeedbackManager.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "RHIGPUReadback.h"
 #include "RenderingThread.h"
 
@@ -47,7 +48,7 @@ void FGPUCollisionFeedbackManager::Initialize()
 	ReadyFluidInteractionSMFeedback.SetNum(MAX_FLUIDINTERACTION_SM_FEEDBACK);
 	ReadyFluidInteractionSMFeedbackCount = 0;
 
-	UE_LOG(LogGPUCollisionFeedback, Log, TEXT("GPUCollisionFeedbackManager initialized (BoneFeedback=%d, StaticMeshFeedback=%d, FluidInteractionSMFeedback=%d)"),
+	KF_LOG_DEV(Log, TEXT("GPUCollisionFeedbackManager initialized (BoneFeedback=%d, StaticMeshFeedback=%d, FluidInteractionSMFeedback=%d)"),
 		MAX_COLLISION_FEEDBACK, MAX_STATICMESH_COLLISION_FEEDBACK, MAX_FLUIDINTERACTION_SM_FEEDBACK);
 }
 
@@ -82,7 +83,7 @@ void FGPUCollisionFeedbackManager::Release()
 
 	bIsInitialized = false;
 
-	UE_LOG(LogGPUCollisionFeedback, Log, TEXT("GPUCollisionFeedbackManager released"));
+	KF_LOG_DEV(Log, TEXT("GPUCollisionFeedbackManager released"));
 }
 
 //=============================================================================
@@ -113,7 +114,7 @@ void FGPUCollisionFeedbackManager::AllocateReadbackObjects(FRHICommandListImmedi
 		}
 	}
 
-	UE_LOG(LogGPUCollisionFeedback, Log, TEXT("Unified readback objects allocated (BufferSize=%d bytes, NumBuffers=%d, MaxColliders=%d)"),
+	KF_LOG_DEV(Log, TEXT("Unified readback objects allocated (BufferSize=%d bytes, NumBuffers=%d, MaxColliders=%d)"),
 		UNIFIED_BUFFER_SIZE, NUM_FEEDBACK_BUFFERS, MAX_COLLIDER_COUNT);
 }
 
@@ -224,7 +225,7 @@ void FGPUCollisionFeedbackManager::ProcessFeedbackReadback(FRHICommandListImmedi
 			{
 				BoneIdxSamples += FString::Printf(TEXT("[%d:OwnerID=%d] "), BoneFeedback[s].BoneIndex, BoneFeedback[s].ColliderOwnerID);
 			}
-			UE_LOG(LogTemp, Warning, TEXT("[UnifiedBuffer-Bone] Count=%d, Samples=%s"), BoneCount, *BoneIdxSamples);
+			KF_LOG_DEV(VeryVerbose, TEXT("UnifiedBuffer-Bone: Count=%d, Samples=%s"), BoneCount, *BoneIdxSamples);
 		}
 	}
 	else
@@ -250,7 +251,7 @@ void FGPUCollisionFeedbackManager::ProcessFeedbackReadback(FRHICommandListImmedi
 			{
 				SMIdxSamples += FString::Printf(TEXT("[%d:OwnerID=%d] "), SMFeedback[s].BoneIndex, SMFeedback[s].ColliderOwnerID);
 			}
-			UE_LOG(LogTemp, Warning, TEXT("[UnifiedBuffer-SM] Count=%d, Samples=%s"), SMCount, *SMIdxSamples);
+			KF_LOG_DEV(VeryVerbose, TEXT("UnifiedBuffer-SM: Count=%d, Samples=%s"), SMCount, *SMIdxSamples);
 		}
 	}
 	else
@@ -276,7 +277,7 @@ void FGPUCollisionFeedbackManager::ProcessFeedbackReadback(FRHICommandListImmedi
 			{
 				FISMIdxSamples += FString::Printf(TEXT("[%d:OwnerID=%d] "), FISMFeedback[s].BoneIndex, FISMFeedback[s].ColliderOwnerID);
 			}
-			UE_LOG(LogTemp, Warning, TEXT("[UnifiedBuffer-FISM] Count=%d, Samples=%s"), FISMCount, *FISMIdxSamples);
+			KF_LOG_DEV(VeryVerbose, TEXT("UnifiedBuffer-FISM: Count=%d, Samples=%s"), FISMCount, *FISMIdxSamples);
 		}
 	}
 	else
@@ -286,7 +287,7 @@ void FGPUCollisionFeedbackManager::ProcessFeedbackReadback(FRHICommandListImmedi
 
 	UnifiedFeedbackReadbacks[ReadIdx]->Unlock();
 
-	UE_LOG(LogGPUCollisionFeedback, Verbose, TEXT("Unified readback %d: Bone=%d, SM=%d, FISM=%d"), ReadIdx, BoneCount, SMCount, FISMCount);
+	KF_LOG_DEV(Verbose, TEXT("Unified readback %d: Bone=%d, SM=%d, FISM=%d"), ReadIdx, BoneCount, SMCount, FISMCount);
 }
 
 /**
@@ -341,7 +342,7 @@ void FGPUCollisionFeedbackManager::ProcessContactCountReadback(FRHICommandListIm
 
 			if (bLogThisFrame && NonZeroColliders > 0)
 			{
-				UE_LOG(LogGPUCollisionFeedback, Log, TEXT("Contact count: Total=%d, NonZeroColliders=%d"),
+				KF_LOG_DEV(Log, TEXT("Contact count: Total=%d, NonZeroColliders=%d"),
 					TotalContactCount, NonZeroColliders);
 			}
 		}
@@ -401,7 +402,7 @@ void FGPUCollisionFeedbackManager::EnqueueReadbackCopy(FRHICommandListImmediate&
 
 		if (bLogThisFrame)
 		{
-			UE_LOG(LogGPUCollisionFeedback, Log, TEXT("EnqueueCopy unified feedback (%d bytes) to readback %d"), UNIFIED_BUFFER_SIZE, WriteIdx);
+			KF_LOG_DEV(Log, TEXT("EnqueueCopy unified feedback (%d bytes) to readback %d"), UNIFIED_BUFFER_SIZE, WriteIdx);
 		}
 	}
 
@@ -431,7 +432,7 @@ void FGPUCollisionFeedbackManager::EnqueueReadbackCopy(FRHICommandListImmediate&
 
 		if (bLogThisFrame)
 		{
-			UE_LOG(LogGPUCollisionFeedback, Log, TEXT("EnqueueCopy contact counts to readback %d"), WriteIdx);
+			KF_LOG_DEV(Log, TEXT("EnqueueCopy contact counts to readback %d"), WriteIdx);
 		}
 	}
 

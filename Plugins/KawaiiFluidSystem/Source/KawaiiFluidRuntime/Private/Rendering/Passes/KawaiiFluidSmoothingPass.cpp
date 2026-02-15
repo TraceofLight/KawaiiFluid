@@ -1112,4 +1112,3 @@ void KawaiiFluidRenderer::RenderVelocitySmoothingPass(
 
 	OutSmoothedVelocityTexture = CurrentInput;
 }
-

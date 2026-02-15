@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/Passes/KawaiiFluidShadingPass.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Rendering/Parameters/KawaiiFluidRenderingParameters.h"
 #include "Rendering/Resources/KawaiiFluidMetaballRenderingData.h"
 #include "Rendering/Shaders/KawaiiFluidCompositeShaders.h"
@@ -39,7 +40,13 @@ void KawaiiFluidRenderer::RenderShadingPass(
 	// Validate input textures
 	if (!IntermediateTextures.SmoothedDepthTexture || !SceneDepthTexture)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiScreenSpaceShading::RenderPostProcessShading: Missing required textures (Depth or SceneDepth)"));
+		static uint64 LastMissingTextureLogFrame = 0;
+		const uint64 CurrentFrame = GFrameCounter;
+		if (LastMissingTextureLogFrame == 0 || CurrentFrame - LastMissingTextureLogFrame >= 120)
+		{
+			LastMissingTextureLogFrame = CurrentFrame;
+			KF_LOG(Warning, TEXT("ScreenSpaceShading: Missing required textures (Depth or SceneDepth)"));
+		}
 		return;
 	}
 

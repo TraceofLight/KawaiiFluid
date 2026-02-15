@@ -1,6 +1,7 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/Pipeline/KawaiiFluidScreenSpacePipeline.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Rendering/KawaiiFluidRenderer.h"
 #include "Rendering/Passes/KawaiiFluidDepthPass.h"
 #include "Rendering/Passes/KawaiiFluidSmoothingPass.h"
@@ -19,6 +20,7 @@
 #include "ScenePrivate.h"
 #include "SceneRendering.h"
 #include "SceneTextures.h"
+#include "EngineGlobals.h"
 
 namespace KFR = KawaiiFluidRenderer;
 
@@ -67,6 +69,21 @@ static bool GenerateIntermediateTextures(
 	FRDGTextureRef VelocityTexture = nullptr;
 	FRDGTextureRef OcclusionMaskTexture = nullptr;
 	FRDGTextureRef HardwareDepthTexture = nullptr;
+	static uint64 LastDepthPassFailLogFrame = 0;
+	static uint64 LastSmoothingPassFailLogFrame = 0;
+	static uint64 LastNormalPassFailLogFrame = 0;
+	static uint64 LastThicknessPassFailLogFrame = 0;
+	static uint64 LastThicknessSmoothingFailLogFrame = 0;
+	const auto ShouldLogThrottled = [](uint64& LastFrame, uint64 IntervalFrames = 120) -> bool
+	{
+		const uint64 CurrentFrame = GFrameCounter;
+		if (LastFrame == 0 || CurrentFrame - LastFrame >= IntervalFrames)
+		{
+			LastFrame = CurrentFrame;
+			return true;
+		}
+		return false;
+	};
 
 	// Cache the depth BEFORE it is updated by the current batch.
 	// This will be used as the background (refraction/transmittance reference) in the shading pass.
@@ -78,7 +95,10 @@ static bool GenerateIntermediateTextures(
 
 	if (!DepthTexture)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FKawaiiMetaballScreenSpacePipeline: Depth pass failed"));
+		if (ShouldLogThrottled(LastDepthPassFailLogFrame))
+		{
+			KF_LOG(Warning, TEXT("ScreenSpacePipeline: Depth pass failed"));
+		}
 		return false;
 	}
 
@@ -114,8 +134,10 @@ static bool GenerateIntermediateTextures(
 
 	if (!SmoothedDepthTexture)
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("FKawaiiMetaballScreenSpacePipeline: Smoothing pass failed"));
+		if (ShouldLogThrottled(LastSmoothingPassFailLogFrame))
+		{
+			KF_LOG(Warning, TEXT("ScreenSpacePipeline: Smoothing pass failed"));
+		}
 		return false;
 	}
 
@@ -125,8 +147,10 @@ static bool GenerateIntermediateTextures(
 
 	if (!NormalTexture)
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("FKawaiiMetaballScreenSpacePipeline: Normal pass failed"));
+		if (ShouldLogThrottled(LastNormalPassFailLogFrame))
+		{
+			KF_LOG(Warning, TEXT("ScreenSpacePipeline: Normal pass failed"));
+		}
 		return false;
 	}
 
@@ -136,8 +160,10 @@ static bool GenerateIntermediateTextures(
 
 	if (!ThicknessTexture)
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("FKawaiiMetaballScreenSpacePipeline: Thickness pass failed"));
+		if (ShouldLogThrottled(LastThicknessPassFailLogFrame))
+		{
+			KF_LOG(Warning, TEXT("ScreenSpacePipeline: Thickness pass failed"));
+		}
 		return false;
 	}
 
@@ -149,8 +175,10 @@ static bool GenerateIntermediateTextures(
 
 	if (!SmoothedThicknessTexture)
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT("FKawaiiMetaballScreenSpacePipeline: Thickness smoothing pass failed"));
+		if (ShouldLogThrottled(LastThicknessSmoothingFailLogFrame))
+		{
+			KF_LOG(Warning, TEXT("ScreenSpacePipeline: Thickness smoothing pass failed"));
+		}
 		SmoothedThicknessTexture = ThicknessTexture; // Fallback to unsmoothed
 	}
 
@@ -241,8 +269,7 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 		{
 			PrevAccumulatedFlowRT = nullptr;
 			bHasPrevFrameData = false;
-			UE_LOG(LogTemp, Verbose,
-			       TEXT(
+			KF_LOG_DEV(Verbose, TEXT(
 				       "FKawaiiMetaballScreenSpacePipeline: Flow accumulation disabled, cleared history buffer"
 			       ));
 		}
@@ -301,8 +328,7 @@ void FKawaiiFluidScreenSpacePipeline::PrepareRender(
 		bHasPrevFrameData = true;
 	}
 
-	UE_LOG(LogTemp, Verbose,
-	       TEXT(
+	KF_LOG_DEV(Verbose, TEXT(
 		       "FKawaiiMetaballScreenSpacePipeline: PrepareForTonemap completed - intermediate textures cached"
 	       ));
 }
@@ -341,10 +367,13 @@ void FKawaiiFluidScreenSpacePipeline::ExecuteRender(
 	// Validate cached intermediate textures
 	if (!CachedIntermediateTextures.IsValid())
 	{
-		UE_LOG(LogTemp, Warning,
-		       TEXT(
-			       "FKawaiiMetaballScreenSpacePipeline: Missing cached intermediate textures for Tonemap"
-		       ));
+		static uint64 LastMissingIntermediateLogFrame = 0;
+		const uint64 CurrentFrame = GFrameCounter;
+		if (LastMissingIntermediateLogFrame == 0 || CurrentFrame - LastMissingIntermediateLogFrame >= 120)
+		{
+			LastMissingIntermediateLogFrame = CurrentFrame;
+			KF_LOG(Warning, TEXT("ScreenSpacePipeline: Missing cached intermediate textures for tonemap"));
+		}
 		return;
 	}
 

@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Brush/KawaiiFluidBrushEditorMode.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Actors/KawaiiFluidVolume.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
@@ -53,7 +54,7 @@ void FKawaiiFluidBrushEditorMode::Enter()
 			this, &FKawaiiFluidBrushEditorMode::OnSelectionChanged);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode Entered"));
+	KF_LOG_DEV(Log, TEXT("Fluid Brush Mode Entered"));
 }
 
 /**
@@ -80,7 +81,7 @@ void FKawaiiFluidBrushEditorMode::Exit()
 	bPainting = false;
 
 	FEdMode::Exit();
-	UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode Exited"));
+	KF_LOG_DEV(Log, TEXT("Fluid Brush Mode Exited"));
 }
 
 /**
@@ -651,7 +652,7 @@ void FKawaiiFluidBrushEditorMode::Tick(FEditorViewportClient* ViewportClient, fl
 	// Target destroyed
 	if (!TargetVolume.IsValid() || !TargetVolumeComponent.IsValid())
 	{
-		UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode: Target destroyed, exiting"));
+		KF_LOG_DEV(Log, TEXT("Fluid Brush Mode: Target destroyed, exiting"));
 		GetModeManager()->DeactivateMode(EM_FluidBrush);
 		return;
 	}
@@ -683,7 +684,7 @@ void FKawaiiFluidBrushEditorMode::OnSelectionChanged(UObject* Object)
 	// Nothing selected -> exit
 	if (Selection->Num() == 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode: Selection cleared, exiting"));
+		KF_LOG_DEV(Log, TEXT("Fluid Brush Mode: Selection cleared, exiting"));
 		GetModeManager()->DeactivateMode(EM_FluidBrush);
 		return;
 	}
@@ -694,7 +695,7 @@ void FKawaiiFluidBrushEditorMode::OnSelectionChanged(UObject* Object)
 		bool bTargetStillSelected = Selection->IsSelected(TargetOwnerActor.Get());
 		if (!bTargetStillSelected)
 		{
-			UE_LOG(LogTemp, Log, TEXT("Fluid Brush Mode: Different actor selected, exiting"));
+			KF_LOG_DEV(Log, TEXT("Fluid Brush Mode: Different actor selected, exiting"));
 			GetModeManager()->DeactivateMode(EM_FluidBrush);
 			return;
 		}

@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Core/KawaiiFluidSimulationStats.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "HAL/IConsoleManager.h"
 #include "Engine/Engine.h"
 
@@ -56,63 +57,63 @@ void FKawaiiFluidSimulationStats::LogStats(const FString& Label) const
 	const FString ModeStr = bIsGPUSimulation ? TEXT("GPU") : TEXT("CPU");
 	const FString LabelStr = Label.IsEmpty() ? ModeStr : FString::Printf(TEXT("%s (%s)"), *Label, *ModeStr);
 
-	UE_LOG(LogTemp, Log, TEXT("========================================"));
-	UE_LOG(LogTemp, Log, TEXT("Fluid Simulation Stats: %s"), *LabelStr);
-	UE_LOG(LogTemp, Log, TEXT("========================================"));
+	KF_LOG_DEV(Log, TEXT("========================================"));
+	KF_LOG_DEV(Log, TEXT("Fluid Simulation Stats: %s"), *LabelStr);
+	KF_LOG_DEV(Log, TEXT("========================================"));
 
 	// Particle counts
-	UE_LOG(LogTemp, Log, TEXT("Particles: %d total, %d active, %d attached"),
+	KF_LOG_DEV(Log, TEXT("Particles: %d total, %d active, %d attached"),
 		ParticleCount, ActiveParticleCount, AttachedParticleCount);
 
 	// Velocity
-	UE_LOG(LogTemp, Log, TEXT("Velocity (cm/s): Avg=%.2f, Min=%.2f, Max=%.2f"),
+	KF_LOG_DEV(Log, TEXT("Velocity (cm/s): Avg=%.2f, Min=%.2f, Max=%.2f"),
 		AvgVelocity, MinVelocity, MaxVelocity);
 
 	// Density
-	UE_LOG(LogTemp, Log, TEXT("Density: Avg=%.2f, Min=%.2f, Max=%.2f, Rest=%.2f"),
+	KF_LOG_DEV(Log, TEXT("Density: Avg=%.2f, Min=%.2f, Max=%.2f, Rest=%.2f"),
 		AvgDensity, MinDensity, MaxDensity, RestDensity);
-	UE_LOG(LogTemp, Log, TEXT("Density Error: %.2f%%"), DensityError);
+	KF_LOG_DEV(Log, TEXT("Density Error: %.2f%%"), DensityError);
 
 	// Stability Metrics (GPU detailed mode)
 	if (DensityStdDev > 0.0f || VelocityStdDev > 0.0f)
 	{
-		UE_LOG(LogTemp, Log, TEXT("--- Stability Metrics ---"));
-		UE_LOG(LogTemp, Log, TEXT("  Density StdDev: %.2f"), DensityStdDev);
-		UE_LOG(LogTemp, Log, TEXT("  Velocity StdDev: %.2f cm/s"), VelocityStdDev);
-		UE_LOG(LogTemp, Log, TEXT("  Per-Particle Error: %.2f%%"), PerParticleDensityError);
-		UE_LOG(LogTemp, Log, TEXT("  Kinetic Energy: %.2f"), KineticEnergy);
-		UE_LOG(LogTemp, Log, TEXT("  Stability Score: %.1f / 100"), StabilityScore);
+		KF_LOG_DEV(Log, TEXT("--- Stability Metrics ---"));
+		KF_LOG_DEV(Log, TEXT("  Density StdDev: %.2f"), DensityStdDev);
+		KF_LOG_DEV(Log, TEXT("  Velocity StdDev: %.2f cm/s"), VelocityStdDev);
+		KF_LOG_DEV(Log, TEXT("  Per-Particle Error: %.2f%%"), PerParticleDensityError);
+		KF_LOG_DEV(Log, TEXT("  Kinetic Energy: %.2f"), KineticEnergy);
+		KF_LOG_DEV(Log, TEXT("  Stability Score: %.1f / 100"), StabilityScore);
 	}
 
 	// Neighbors
-	UE_LOG(LogTemp, Log, TEXT("Neighbors: Avg=%.2f, Min=%d, Max=%d"),
+	KF_LOG_DEV(Log, TEXT("Neighbors: Avg=%.2f, Min=%d, Max=%d"),
 		AvgNeighborCount, MinNeighborCount, MaxNeighborCount);
 
 	// Forces
-	UE_LOG(LogTemp, Log, TEXT("Forces: Pressure=%.4f, Viscosity=%.4f, Cohesion=%.4f"),
+	KF_LOG_DEV(Log, TEXT("Forces: Pressure=%.4f, Viscosity=%.4f, Cohesion=%.4f"),
 		AvgPressureCorrection, AvgViscosityForce, AvgCohesionForce);
 
 	// Collision
-	UE_LOG(LogTemp, Log, TEXT("Collisions: Bounds=%d, Primitive=%d, Ground=%d"),
+	KF_LOG_DEV(Log, TEXT("Collisions: Bounds=%d, Primitive=%d, Ground=%d"),
 		BoundsCollisionCount, PrimitiveCollisionCount, GroundContactCount);
 
 	// Solver
-	UE_LOG(LogTemp, Log, TEXT("Solver: Substeps=%d, SolverIter=%d"),
+	KF_LOG_DEV(Log, TEXT("Solver: Substeps=%d, SolverIter=%d"),
 		SubstepCount, SolverIterations);
 
 	// Performance
-	UE_LOG(LogTemp, Log, TEXT("Performance (ms): Total=%.3f, Hash=%.3f, Density=%.3f"),
+	KF_LOG_DEV(Log, TEXT("Performance (ms): Total=%.3f, Hash=%.3f, Density=%.3f"),
 		TotalSimulationTimeMs, SpatialHashTimeMs, DensitySolveTimeMs);
-	UE_LOG(LogTemp, Log, TEXT("  Viscosity=%.3f, Cohesion=%.3f, Collision=%.3f"),
+	KF_LOG_DEV(Log, TEXT("  Viscosity=%.3f, Cohesion=%.3f, Collision=%.3f"),
 		ViscosityTimeMs, CohesionTimeMs, CollisionTimeMs);
 
 	if (bIsGPUSimulation)
 	{
-		UE_LOG(LogTemp, Log, TEXT("  GPU Sim=%.3f, GPU Readback=%.3f"),
+		KF_LOG_DEV(Log, TEXT("  GPU Sim=%.3f, GPU Readback=%.3f"),
 			GPUSimulationTimeMs, GPUReadbackTimeMs);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("========================================"));
+	KF_LOG_DEV(Log, TEXT("========================================"));
 }
 
 /**
@@ -124,7 +125,7 @@ FString FKawaiiFluidSimulationStats::ToString() const
 	const FString ModeStr = bIsGPUSimulation ? TEXT("GPU") : TEXT("CPU");
 
 	FString Result;
-	Result += FString::Printf(TEXT("[%s] Particles: %d (Active: %d, Attached: %d)\n"),
+	Result += FString::Printf(TEXT("%s: Particles=%d (Active=%d, Attached=%d)\n"),
 		*ModeStr, ParticleCount, ActiveParticleCount, AttachedParticleCount);
 	Result += FString::Printf(TEXT("Velocity: Avg=%.1f, Max=%.1f cm/s\n"),
 		AvgVelocity, MaxVelocity);
@@ -671,16 +672,16 @@ void FKawaiiFluidStatsCommand::HandleStatsCommand(const TArray<FString>& Args, U
 	if (Args.Num() == 0)
 	{
 		// Show help
-		UE_LOG(LogTemp, Log, TEXT("KawaiiFluidSimulation.Stats - Fluid simulation statistics"));
-		UE_LOG(LogTemp, Log, TEXT("Usage:"));
-		UE_LOG(LogTemp, Log, TEXT("  KawaiiFluidSimulation.Stats on          - Enable stat collection"));
-		UE_LOG(LogTemp, Log, TEXT("  KawaiiFluidSimulation.Stats off         - Disable stat collection"));
-		UE_LOG(LogTemp, Log, TEXT("  KawaiiFluidSimulation.Stats detailed on - Enable GPU detailed stats (causes readback)"));
-		UE_LOG(LogTemp, Log, TEXT("  KawaiiFluidSimulation.Stats detailed off- Disable GPU detailed stats"));
-		UE_LOG(LogTemp, Log, TEXT("  KawaiiFluidSimulation.Stats show        - Show current stats"));
-		UE_LOG(LogTemp, Log, TEXT("  KawaiiFluidSimulation.Stats log         - Log stats to output log"));
-		UE_LOG(LogTemp, Log, TEXT("  KawaiiFluidSimulation.Stats reset       - Reset statistics"));
-		UE_LOG(LogTemp, Log, TEXT("Currently: %s, Detailed GPU: %s"),
+		KF_LOG_DEV(Log, TEXT("KawaiiFluidSimulation.Stats - Fluid simulation statistics"));
+		KF_LOG_DEV(Log, TEXT("Usage:"));
+		KF_LOG_DEV(Log, TEXT("  KawaiiFluidSimulation.Stats on          - Enable stat collection"));
+		KF_LOG_DEV(Log, TEXT("  KawaiiFluidSimulation.Stats off         - Disable stat collection"));
+		KF_LOG_DEV(Log, TEXT("  KawaiiFluidSimulation.Stats detailed on - Enable GPU detailed stats (causes readback)"));
+		KF_LOG_DEV(Log, TEXT("  KawaiiFluidSimulation.Stats detailed off- Disable GPU detailed stats"));
+		KF_LOG_DEV(Log, TEXT("  KawaiiFluidSimulation.Stats show        - Show current stats"));
+		KF_LOG_DEV(Log, TEXT("  KawaiiFluidSimulation.Stats log         - Log stats to output log"));
+		KF_LOG_DEV(Log, TEXT("  KawaiiFluidSimulation.Stats reset       - Reset statistics"));
+		KF_LOG_DEV(Log, TEXT("Currently: %s, Detailed GPU: %s"),
 			GetFluidStatsCollector().IsEnabled() ? TEXT("ENABLED") : TEXT("DISABLED"),
 			GetFluidStatsCollector().IsDetailedGPUEnabled() ? TEXT("ON") : TEXT("OFF"));
 		return;
@@ -691,7 +692,7 @@ void FKawaiiFluidStatsCommand::HandleStatsCommand(const TArray<FString>& Args, U
 	if (Command == TEXT("on") || Command == TEXT("enable") || Command == TEXT("1"))
 	{
 		GetFluidStatsCollector().SetEnabled(true);
-		UE_LOG(LogTemp, Log, TEXT("Fluid stats collection ENABLED"));
+		KF_LOG_DEV(Log, TEXT("Fluid stats collection ENABLED"));
 
 		// Auto-enable stat display
 		if (GEngine)
@@ -702,7 +703,7 @@ void FKawaiiFluidStatsCommand::HandleStatsCommand(const TArray<FString>& Args, U
 	else if (Command == TEXT("off") || Command == TEXT("disable") || Command == TEXT("0"))
 	{
 		GetFluidStatsCollector().SetEnabled(false);
-		UE_LOG(LogTemp, Log, TEXT("Fluid stats collection DISABLED"));
+		KF_LOG_DEV(Log, TEXT("Fluid stats collection DISABLED"));
 
 		// Auto-disable stat display
 		if (GEngine)
@@ -719,56 +720,56 @@ void FKawaiiFluidStatsCommand::HandleStatsCommand(const TArray<FString>& Args, U
 			if (SubCommand == TEXT("on") || SubCommand == TEXT("1"))
 			{
 				GetFluidStatsCollector().SetDetailedGPUEnabled(true);
-				UE_LOG(LogTemp, Log, TEXT("GPU detailed stats ENABLED (will cause GPU readback - may affect performance)"));
+				KF_LOG_DEV(Log, TEXT("GPU detailed stats ENABLED (will cause GPU readback - may affect performance)"));
 			}
 			else if (SubCommand == TEXT("off") || SubCommand == TEXT("0"))
 			{
 				GetFluidStatsCollector().SetDetailedGPUEnabled(false);
-				UE_LOG(LogTemp, Log, TEXT("GPU detailed stats DISABLED"));
+				KF_LOG_DEV(Log, TEXT("GPU detailed stats DISABLED"));
 			}
 			else
 			{
-				UE_LOG(LogTemp, Warning, TEXT("Usage: KawaiiFluidSimulation.Stats detailed on/off"));
+				KF_LOG(Log, TEXT("Usage: KawaiiFluidSimulation.Stats detailed on/off"));
 			}
 		}
 		else
 		{
-			UE_LOG(LogTemp, Log, TEXT("GPU detailed stats: %s"),
+			KF_LOG_DEV(Log, TEXT("GPU detailed stats: %s"),
 				GetFluidStatsCollector().IsDetailedGPUEnabled() ? TEXT("ON") : TEXT("OFF"));
-			UE_LOG(LogTemp, Log, TEXT("Usage: KawaiiFluidSimulation.Stats detailed on/off"));
+			KF_LOG_DEV(Log, TEXT("Usage: KawaiiFluidSimulation.Stats detailed on/off"));
 		}
 	}
 	else if (Command == TEXT("show"))
 	{
 		if (!GetFluidStatsCollector().IsEnabled())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Stats collection is disabled. Use 'KawaiiFluidSimulation.Stats on' first."));
+			KF_LOG(Log, TEXT("Stats collection is disabled. Use 'KawaiiFluidSimulation.Stats on' first."));
 			return;
 		}
 
 		const FKawaiiFluidSimulationStats& Stats = GetFluidStatsCollector().GetStats();
-		UE_LOG(LogTemp, Log, TEXT("%s"), *Stats.ToString());
+		KF_LOG_DEV(Log, TEXT("%s"), *Stats.ToString());
 	}
 	else if (Command == TEXT("log"))
 	{
 		if (!GetFluidStatsCollector().IsEnabled())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Stats collection is disabled. Use 'KawaiiFluidSimulation.Stats on' first."));
+			KF_LOG(Log, TEXT("Stats collection is disabled. Use 'KawaiiFluidSimulation.Stats on' first."));
 			return;
 		}
 
 		const FKawaiiFluidSimulationStats& Stats = GetFluidStatsCollector().GetStats();
 		Stats.LogStats();
-		UE_LOG(LogTemp, Log, TEXT("Stats logged to Output Log"));
+		KF_LOG_DEV(Log, TEXT("Stats logged to Output Log"));
 	}
 	else if (Command == TEXT("reset"))
 	{
 		GetFluidStatsCollector().BeginFrame();  // This resets
-		UE_LOG(LogTemp, Log, TEXT("Stats reset"));
+		KF_LOG_DEV(Log, TEXT("Stats reset"));
 	}
 	else
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Unknown command: %s"), *Command);
-		UE_LOG(LogTemp, Log, TEXT("Use 'KawaiiFluidSimulation.Stats' for help"));
+		KF_LOG(Log, TEXT("Unknown command: %s"), *Command);
+		KF_LOG_DEV(Log, TEXT("Use 'KawaiiFluidSimulation.Stats' for help"));
 	}
 }

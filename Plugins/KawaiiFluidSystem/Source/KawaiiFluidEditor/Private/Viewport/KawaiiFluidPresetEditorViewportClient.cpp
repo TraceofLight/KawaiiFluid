@@ -109,4 +109,3 @@ void FKawaiiFluidPresetEditorViewportClient::FocusOnBounds(const FBoxSphereBound
 	SetViewLocation(NewLocation);
 	SetLookAtLocation(Bounds.Origin);
 }
-

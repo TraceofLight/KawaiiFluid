@@ -1556,9 +1556,3 @@ bool FCopyCountToSpawnCounterCS::ShouldCompilePermutation(const FGlobalShaderPer
 {
 	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
 }
-
-
-
-
-
-

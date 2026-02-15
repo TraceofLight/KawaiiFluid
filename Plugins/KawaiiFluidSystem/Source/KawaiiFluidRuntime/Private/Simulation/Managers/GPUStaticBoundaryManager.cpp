@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUStaticBoundaryManager Implementation
 // 
 // Performance Optimization (v2):
@@ -7,6 +7,7 @@
 // - GPU upload only when active primitive set changes
 
 #include "Simulation/Managers/GPUStaticBoundaryManager.h"
+#include "Logging/KawaiiFluidLog.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGPUStaticBoundary, Log, All);
 DEFINE_LOG_CATEGORY(LogGPUStaticBoundary);
@@ -39,7 +40,7 @@ void FGPUStaticBoundaryManager::Initialize()
 	}
 
 	bIsInitialized = true;
-	UE_LOG(LogGPUStaticBoundary, Log, TEXT("FGPUStaticBoundaryManager initialized"));
+	KF_LOG_DEV(Log, TEXT("FGPUStaticBoundaryManager initialized"));
 }
 
 /**
@@ -58,7 +59,7 @@ void FGPUStaticBoundaryManager::Release()
 	PreviousActivePrimitiveKeys.Empty();
 	bIsInitialized = false;
 
-	UE_LOG(LogGPUStaticBoundary, Log, TEXT("FGPUStaticBoundaryManager released"));
+	KF_LOG_DEV(Log, TEXT("FGPUStaticBoundaryManager released"));
 }
 
 //=============================================================================
@@ -189,7 +190,7 @@ bool FGPUStaticBoundaryManager::GenerateBoundaryParticles(
 		CachedParticleSpacing = ParticleSpacing;
 		bCacheInvalidated = false;
 		
-		UE_LOG(LogGPUStaticBoundary, Log, TEXT("Cache invalidated due to parameter change (Spacing=%.1f, Density=%.1f)"), 
+		KF_LOG_DEV(Log, TEXT("Cache invalidated due to parameter change (Spacing=%.1f, Density=%.1f)"), 
 			ParticleSpacing, RestDensity);
 	}
 
@@ -339,8 +340,7 @@ bool FGPUStaticBoundaryManager::GenerateBoundaryParticles(
 			}
 		}
 
-		UE_LOG(LogGPUStaticBoundary, Log, 
-			TEXT("Boundary particles updated: Total=%d, NewPrimitives=%d, CachedReused=%d, ActivePrimitives=%d"),
+		KF_LOG_DEV(Log, TEXT("Boundary particles updated: Total=%d, NewPrimitives=%d, CachedReused=%d, ActivePrimitives=%d"),
 			BoundaryParticles.Num(), NewPrimitivesGenerated, CachedPrimitivesReused, ActivePrimitiveKeys.Num());
 
 		return true;  // GPU upload required
@@ -372,7 +372,7 @@ void FGPUStaticBoundaryManager::InvalidateCache()
 	PreviousActivePrimitiveKeys.Empty();
 	bCacheInvalidated = true;
 	
-	UE_LOG(LogGPUStaticBoundary, Log, TEXT("Cache explicitly invalidated"));
+	KF_LOG_DEV(Log, TEXT("Cache explicitly invalidated"));
 }
 
 //=============================================================================

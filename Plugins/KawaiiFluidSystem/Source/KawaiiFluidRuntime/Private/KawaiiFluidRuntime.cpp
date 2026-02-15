@@ -1,11 +1,14 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "KawaiiFluidRuntime.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Interfaces/IPluginManager.h"
 #include "Misc/Paths.h"
 #include "ShaderCore.h"
 
 #define LOCTEXT_NAMESPACE "FKawaiiFluidRuntimeModule"
+
+DEFINE_LOG_CATEGORY(LogKawaiiFluid);
 
 void FKawaiiFluidRuntimeModule::StartupModule()
 {
@@ -13,7 +16,7 @@ void FKawaiiFluidRuntimeModule::StartupModule()
 	FString PluginShaderPath = FPaths::Combine(IPluginManager::Get().FindPlugin(TEXT("KawaiiFluidSystem"))->GetBaseDir(), TEXT("Shaders"));
 	AddShaderSourceDirectoryMapping(TEXT("/Plugin/KawaiiFluidSystem"), PluginShaderPath);
 
-	UE_LOG(LogTemp, Log, TEXT("KawaiiFluidRuntime Module Started: Shader Directory: %s"), *PluginShaderPath);
+	KF_LOG_DEV(Log, TEXT("Runtime module started: Shader Directory: %s"), *PluginShaderPath);
 }
 
 void FKawaiiFluidRuntimeModule::ShutdownModule()

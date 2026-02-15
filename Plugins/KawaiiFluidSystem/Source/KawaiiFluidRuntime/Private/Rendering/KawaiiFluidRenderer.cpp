@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/KawaiiFluidRenderer.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Core/IKawaiiFluidDataProvider.h"
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
@@ -35,12 +36,12 @@ void UKawaiiFluidRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwnerC
 
 	if (!CachedWorld)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidMetaballRenderer::Initialize - No world context provided"));
+		KF_LOG(Warning, TEXT("KawaiiFluidMetaballRenderer: Initialize - No world context provided"));
 	}
 
 	if (!CachedOwnerComponent)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidMetaballRenderer::Initialize - No owner component provided"));
+		KF_LOG(Warning, TEXT("KawaiiFluidMetaballRenderer: Initialize - No owner component provided"));
 	}
 
 	// Cache renderer subsystem for ViewExtension access
@@ -50,7 +51,7 @@ void UKawaiiFluidRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwnerC
  
 		if (!RendererSubsystem.IsValid())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidMetaballRenderer: Failed to get FluidRendererSubsystem"));
+			KF_LOG(Warning, TEXT("KawaiiFluidMetaballRenderer: Failed to get FluidRendererSubsystem"));
 		}
 	}
 
@@ -61,7 +62,7 @@ void UKawaiiFluidRenderer::Initialize(UWorld* InWorld, USceneComponent* InOwnerC
 		UpdatePipeline();
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Initialized GPU resources (MaxParticles: %d)"),
+	KF_LOG_DEV(Log, TEXT("MetaballRenderer: Initialized GPU resources (MaxParticles: %d)"),
 		MaxRenderParticles);
 }
 
@@ -80,7 +81,7 @@ void UKawaiiFluidRenderer::Cleanup()
 	CachedOwnerComponent = nullptr;
 	bEnabled = false;
 
-	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Cleanup completed"));
+	KF_LOG_DEV(Log, TEXT("MetaballRenderer: Cleanup completed"));
 }
 
 void UKawaiiFluidRenderer::ApplySettings(const FKawaiiFluidMetaballRendererSettings& Settings)
@@ -101,7 +102,7 @@ void UKawaiiFluidRenderer::ApplySettings(const FKawaiiFluidMetaballRendererSetti
 	// Update Pipeline (ShadingMode is handled internally by Pipeline)
 	UpdatePipeline();
 
-	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Applied settings (Enabled: %s, UseSimRadius: %s, MaxParticles: %d)"),
+	KF_LOG_DEV(Log, TEXT("MetaballRenderer: Applied settings (Enabled: %s, UseSimRadius: %s, MaxParticles: %d)"),
 		bEnabled ? TEXT("true") : TEXT("false"),
 		bUseSimulationRadius ? TEXT("true") : TEXT("false"),
 		MaxRenderParticles);
@@ -188,7 +189,7 @@ void UKawaiiFluidRenderer::UpdateRendering(const IKawaiiFluidDataProvider* DataP
 	// static int32 FrameCounter = 0;
 	// if (++FrameCounter % 60 == 0)
 	// {
-	// 	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: GPU mode - Set simulator reference in RenderResource (%d particles, radius: %.2f)"),
+	// 	KF_LOG_DEV(Log, TEXT("MetaballRenderer: GPU mode - Set simulator reference in RenderResource (%d particles, radius: %.2f)"),
 	// 		GPUParticleCount, RenderRadius);
 	// }
 }
@@ -206,7 +207,7 @@ void UKawaiiFluidRenderer::SetSimulationContext(UKawaiiFluidSimulationContext* I
 {
 	CachedSimulationContext = InContext;
 
-	UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: %s SimulationContext"),
+	KF_LOG_DEV(Log, TEXT("MetaballRenderer: %s SimulationContext"),
 		InContext ? TEXT("Set") : TEXT("Cleared"));
 }
 
@@ -221,7 +222,7 @@ void UKawaiiFluidRenderer::UpdatePipeline()
 	if (!Pipeline)
 	{
 		Pipeline = MakeShared<FKawaiiFluidScreenSpacePipeline>();
-		UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: Created ScreenSpace Pipeline"));
+		KF_LOG_DEV(Log, TEXT("MetaballRenderer: Created ScreenSpace Pipeline"));
 	}
 }
 
@@ -233,6 +234,6 @@ void UKawaiiFluidRenderer::SetPreset(UKawaiiFluidPresetDataAsset* InPreset)
 	{
 		// Ensure Pipeline is created
 		UpdatePipeline();
-		UE_LOG(LogTemp, Log, TEXT("MetaballRenderer: SetPreset - Pipeline=ScreenSpace"));
+		KF_LOG_DEV(Log, TEXT("MetaballRenderer: SetPreset - Pipeline=ScreenSpace"));
 	}
 }

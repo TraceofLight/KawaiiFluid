@@ -1,7 +1,8 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUZOrderSortManager - Z-Order Morton Code Sorting System
 
 #include "Simulation/Managers/GPUZOrderSortManager.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
@@ -36,7 +37,7 @@ FGPUZOrderSortManager::~FGPUZOrderSortManager()
 void FGPUZOrderSortManager::Initialize()
 {
 	bIsInitialized = true;
-	UE_LOG(LogGPUZOrderSort, Log, TEXT("GPUZOrderSortManager initialized"));
+	KF_LOG_DEV(Log, TEXT("GPUZOrderSortManager initialized"));
 }
 
 /**
@@ -46,7 +47,7 @@ void FGPUZOrderSortManager::Release()
 {
 	ZOrderBufferParticleCapacity = 0;
 	bIsInitialized = false;
-	UE_LOG(LogGPUZOrderSort, Log, TEXT("GPUZOrderSortManager released"));
+	KF_LOG_DEV(Log, TEXT("GPUZOrderSortManager released"));
 }
 
 //=============================================================================
@@ -253,7 +254,7 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
 	// Validate CellSize
 	if (Params.CellSize <= 0.0f)
 	{
-		UE_LOG(LogGPUZOrderSort, Error, TEXT("Morton code ERROR: Invalid CellSize (%.4f)!"), Params.CellSize);
+		KF_LOG(Error, TEXT("Morton code ERROR: Invalid CellSize (%.4f)!"), Params.CellSize);
 	}
 
 	// Get grid parameters - use Medium preset in Hybrid mode for 21-bit keys
@@ -270,8 +271,7 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
 
 		if (BoundsExtent.X > MaxExtent || BoundsExtent.Y > MaxExtent || BoundsExtent.Z > MaxExtent)
 		{
-			UE_LOG(LogGPUZOrderSort, Warning,
-				TEXT("Morton code bounds overflow! BoundsExtent(%.1f, %.1f, %.1f) exceeds MaxExtent(%.1f). Preset=%d"),
+			KF_LOG(Warning, TEXT("Morton code bounds overflow! BoundsExtent(%.1f, %.1f, %.1f) exceeds MaxExtent(%.1f). Preset=%d"),
 				BoundsExtent.X, BoundsExtent.Y, BoundsExtent.Z, MaxExtent, static_cast<int32>(GridResolutionPreset));
 		}
 	}

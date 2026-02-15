@@ -2,6 +2,7 @@
 // FGPUBoundarySkinningManager - GPU Boundary Skinning and Adhesion System
 
 #include "Simulation/Managers/GPUBoundarySkinningManager.h"
+#include "Logging/KawaiiFluidLog.h"
 
 #include <Simulation/Resources/GPUFluidSpatialData.h>
 
@@ -50,7 +51,7 @@ FGPUBoundarySkinningManager::~FGPUBoundarySkinningManager()
 void FGPUBoundarySkinningManager::Initialize()
 {
 	bIsInitialized = true;
-	UE_LOG(LogGPUBoundarySkinning, Log, TEXT("GPUBoundarySkinningManager initialized"));
+	KF_LOG_DEV(Log, TEXT("GPUBoundarySkinningManager initialized"));
 }
 
 /**
@@ -89,7 +90,7 @@ void FGPUBoundarySkinningManager::Release()
 
 	bIsInitialized = false;
 
-	UE_LOG(LogGPUBoundarySkinning, Log, TEXT("GPUBoundarySkinningManager released"));
+	KF_LOG_DEV(Log, TEXT("GPUBoundarySkinningManager released"));
 }
 
 //=============================================================================
@@ -122,7 +123,7 @@ void FGPUBoundarySkinningManager::UploadStaticBoundaryParticles(const TArray<FGP
 	bStaticZOrderValid = false;
 	bStaticBoundaryEnabled = true;
 
-	UE_LOG(LogGPUBoundarySkinning, Log, TEXT("Static boundary particles queued for upload: Count=%d"), StaticBoundaryParticleCount);
+	KF_LOG_DEV(Log, TEXT("Static boundary particles queued for upload: Count=%d"), StaticBoundaryParticleCount);
 }
 
 /**
@@ -142,7 +143,7 @@ void FGPUBoundarySkinningManager::ClearStaticBoundaryParticles()
 	bStaticBoundaryDirty = true;
 	bStaticZOrderValid = false;
 
-	UE_LOG(LogGPUBoundarySkinning, Log, TEXT("Static boundary particles cleared"));
+	KF_LOG_DEV(Log, TEXT("Static boundary particles cleared"));
 }
 
 /**
@@ -200,7 +201,7 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 		// Clear pending data after upload
 		PendingStaticBoundaryParticles.Empty();
 
-		UE_LOG(LogGPUBoundarySkinning, Log, TEXT("Static boundary particles uploaded to GPU: Count=%d"), ParticleCount);
+		KF_LOG_DEV(Log, TEXT("Static boundary particles uploaded to GPU: Count=%d"), ParticleCount);
 	}
 
 	// Perform Z-Order sorting if dirty
@@ -515,7 +516,7 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
 		bStaticBoundaryDirty = false;
 		bStaticZOrderValid = true;
 
-		UE_LOG(LogGPUBoundarySkinning, Log, TEXT("Static boundary Z-Order sort completed: %d particles"), ParticleCount);
+		KF_LOG_DEV(Log, TEXT("Static boundary Z-Order sort completed: %d particles"), ParticleCount);
 	}
 }
 
@@ -550,7 +551,7 @@ void FGPUBoundarySkinningManager::UploadLocalBoundaryParticles(int32 OwnerID, co
 		TotalLocalBoundaryParticleCount += Pair.Value.LocalParticles.Num();
 	}
 
-	UE_LOG(LogGPUBoundarySkinning, Log, TEXT("UploadLocalBoundaryParticles: OwnerID=%d, Count=%d, TotalCount=%d"),
+	KF_LOG_DEV(Log, TEXT("UploadLocalBoundaryParticles: OwnerID=%d, Count=%d, TotalCount=%d"),
 		OwnerID, LocalParticles.Num(), TotalLocalBoundaryParticleCount);
 }
 
@@ -586,7 +587,7 @@ void FGPUBoundarySkinningManager::RegisterSkeletalMeshReference(int32 OwnerID, U
 {
 	if (!bIsInitialized || !SkelMesh)
 	{
-		UE_LOG(LogGPUBoundarySkinning, Warning, TEXT("RegisterSkeletalMeshReference FAILED: bIsInitialized=%d, SkelMesh=%p"),
+		KF_LOG(Warning, TEXT("RegisterSkeletalMeshReference FAILED: bIsInitialized=%d, SkelMesh=%p"),
 			bIsInitialized, SkelMesh);
 		return;
 	}
@@ -597,12 +598,12 @@ void FGPUBoundarySkinningManager::RegisterSkeletalMeshReference(int32 OwnerID, U
 	if (SkinningData)
 	{
 		SkinningData->SkeletalMeshRef = SkelMesh;
-		UE_LOG(LogGPUBoundarySkinning, Warning, TEXT("RegisterSkeletalMeshReference SUCCESS: OwnerID=%d, SkelMesh=%s, NumBones=%d"),
+		KF_LOG_DEV(Verbose, TEXT("RegisterSkeletalMeshReference: OwnerID=%d, SkelMesh=%s, NumBones=%d"),
 			OwnerID, *SkelMesh->GetName(), SkelMesh->GetNumBones());
 	}
 	else
 	{
-		UE_LOG(LogGPUBoundarySkinning, Warning, TEXT("RegisterSkeletalMeshReference: OwnerID=%d NOT FOUND in map"),
+		KF_LOG_DEV(Verbose, TEXT("RegisterSkeletalMeshReference: OwnerID=%d NOT FOUND in map"),
 			OwnerID);
 	}
 }
@@ -661,14 +662,13 @@ void FGPUBoundarySkinningManager::RefreshAllBoneTransforms()
 			if (FrameCounter % 60 == 0 && NumBones > 0)
 			{
 				FVector Bone0Pos = SkelMesh->GetBoneTransform(0).GetLocation();
-				UE_LOG(LogGPUBoundarySkinning, Warning,
-					TEXT("[GameThread Frame %llu] RefreshAllBoneTransforms: WriteIdx=%d, Bone0 = (%.2f, %.2f, %.2f)"),
+				KF_LOG_DEV(VeryVerbose, TEXT("GameThread Frame %llu: RefreshAllBoneTransforms: WriteIdx=%d, Bone0 = (%.2f, %.2f, %.2f)"),
 					FrameCounter, WriteIdx, Bone0Pos.X, Bone0Pos.Y, Bone0Pos.Z);
 			}
 		}
 	}
 
-	UE_LOG(LogGPUBoundarySkinning, VeryVerbose, TEXT("RefreshAllBoneTransforms: Updated %d owners"),
+	KF_LOG_DEV(VeryVerbose, TEXT("RefreshAllBoneTransforms: Updated %d owners"),
 		BoundarySkinningDataMap.Num());
 }
 
@@ -739,7 +739,7 @@ void FGPUBoundarySkinningManager::RemoveBoundarySkinningData(int32 OwnerID)
 
 		bBoundarySkinningDataDirty = true;
 
-		UE_LOG(LogGPUBoundarySkinning, Log, TEXT("RemoveBoundarySkinningData: OwnerID=%d, TotalCount=%d"),
+		KF_LOG_DEV(Log, TEXT("RemoveBoundarySkinningData: OwnerID=%d, TotalCount=%d"),
 			OwnerID, TotalLocalBoundaryParticleCount);
 	}
 }
@@ -765,7 +765,7 @@ void FGPUBoundarySkinningManager::ClearAllBoundarySkinningData()
 	CombinedBoundaryAABB = FGPUBoundaryOwnerAABB();
 	bBoundaryAABBDirty = true;
 
-	UE_LOG(LogGPUBoundarySkinning, Log, TEXT("ClearAllBoundarySkinningData"));
+	KF_LOG_DEV(Log, TEXT("ClearAllBoundarySkinningData"));
 }
 
 bool FGPUBoundarySkinningManager::IsBoundaryAdhesionEnabled() const
@@ -873,8 +873,7 @@ bool FGPUBoundarySkinningManager::ShouldSkipBoundaryAdhesionPass(const FGPUFluid
 		// static int32 SkipLogCounter = 0;
 		// if (++SkipLogCounter % 60 == 1)
 		// {
-		// 	UE_LOG(LogGPUBoundarySkinning, Log,
-		// 		TEXT("[BoundaryAdhesion] SKIPPED - No overlap between Boundary AABB [(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)] and Volume [(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)] with AdhesionRadius=%.1f"),
+		// 	KF_LOG_DEV(Log, // 		TEXT("BoundaryAdhesion: SKIPPED - No overlap between Boundary AABB [(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)] and Volume [(%.1f,%.1f,%.1f)-(%.1f,%.1f,%.1f)] with AdhesionRadius=%.1f"),
 		// 		CombinedBoundaryAABB.Min.X, CombinedBoundaryAABB.Min.Y, CombinedBoundaryAABB.Min.Z,
 		// 		CombinedBoundaryAABB.Max.X, CombinedBoundaryAABB.Max.Y, CombinedBoundaryAABB.Max.Z,
 		// 		ZOrderBoundsMin.X, ZOrderBoundsMin.Y, ZOrderBoundsMin.Z,
@@ -914,7 +913,7 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 	// {
 	// 	float exampleMovement = 10.0f;
 	// 	float estimatedVelocity = DeltaTime > 0.0001f ? exampleMovement / DeltaTime : 0.0f;
-	// 	UE_LOG(LogGPUBoundarySkinning, Warning, TEXT("[BoundaryVelocityDebug] DeltaTime=%.6f, If 10cm/frame -> Velocity=%.1f cm/s"),
+	// 	KF_LOG(Warning, TEXT("BoundaryVelocityDebug: DeltaTime=%.6f, If 10cm/frame -> Velocity=%.1f cm/s"),
 	// 		DeltaTime, estimatedVelocity);
 	// }
 
@@ -1060,8 +1059,7 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 
 		if (!BoneTransformsPtr || BoneTransformsPtr->Num() == 0)
 		{
-			UE_LOG(LogGPUBoundarySkinning, Warning,
-				TEXT("[AddBoundarySkinningPass] No bone transforms available for Owner=%d, skipping"),
+			KF_LOG_DEV(VeryVerbose, TEXT("AddBoundarySkinningPass: No bone transforms available for Owner=%d, skipping"),
 				OwnerID);
 			continue;
 		}
@@ -1073,8 +1071,7 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 		{
 			const FMatrix44f& Bone0Matrix = (*BoneTransformsPtr)[0];
 			FVector3f Bone0Pos = FVector3f(Bone0Matrix.M[3][0], Bone0Matrix.M[3][1], Bone0Matrix.M[3][2]);
-			UE_LOG(LogGPUBoundarySkinning, Warning,
-				TEXT("[RenderThread Frame %llu] AddBoundarySkinningPass: ReadIdx=%d, Bone0 = (%.2f, %.2f, %.2f)"),
+			KF_LOG_DEV(VeryVerbose, TEXT("RenderThread Frame %llu: AddBoundarySkinningPass: ReadIdx=%d, Bone0 = (%.2f, %.2f, %.2f)"),
 				RenderFrameCounter, ReadIdx, Bone0Pos.X, Bone0Pos.Y, Bone0Pos.Z);
 		}
 
@@ -1170,8 +1167,7 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
 	{
 		// No skinning passes were dispatched (all owners had invalid/empty data)
 		// Return nullptr to signal caller that no boundary data is available this frame
-		UE_LOG(LogGPUBoundarySkinning, Warning,
-			TEXT("[AddBoundarySkinningPass] No skinning passes dispatched despite TotalLocalBoundaryParticleCount=%d. Check LocalParticles and BoneTransforms data."),
+		KF_LOG(Warning, TEXT("AddBoundarySkinningPass: No skinning passes dispatched despite TotalLocalBoundaryParticleCount=%d. Check LocalParticles and BoneTransforms data."),
 			TotalLocalBoundaryParticleCount);
 		OutWorldBoundaryBuffer = nullptr;
 		OutBoundaryParticleCount = 0;
@@ -1425,8 +1421,7 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
 		// static int32 AdhesionDebugCounter = 0;
 		// if (++AdhesionDebugCounter % 60 == 1)
 		// {
-		// 	UE_LOG(LogGPUBoundarySkinning, Warning,
-		// 		TEXT("[BoundaryAdhesionPass] Running! AdhesionStrength=%.2f, CohesionStrength=%.2f, AdhesionRadius=%.2f, SmoothingRadius=%.2f, BoundaryCount=%d, FluidCount=%d"),
+		// 	KF_LOG(Warning, // 		TEXT("BoundaryAdhesionPass: Running! AdhesionStrength=%.2f, CohesionStrength=%.2f, AdhesionRadius=%.2f, SmoothingRadius=%.2f, BoundaryCount=%d, FluidCount=%d"),
 		// 		CachedBoundaryAdhesionParams.AdhesionForceStrength,
 		// 		CachedBoundaryAdhesionParams.CohesionStrength,
 		// 		CachedBoundaryAdhesionParams.AdhesionRadius,
@@ -1860,8 +1855,7 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 	bBoundaryZOrderValid = true;
 	bBoundaryZOrderDirty = false;
 
-	UE_LOG(LogGPUBoundarySkinning, Verbose,
-		TEXT("BoundaryZOrderSort completed: %d particles, Preset=%d"),
+	KF_LOG_DEV(Verbose, TEXT("BoundaryZOrderSort completed: %d particles, Preset=%d"),
 		BoundaryParticleCount, static_cast<int32>(GridResolutionPreset));
 
 	return true;
@@ -1921,8 +1915,7 @@ void FGPUBoundarySkinningManager::SnapshotBoneTransformsForPendingSimulation()
 
 	PendingBoneTransformSnapshots.Add(MoveTemp(Snapshot));
 
-	UE_LOG(LogGPUBoundarySkinning, Verbose,
-		TEXT("SnapshotBoneTransformsForPendingSimulation: Captured snapshot, queue size=%d"),
+	KF_LOG_DEV(Verbose, TEXT("SnapshotBoneTransformsForPendingSimulation: Captured snapshot, queue size=%d"),
 		PendingBoneTransformSnapshots.Num());
 }
 
@@ -1936,7 +1929,7 @@ bool FGPUBoundarySkinningManager::PopAndActivateSnapshot()
 
 	if (PendingBoneTransformSnapshots.Num() == 0)
 	{
-		UE_LOG(LogGPUBoundarySkinning, Verbose, TEXT("PopAndActivateSnapshot: No snapshots available"));
+		KF_LOG_DEV(Verbose, TEXT("PopAndActivateSnapshot: No snapshots available"));
 		return false;
 	}
 
@@ -1944,8 +1937,7 @@ bool FGPUBoundarySkinningManager::PopAndActivateSnapshot()
 	ActiveSnapshot = MoveTemp(PendingBoneTransformSnapshots[0]);
 	PendingBoneTransformSnapshots.RemoveAt(0);
 
-	UE_LOG(LogGPUBoundarySkinning, Verbose,
-		TEXT("PopAndActivateSnapshot: Activated snapshot, remaining=%d"),
+	KF_LOG_DEV(Verbose, TEXT("PopAndActivateSnapshot: Activated snapshot, remaining=%d"),
 		PendingBoneTransformSnapshots.Num());
 
 	return true;
@@ -1971,4 +1963,3 @@ const FGPUBoundarySkinningManager::FBoneTransformSnapshotData* FGPUBoundarySkinn
 	const FBoneTransformSnapshotData* Data = ActiveSnapshot.GetValue().SkinningDataSnapshot.Find(OwnerID);
 	return Data;
 }
-

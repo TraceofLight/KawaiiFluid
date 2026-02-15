@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Core/KawaiiFluidSimulationContext.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Core/KawaiiFluidSpatialHash.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
@@ -201,7 +202,7 @@ namespace
 				static int32 FallbackLogCounter = 0;
 				if (++FallbackLogCounter % 60 == 1)
 				{
-					UE_LOG(LogTemp, Log, TEXT("[Convex] Fallback to ChaosConvex: Verts=%d, IndexData=%d, ChaosPlanes=%d"),
+					KF_LOG_DEV(Log, TEXT("Convex: Fallback to ChaosConvex: Verts=%d, IndexData=%d, ChaosPlanes=%d"),
 						VertexData.Num(), IndexData.Num(), ChaosPlanes.Num());
 				}
 			}
@@ -209,7 +210,7 @@ namespace
 
 		if (Planes.Num() < 4)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[Convex] SKIP: Verts=%d, Indices=%d, Planes=%d (need >= 4, no ChaosConvex fallback)"),
+			KF_LOG(Warning, TEXT("Convex: SKIP: Verts=%d, Indices=%d, Planes=%d (need >= 4, no ChaosConvex fallback)"),
 				VertexData.Num(), IndexData.Num(), Planes.Num());
 			return;
 		}
@@ -218,12 +219,12 @@ namespace
 		static int32 ConvexLogCounter = 0;
 		if (++ConvexLogCounter % 300 == 1)
 		{
-			UE_LOG(LogTemp, Log, TEXT("[Convex] Created: Center=(%.1f, %.1f, %.1f), BoundingRadius=%.1f, Planes=%d"),
+			KF_LOG_DEV(Log, TEXT("Convex: Created: Center=(%.1f, %.1f, %.1f), BoundingRadius=%.1f, Planes=%d"),
 				Center.X, Center.Y, Center.Z, FMath::Sqrt(MaxDistSq) + GPUWorldCollisionMargin, Planes.Num());
 			for (int32 i = 0; i < FMath::Min(Planes.Num(), 6); ++i)
 			{
 				const FGPUConvexPlane& P = Planes[i];
-				UE_LOG(LogTemp, Log, TEXT("  Plane[%d]: Normal=(%.3f, %.3f, %.3f), Dist=%.1f"),
+				KF_LOG_DEV(Log, TEXT("  Plane[%d]: Normal=(%.3f, %.3f, %.3f), Dist=%.1f"),
 					i, P.Normal.X, P.Normal.Y, P.Normal.Z, P.Distance);
 			}
 		}
@@ -237,7 +238,7 @@ namespace
 		// PlaneStartIndex debug log
 		if (ConvexLogCounter % 300 == 1)
 		{
-			UE_LOG(LogTemp, Log, TEXT("[Convex] PlaneStartIndex=%d, PlaneCount=%d, TotalPlanesBeforeAppend=%d"),
+			KF_LOG_DEV(Log, TEXT("Convex: PlaneStartIndex=%d, PlaneCount=%d, TotalPlanesBeforeAppend=%d"),
 				Convex.PlaneStartIndex, Convex.PlaneCount, OutPrimitives.ConvexPlanes.Num());
 		}
 		Convex.Friction = Friction;
@@ -403,7 +404,7 @@ void UKawaiiFluidSimulationContext::InitializeGPUSimulator(int32 MaxParticleCoun
 	GPUSimulator = MakeShared<FGPUFluidSimulator>();
 	GPUSimulator->Initialize(MaxParticleCount);
 
-	UE_LOG(LogTemp, Log, TEXT("GPU Fluid Simulator initialized with capacity: %d"), MaxParticleCount);
+	KF_LOG_DEV(Log, TEXT("GPU Fluid Simulator initialized with capacity: %d"), MaxParticleCount);
 }
 
 /**
@@ -442,7 +443,7 @@ void UKawaiiFluidSimulationContext::InitializeRenderResource()
 		}
 	);
 
-	UE_LOG(LogTemp, Log, TEXT("SimulationContext: RenderResource initialized"));
+	KF_LOG_DEV(Log, TEXT("SimulationContext: RenderResource initialized"));
 }
 
 /**
@@ -738,7 +739,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 		InitializeGPUSimulator(MaxParticles);
 		if (!IsGPUSimulatorReady())
 		{
-			UE_LOG(LogTemp, Warning, TEXT("GPU Simulator not ready"));
+			KF_LOG_DEV(Verbose, TEXT("GPU Simulator not ready"));
 			return;
 		}
 	}
@@ -872,7 +873,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 	static int32 SimGPULogCounter = 0;
 	if (++SimGPULogCounter % 60 == 1)
 	{
-		UE_LOG(LogTemp, Log, TEXT("SimulateGPU: GPUCount=%d, PendingSpawn=%d, GPUSimulator=%p"),
+		KF_LOG_DEV(VeryVerbose, TEXT("SimulateGPU: GPUCount=%d, PendingSpawn=%d, GPUSimulator=%p"),
 			CurrentGPUCount, PendingSpawnCount, GPUSimulator.Get());
 	}
 
@@ -1040,7 +1041,7 @@ void UKawaiiFluidSimulationContext::SimulateGPU(
 					if (bHasStaticBoundary || bIsStaticBoundaryEnabledOnGPU)
 					{
 						GPUSimulator->ClearStaticBoundaryParticles();
-						UE_LOG(LogTemp, Log, TEXT("Static boundary cleared: bHasStaticBoundary=%d, bIsGPUEnabled=%d"),
+						KF_LOG_DEV(Log, TEXT("Static boundary cleared: bHasStaticBoundary=%d, bIsGPUEnabled=%d"),
 							bHasStaticBoundary, bIsStaticBoundaryEnabledOnGPU);
 					}
 					bStaticBoundaryParticlesDirty = false;
@@ -1364,13 +1365,13 @@ void UKawaiiFluidSimulationContext::RunInitializationSimulation(
 {
 	if (!Preset)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("RunInitializationSimulation: No Preset provided"));
+		KF_LOG(Warning, TEXT("RunInitializationSimulation: No Preset provided"));
 		return;
 	}
 
 	if (!IsGPUSimulatorReady())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("RunInitializationSimulation: GPU Simulator not ready"));
+		KF_LOG(Error, TEXT("RunInitializationSimulation: GPU Simulator not ready"));
 		return;
 	}
 
@@ -1401,7 +1402,7 @@ void UKawaiiFluidSimulationContext::RunInitializationSimulation(
 	// Restore previous anisotropy parameters
 	GPUSimulator->SetAnisotropyParams(PreviousParams);
 
-	UE_LOG(LogTemp, Log, TEXT("RunInitializationSimulation: Completed for %d particles"), ParticleCount);
+	KF_LOG_DEV(Log, TEXT("RunInitializationSimulation: Completed for %d particles"), ParticleCount);
 }
 
 /**
@@ -1612,7 +1613,7 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 	{
 		if (bShouldLog)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: bUseWorldCollision=false"));
+			KF_LOG_DEV(Verbose, TEXT("WorldCollision: SKIP: bUseWorldCollision=false"));
 		}
 		bGPUWorldCollisionCacheDirty = true;
 		return;
@@ -1622,7 +1623,7 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 	{
 		if (bShouldLog)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: World is nullptr"));
+			KF_LOG_DEV(Verbose, TEXT("WorldCollision: SKIP: World is nullptr"));
 		}
 		bGPUWorldCollisionCacheDirty = true;
 		return;
@@ -1632,7 +1633,7 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 	{
 		if (bShouldLog)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[WorldCollision] SKIP: QueryBounds is invalid"));
+			KF_LOG_DEV(Verbose, TEXT("WorldCollision: SKIP: QueryBounds is invalid"));
 		}
 		return;
 	}
@@ -1751,8 +1752,7 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 					static int32 ISMCWarningLogCounter = 0;
 					if (++ISMCWarningLogCounter % 300 == 1)
 					{
-						UE_LOG(LogTemp, Warning,
-							TEXT("[WorldCollision] ISMC '%s' has %d instances, limiting to %d for collision"),
+						KF_LOG(Log, TEXT("WorldCollision: ISMC '%s' has %d instances, limiting to %d for collision"),
 							*ISMComp->GetName(), InstanceCount, MaxISMCInstancesForCollision);
 					}
 				}
@@ -1782,7 +1782,7 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 				// Debug logging (throttled)
 				if (bShouldLog)
 				{
-					UE_LOG(LogTemp, Log, TEXT("  [WorldCollision] ISMC: %s, Instances: %d (effective: %d)"),
+					KF_LOG_DEV(Log, TEXT("  WorldCollision: ISMC: %s, Instances: %d (effective: %d)"),
 						*ISMComp->GetName(), InstanceCount, EffectiveInstanceCount);
 				}
 
@@ -1817,13 +1817,13 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 			{
 				const FVector MeshLocation = StaticMeshComp->GetComponentLocation();
 				const FVector MeshScale = StaticMeshComp->GetComponentScale();
-				UE_LOG(LogTemp, Log, TEXT("  [WorldCollision] Mesh: %s, Owner: %s"),
+				KF_LOG_DEV(Log, TEXT("  WorldCollision: Mesh: %s, Owner: %s"),
 					*StaticMesh->GetName(),
 					Owner ? *Owner->GetName() : TEXT("None"));
-				UE_LOG(LogTemp, Log, TEXT("    Location: (%.1f, %.1f, %.1f), Scale: (%.2f, %.2f, %.2f)"),
+				KF_LOG_DEV(Log, TEXT("    Location: (%.1f, %.1f, %.1f), Scale: (%.2f, %.2f, %.2f)"),
 					MeshLocation.X, MeshLocation.Y, MeshLocation.Z,
 					MeshScale.X, MeshScale.Y, MeshScale.Z);
-				UE_LOG(LogTemp, Log, TEXT("    Collision: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d"),
+				KF_LOG_DEV(Log, TEXT("    Collision: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d"),
 					AggGeom.SphereElems.Num(), AggGeom.SphylElems.Num(),
 					AggGeom.BoxElems.Num(), AggGeom.ConvexElems.Num());
 
@@ -1831,19 +1831,19 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 				for (int32 i = 0; i < AggGeom.SphereElems.Num(); ++i)
 				{
 					const FKSphereElem& Sphere = AggGeom.SphereElems[i];
-					UE_LOG(LogTemp, Log, TEXT("      Sphere[%d]: Center=(%.1f, %.1f, %.1f), Radius=%.1f"),
+					KF_LOG_DEV(Log, TEXT("      Sphere[%d]: Center=(%.1f, %.1f, %.1f), Radius=%.1f"),
 						i, Sphere.Center.X, Sphere.Center.Y, Sphere.Center.Z, Sphere.Radius);
 				}
 				for (int32 i = 0; i < AggGeom.BoxElems.Num(); ++i)
 				{
 					const FKBoxElem& Box = AggGeom.BoxElems[i];
-					UE_LOG(LogTemp, Log, TEXT("      Box[%d]: Center=(%.1f, %.1f, %.1f), Size=(%.1f, %.1f, %.1f)"),
+					KF_LOG_DEV(Log, TEXT("      Box[%d]: Center=(%.1f, %.1f, %.1f), Size=(%.1f, %.1f, %.1f)"),
 						i, Box.Center.X, Box.Center.Y, Box.Center.Z, Box.X, Box.Y, Box.Z);
 				}
 				for (int32 i = 0; i < AggGeom.ConvexElems.Num(); ++i)
 				{
 					const FKConvexElem& Convex = AggGeom.ConvexElems[i];
-					UE_LOG(LogTemp, Log, TEXT("      Convex[%d]: Vertices=%d, Indices=%d"),
+					KF_LOG_DEV(Log, TEXT("      Convex[%d]: Vertices=%d, Indices=%d"),
 						i, Convex.VertexData.Num(), Convex.IndexData.Num());
 					if (Convex.VertexData.Num() > 0)
 					{
@@ -1853,7 +1853,7 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 						{
 							ConvexBounds += V;
 						}
-						UE_LOG(LogTemp, Log, TEXT("        LocalBounds: Min=(%.1f, %.1f, %.1f), Max=(%.1f, %.1f, %.1f)"),
+						KF_LOG_DEV(Log, TEXT("        LocalBounds: Min=(%.1f, %.1f, %.1f), Max=(%.1f, %.1f, %.1f)"),
 							ConvexBounds.Min.X, ConvexBounds.Min.Y, ConvexBounds.Min.Z,
 							ConvexBounds.Max.X, ConvexBounds.Max.Y, ConvexBounds.Max.Z);
 					}
@@ -1875,19 +1875,19 @@ void UKawaiiFluidSimulationContext::AppendGPUWorldCollisionPrimitives(
 		static int32 WorldCollisionLogCounter = 0;
 		if (++WorldCollisionLogCounter % 60 == 1)
 		{
-			UE_LOG(LogTemp, Log, TEXT("========== GPU World Collision Cache Updated =========="));
-			UE_LOG(LogTemp, Log, TEXT("  Query Bounds: Center=(%.1f, %.1f, %.1f) Extent=(%.1f, %.1f, %.1f)"),
+			KF_LOG_DEV(Log, TEXT("========== GPU World Collision Cache Updated =========="));
+			KF_LOG_DEV(Log, TEXT("  Query Bounds: Center=(%.1f, %.1f, %.1f) Extent=(%.1f, %.1f, %.1f)"),
 				QueryCenter.X, QueryCenter.Y, QueryCenter.Z,
 				QueryExtent.X, QueryExtent.Y, QueryExtent.Z);
-			UE_LOG(LogTemp, Log, TEXT("  Overlaps Found: %d (Unique Components: %d)"),
+			KF_LOG_DEV(Log, TEXT("  Overlaps Found: %d (Unique Components: %d)"),
 				TotalOverlaps, UniqueComponents.Num());
-			UE_LOG(LogTemp, Log, TEXT("  Valid StaticMeshes with Simple Collision: %d"), ValidStaticMeshCount);
-			UE_LOG(LogTemp, Log, TEXT("  Cached Primitives: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d"),
+			KF_LOG_DEV(Log, TEXT("  Valid StaticMeshes with Simple Collision: %d"), ValidStaticMeshCount);
+			KF_LOG_DEV(Log, TEXT("  Cached Primitives: Spheres=%d, Capsules=%d, Boxes=%d, Convexes=%d"),
 				CachedGPUWorldCollisionPrimitives.Spheres.Num(),
 				CachedGPUWorldCollisionPrimitives.Capsules.Num(),
 				CachedGPUWorldCollisionPrimitives.Boxes.Num(),
 				CachedGPUWorldCollisionPrimitives.Convexes.Num());
-			UE_LOG(LogTemp, Log, TEXT("========================================================"));
+			KF_LOG_DEV(Log, TEXT("========================================================"));
 		}
 	}
 
@@ -2882,7 +2882,7 @@ void UKawaiiFluidSimulationContext::UpdateLandscapeHeightmapCollision(
 
 	if (!bSuccess || CachedLandscapeHeightmap.IsEmpty())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("Failed to extract landscape heightmap"));
+		KF_LOG(Warning, TEXT("Failed to extract landscape heightmap"));
 		GPUSimulator->SetHeightmapCollisionEnabled(false);
 		bLandscapeHeightmapDirty = false;
 		return;
@@ -2906,7 +2906,7 @@ void UKawaiiFluidSimulationContext::UpdateLandscapeHeightmapCollision(
 	GPUSimulator->UploadHeightmapData(CachedLandscapeHeightmap, CachedHeightmapWidth, CachedHeightmapHeight);
 	GPUSimulator->SetHeightmapCollisionEnabled(true);
 
-	UE_LOG(LogTemp, Log, TEXT("Landscape heightmap collision enabled: %dx%d, Bounds: (%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)"),
+	KF_LOG_DEV(Log, TEXT("Landscape heightmap collision enabled: %dx%d, Bounds: (%.0f,%.0f,%.0f)-(%.0f,%.0f,%.0f)"),
 		CachedHeightmapWidth, CachedHeightmapHeight,
 		CachedHeightmapBounds.Min.X, CachedHeightmapBounds.Min.Y, CachedHeightmapBounds.Min.Z,
 		CachedHeightmapBounds.Max.X, CachedHeightmapBounds.Max.Y, CachedHeightmapBounds.Max.Z);

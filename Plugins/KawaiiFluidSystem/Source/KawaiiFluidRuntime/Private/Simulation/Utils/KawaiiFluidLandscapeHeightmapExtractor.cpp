@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Simulation/Utils/KawaiiFluidLandscapeHeightmapExtractor.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "LandscapeComponent.h"
 #include "EngineUtils.h"
 #include "LandscapeProxy.h"
@@ -40,7 +41,7 @@ bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractHeightmap(
 {
 	if (!Landscape)
 	{
-		UE_LOG(LogHeightmapExtractor, Warning, TEXT("ExtractHeightmap: Landscape is null"));
+		KF_LOG_DEV(Verbose, TEXT("ExtractHeightmap: Landscape is null"));
 		return false;
 	}
 
@@ -52,7 +53,7 @@ bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractHeightmap(
 
 	if (!OutBounds.IsValid)
 	{
-		UE_LOG(LogHeightmapExtractor, Warning, TEXT("ExtractHeightmap: Invalid landscape bounds"));
+		KF_LOG_DEV(Verbose, TEXT("ExtractHeightmap: Invalid landscape bounds"));
 		return false;
 	}
 
@@ -119,7 +120,7 @@ bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractHeightmap(
 		}
 	}
 
-	UE_LOG(LogHeightmapExtractor, Log, TEXT("Extracted heightmap from %s: %dx%d, Bounds: (%.1f,%.1f,%.1f) - (%.1f,%.1f,%.1f)"),
+	KF_LOG_DEV(Log, TEXT("Extracted heightmap from %s: %dx%d, Bounds: (%.1f,%.1f,%.1f) - (%.1f,%.1f,%.1f)"),
 		*Landscape->GetName(), OutWidth, OutHeight,
 		OutBounds.Min.X, OutBounds.Min.Y, OutBounds.Min.Z,
 		OutBounds.Max.X, OutBounds.Max.Y, OutBounds.Max.Z);
@@ -147,7 +148,7 @@ bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 {
 	if (Landscapes.Num() == 0)
 	{
-		UE_LOG(LogHeightmapExtractor, Warning, TEXT("ExtractCombinedHeightmap: No landscapes provided"));
+		KF_LOG_DEV(Verbose, TEXT("ExtractCombinedHeightmap: No landscapes provided"));
 		return false;
 	}
 
@@ -171,7 +172,7 @@ bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 
 	if (!OutBounds.IsValid)
 	{
-		UE_LOG(LogHeightmapExtractor, Warning, TEXT("ExtractCombinedHeightmap: Invalid combined bounds"));
+		KF_LOG_DEV(Verbose, TEXT("ExtractCombinedHeightmap: Invalid combined bounds"));
 		return false;
 	}
 
@@ -268,7 +269,7 @@ bool FKawaiiFluidLandscapeHeightmapExtractor::ExtractCombinedHeightmap(
 		}
 	}
 
-	UE_LOG(LogHeightmapExtractor, Log, TEXT("Extracted combined heightmap from %d landscapes: %dx%d"),
+	KF_LOG_DEV(Log, TEXT("Extracted combined heightmap from %d landscapes: %dx%d"),
 		Landscapes.Num(), OutWidth, OutHeight);
 
 	return true;
@@ -320,7 +321,7 @@ void FKawaiiFluidLandscapeHeightmapExtractor::FindLandscapesInWorld(UWorld* Worl
 		OutLandscapes.Add(*It);
 	}
 
-	UE_LOG(LogHeightmapExtractor, Log, TEXT("Found %d landscapes in world"), OutLandscapes.Num());
+	KF_LOG_DEV(Log, TEXT("Found %d landscapes in world"), OutLandscapes.Num());
 }
 
 /**

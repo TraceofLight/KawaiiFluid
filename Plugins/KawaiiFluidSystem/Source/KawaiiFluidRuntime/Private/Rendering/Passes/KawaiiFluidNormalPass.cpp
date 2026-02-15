@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/Passes/KawaiiFluidNormalPass.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "SceneView.h"
@@ -90,7 +91,7 @@ void KawaiiFluidRenderer::RenderNormalPass(
 
 	PassParameters->OutputNormalTexture = GraphBuilder.CreateUAV(OutNormalTexture);
 
-	// UE_LOG(LogTemp, Log, TEXT("KawaiiFluid: Rendering FluidNormalPass. Extent: %d x %d"),
+	// KF_LOG_DEV(Log, TEXT("KawaiiFluid: Rendering FluidNormalPass. Extent: %d x %d"),
 	//        Extent.X, Extent.Y);
 
 	FComputeShaderUtils::AddPass(
@@ -100,4 +101,3 @@ void KawaiiFluidRenderer::RenderNormalPass(
 		PassParameters,
 		FComputeShaderUtils::GetGroupCount(Extent, FIntPoint(8, 8)));
 }
-

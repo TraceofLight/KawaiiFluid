@@ -1,7 +1,8 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUSpawnManager - Thread-safe particle spawn queue manager
 
 #include "Simulation/Managers/GPUSpawnManager.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
@@ -38,7 +39,7 @@ void FGPUSpawnManager::Initialize(int32 InMaxParticleCount)
 {
 	if (InMaxParticleCount <= 0)
 	{
-		UE_LOG(LogGPUSpawnManager, Warning, TEXT("Initialize called with invalid particle count: %d"), InMaxParticleCount);
+		KF_LOG(Error, TEXT("Initialize called with invalid particle count: %d"), InMaxParticleCount);
 		return;
 	}
 
@@ -63,7 +64,7 @@ void FGPUSpawnManager::Initialize(int32 InMaxParticleCount)
 	SourceCounterReadIndex = 0;
 	SourceCounterPendingCount = 0;
 
-	UE_LOG(LogGPUSpawnManager, Log, TEXT("GPUSpawnManager initialized with capacity: %d, MaxSourceCount: %d"),
+	KF_LOG_DEV(Log, TEXT("GPUSpawnManager initialized with capacity: %d, MaxSourceCount: %d"),
 		MaxParticleCapacity, EGPUParticleSource::MaxSourceCount);
 }
 
@@ -131,7 +132,7 @@ void FGPUSpawnManager::Release()
 	bIsInitialized = false;
 	MaxParticleCapacity = 0;
 
-	UE_LOG(LogGPUSpawnManager, Log, TEXT("GPUSpawnManager released (all despawn state cleared)"));
+	KF_LOG_DEV(Log, TEXT("GPUSpawnManager released (all despawn state cleared)"));
 }
 
 //=============================================================================
@@ -157,7 +158,7 @@ void FGPUSpawnManager::AddSpawnRequest(const FVector3f& Position, const FVector3
 	PendingSpawnRequests.Add(Request);
 	bHasPendingSpawnRequests.store(true);
 
-	UE_LOG(LogGPUSpawnManager, Verbose, TEXT("AddSpawnRequest: Pos=(%.2f, %.2f, %.2f), Vel=(%.2f, %.2f, %.2f)"),
+	KF_LOG_DEV(Verbose, TEXT("AddSpawnRequest: Pos=(%.2f, %.2f, %.2f), Vel=(%.2f, %.2f, %.2f)"),
 		Position.X, Position.Y, Position.Z, Velocity.X, Velocity.Y, Velocity.Z);
 }
 
@@ -177,7 +178,7 @@ void FGPUSpawnManager::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests
 	PendingSpawnRequests.Append(Requests);
 	bHasPendingSpawnRequests.store(true);
 
-	UE_LOG(LogGPUSpawnManager, Verbose, TEXT("AddSpawnRequests: Added %d requests (total pending: %d)"),
+	KF_LOG_DEV(Verbose, TEXT("AddSpawnRequests: Added %d requests (total pending: %d)"),
 		Requests.Num(), PendingSpawnRequests.Num());
 }
 
@@ -227,7 +228,7 @@ int32 FGPUSpawnManager::CancelPendingSpawnsForSource(int32 SourceID)
 
 	if (RemovedCount > 0)
 	{
-		UE_LOG(LogGPUSpawnManager, Log, TEXT("CancelPendingSpawnsForSource: Cancelled %d pending spawns for SourceID=%d"),
+		KF_LOG_DEV(Log, TEXT("CancelPendingSpawnsForSource: Cancelled %d pending spawns for SourceID=%d"),
 			RemovedCount, SourceID);
 	}
 
@@ -309,7 +310,7 @@ void FGPUSpawnManager::SetSourceEmitterMax(int32 SourceID, int32 MaxCount)
 		--ActiveEmitterMaxCount;
 	}
 
-	UE_LOG(LogGPUSpawnManager, Verbose, TEXT("SetSourceEmitterMax: SourceID=%d, Max=%d (active=%d)"),
+	KF_LOG_DEV(Verbose, TEXT("SetSourceEmitterMax: SourceID=%d, Max=%d (active=%d)"),
 		SourceID, MaxCount, ActiveEmitterMaxCount);
 }
 
@@ -335,7 +336,7 @@ bool FGPUSpawnManager::SwapGPUDespawnBuffers()
 
 	if (bHasAny)
 	{
-		UE_LOG(LogGPUSpawnManager, Verbose, TEXT("SwapGPUDespawnBuffers: Brush=%d, Source=%d, PerSourceRecycle=%s"),
+		KF_LOG_DEV(Verbose, TEXT("SwapGPUDespawnBuffers: Brush=%d, Source=%d, PerSourceRecycle=%s"),
 			ActiveGPUBrushDespawns.Num(), ActiveGPUSourceDespawns.Num(), HasPerSourceRecycle() ? TEXT("Yes") : TEXT("No"));
 	}
 
@@ -853,7 +854,7 @@ void FGPUSpawnManager::AddSpawnParticlesPass(
 		FIntVector(NumGroups, 1, 1)
 	);
 
-	// UE_LOG(LogGPUSpawnManager, Verbose, TEXT("SpawnParticlesPass: Spawning %d particles (NextID: %d)"),
+	// KF_LOG_DEV(Verbose, TEXT("SpawnParticlesPass: Spawning %d particles (NextID: %d)"),
 	// 	ActiveSpawnRequests.Num(), NextParticleID.load());
 }
 
@@ -894,7 +895,7 @@ FRDGBufferUAVRef FGPUSpawnManager::RegisterSourceCounterUAV(FRDGBuilder& GraphBu
 		// Extract to persistent buffer
 		GraphBuilder.QueueBufferExtraction(TempBuffer, &SourceCounterBuffer);
 
-		UE_LOG(LogGPUSpawnManager, Log, TEXT("Created SourceCounterBuffer with %d slots"), EGPUParticleSource::MaxSourceCount);
+		KF_LOG_DEV(Log, TEXT("Created SourceCounterBuffer with %d slots"), EGPUParticleSource::MaxSourceCount);
 
 		return GraphBuilder.CreateUAV(TempBuffer);
 	}
@@ -961,7 +962,7 @@ void FGPUSpawnManager::EnqueueSourceCounterReadback(FRHICommandListImmediate& RH
 	// Ring buffer full - skip this frame
 	if (SourceCounterPendingCount >= SourceCounterRingBufferSize)
 	{
-		UE_LOG(LogGPUSpawnManager, Verbose, TEXT("SourceCounter ring buffer full, skipping enqueue"));
+		KF_LOG_DEV(Verbose, TEXT("SourceCounter ring buffer full, skipping enqueue"));
 		return;
 	}
 
@@ -1043,7 +1044,7 @@ void FGPUSpawnManager::ClearSourceCounters(FRDGBuilder& GraphBuilder)
 		}
 	}
 
-	UE_LOG(LogGPUSpawnManager, Log, TEXT("Cleared all source counters"));
+	KF_LOG_DEV(Log, TEXT("Cleared all source counters"));
 }
 
 /**
@@ -1126,11 +1127,11 @@ void FGPUSpawnManager::InitializeSourceCountersFromParticles(const TArray<FGPUFl
 	{
 		if (CachedSourceCounts[i] > 0)
 		{
-			UE_LOG(LogGPUSpawnManager, Log, TEXT("InitializeSourceCounters: SourceID %d = %d particles"), i, CachedSourceCounts[i]);
+			KF_LOG_DEV(Log, TEXT("InitializeSourceCounters: SourceID %d = %d particles"), i, CachedSourceCounts[i]);
 			TotalCounted += CachedSourceCounts[i];
 		}
 	}
-	UE_LOG(LogGPUSpawnManager, Log, TEXT("InitializeSourceCounters: Total %d particles from %d input"), TotalCounted, Particles.Num());
+	KF_LOG_DEV(Log, TEXT("InitializeSourceCounters: Total %d particles from %d input"), TotalCounted, Particles.Num());
 }
 
 //=============================================================================
@@ -1179,7 +1180,7 @@ void FGPUSpawnManager::EnsureStreamCompactionBuffers(FRDGBuilder& GraphBuilder, 
 	StreamCompactionCapacity = Capacity;
 
 	const int32 CompactedSize = Capacity * sizeof(FGPUFluidParticle) * 2;  // Double buffer
-	UE_LOG(LogGPUSpawnManager, Log, TEXT("EnsureStreamCompactionBuffers: Allocated %d capacity (%d KB total)"),
+	KF_LOG_DEV(Log, TEXT("EnsureStreamCompactionBuffers: Allocated %d capacity (%d KB total)"),
 		Capacity, (Capacity * 2 * 4 + BlockCount * 4 + CompactedSize) / 1024);
 }
 

@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Simulation/Shaders/KawaiiFluidSpatialHashShaders.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "GlobalShader.h"
@@ -115,13 +116,13 @@ bool FSpatialHashBuilder::BuildHash(
 {
     if (!Resources.IsValid())
     {
-        UE_LOG(LogTemp, Warning, TEXT("FSpatialHashBuilder::BuildHash - Resources not valid"));
+        KF_LOG(Warning, TEXT("FSpatialHashBuilder: BuildHash - Resources not valid"));
         return false;
     }
 
     if (ParticleCount <= 0 || !ParticlePositionsSRV)
     {
-        UE_LOG(LogTemp, Warning, TEXT("FSpatialHashBuilder::BuildHash - Invalid inputs (ParticleCount: %d)"), ParticleCount);
+        KF_LOG(Warning, TEXT("FSpatialHashBuilder: BuildHash - Invalid inputs (ParticleCount: %d)"), ParticleCount);
         return false;
     }
 
@@ -494,5 +495,3 @@ bool FSpatialHashBuilder::CreateAndBuildHashMultipass(
 
     return true;
 }
-
-

@@ -1,6 +1,7 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Rendering/KawaiiFluidSceneViewExtension.h"
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -48,7 +49,7 @@ void UKawaiiFluidRendererSubsystem::Initialize(FSubsystemCollectionBase& Collect
 	// Create and register Scene View Extension
 	ViewExtension = FSceneViewExtensions::NewExtension<FKawaiiFluidSceneViewExtension>(this);
 
-	UE_LOG(LogTemp, Log, TEXT("FluidRendererSubsystem Initialized"));
+	KF_LOG_DEV(Log, TEXT("FluidRendererSubsystem Initialized"));
 }
 
 /**
@@ -66,7 +67,7 @@ void UKawaiiFluidRendererSubsystem::Deinitialize()
 
 	Super::Deinitialize();
 
-	UE_LOG(LogTemp, Log, TEXT("FluidRendererSubsystem Deinitialized"));
+	KF_LOG_DEV(Log, TEXT("FluidRendererSubsystem Deinitialized"));
 }
 
 //========================================
@@ -114,20 +115,20 @@ void UKawaiiFluidRendererSubsystem::RegisterRenderingModule(UKawaiiFluidRenderin
 {
 	if (!Module)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FluidRendererSubsystem: RegisterRenderingModule - Module is null"));
+		KF_LOG(Warning, TEXT("FluidRendererSubsystem: RegisterRenderingModule - Module is null"));
 		return;
 	}
 
 	if (RegisteredRenderingModules.Contains(Module))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("FluidRendererSubsystem: RenderingModule already registered: %s"),
+		KF_LOG_DEV(Verbose, TEXT("FluidRendererSubsystem: RenderingModule already registered: %s"),
 			*Module->GetName());
 		return;
 	}
 
 	RegisteredRenderingModules.Add(Module);
 
-	UE_LOG(LogTemp, Log, TEXT("FluidRendererSubsystem: Registered RenderingModule %s (Total: %d)"),
+	KF_LOG_DEV(Log, TEXT("FluidRendererSubsystem: Registered RenderingModule %s (Total: %d)"),
 		*Module->GetName(),
 		RegisteredRenderingModules.Num());
 }
@@ -147,7 +148,7 @@ void UKawaiiFluidRendererSubsystem::UnregisterRenderingModule(UKawaiiFluidRender
 
 	if (Removed > 0)
 	{
-		UE_LOG(LogTemp, Log, TEXT("FluidRendererSubsystem: Unregistered RenderingModule %s (Remaining: %d)"),
+		KF_LOG_DEV(Log, TEXT("FluidRendererSubsystem: Unregistered RenderingModule %s (Remaining: %d)"),
 			*Module->GetName(),
 			RegisteredRenderingModules.Num());
 	}
@@ -383,6 +384,7 @@ UStaticMesh* UKawaiiFluidRendererSubsystem::GetOrCreateShadowMesh(EFluidShadowMe
 	const int32 QualityIndex = static_cast<int32>(Quality);
 	if (QualityIndex < 0 || QualityIndex >= NUM_SHADOW_QUALITY_LEVELS)
 	{
+		KF_LOG(Error, TEXT("FluidRendererSubsystem: GetOrCreateShadowMesh - Invalid quality index: %d"), QualityIndex);
 		return nullptr;
 	}
 
@@ -394,14 +396,16 @@ UStaticMesh* UKawaiiFluidRendererSubsystem::GetOrCreateShadowMesh(EFluidShadowMe
 
 	// Create new mesh for this quality level
 	ShadowSphereMeshes[QualityIndex] = CreateLowPolySphere(50.0f, Quality);
-
-	if (ShadowSphereMeshes[QualityIndex])
+	if (!ShadowSphereMeshes[QualityIndex])
 	{
-		int32 TriCount = (Quality == EFluidShadowMeshQuality::Low) ? 8 :
-		                 (Quality == EFluidShadowMeshQuality::Medium) ? 20 : 80;
-		UE_LOG(LogTemp, Log, TEXT("FluidRendererSubsystem: Created shadow sphere (Quality: %d, %d triangles)"),
-			QualityIndex, TriCount);
+		KF_LOG(Error, TEXT("FluidRendererSubsystem: Failed to create shadow sphere mesh for quality %d"), QualityIndex);
+		return nullptr;
 	}
+
+	int32 TriCount = (Quality == EFluidShadowMeshQuality::Low) ? 8 :
+	                 (Quality == EFluidShadowMeshQuality::Medium) ? 20 : 80;
+	KF_LOG_DEV(Log, TEXT("FluidRendererSubsystem: Created shadow sphere (Quality: %d, %d triangles)"),
+		QualityIndex, TriCount);
 
 	return ShadowSphereMeshes[QualityIndex];
 }
@@ -416,6 +420,7 @@ UInstancedStaticMeshComponent* UKawaiiFluidRendererSubsystem::GetOrCreateShadowI
 	const int32 QualityIndex = static_cast<int32>(Quality);
 	if (QualityIndex < 0 || QualityIndex >= NUM_SHADOW_QUALITY_LEVELS)
 	{
+		KF_LOG(Error, TEXT("FluidRendererSubsystem: GetOrCreateShadowISM - Invalid quality index: %d"), QualityIndex);
 		return nullptr;
 	}
 
@@ -428,6 +433,8 @@ UInstancedStaticMeshComponent* UKawaiiFluidRendererSubsystem::GetOrCreateShadowI
 	UWorld* World = GetWorld();
 	if (!World || World->bIsTearingDown || !World->bActorsInitialized)
 	{
+		KF_LOG_DEV(VeryVerbose, TEXT("FluidRendererSubsystem: Shadow ISM creation skipped (WorldReady=%d, TearingDown=%d, ActorsInitialized=%d)"),
+			World != nullptr, World ? World->bIsTearingDown : 1, World ? World->bActorsInitialized : 0);
 		return nullptr;
 	}
 
@@ -442,7 +449,7 @@ UInstancedStaticMeshComponent* UKawaiiFluidRendererSubsystem::GetOrCreateShadowI
 		ShadowProxyActor = World->SpawnActor<AActor>(AActor::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
 		if (!ShadowProxyActor)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("FluidRendererSubsystem: Failed to spawn shadow proxy actor"));
+			KF_LOG(Error, TEXT("FluidRendererSubsystem: Failed to spawn shadow proxy actor"));
 			return nullptr;
 		}
 	}
@@ -451,6 +458,7 @@ UInstancedStaticMeshComponent* UKawaiiFluidRendererSubsystem::GetOrCreateShadowI
 	UStaticMesh* ShadowMesh = GetOrCreateShadowMesh(Quality);
 	if (!ShadowMesh)
 	{
+		KF_LOG_DEV(Verbose, TEXT("FluidRendererSubsystem: Shadow mesh unavailable for quality %d"), QualityIndex);
 		return nullptr;
 	}
 
@@ -459,6 +467,7 @@ UInstancedStaticMeshComponent* UKawaiiFluidRendererSubsystem::GetOrCreateShadowI
 	UInstancedStaticMeshComponent* ISM = NewObject<UInstancedStaticMeshComponent>(ShadowProxyActor, ComponentName);
 	if (!ISM)
 	{
+		KF_LOG(Error, TEXT("FluidRendererSubsystem: Failed to create shadow ISM component for quality %d"), QualityIndex);
 		return nullptr;
 	}
 
@@ -500,10 +509,15 @@ UInstancedStaticMeshComponent* UKawaiiFluidRendererSubsystem::GetOrCreateShadowI
 
 	// Register component
 	ISM->RegisterComponent();
+	if (!ISM->IsRegistered())
+	{
+		KF_LOG(Error, TEXT("FluidRendererSubsystem: Shadow ISM RegisterComponent failed for quality %d"), QualityIndex);
+		return nullptr;
+	}
 
 	ShadowInstanceComponents[QualityIndex] = ISM;
 
-	UE_LOG(LogTemp, Log, TEXT("FluidRendererSubsystem: Created shadow ISM for quality %d"), QualityIndex);
+	KF_LOG_DEV(Log, TEXT("FluidRendererSubsystem: Created shadow ISM for quality %d"), QualityIndex);
 
 	return ISM;
 }
@@ -527,6 +541,7 @@ void UKawaiiFluidRendererSubsystem::RegisterShadowParticles(const FVector* Parti
 	const int32 QualityIndex = static_cast<int32>(Quality);
 	if (QualityIndex < 0 || QualityIndex >= NUM_SHADOW_QUALITY_LEVELS)
 	{
+		KF_LOG_DEV(Verbose, TEXT("FluidRendererSubsystem: RegisterShadowParticles skipped due to invalid quality index: %d"), QualityIndex);
 		return;
 	}
 

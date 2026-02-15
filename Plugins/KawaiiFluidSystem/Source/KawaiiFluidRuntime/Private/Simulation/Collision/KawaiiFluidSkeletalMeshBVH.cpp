@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Simulation/Collision/KawaiiFluidSkeletalMeshBVH.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SkinnedMeshComponent.h"
 #include "Rendering/SkeletalMeshRenderData.h"
@@ -54,14 +55,14 @@ bool FKawaiiFluidSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh,
 
 	if (!InSkelMesh)
 	{
-		UE_LOG(LogSkeletalMeshBVH, Warning, TEXT("Initialize failed: SkelMesh is null"));
+		KF_LOG(Warning, TEXT("Initialize failed: SkelMesh is null"));
 		return false;
 	}
 
 	USkeletalMesh* SkelMeshAsset = InSkelMesh->GetSkeletalMeshAsset();
 	if (!SkelMeshAsset)
 	{
-		UE_LOG(LogSkeletalMeshBVH, Warning, TEXT("Initialize failed: SkeletalMeshAsset is null"));
+		KF_LOG(Warning, TEXT("Initialize failed: SkeletalMeshAsset is null"));
 		return false;
 	}
 
@@ -70,14 +71,14 @@ bool FKawaiiFluidSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh,
 
 	if (!ExtractTrianglesFromMesh())
 	{
-		UE_LOG(LogSkeletalMeshBVH, Warning, TEXT("Initialize failed: Could not extract triangles"));
+		KF_LOG(Warning, TEXT("Initialize failed: Could not extract triangles"));
 		Clear();
 		return false;
 	}
 
 	if (SkinnedTriangles.Num() == 0)
 	{
-		UE_LOG(LogSkeletalMeshBVH, Warning, TEXT("Initialize failed: No triangles extracted"));
+		KF_LOG(Warning, TEXT("Initialize failed: No triangles extracted"));
 		Clear();
 		return false;
 	}
@@ -95,7 +96,7 @@ bool FKawaiiFluidSkeletalMeshBVH::Initialize(USkeletalMeshComponent* InSkelMesh,
 
 	bIsInitialized = true;
 
-	UE_LOG(LogSkeletalMeshBVH, Log, TEXT("BVH initialized: %d triangles, %d nodes"),
+	KF_LOG_DEV(Log, TEXT("BVH initialized: %d triangles, %d nodes"),
 		SkinnedTriangles.Num(), Nodes.Num());
 
 	return true;

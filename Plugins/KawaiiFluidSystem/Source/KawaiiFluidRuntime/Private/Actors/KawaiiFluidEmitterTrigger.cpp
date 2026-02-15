@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Actors/KawaiiFluidEmitterTrigger.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Actors/KawaiiFluidEmitter.h"
 #include "Actors/KawaiiFluidVolume.h"
 #include "Components/BoxComponent.h"
@@ -62,7 +63,7 @@ void AKawaiiFluidEmitterTrigger::BeginPlay()
 	// Warn if no target emitters assigned
 	if (TargetEmitters.Num() == 0)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluidEmitterTrigger [%s]: No TargetEmitters assigned!"), *GetName());
+		KF_LOG(Warning, TEXT("EmitterTrigger: No target emitters assigned (Trigger=%s)"), *GetName());
 	}
 }
 

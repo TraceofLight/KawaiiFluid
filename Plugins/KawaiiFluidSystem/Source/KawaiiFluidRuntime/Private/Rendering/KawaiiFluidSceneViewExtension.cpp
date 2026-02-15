@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/KawaiiFluidSceneViewExtension.h"
+#include "Logging/KawaiiFluidLog.h"
 
 #include "KawaiiFluidRendererSubsystem.h"
 #include "RenderGraphBuilder.h"
@@ -423,7 +424,7 @@ void FKawaiiFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 	// Get SceneColor and SceneDepth from SceneTextures
 	if (!Inputs.SceneTextures)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid PrePostProcess: SceneTextures not available"));
+		KF_LOG_DEV(Verbose, TEXT("PrePostProcess: SceneTextures not available"));
 		return;
 	}
 
@@ -432,7 +433,7 @@ void FKawaiiFluidSceneViewExtension::PrePostProcessPass_RenderThread(
 
 	if (!SceneColorTexture)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("KawaiiFluid PrePostProcess: SceneColor not available"));
+		KF_LOG_DEV(Verbose, TEXT("PrePostProcess: SceneColor not available"));
 		return;
 	}
 

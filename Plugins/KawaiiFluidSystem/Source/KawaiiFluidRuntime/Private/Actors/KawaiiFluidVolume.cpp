@@ -1,6 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Actors/KawaiiFluidVolume.h"
+#include "Logging/KawaiiFluidLog.h"
 #include "Actors/KawaiiFluidEmitter.h"
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
@@ -672,7 +673,7 @@ void AKawaiiFluidVolume::ProcessPendingSpawnRequests()
 	FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 	if (!GPUSimulator)
 	{
-		UE_LOG(LogTemp, Warning, TEXT("AKawaiiFluidVolume [%s]: No GPU simulator available for spawn requests"),
+		KF_LOG(Warning, TEXT("FluidVolume: No GPU simulator available for spawn requests (Volume=%s)"),
 			*GetName());
 		PendingSpawnRequests.Empty();
 		return;
@@ -697,8 +698,8 @@ void AKawaiiFluidVolume::ProcessPendingSpawnRequests()
 	// Send all requests directly to GPU (preserving each request's SourceID)
 	GPUSimulator->AddSpawnRequests(PendingSpawnRequests);
 
-	UE_LOG(LogTemp, Verbose, TEXT("AKawaiiFluidVolume [%s]: Sent %d spawn requests to GPU"),
-		*GetName(), PendingSpawnRequests.Num());
+	KF_LOG_DEV(Verbose, TEXT("FluidVolume: Sent %d spawn requests to GPU (Volume=%s)"),
+		PendingSpawnRequests.Num(), *GetName());
 
 	PendingSpawnRequests.Empty();
 }
@@ -708,7 +709,7 @@ void AKawaiiFluidVolume::RegisterEmitter(AKawaiiFluidEmitter* Emitter)
 	if (Emitter && !RegisteredEmitters.Contains(Emitter))
 	{
 		RegisteredEmitters.Add(Emitter);
-		UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume: Registered emitter %s"), *Emitter->GetName());
+		KF_LOG_DEV(Log, TEXT("FluidVolume: Registered emitter %s (Volume=%s)"), *Emitter->GetName(), *GetName());
 	}
 }
 
@@ -717,7 +718,7 @@ void AKawaiiFluidVolume::UnregisterEmitter(AKawaiiFluidEmitter* Emitter)
 	if (Emitter)
 	{
 		RegisteredEmitters.Remove(Emitter);
-		UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume: Unregistered emitter %s"), *Emitter->GetName());
+		KF_LOG_DEV(Log, TEXT("FluidVolume: Unregistered emitter %s (Volume=%s)"), *Emitter->GetName(), *GetName());
 	}
 }
 
@@ -790,7 +791,7 @@ void AKawaiiFluidVolume::InitializeSimulation()
 	{
 		Preset = NewObject<UKawaiiFluidPresetDataAsset>(this, NAME_None, RF_Transient);
 		VolumeComponent->Preset = Preset;
-		UE_LOG(LogTemp, Warning, TEXT("AKawaiiFluidVolume [%s]: No Preset assigned, using default values"), *GetName());
+		KF_LOG(Warning, TEXT("FluidVolume: No Preset assigned, using default values (Volume=%s)"), *GetName());
 	}
 
 	// Initialize SimulationModule (module was created in constructor via CreateDefaultSubobject)
@@ -809,8 +810,8 @@ void AKawaiiFluidVolume::InitializeSimulation()
 	// Register module with VolumeComponent
 	VolumeComponent->RegisterModule(SimulationModule);
 
-	UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Simulation module initialized with Preset [%s]"),
-		*GetName(), Preset ? *Preset->GetName() : TEXT("Default"));
+	KF_LOG_DEV(Log, TEXT("FluidVolume: Simulation module initialized with Preset=%s (Volume=%s)"),
+		Preset ? *Preset->GetName() : TEXT("Default"), *GetName());
 }
 
 void AKawaiiFluidVolume::RegisterSimulationWithSubsystem()
@@ -845,9 +846,9 @@ void AKawaiiFluidVolume::RegisterSimulationWithSubsystem()
 	const bool bGPUActive = SimulationModule->IsGPUSimulationActive();
 	const bool bContextReady = SimulationContext && SimulationContext->IsGPUSimulatorReady();
 
-	UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Registered with Subsystem"),
+	KF_LOG_DEV(Log, TEXT("FluidVolume: Registered with Subsystem (Volume=%s)"),
 		*GetName());
-	UE_LOG(LogTemp, Log, TEXT("  - GPU Simulator: %s, Active: %s, Context Ready: %s"),
+	KF_LOG_DEV(Log, TEXT("  - GPU Simulator: %s, Active: %s, Context Ready: %s"),
 		bGPUReady ? TEXT("Ready") : TEXT("NOT Ready"),
 		bGPUActive ? TEXT("Yes") : TEXT("No"),
 		bContextReady ? TEXT("Yes") : TEXT("No"));
@@ -885,7 +886,7 @@ void AKawaiiFluidVolume::CleanupSimulation()
 	// Clear context reference (context is owned by Subsystem)
 	SimulationContext = nullptr;
 
-	UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Simulation cleaned up"), *GetName());
+	KF_LOG_DEV(Log, TEXT("FluidVolume: Simulation cleaned up (Volume=%s)"), *GetName());
 }
 
 void AKawaiiFluidVolume::InitializeRendering()
@@ -917,7 +918,7 @@ void AKawaiiFluidVolume::InitializeRendering()
 		{
 			ISMRenderer->SetFluidColor(VolumeComponent->ISMDebugColor);
 		}
-		UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: ISMRenderer %s"), *GetName(), bISMMode ? TEXT("enabled") : TEXT("disabled"));
+		KF_LOG_DEV(Log, TEXT("FluidVolume: ISMRenderer %s (Volume=%s)"), bISMMode ? TEXT("enabled") : TEXT("disabled"), *GetName());
 	}
 
 	// Configure MetaballRenderer based on preset's RenderingParameters
@@ -937,9 +938,9 @@ void AKawaiiFluidVolume::InitializeRendering()
 			// Creates the ScreenSpace pipeline
 			MetaballRenderer->UpdatePipeline();
 
-			UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: MetaballRenderer configured (Enabled: %s, Pipeline: ScreenSpace)"),
-				*GetName(),
-				bEnableMetaball ? TEXT("true") : TEXT("false"));
+			KF_LOG_DEV(Log, TEXT("FluidVolume: MetaballRenderer configured (Enabled=%s, Pipeline=ScreenSpace, Volume=%s)"),
+				bEnableMetaball ? TEXT("true") : TEXT("false"),
+				*GetName());
 	}
 
 	// Connect MetaballRenderer to SimulationContext
@@ -957,7 +958,7 @@ void AKawaiiFluidVolume::InitializeRendering()
 		RendererSubsystem->RegisterRenderingModule(RenderingModule);
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Rendering initialized"), *GetName());
+	KF_LOG_DEV(Log, TEXT("FluidVolume: Rendering initialized (Volume=%s)"), *GetName());
 }
 
 #if WITH_EDITOR
@@ -1006,8 +1007,8 @@ void AKawaiiFluidVolume::InitializeEditorRendering()
 		{
 			ISMRenderer->SetFluidColor(VolumeComponent->ISMDebugColor);
 		}
-		UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Editor ISMRenderer %s"),
-			*GetName(), bISMMode ? TEXT("enabled") : TEXT("disabled"));
+		KF_LOG_DEV(Log, TEXT("FluidVolume: Editor ISMRenderer %s (Volume=%s)"),
+			bISMMode ? TEXT("enabled") : TEXT("disabled"), *GetName());
 	}
 
 	// Metaball is enabled when Actor is visible AND not in ISM/DebugDraw mode
@@ -1027,9 +1028,8 @@ void AKawaiiFluidVolume::InitializeEditorRendering()
 		{
 			MetaballRenderer->SetSimulationContext(SimulationContext);
 		}
-		
-		UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Editor MetaballRenderer %s"), 
-			*GetName(), bEnableMetaball ? TEXT("enabled") : TEXT("disabled"));
+		KF_LOG_DEV(Log, TEXT("FluidVolume: Editor MetaballRenderer %s (Volume=%s)"),
+			bEnableMetaball ? TEXT("enabled") : TEXT("disabled"), *GetName());
 	}
 
 	// Register RenderingModule with FluidRendererSubsystem (CRITICAL for SSFR rendering pipeline)
@@ -1037,12 +1037,12 @@ void AKawaiiFluidVolume::InitializeEditorRendering()
 	if (UKawaiiFluidRendererSubsystem* RendererSubsystem = World->GetSubsystem<UKawaiiFluidRendererSubsystem>())
 	{
 		RendererSubsystem->RegisterRenderingModule(RenderingModule);
-		UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Editor RenderingModule registered with FluidRendererSubsystem"), *GetName());
+		KF_LOG_DEV(Log, TEXT("FluidVolume: Editor RenderingModule registered with FluidRendererSubsystem (Volume=%s)"), *GetName());
 	}
 
 	bEditorRenderingInitialized = true;
-	UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Editor rendering initialized (DebugDrawMode=%d)"), 
-		*GetName(), static_cast<int32>(CurrentMode));
+	KF_LOG_DEV(Log, TEXT("FluidVolume: Editor rendering initialized (DebugDrawMode=%d, Volume=%s)"),
+		static_cast<int32>(CurrentMode), *GetName());
 }
 #endif
 
@@ -1062,7 +1062,7 @@ void AKawaiiFluidVolume::CleanupRendering()
 		RenderingModule->Cleanup();
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("AKawaiiFluidVolume [%s]: Rendering cleaned up"), *GetName());
+	KF_LOG_DEV(Log, TEXT("FluidVolume: Rendering cleaned up (Volume=%s)"), *GetName());
 }
 
 void AKawaiiFluidVolume::RegisterToSubsystem()
@@ -1283,7 +1283,7 @@ void AKawaiiFluidVolume::DrawDebugStaticBoundaryParticles()
 		static int32 LogCounter = 0;
 		if (++LogCounter % 300 == 1)
 		{
-			UE_LOG(LogTemp, Log, TEXT("[StaticBoundary Editor Volume] Drawing %d boundary particles"), NumParticles);
+			KF_LOG_DEV(Log, TEXT("StaticBoundary Editor Volume: Drawing %d boundary particles"), NumParticles);
 		}
 	}
 #endif
@@ -1551,7 +1551,7 @@ void AKawaiiFluidVolume::GenerateEditorBoundaryParticlesPreview()
 		}
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[StaticBoundary Editor Volume] Generated %d preview boundary particles from %d overlapping meshes"),
+	KF_LOG_DEV(Log, TEXT("StaticBoundary Editor Volume: Generated %d preview boundary particles from %d overlapping meshes"),
 		EditorPreviewBoundaryPositions.Num(), OverlapResults.Num());
 }
 #endif

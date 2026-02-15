@@ -33,6 +33,3 @@ void FRecordZOrderIndicesCS::ModifyCompilationEnvironment(
 	FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
 	OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
 }
-
-
-

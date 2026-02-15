@@ -46,5 +46,3 @@ public:
 		const FGlobalShaderPermutationParameters& Parameters,
 		FShaderCompilerEnvironment& OutEnvironment);
 };
-
-
