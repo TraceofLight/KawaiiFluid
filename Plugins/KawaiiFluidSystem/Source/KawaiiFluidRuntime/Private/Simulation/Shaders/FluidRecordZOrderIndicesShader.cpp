@@ -1,5 +1,5 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
-// Shader Implementation for FluidRecordZOrderIndices.usf
+// Shader Implementation for KawaiiFluidZOrderDebug.usf
 
 #include "Simulation/Shaders/FluidRecordZOrderIndicesShader.h"
 #include "RenderGraphBuilder.h"
@@ -12,7 +12,7 @@
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FRecordZOrderIndicesCS,
-	"/Plugin/KawaiiFluidSystem/Private/Sorting/FluidRecordZOrderIndices.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidZOrderDebug.usf",
 	"RecordZOrderIndicesCS", SF_Compute);
 
 /**
@@ -33,3 +33,6 @@ void FRecordZOrderIndicesCS::ModifyCompilationEnvironment(
 	FGlobalShader::ModifyCompilationEnvironment(Parameters, OutEnvironment);
 	OutEnvironment.SetDefine(TEXT("THREAD_GROUP_SIZE"), ThreadGroupSize);
 }
+
+
+

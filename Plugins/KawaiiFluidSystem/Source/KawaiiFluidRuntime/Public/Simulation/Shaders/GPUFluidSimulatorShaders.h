@@ -304,7 +304,7 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FParticleSleepingCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, Particles)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<FGPUFluidParticle>, SleepingParticles)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint>, SleepCounters)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborList)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, NeighborCounts)
@@ -1072,8 +1072,8 @@ public:
 	SHADER_USE_PARAMETER_STRUCT(FExtractPositionsCS, FGlobalShader);
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, Particles)
-		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float3>, Positions)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUFluidParticle>, ExtractParticles)
+		SHADER_PARAMETER_RDG_BUFFER_UAV(RWStructuredBuffer<float3>, ExtractedPositions)
 		SHADER_PARAMETER(int32, ParticleCount)
 		SHADER_PARAMETER(int32, bUsePredictedPosition)
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
@@ -1588,10 +1588,10 @@ public:
 
 	BEGIN_SHADER_PARAMETER_STRUCT(FParameters, )
 		// SOA particle buffers
-		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, Positions)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(Buffer<float>, StackPositions)
 		SHADER_PARAMETER_RDG_BUFFER_UAV(RWBuffer<uint2>, PackedVelocities)  // B plan: half3 packed
 		SHADER_PARAMETER(float, UniformParticleMass)  // B plan: uniform mass
-		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUParticleAttachment>, Attachments)
+		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<FGPUParticleAttachment>, StackAttachments)
 
 		// Spatial hash for neighbor search
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, CellCounts)
@@ -1664,7 +1664,7 @@ public:
 //   - SimulationBounds = ±1280cm (25.6m total)
 //=============================================================================
 
-// Morton grid constants (must match FluidMortonCode.usf and FluidCellStartEnd.usf)
+// Morton grid constants (must match KawaiiFluidSortingPipeline.usf and KawaiiFluidSortingPipeline.usf)
 // 7 bits per axis → 21-bit Morton code → 2M cells max
 #define GPU_MORTON_GRID_AXIS_BITS 7
 #define GPU_MORTON_GRID_SIZE (1 << GPU_MORTON_GRID_AXIS_BITS)  // 128 (2^7)
@@ -1674,7 +1674,7 @@ public:
 // Build grid lookup structure from sorted Morton codes
 //=============================================================================
 
-// MAX_CELLS = GridResolution^3 (must match FluidCellStartEnd.usf)
+// MAX_CELLS = GridResolution^3 (must match KawaiiFluidSortingPipeline.usf)
 // 128^3 = 2,097,152 cells (21-bit Morton code = Cell ID)
 #define GPU_MAX_CELLS (GPU_MORTON_GRID_SIZE * GPU_MORTON_GRID_SIZE * GPU_MORTON_GRID_SIZE)  // 2,097,152
 
@@ -2035,7 +2035,7 @@ public:
 		SHADER_PARAMETER_RDG_BUFFER_SRV(StructuredBuffer<uint>, ParticleCountBuffer)
 	END_SHADER_PARAMETER_STRUCT()
 
-	// Increased to 512 to match FluidCellStartEnd.usf
+	// Increased to 512 to match KawaiiFluidSortingPipeline.usf
 	static constexpr int32 ThreadGroupSize = 512;
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
@@ -2471,4 +2471,5 @@ public:
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
+
 

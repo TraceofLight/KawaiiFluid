@@ -13,7 +13,7 @@
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FFluidAnisotropyCS,
-	"/Plugin/KawaiiFluidSystem/Private/Simulation/FluidAnisotropyCompute.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Simulation/KawaiiFluidSimulationAnisotropy.usf",
 	"MainCS", SF_Compute);
 
 /**

@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidSpatialHashBuild.usf
- * @brief Shader implementation for FluidSpatialHashBuild
+ * @file KawaiiFluidSpatialHashBuild.usf
+ * @brief Shader implementation for KawaiiFluidSpatialHashBuild
  */
 
 //
@@ -11,7 +11,7 @@
 // Kept for backward compatibility (bUseZOrderSorting=false path).
 //
 // The RECOMMENDED approach is Z-Order (Morton Code) sorting via:
-// - FluidMortonCode.usf (Morton code computation)
+// - KawaiiFluidSortingPipeline.usf (Morton code computation)
 // - GPUZOrderSortManager (C++ orchestration)
 //
 // See KawaiiFluidSpatialHash.ush for more details.
@@ -88,12 +88,12 @@ void CountParticlesPerCellCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 [numthreads(1, 1, 1)]
 void PrefixSumCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-    uint sum = 0;
+    uint Sum = 0;
     for (uint i = 0; i < SPATIAL_HASH_SIZE; ++i)
     {
-        uint count = CellCounters[i];
-        PrefixSumBuffer[i] = sum;
-        sum += count;
+        uint Count = CellCounters[i];
+        PrefixSumBuffer[i] = Sum;
+        Sum += Count;
     }
 }
 
@@ -230,22 +230,22 @@ void SortCellParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     // Simple insertion sort
     for (uint j = 1; j < Count; ++j)
     {
-        uint key = LocalIndices[j];
-        uint insertPos = j;
+        uint Key = LocalIndices[j];
+        uint InsertPos = j;
 
-        for (uint scan = j; scan > 0; --scan)
+        for (uint Scan = j; Scan > 0; --Scan)
         {
-            if (LocalIndices[scan - 1] > key)
+            if (LocalIndices[Scan - 1] > Key)
             {
-                LocalIndices[scan] = LocalIndices[scan - 1];
-                insertPos = scan - 1;
+                LocalIndices[Scan] = LocalIndices[Scan - 1];
+                InsertPos = Scan - 1;
             }
             else
             {
                 break;
             }
         }
-        LocalIndices[insertPos] = key;
+        LocalIndices[InsertPos] = Key;
     }
 
     // Write back sorted indices
@@ -301,25 +301,24 @@ void SortBucketParticlesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     // Selection Sort in global memory (O(n²) but no size limit)
     for (uint i = 0; i < Count - 1; ++i)
     {
-        uint minIdx = i;
-        uint minVal = ParticleIndices[StartIndex + i];
+        uint MinIdx = i;
+        uint MinVal = ParticleIndices[StartIndex + i];
 
         for (uint j = i + 1; j < Count; ++j)
         {
-            uint val = ParticleIndices[StartIndex + j];
-            if (val < minVal)
+            uint Value = ParticleIndices[StartIndex + j];
+            if (Value < MinVal)
             {
-                minIdx = j;
-                minVal = val;
+                MinIdx = j;
+                MinVal = Value;
             }
         }
 
-        if (minIdx != i)
+        if (MinIdx != i)
         {
-            ParticleIndices[StartIndex + minIdx] = ParticleIndices[StartIndex + i];
-            ParticleIndices[StartIndex + i] = minVal;
+            ParticleIndices[StartIndex + MinIdx] = ParticleIndices[StartIndex + i];
+            ParticleIndices[StartIndex + i] = MinVal;
         }
     }
 }
 #endif
-

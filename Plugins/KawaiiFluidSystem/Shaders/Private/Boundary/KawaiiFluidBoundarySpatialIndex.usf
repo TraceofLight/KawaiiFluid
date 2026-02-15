@@ -52,7 +52,7 @@ void ComputeBoundaryMortonCodesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	if (bUseHybridTiledZOrder)
 	{
 		// Hybrid Tiled Z-Order: 21-bit key (3-bit TileHash + 18-bit LocalMorton)
-		// Must match fluid particle key computation in FluidMortonCode.usf
+		// Must match fluid particle key computation in KawaiiFluidSortingPipeline.usf
 		SortKey = ComputeHybridTiledKey(CellCoord);
 	}
 	else
@@ -174,3 +174,4 @@ void ComputeBoundaryCellStartEndCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		BoundaryCellEnd[CurrentCellID] = ParticleIndex;
 	}
 }
+

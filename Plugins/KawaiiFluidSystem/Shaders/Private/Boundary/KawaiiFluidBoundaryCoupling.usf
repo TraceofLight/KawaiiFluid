@@ -89,7 +89,7 @@ float DistanceSquaredToAABB(float3 TestPosition, float3 AabbMin, float3 AabbMax)
 //=============================================================================
 
 //=============================================================================
-// Z-Order Cell ID Calculation (must match FluidSolveDensityPressure.usf)
+// Z-Order Cell ID Calculation (must match KawaiiFluidSimulationDensityPressure.usf)
 // IMPORTANT: Result is truncated to fit CellStart/CellEnd buffer size (MAX_CELLS)
 //=============================================================================
 /**

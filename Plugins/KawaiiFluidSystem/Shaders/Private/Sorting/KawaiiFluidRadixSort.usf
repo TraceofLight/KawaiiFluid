@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidRadixSort.usf
- * @brief Shader implementation for FluidRadixSort
+ * @file KawaiiFluidRadixSort.usf
+ * @brief Shader implementation for KawaiiFluidRadixSort
  */
 
 // GPU Fluid Physics - Radix Sort for Morton Code Sorting
@@ -11,7 +11,7 @@
 //
 // Pipeline:
 // 1. Histogram: Each thread group computes per-warp histogram
-// 2. Global Prefix Sum: Compute global offsets for each bucket
+// 2. Global Prefix Sum: Compute global offsets for each Bucket
 // 3. Scatter: Write elements to final positions (STABLE via Wave Intrinsics ranking)
 //
 // OPTIMIZATIONS:
@@ -42,7 +42,7 @@
 // Configuration - 8-bit Radix (256 buckets)
 //=============================================================================
 
-#define RADIX_BITS 8                    // 8 bits per pass (256 buckets)
+#define RADIX_BITS 8                    // 8 bits per PassIndex (256 buckets)
 #define RADIX_SIZE (1 << RADIX_BITS)    // 256 buckets
 #define RADIX_MASK (RADIX_SIZE - 1)     // 0xFF
 
@@ -65,12 +65,12 @@ StructuredBuffer<uint> ValuesIn;
 RWStructuredBuffer<uint> KeysOut;
 RWStructuredBuffer<uint> ValuesOut;
 
-// Histogram and prefix sum buffers
+// Histogram and prefix Sum buffers
 // Note: These have both RW and RO versions for different shader passes
 RWStructuredBuffer<uint> Histogram;      // [NumGroups * RADIX_SIZE] - UAV for Histogram/PrefixSum passes
 RWStructuredBuffer<uint> GlobalOffsets;  // [RADIX_SIZE] - UAV for PrefixSum passes
 
-// Read-only versions for Scatter pass (bound as SRV)
+// Read-only versions for Scatter PassIndex (bound as SRV)
 StructuredBuffer<uint> HistogramSRV;
 StructuredBuffer<uint> GlobalOffsetsSRV;
 
@@ -86,7 +86,7 @@ groupshared uint LocalHistogram[RADIX_SIZE];                 // 1KB - per-group 
 
 //=============================================================================
 // Pass 1: Histogram Computation (8-bit radix)
-// Each thread group counts elements per bucket using warp-level atomics
+// Each thread group counts elements per Bucket using warp-level atomics
 //=============================================================================
 
 /**
@@ -98,36 +98,36 @@ void RadixSortHistogramCS(
     uint3 GroupThreadId : SV_GroupThreadID,
     uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-    uint localIdx = GroupThreadId.x;
-    uint groupIdx = GroupId.x;
-    uint globalBase = groupIdx * ELEMENTS_PER_GROUP;
+    uint LocalIdx = GroupThreadId.x;
+    uint GroupIdx = GroupId.x;
+    uint GlobalBase = GroupIdx * ELEMENTS_PER_GROUP;
 
     // Initialize local histogram (256 threads clear 256 buckets - perfect 1:1)
-    LocalHistogram[localIdx] = 0;
+    LocalHistogram[LocalIdx] = 0;
     GroupMemoryBarrierWithGroupSync();
 
-    // Load elements and count (only valid elements)
+    // Load elements and Count (only valid elements)
     [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
-        uint elementIdx = globalBase + localIdx * ELEMENTS_PER_THREAD + i;
+        uint ElementIdx = GlobalBase + LocalIdx * ELEMENTS_PER_THREAD + i;
 
-        if (elementIdx < (uint)ElementCount)
+        if (ElementIdx < (uint)ElementCount)
         {
-            uint key = KeysIn[elementIdx];
-            uint digit = (key >> BitOffset) & RADIX_MASK;
-            InterlockedAdd(LocalHistogram[digit], 1);
+            uint Key = KeysIn[ElementIdx];
+            uint Digit = (Key >> BitOffset) & RADIX_MASK;
+            InterlockedAdd(LocalHistogram[Digit], 1);
         }
     }
     GroupMemoryBarrierWithGroupSync();
 
     // Write histogram to global memory (256 threads write 256 values - coalesced)
-    Histogram[groupIdx * RADIX_SIZE + localIdx] = LocalHistogram[localIdx];
+    Histogram[GroupIdx * RADIX_SIZE + LocalIdx] = LocalHistogram[LocalIdx];
 }
 
 //=============================================================================
 // Pass 2: Global Prefix Sum over Histograms
-// Computes global offsets for each bucket across all groups
+// Computes global offsets for each Bucket across all groups
 // 256 threads process 256 buckets in parallel
 //=============================================================================
 
@@ -137,39 +137,39 @@ void RadixSortHistogramCS(
 [numthreads(RADIX_SIZE, 1, 1)]
 void RadixSortGlobalPrefixSumCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-    uint bucketIdx = DispatchThreadId.x;
-    if (bucketIdx >= RADIX_SIZE)
+    uint BucketIdx = DispatchThreadId.x;
+    if (BucketIdx >= RADIX_SIZE)
     {
         return;
     }
 
-    // Sum counts for this bucket across all groups
-    uint totalCount = 0;
+    // Sum counts for this Bucket across all groups
+    uint TotalCount = 0;
     for (int g = 0; g < NumGroups; ++g)
     {
-        uint count = Histogram[g * RADIX_SIZE + bucketIdx];
-        Histogram[g * RADIX_SIZE + bucketIdx] = totalCount;  // Store prefix for this group
-        totalCount += count;
+        uint Count = Histogram[g * RADIX_SIZE + BucketIdx];
+        Histogram[g * RADIX_SIZE + BucketIdx] = TotalCount;  // Store prefix for this group
+        TotalCount += Count;
     }
 
-    // Store total count in global offsets (will be prefix-summed next)
-    GlobalOffsets[bucketIdx] = totalCount;
+    // Store total Count in global offsets (will be prefix-summed next)
+    GlobalOffsets[BucketIdx] = TotalCount;
 }
 
 //=============================================================================
 // Pass 2b: Prefix Sum over Global Offsets
-// Converts bucket totals to bucket start positions
+// Converts Bucket totals to Bucket start positions
 //
-// Wave-optimized: O(log n) parallel prefix sum using WavePrefixSum
-// Fallback: O(n) sequential prefix sum
+// Wave-optimized: O(log n) parallel prefix Sum using WavePrefixSum
+// Fallback: O(n) sequential prefix Sum
 //
-// Both versions dispatch with (1, 1, 1) groups - thread count differs in numthreads
+// Both versions dispatch with (1, 1, 1) groups - thread Count differs in numthreads
 //=============================================================================
 
 #if COMPILER_SUPPORTS_WAVE_INTRINSICS
 
 // Wave-optimized version: 256 threads with WavePrefixSum + LDS cross-wave
-// Complexity: O(log waveSize) intra-wave + O(numWaves) cross-wave
+// Complexity: O(log WaveSize) intra-wave + O(numWaves) cross-wave
 groupshared uint BucketWaveTotals[8];  // Max 8 waves (256 threads / 32 wave size)
 
 /**
@@ -178,34 +178,34 @@ groupshared uint BucketWaveTotals[8];  // Max 8 waves (256 threads / 32 wave siz
 [numthreads(RADIX_SIZE, 1, 1)]
 void RadixSortBucketPrefixSumCS(uint3 GroupThreadId : SV_GroupThreadID)
 {
-    uint idx = GroupThreadId.x;
-    uint laneIdx = WaveGetLaneIndex();
-    uint waveSize = WaveGetLaneCount();
-    uint waveIdx = idx / waveSize;
+    uint Idx = GroupThreadId.x;
+    uint LaneIdx = WaveGetLaneIndex();
+    uint WaveSize = WaveGetLaneCount();
+    uint WaveIdx = Idx / WaveSize;
 
-    // Step 1: Read bucket count
-    uint myCount = GlobalOffsets[idx];
+    // Step 1: Read Bucket Count
+    uint MyCount = GlobalOffsets[Idx];
 
-    // Step 2: Intra-wave exclusive prefix sum (O(log waveSize) internally)
-    uint wavePrefixSum = WavePrefixSum(myCount);
-    uint waveTotal = WaveActiveSum(myCount);
+    // Step 2: Intra-wave exclusive prefix Sum (O(log WaveSize) internally)
+    uint WavePrefixValue = WavePrefixSum(MyCount);
+    uint WaveTotal = WaveActiveSum(MyCount);
 
     // Step 3: First lane of each wave stores wave total to LDS
     if (WaveIsFirstLane())
     {
-        BucketWaveTotals[waveIdx] = waveTotal;
+        BucketWaveTotals[WaveIdx] = WaveTotal;
     }
     GroupMemoryBarrierWithGroupSync();
 
     // Step 4: Compute cross-wave prefix (small sequential loop, max 8 iterations)
-    uint crossWavePrefix = 0;
-    for (uint w = 0; w < waveIdx; ++w)
+    uint CrossWavePrefix = 0;
+    for (uint w = 0; w < WaveIdx; ++w)
     {
-        crossWavePrefix += BucketWaveTotals[w];
+        CrossWavePrefix += BucketWaveTotals[w];
     }
 
     // Step 5: Final prefix = cross-wave prefix + intra-wave prefix
-    GlobalOffsets[idx] = crossWavePrefix + wavePrefixSum;
+    GlobalOffsets[Idx] = CrossWavePrefix + WavePrefixValue;
 }
 
 #else
@@ -217,12 +217,12 @@ void RadixSortBucketPrefixSumCS(uint3 GroupThreadId : SV_GroupThreadID)
 [numthreads(1, 1, 1)]
 void RadixSortBucketPrefixSumCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 {
-    uint prefixSum = 0;
+    uint PrefixSum = 0;
     for (uint i = 0; i < RADIX_SIZE; ++i)
     {
-        uint count = GlobalOffsets[i];
-        GlobalOffsets[i] = prefixSum;
-        prefixSum += count;
+        uint Count = GlobalOffsets[i];
+        GlobalOffsets[i] = PrefixSum;
+        PrefixSum += Count;
     }
 }
 
@@ -258,41 +258,41 @@ void RadixSortScatterCS(
     uint3 GroupId : SV_GroupID,
     uint3 GroupThreadId : SV_GroupThreadID)
 {
-    uint localIdx = GroupThreadId.x;
-    uint groupIdx = GroupId.x;
-    uint globalBase = groupIdx * ELEMENTS_PER_GROUP;
-    uint warpId = localIdx / WARP_SIZE;
+    uint LocalIdx = GroupThreadId.x;
+    uint GroupIdx = GroupId.x;
+    uint GlobalBase = GroupIdx * ELEMENTS_PER_GROUP;
+    uint WarpId = LocalIdx / WARP_SIZE;
 
     //=========================================================================
     // Step 1: Load elements and store digits to LDS
     //=========================================================================
 
-    uint myKeys[ELEMENTS_PER_THREAD];
-    uint myValues[ELEMENTS_PER_THREAD];
-    uint myDigits[ELEMENTS_PER_THREAD];
-    uint myValid[ELEMENTS_PER_THREAD];
+    uint MyKeys[ELEMENTS_PER_THREAD];
+    uint MyValues[ELEMENTS_PER_THREAD];
+    uint MyDigits[ELEMENTS_PER_THREAD];
+    uint MyValid[ELEMENTS_PER_THREAD];
 
     [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
-        uint elementIdx = globalBase + localIdx * ELEMENTS_PER_THREAD + i;
-        uint localElementIdx = localIdx * ELEMENTS_PER_THREAD + i;
+        uint ElementIdx = GlobalBase + LocalIdx * ELEMENTS_PER_THREAD + i;
+        uint LocalElementIdx = LocalIdx * ELEMENTS_PER_THREAD + i;
 
-        if (elementIdx < (uint)ElementCount)
+        if (ElementIdx < (uint)ElementCount)
         {
-            myKeys[i] = KeysIn[elementIdx];
-            myValues[i] = ValuesIn[elementIdx];
-            myDigits[i] = (myKeys[i] >> BitOffset) & RADIX_MASK;
-            myValid[i] = 1;
-            ElementDigits[localElementIdx] = myDigits[i];
+            MyKeys[i] = KeysIn[ElementIdx];
+            MyValues[i] = ValuesIn[ElementIdx];
+            MyDigits[i] = (MyKeys[i] >> BitOffset) & RADIX_MASK;
+            MyValid[i] = 1;
+            ElementDigits[LocalElementIdx] = MyDigits[i];
         }
         else
         {
-            myKeys[i] = 0xFFFFFFFF;
-            myValues[i] = 0;
-            myDigits[i] = 0xFF;
-            myValid[i] = 0;
-            ElementDigits[localElementIdx] = 0xFFFFFFFF;  // Invalid marker
+            MyKeys[i] = 0xFFFFFFFF;
+            MyValues[i] = 0;
+            MyDigits[i] = 0xFF;
+            MyValid[i] = 0;
+            ElementDigits[LocalElementIdx] = 0xFFFFFFFF;  // Invalid marker
         }
     }
 
@@ -300,20 +300,20 @@ void RadixSortScatterCS(
     // Step 2: Clear and build per-warp histograms
     //=========================================================================
 
-    // Clear warp bucket data (256 threads clear 8*256=2048 values)
-    for (uint b = localIdx; b < NUM_WARPS * RADIX_SIZE; b += THREAD_GROUP_SIZE)
+    // Clear warp Bucket data (256 threads clear 8*256=2048 values)
+    for (uint b = LocalIdx; b < NUM_WARPS * RADIX_SIZE; b += THREAD_GROUP_SIZE)
     {
         WarpBucketData[b] = 0;
     }
     GroupMemoryBarrierWithGroupSync();
 
-    // Count elements per warp per bucket (atomics for counting only)
+    // Count elements per warp per Bucket (atomics for counting only)
     [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
-        if (myValid[i])
+        if (MyValid[i])
         {
-            InterlockedAdd(WarpBucketData[warpId * RADIX_SIZE + myDigits[i]], 1);
+            InterlockedAdd(WarpBucketData[WarpId * RADIX_SIZE + MyDigits[i]], 1);
         }
     }
     GroupMemoryBarrierWithGroupSync();
@@ -324,17 +324,17 @@ void RadixSortScatterCS(
     //=========================================================================
 
     {
-        uint bucket = localIdx;
-        DigitBaseOffsets[bucket] = GlobalOffsetsSRV[bucket] + HistogramSRV[groupIdx * RADIX_SIZE + bucket];
+        uint Bucket = LocalIdx;
+        DigitBaseOffsets[Bucket] = GlobalOffsetsSRV[Bucket] + HistogramSRV[GroupIdx * RADIX_SIZE + Bucket];
 
-        // Prefix sum across warps for this bucket (8 iterations, sequential)
-        uint sum = 0;
+        // Prefix Sum across warps for this Bucket (8 iterations, sequential)
+        uint Sum = 0;
         for (uint w = 0; w < NUM_WARPS; ++w)
         {
-            uint idx = w * RADIX_SIZE + bucket;
-            uint count = WarpBucketData[idx];
-            WarpBucketData[idx] = sum;  // Replace count with prefix
-            sum += count;
+            uint Idx = w * RADIX_SIZE + Bucket;
+            uint Count = WarpBucketData[Idx];
+            WarpBucketData[Idx] = Sum;  // Replace Count with prefix
+            Sum += Count;
         }
     }
     GroupMemoryBarrierWithGroupSync();
@@ -342,43 +342,43 @@ void RadixSortScatterCS(
     //=========================================================================
     // Step 4: Scatter with STABLE intra-warp ranking
     //
-    // For stability: rank = count of elements with same digit that come
+    // For stability: rank = Count of elements with same Digit that come
     // BEFORE this element in deterministic order (thread 0 elem 0 first,
     // then thread 0 elem 1, ..., thread 31 elem 3).
     //
     // This scan is O(128) per element but guarantees deterministic ordering.
     //=========================================================================
 
-    uint warpStartElement = warpId * (WARP_SIZE * ELEMENTS_PER_THREAD);  // 128 elements per warp
+    uint WarpStartElement = WarpId * (WARP_SIZE * ELEMENTS_PER_THREAD);  // 128 elements per warp
 
     [unroll]
     for (uint i = 0; i < ELEMENTS_PER_THREAD; ++i)
     {
-        if (myValid[i])
+        if (MyValid[i])
         {
-            uint digit = myDigits[i];
-            uint myElementIdx = localIdx * ELEMENTS_PER_THREAD + i;
-            uint myWarpLocalIdx = myElementIdx - warpStartElement;
+            uint Digit = MyDigits[i];
+            uint MyElementIdx = LocalIdx * ELEMENTS_PER_THREAD + i;
+            uint MyWarpLocalIdx = MyElementIdx - WarpStartElement;
 
-            // Count elements with same digit before this one within the warp
-            // This is the key to STABLE sort - deterministic ordering
-            uint rankInWarp = 0;
-            for (uint j = 0; j < myWarpLocalIdx; ++j)
+            // Count elements with same Digit before this one within the warp
+            // This is the Key to STABLE sort - deterministic ordering
+            uint RankInWarp = 0;
+            for (uint j = 0; j < MyWarpLocalIdx; ++j)
             {
-                if (ElementDigits[warpStartElement + j] == digit)
+                if (ElementDigits[WarpStartElement + j] == Digit)
                 {
-                    rankInWarp++;
+                    RankInWarp++;
                 }
             }
 
             // Final output position:
-            // Global bucket start + warp's prefix within group + rank within warp
-            uint outputPos = DigitBaseOffsets[digit]
-                           + WarpBucketData[warpId * RADIX_SIZE + digit]
-                           + rankInWarp;
+            // Global Bucket start + warp's prefix within group + rank within warp
+            uint OutputPos = DigitBaseOffsets[Digit]
+                           + WarpBucketData[WarpId * RADIX_SIZE + Digit]
+                           + RankInWarp;
 
-            KeysOut[outputPos] = myKeys[i];
-            ValuesOut[outputPos] = myValues[i];
+            KeysOut[OutputPos] = MyKeys[i];
+            ValuesOut[OutputPos] = MyValues[i];
         }
     }
 }
@@ -401,7 +401,7 @@ groupshared uint SmallSortTempV[1024];     // 4KB
 groupshared uint SmallHistogram[RADIX_SIZE];        // 1KB
 groupshared uint SmallPrefixSum[RADIX_SIZE];        // 1KB
 #if COMPILER_SUPPORTS_WAVE_INTRINSICS
-groupshared uint SmallWaveTotals[8];       // 32B - wave totals for parallel prefix sum
+groupshared uint SmallWaveTotals[8];       // 32B - wave totals for parallel prefix Sum
 #endif
 
 /**
@@ -410,96 +410,96 @@ groupshared uint SmallWaveTotals[8];       // 32B - wave totals for parallel pre
 [numthreads(SMALL_SORT_THREAD_COUNT, 1, 1)]
 void RadixSortSmallCS(uint3 GroupThreadId : SV_GroupThreadID)
 {
-    uint localIdx = GroupThreadId.x;
-    uint elemIdx, loopIdx;
+    uint LocalIdx = GroupThreadId.x;
+    uint ElemIdx, LoopIdx;
 
     // Load data to shared memory
     [unroll]
-    for (loopIdx = 0; loopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++loopIdx)
+    for (LoopIdx = 0; LoopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++LoopIdx)
     {
-        elemIdx = localIdx * SMALL_SORT_ELEMENTS_PER_THREAD + loopIdx;
-        if (elemIdx < (uint)ElementCount)
+        ElemIdx = LocalIdx * SMALL_SORT_ELEMENTS_PER_THREAD + LoopIdx;
+        if (ElemIdx < (uint)ElementCount)
         {
-            SmallSortKeys[elemIdx] = KeysIn[elemIdx];
-            SmallSortValues[elemIdx] = ValuesIn[elemIdx];
+            SmallSortKeys[ElemIdx] = KeysIn[ElemIdx];
+            SmallSortValues[ElemIdx] = ValuesIn[ElemIdx];
         }
         else
         {
-            SmallSortKeys[elemIdx] = 0xFFFFFFFF;  // Max value for padding
-            SmallSortValues[elemIdx] = 0;
+            SmallSortKeys[ElemIdx] = 0xFFFFFFFF;  // Max Value for padding
+            SmallSortValues[ElemIdx] = 0;
         }
     }
     GroupMemoryBarrierWithGroupSync();
 
     // Perform 3 passes of 8-bit radix sort in shared memory (24-bit keys)
-    for (int pass = 0; pass < 3; ++pass)
+    for (int PassIndex = 0; PassIndex < 3; ++PassIndex)
     {
-        int bitOff = pass * 8;
+        int BitOffsetLocal = PassIndex * 8;
 
         //=====================================================================
         // Step 1: Clear histogram
         //=====================================================================
-        if (localIdx < RADIX_SIZE)
+        if (LocalIdx < RADIX_SIZE)
         {
-            SmallHistogram[localIdx] = 0;
+            SmallHistogram[LocalIdx] = 0;
         }
         GroupMemoryBarrierWithGroupSync();
 
         //=====================================================================
-        // Step 2: Build histogram (only count valid elements)
+        // Step 2: Build histogram (only Count valid elements)
         //=====================================================================
         [unroll]
-        for (loopIdx = 0; loopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++loopIdx)
+        for (LoopIdx = 0; LoopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++LoopIdx)
         {
-            elemIdx = localIdx * SMALL_SORT_ELEMENTS_PER_THREAD + loopIdx;
-            if (elemIdx < (uint)ElementCount)
+            ElemIdx = LocalIdx * SMALL_SORT_ELEMENTS_PER_THREAD + LoopIdx;
+            if (ElemIdx < (uint)ElementCount)
             {
-                uint digit = (SmallSortKeys[elemIdx] >> bitOff) & RADIX_MASK;
-                InterlockedAdd(SmallHistogram[digit], 1);
+                uint Digit = (SmallSortKeys[ElemIdx] >> BitOffsetLocal) & RADIX_MASK;
+                InterlockedAdd(SmallHistogram[Digit], 1);
             }
         }
         GroupMemoryBarrierWithGroupSync();
 
         //=====================================================================
-        // Step 3: Exclusive prefix sum on histogram (256 buckets)
+        // Step 3: Exclusive prefix Sum on histogram (256 buckets)
         // Wave path: O(log n) parallel using WavePrefixSum + LDS
         // Fallback: O(n) sequential single-thread
         //=====================================================================
 #if COMPILER_SUPPORTS_WAVE_INTRINSICS
         {
-            // All 256 threads participate in parallel prefix sum
-            uint laneIdx = WaveGetLaneIndex();
-            uint waveSize = WaveGetLaneCount();
-            uint waveIdx = localIdx / waveSize;
+            // All 256 threads participate in parallel prefix Sum
+            uint LaneIdx = WaveGetLaneIndex();
+            uint WaveSize = WaveGetLaneCount();
+            uint WaveIdx = LocalIdx / WaveSize;
 
-            uint myCount = SmallHistogram[localIdx];
-            uint wavePrefixSum = WavePrefixSum(myCount);
-            uint waveTotal = WaveActiveSum(myCount);
+            uint MyCount = SmallHistogram[LocalIdx];
+            uint WavePrefixValue = WavePrefixSum(MyCount);
+            uint WaveTotal = WaveActiveSum(MyCount);
 
             if (WaveIsFirstLane())
             {
-                SmallWaveTotals[waveIdx] = waveTotal;
+                SmallWaveTotals[WaveIdx] = WaveTotal;
             }
             GroupMemoryBarrierWithGroupSync();
 
-            uint crossWavePrefix = 0;
-            for (uint w = 0; w < waveIdx; ++w)
+            uint CrossWavePrefix = 0;
+            for (uint w = 0; w < WaveIdx; ++w)
             {
-                crossWavePrefix += SmallWaveTotals[w];
+                CrossWavePrefix += SmallWaveTotals[w];
             }
 
-            SmallPrefixSum[localIdx] = crossWavePrefix + wavePrefixSum;
+            SmallPrefixSum[LocalIdx] = CrossWavePrefix + WavePrefixValue;
         }
         GroupMemoryBarrierWithGroupSync();
 #else
-        if (localIdx == 0)
+        if (LocalIdx == 0)
         {
-            uint sum = 0;
+            uint Sum = 0;
             for (uint b = 0; b < RADIX_SIZE; ++b)
             {
-                uint count = SmallHistogram[b];
-                SmallPrefixSum[b] = sum;
-                sum += count;
+                uint Count = SmallHistogram[b];
+                SmallPrefixSum[b] = Sum;
+                Sum += Count;
             }
         }
         GroupMemoryBarrierWithGroupSync();
@@ -509,20 +509,20 @@ void RadixSortSmallCS(uint3 GroupThreadId : SV_GroupThreadID)
         // Step 4: Scatter to temp buffer using atomic increment
         //=====================================================================
         [unroll]
-        for (loopIdx = 0; loopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++loopIdx)
+        for (LoopIdx = 0; LoopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++LoopIdx)
         {
-            elemIdx = localIdx * SMALL_SORT_ELEMENTS_PER_THREAD + loopIdx;
-            if (elemIdx < (uint)ElementCount)
+            ElemIdx = LocalIdx * SMALL_SORT_ELEMENTS_PER_THREAD + LoopIdx;
+            if (ElemIdx < (uint)ElementCount)
             {
-                uint key = SmallSortKeys[elemIdx];
-                uint value = SmallSortValues[elemIdx];
-                uint digit = (key >> bitOff) & RADIX_MASK;
+                uint Key = SmallSortKeys[ElemIdx];
+                uint Value = SmallSortValues[ElemIdx];
+                uint Digit = (Key >> BitOffsetLocal) & RADIX_MASK;
 
-                uint outPos;
-                InterlockedAdd(SmallPrefixSum[digit], 1, outPos);
+                uint OutPos;
+                InterlockedAdd(SmallPrefixSum[Digit], 1, OutPos);
 
-                SmallSortTemp[outPos] = key;
-                SmallSortTempV[outPos] = value;
+                SmallSortTemp[OutPos] = Key;
+                SmallSortTempV[OutPos] = Value;
             }
         }
         GroupMemoryBarrierWithGroupSync();
@@ -531,24 +531,25 @@ void RadixSortSmallCS(uint3 GroupThreadId : SV_GroupThreadID)
         // Step 5: Copy back from temp to main arrays
         //=====================================================================
         [unroll]
-        for (loopIdx = 0; loopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++loopIdx)
+        for (LoopIdx = 0; LoopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++LoopIdx)
         {
-            elemIdx = localIdx * SMALL_SORT_ELEMENTS_PER_THREAD + loopIdx;
-            SmallSortKeys[elemIdx] = SmallSortTemp[elemIdx];
-            SmallSortValues[elemIdx] = SmallSortTempV[elemIdx];
+            ElemIdx = LocalIdx * SMALL_SORT_ELEMENTS_PER_THREAD + LoopIdx;
+            SmallSortKeys[ElemIdx] = SmallSortTemp[ElemIdx];
+            SmallSortValues[ElemIdx] = SmallSortTempV[ElemIdx];
         }
         GroupMemoryBarrierWithGroupSync();
     }
 
     // Write results to output
     [unroll]
-    for (loopIdx = 0; loopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++loopIdx)
+    for (LoopIdx = 0; LoopIdx < SMALL_SORT_ELEMENTS_PER_THREAD; ++LoopIdx)
     {
-        elemIdx = localIdx * SMALL_SORT_ELEMENTS_PER_THREAD + loopIdx;
-        if (elemIdx < (uint)ElementCount)
+        ElemIdx = LocalIdx * SMALL_SORT_ELEMENTS_PER_THREAD + LoopIdx;
+        if (ElemIdx < (uint)ElementCount)
         {
-            KeysOut[elemIdx] = SmallSortKeys[elemIdx];
-            ValuesOut[elemIdx] = SmallSortValues[elemIdx];
+            KeysOut[ElemIdx] = SmallSortKeys[ElemIdx];
+            ValuesOut[ElemIdx] = SmallSortValues[ElemIdx];
         }
     }
 }
+

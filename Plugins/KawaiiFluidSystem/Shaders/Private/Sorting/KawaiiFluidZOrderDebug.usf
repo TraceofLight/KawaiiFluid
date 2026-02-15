@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidRecordZOrderIndices.usf
- * @brief Shader implementation for FluidRecordZOrderIndices
+ * @file KawaiiFluidZOrderDebug.usf
+ * @brief Shader implementation for KawaiiFluidZOrderDebug
  */
 
 // GPU Fluid - Record Z-Order Array Indices (Debug Visualization)
@@ -58,4 +58,3 @@ void RecordZOrderIndicesCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     int ParticleID = Particle.ParticleID;
     DebugZOrderIndices[ParticleID] = (int)ArrayIndex;
 }
-

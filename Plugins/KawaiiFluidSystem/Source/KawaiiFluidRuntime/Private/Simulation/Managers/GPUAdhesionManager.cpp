@@ -554,10 +554,10 @@ void FGPUAdhesionManager::AddStackPressurePass(
 
 	FStackPressureCS::FParameters* PassParameters = GraphBuilder.AllocParameters<FStackPressureCS::FParameters>();
 	// Bind SOA buffers
-	PassParameters->Positions = GraphBuilder.CreateSRV(SpatialData.SoA_Positions, PF_R32_FLOAT);
+	PassParameters->StackPositions = GraphBuilder.CreateSRV(SpatialData.SoA_Positions, PF_R32_FLOAT);
 	PassParameters->PackedVelocities = GraphBuilder.CreateUAV(SpatialData.SoA_PackedVelocities, PF_R32G32_UINT);
 	PassParameters->UniformParticleMass = Params.ParticleMass;
-	PassParameters->Attachments = InAttachmentSRV;
+	PassParameters->StackAttachments = InAttachmentSRV;
 	PassParameters->CellCounts = InCellCountsSRV;
 	PassParameters->ParticleIndices = InParticleIndicesSRV;
 

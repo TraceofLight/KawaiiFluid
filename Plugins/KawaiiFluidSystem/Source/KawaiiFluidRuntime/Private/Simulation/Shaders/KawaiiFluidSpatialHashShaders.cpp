@@ -10,16 +10,16 @@
 // Shader Implementations
 //=============================================================================
 
-IMPLEMENT_GLOBAL_SHADER(FClearCellDataCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "ClearCellDataCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FBuildSpatialHashSimpleCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "BuildSpatialHashSimpleCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FSortCellParticlesCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "SortCellParticlesCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FClearCellDataCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "ClearCellDataCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FBuildSpatialHashSimpleCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "BuildSpatialHashSimpleCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FSortCellParticlesCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "SortCellParticlesCS", SF_Compute);
 
-IMPLEMENT_GLOBAL_SHADER(FClearCellDataMultipassCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "ClearCellDataMultipassCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FCountParticlesPerCellCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "CountParticlesPerCellCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FPrefixSumCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "PrefixSumCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FScatterParticlesCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "ScatterParticlesCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FFinalizeCellDataCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "FinalizeCellDataCS", SF_Compute);
-IMPLEMENT_GLOBAL_SHADER(FSortBucketParticlesCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/FluidSpatialHashBuild.usf", "SortBucketParticlesCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FClearCellDataMultipassCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "ClearCellDataMultipassCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FCountParticlesPerCellCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "CountParticlesPerCellCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FPrefixSumCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "PrefixSumCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FScatterParticlesCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "ScatterParticlesCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FFinalizeCellDataCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "FinalizeCellDataCS", SF_Compute);
+IMPLEMENT_GLOBAL_SHADER(FSortBucketParticlesCS, "/Plugin/KawaiiFluidSystem/Private/Sorting/KawaiiFluidSpatialHashBuild.usf", "SortBucketParticlesCS", SF_Compute);
 
 //=============================================================================
 // FSpatialHashBuilder Implementation
@@ -494,3 +494,5 @@ bool FSpatialHashBuilder::CreateAndBuildHashMultipass(
 
     return true;
 }
+
+
