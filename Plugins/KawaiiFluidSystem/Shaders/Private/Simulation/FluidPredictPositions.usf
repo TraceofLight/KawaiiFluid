@@ -19,7 +19,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
 
 //=============================================================================
 // Shader Parameters
@@ -287,3 +287,5 @@ void PredictPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     // Store back
     Particles[idx] = particle;
 }
+
+

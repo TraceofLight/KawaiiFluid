@@ -6,10 +6,12 @@
  */
 
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"  // Half precision packing utilities (UnpackVelocity, etc.)
-#include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidMortonUtils.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidCollisionPrimitives.ush"  // Contains FGPUParticleAttachment, FGPUCollisionSphere/Capsule/Box, quaternion utils
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"  // Half precision packing utilities (UnpackVelocity, etc.)
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryParticles.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryAttachment.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidMortonUtils.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidCollisionPrimitives.ush"  // Contains FGPUParticleAttachment, FGPUCollisionSphere/Capsule/Box, quaternion utils
 
 //-----------------------------------------------------------------------------
 // Anisotropy Compute Shader
@@ -17,9 +19,9 @@
 // Based on NVIDIA FleX and Yu & Turk 2013
 //-----------------------------------------------------------------------------
 
-// NOTE: FGPUParticleAttachment is now defined in FluidCollisionPrimitives.ush
+// NOTE: FGPUParticleAttachment is now defined in KawaiiFluidCollisionPrimitives.ush
 
-// Particle Flags (must match EGPUParticleFlags in C++ and FluidGPUPhysics.ush)
+// Particle Flags (must match EGPUParticleFlags in C++ and KawaiiFluidParticleCore.ush)
 #define FLAG_IS_ATTACHED (1 << 0)
 #define FLAG_IS_SURFACE (1 << 1)
 #define FLAG_JUST_DETACHED (1 << 2)
@@ -77,20 +79,6 @@ int bUseHybridTiledZOrder;    // 1 = Hybrid Tiled Z-Order (unlimited range), 0 =
 //-----------------------------------------------------------------------------
 // Boundary Particles for anisotropy calculation (Akinci 2012 style)
 //-----------------------------------------------------------------------------
-/**
- * @brief Data layout for FGPUBoundaryParticle
- */
-struct FGPUBoundaryParticle
-{
-	float3 Position;      // 12 bytes - World position
-	float Psi;            // 4 bytes  - Boundary particle "mass" (total: 16)
-	float3 Normal;        // 12 bytes - Surface normal
-	int OwnerID;          // 4 bytes  - Owner component ID (total: 32)
-	float3 Velocity;      // 12 bytes - World velocity
-	float FrictionCoeff;  // 4 bytes  - Coulomb friction coefficient (total: 48)
-	int BoneIndex;        // 4 bytes  - Skeleton bone index (-1 for static mesh)
-	float3 Padding;       // 12 bytes - Alignment padding (total: 64)
-};
 
 // Legacy brute-force mode
 StructuredBuffer<FGPUBoundaryParticle> BoundaryParticles;
@@ -121,31 +109,6 @@ int bPreserveVolume;
 // Controls overall ellipsoid size when volume preservation is disabled
 float NonPreservedRenderScale;
 
-//-----------------------------------------------------------------------------
-// BoneDelta Attachment for NEAR_BOUNDARY particles (must match C++ FGPUBoneDeltaAttachment)
-// 64 bytes - matches GPUBoundaryAttachment.h and FluidBoneDeltaAttachment.ush
-//-----------------------------------------------------------------------------
-/**
- * @brief Data layout for FGPUBoneDeltaAttachment
- */
-struct FGPUBoneDeltaAttachment
-{
-	int BoundaryParticleIndex;  // 4 bytes - Index into WorldBoundaryParticles (-1 = not attached)
-	float Padding1;             // 4 bytes (total: 8)
-
-	float3 LocalNormal;         // 12 bytes - Surface normal in world space (for anisotropy)
-	float Padding2;             // 4 bytes (total: 24)
-
-	float3 PreviousPosition;    // 12 bytes - Previous frame position (for detach check)
-	float Padding3;             // 4 bytes (total: 40)
-
-	float3 LocalOffset;         // 12 bytes - Offset from boundary position (physics drift)
-	float Padding4;             // 4 bytes (total: 56)
-
-	float Padding5;             // 4 bytes
-	float Padding6;             // 4 bytes (total: 64)
-};
-
 StructuredBuffer<FGPUBoneDeltaAttachment> InBoneDeltaAttachments;
 
 // Surface Normal Anisotropy enable flag
@@ -165,7 +128,7 @@ float ColliderSearchRadius;
 
 //-----------------------------------------------------------------------------
 // Z-Order Cell ID Calculation (uses shader parameters)
-// Morton code functions are provided by FluidMortonUtils.ush
+// Morton code functions are provided by KawaiiFluidMortonUtils.ush
 //-----------------------------------------------------------------------------
 
 /**
@@ -195,7 +158,7 @@ uint GetMortonCellIDFromCellCoord_Aniso(int3 cellCoord)
 		uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
 		uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
-		// Compute Morton code using preset-specific function from FluidMortonUtils.ush
+		// Compute Morton code using preset-specific function from KawaiiFluidMortonUtils.ush
 		return Morton3D(uoffset.x, uoffset.y, uoffset.z);
 	}
 }
@@ -1464,3 +1427,5 @@ void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	OutAnisotropyAxis3[Idx] = float4(Axis3, Scale3);
 	OutRenderOffset[Idx] = renderOffset;
 }
+
+

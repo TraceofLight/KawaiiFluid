@@ -21,11 +21,12 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidMortonUtils.ush"  // Unified Morton code functions
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryParticles.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidMortonUtils.ush"  // Unified Morton code functions
 
-// Half Precision Packing Utilities: defined in FluidGPUPhysics.ush
+// Half Precision Packing Utilities: defined in KawaiiFluidParticleCore.ush
 // PackHalf2, UnpackHalf2, PackVelocity, UnpackVelocity, PackDensityLambda, UnpackDensityLambda
 
 //=============================================================================
@@ -159,24 +160,6 @@ float3 MortonBoundsExtent;  // Simulation bounds extent (Max - Min)
 // for unlimited simulation range. Must match FluidMortonCode.usf
 int bUseHybridTiledZOrder;
 
-//=============================================================================
-// Boundary Particles for density contribution (Akinci 2012)
-//=============================================================================
-/**
- * @brief Data layout for FGPUBoundaryParticle
- */
-struct FGPUBoundaryParticle
-{
-	float3 Position;      // 12 bytes - World position
-	float Psi;            // 4 bytes  - Boundary particle "mass" (total: 16)
-	float3 Normal;        // 12 bytes - Surface normal
-	int OwnerID;          // 4 bytes  - Owner component ID (total: 32)
-	float3 Velocity;      // 12 bytes - World velocity
-	float FrictionCoeff;  // 4 bytes  - Coulomb friction coefficient (total: 48)
-	int BoneIndex;        // 4 bytes  - Skeleton bone index (-1 for static mesh)
-	float3 Padding;       // 12 bytes - Alignment padding (total: 64)
-};
-
 StructuredBuffer<FGPUBoundaryParticle> BoundaryParticles;
 int BoundaryParticleCount;
 int bUseBoundaryDensity;
@@ -216,7 +199,7 @@ float MaxSurfaceTensionCorrection;        // Max correction per iteration (cm)
 
 //=============================================================================
 // Z-Order Cell ID Calculation (uses shader parameters)
-// Morton code functions are provided by FluidMortonUtils.ush
+// Morton code functions are provided by KawaiiFluidMortonUtils.ush
 //=============================================================================
 
 /**
@@ -247,7 +230,7 @@ uint GetMortonCellIDFromCellCoord(int3 cellCoord)
 	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
 	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
-	// Compute Morton code using preset-specific function from FluidMortonUtils.ush
+	// Compute Morton code using preset-specific function from KawaiiFluidMortonUtils.ush
 	return Morton3D(uoffset.x, uoffset.y, uoffset.z);
 }
 
@@ -988,3 +971,5 @@ void SolveDensityPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	NeighborCountsBuffer[idx] = neighborCount;
 }
+
+

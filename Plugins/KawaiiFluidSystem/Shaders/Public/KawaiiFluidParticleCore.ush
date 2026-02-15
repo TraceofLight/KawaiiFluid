@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidGPUPhysics.ush
+ * @file KawaiiFluidParticleCore.ush
  * @brief Core SPH GPU particle structures, constants, and shared math helpers.
  */
 
@@ -75,62 +75,62 @@ struct FGPUFluidParticle
  * @brief Poly6 kernel (for density calculation)
  * W(r, h) = 315 / (64 * PI * h^9) * (h^2 - r^2)^3
  *
- * @param r2 - Squared distance between particles
- * @param h2 - Squared smoothing radius
+ * @param R2 - Squared distance between particles
+ * @param H2 - Squared smoothing radius
  * @return Kernel value (NOT multiplied by coefficient)
  */
-float Poly6Kernel(float r2, float h2)
+float Poly6Kernel(float R2, float H2)
 {
-	float diff = h2 - r2;
-	return (diff > 0.0f) ? diff * diff * diff : 0.0f;
+	float Diff = H2 - R2;
+	return (Diff > 0.0f) ? Diff * Diff * Diff : 0.0f;
 }
 
 /**
  * @brief Optimized Spiky gradient using rsqrt (faster inverse square root)
  * Uses rsqrt(r2) instead of sqrt(r2) for better GPU performance
  *
- * @param r - Vector from neighbor to particle (particle.pos - neighbor.pos)
- * @param r2 - Squared length of r (pre-computed)
- * @param h - Smoothing radius
- * @param h2 - Squared smoothing radius (pre-computed)
+ * @param R - Vector from neighbor to particle (particle.pos - neighbor.pos)
+ * @param R2 - Squared length of R (pre-computed)
+ * @param H - Smoothing radius
+ * @param H2 - Squared smoothing radius (pre-computed)
  * @return Gradient vector (NOT multiplied by coefficient)
  */
-float3 SpikyGradientFast(float3 r, float r2, float h, float h2)
+float3 SpikyGradientFast(float3 R, float R2, float H, float H2)
 {
 	// Early exit for particles too close (avoid div by zero)
-	if (r2 < SMALL_NUMBER * SMALL_NUMBER)
+	if (R2 < SMALL_NUMBER * SMALL_NUMBER)
 	{
 		return float3(0.0f, 0.0f, 0.0f);
 	}
 
 	// rsqrt is faster than sqrt on GPU (uses special function unit)
 	// rLenInv = 1 / sqrt(r2)
-	float rLenInv = rsqrt(r2);
-	float rLen = r2 * rLenInv;  // rLen = r2 / sqrt(r2) = sqrt(r2)
+	float RLenInv = rsqrt(R2);
+	float RLen = R2 * RLenInv;  // rLen = r2 / sqrt(r2) = sqrt(r2)
 
-	float diff = h - rLen;
-	if (diff <= 0.0f)
+	float Diff = H - RLen;
+	if (Diff <= 0.0f)
 	{
 		return float3(0.0f, 0.0f, 0.0f);
 	}
 
 	// Normalized direction using rsqrt: r * (1/|r|) = r * rsqrt(r2)
-	float3 dir = r * rLenInv;
-	return dir * (diff * diff);
+	float3 Dir = R * RLenInv;
+	return Dir * (Diff * Diff);
 }
 
 /**
  * @brief Viscosity kernel Laplacian (for viscosity calculation)
  * ∇²W(r, h) = 45 / (PI * h^6) * (h - |r|)
  *
- * @param rLen - Distance between particles
- * @param h - Smoothing radius
- * @param coeff - Precomputed coefficient (45 / (PI * h^6))
+ * @param RLen - Distance between particles
+ * @param H - Smoothing radius
+ * @param Coeff - Precomputed coefficient (45 / (PI * h^6))
  */
-float ViscosityLaplacian(float rLen, float h, float coeff)
+float ViscosityLaplacian(float RLen, float H, float Coeff)
 {
-	float diff = h - rLen;
-	return (diff > 0.0f) ? coeff * diff : 0.0f;
+	float Diff = H - RLen;
+	return (Diff > 0.0f) ? Coeff * Diff : 0.0f;
 }
 
 //=============================================================================
@@ -152,85 +152,85 @@ float ViscosityLaplacian(float rLen, float h, float coeff)
  * - Repulsion at close range prevents clustering
  * - Smooth transition, no discontinuities
  *
- * @param rLen - Distance between particles
- * @param h - Smoothing radius
+ * @param RLen - Distance between particles
+ * @param H - Smoothing radius
  * @return Spline value (positive = attraction, negative = repulsion)
  */
-float AkinciCohesionSpline(float rLen, float h)
+float AkinciCohesionSpline(float RLen, float H)
 {
-	if (rLen > h || rLen < SMALL_NUMBER)
+	if (RLen > H || RLen < SMALL_NUMBER)
 	{
 		return 0.0f;
 	}
 
-	float h2 = h * h;
-	float h3 = h2 * h;
-	float h6 = h3 * h3;
-	float h9 = h6 * h3;
-	float coeff = 32.0f / (PI * h9);
+	float H2 = H * H;
+	float H3 = H2 * H;
+	float H6 = H3 * H3;
+	float H9 = H6 * H3;
+	float Coeff = 32.0f / (PI * H9);
 
-	float halfH = h * 0.5f;
-	float diff = h - rLen;
-	float diff3 = diff * diff * diff;
-	float r3 = rLen * rLen * rLen;
+	float HalfH = H * 0.5f;
+	float Diff = H - RLen;
+	float Diff3 = Diff * Diff * Diff;
+	float R3 = RLen * RLen * RLen;
 
-	if (rLen > halfH)
+	if (RLen > HalfH)
 	{
 		// Attraction region: (h-r)³ * r³
-		return coeff * diff3 * r3;
+		return Coeff * Diff3 * R3;
 	}
 	else
 	{
 		// Repulsion region: 2*(h-r)³ * r³ - h⁶/64
-		return coeff * (2.0f * diff3 * r3 - h6 / 64.0f);
+		return Coeff * (2.0f * Diff3 * R3 - H6 / 64.0f);
 	}
 }
 
 /**
  * @brief Legacy cohesion kernel (kept for compatibility)
  */
-float CohesionKernel(float rLen, float h)
+float CohesionKernel(float RLen, float H)
 {
-	return AkinciCohesionSpline(rLen, h);
+	return AkinciCohesionSpline(RLen, H);
 }
 
 /**
  * @brief Simple adhesion kernel for boundary adhesion (legacy)
  * Linear falloff: r=0 → max, r=h → 0
  */
-float AdhesionKernel(float rLen, float h)
+float AdhesionKernel(float RLen, float H)
 {
-	if (rLen > h || rLen < 0.0001f)
+	if (RLen > H || RLen < 0.0001f)
 	{
 		return 0.0f;
 	}
 
 	// Linear falloff: r=0 → 1 (max), r=h → 0 (escape)
-	return 1.0f - (rLen / h);
+	return 1.0f - (RLen / H);
 }
 
 /**
  * @brief Convert flag check to bool
  */
-bool HasFlag(uint flags, uint flag)
+bool HasFlag(uint Flags, uint Flag)
 {
-	return (flags & flag) != 0;
+	return (Flags & Flag) != 0;
 }
 
 /**
  * @brief Set flag
  */
-uint SetFlag(uint flags, uint flag)
+uint SetFlag(uint Flags, uint Flag)
 {
-	return flags | flag;
+	return Flags | Flag;
 }
 
 /**
  * @brief Clear flag
  */
-uint ClearFlag(uint flags, uint flag)
+uint ClearFlag(uint Flags, uint Flag)
 {
-	return flags & ~flag;
+	return Flags & ~Flag;
 }
 
 //=============================================================================
@@ -287,71 +287,71 @@ struct FGPUCollisionFeedback
 
 /**
  * @brief Pack two floats into one uint (2x float16)
- * @param v - float2 to pack
+ * @param V - float2 to pack
  * @return Packed uint containing two half-precision values
  */
-uint PackHalf2(float2 v)
+uint PackHalf2(float2 V)
 {
-	return f32tof16(v.x) | (f32tof16(v.y) << 16);
+	return f32tof16(V.x) | (f32tof16(V.y) << 16);
 }
 
 /**
  * @brief Unpack one uint into two floats
- * @param packed - uint containing two half-precision values
+ * @param Packed - uint containing two half-precision values
  * @return float2 with unpacked values
  */
-float2 UnpackHalf2(uint packed)
+float2 UnpackHalf2(uint Packed)
 {
-	return float2(f16tof32(packed), f16tof32(packed >> 16));
+	return float2(f16tof32(Packed), f16tof32(Packed >> 16));
 }
 
 /**
  * @brief Pack float3 velocity into uint2 (half4: xy in .x, z+padding in .y)
  * Total: 12 bytes → 8 bytes (33% bandwidth reduction)
- * @param vel - float3 velocity to pack
+ * @param Velocity - float3 velocity to pack
  * @return uint2 with packed half-precision velocity
  */
-uint2 PackVelocity(float3 vel)
+uint2 PackVelocity(float3 Velocity)
 {
-	uint2 packed;
-	packed.x = PackHalf2(float2(vel.x, vel.y));
-	packed.y = PackHalf2(float2(vel.z, 0.0f));
-	return packed;
+	uint2 Packed;
+	Packed.x = PackHalf2(float2(Velocity.x, Velocity.y));
+	Packed.y = PackHalf2(float2(Velocity.z, 0.0f));
+	return Packed;
 }
 
 /**
  * @brief Unpack uint2 into float3 velocity
- * @param packed - uint2 containing packed velocity
+ * @param Packed - uint2 containing packed velocity
  * @return float3 unpacked velocity
  */
-float3 UnpackVelocity(uint2 packed)
+float3 UnpackVelocity(uint2 Packed)
 {
-	float2 xy = UnpackHalf2(packed.x);
-	float2 zw = UnpackHalf2(packed.y);
-	return float3(xy.x, xy.y, zw.x);
+	float2 XY = UnpackHalf2(Packed.x);
+	float2 ZW = UnpackHalf2(Packed.y);
+	return float3(XY.x, XY.y, ZW.x);
 }
 
 /**
  * @brief Pack Density + Lambda into one uint (half2)
  * Total: 8 bytes → 4 bytes (50% bandwidth reduction)
- * @param density - particle density
- * @param lambda - PBF lambda constraint multiplier
+ * @param Density - particle density
+ * @param Lambda - PBF lambda constraint multiplier
  * @return uint with packed half-precision values
  */
-uint PackDensityLambda(float density, float lambda)
+uint PackDensityLambda(float Density, float Lambda)
 {
-	return PackHalf2(float2(density, lambda));
+	return PackHalf2(float2(Density, Lambda));
 }
 
 /**
  * @brief Unpack uint into Density and Lambda
- * @param packed - uint containing packed density/lambda
- * @param density - output density
- * @param lambda - output lambda
+ * @param Packed - uint containing packed density/lambda
+ * @param OutDensity - output density
+ * @param OutLambda - output lambda
  */
-void UnpackDensityLambda(uint packed, out float density, out float lambda)
+void UnpackDensityLambda(uint Packed, out float OutDensity, out float OutLambda)
 {
-	float2 dl = UnpackHalf2(packed);
-	density = dl.x;
-	lambda = dl.y;
+	float2 DensityLambda = UnpackHalf2(Packed);
+	OutDensity = DensityLambda.x;
+	OutLambda = DensityLambda.y;
 }

@@ -1,11 +1,10 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidCollisionPrimitives.ush
+ * @file KawaiiFluidCollisionPrimitives.ush
  * @brief Defines GPU collision primitive data and SDF/collision helper functions.
  */
 
-#ifndef FLUID_COLLISION_PRIMITIVES_USH
-#define FLUID_COLLISION_PRIMITIVES_USH
+#pragma once
 
 //=============================================================================
 // Primitive Structures (must match C++ definitions)
@@ -128,19 +127,19 @@ struct FGPUParticleAttachment
 /**
  * @brief Rotate vector by quaternion
  */
-float3 RotateByQuat(float3 v, float4 q)
+float3 RotateByQuat(float3 V, float4 Q)
 {
-	float3 t = 2.0f * cross(q.xyz, v);
-	return v + q.w * t + cross(q.xyz, t);
+	float3 T = 2.0f * cross(Q.xyz, V);
+	return V + Q.w * T + cross(Q.xyz, T);
 }
 
 /**
  * @brief Inverse rotate vector by quaternion
  */
-float3 InverseRotateByQuat(float3 v, float4 q)
+float3 InverseRotateByQuat(float3 V, float4 Q)
 {
 	// Conjugate of quaternion: (x,y,z,w) -> (-x,-y,-z,w)
-	return RotateByQuat(v, float4(-q.xyz, q.w));
+	return RotateByQuat(V, float4(-Q.xyz, Q.w));
 }
 
 //=============================================================================
@@ -150,41 +149,41 @@ float3 InverseRotateByQuat(float3 v, float4 q)
 /**
  * @brief Transform position from bone-local to world space
  */
-float3 BoneLocalToWorld(float3 localPos, FGPUBoneTransform bone)
+float3 BoneLocalToWorld(float3 LocalPos, FGPUBoneTransform Bone)
 {
-	float3 scaled = localPos * bone.Scale;
-	float3 rotated = RotateByQuat(scaled, bone.Rotation);
-	return rotated + bone.Position;
+	float3 Scaled = LocalPos * Bone.Scale;
+	float3 Rotated = RotateByQuat(Scaled, Bone.Rotation);
+	return Rotated + Bone.Position;
 }
 
 /**
  * @brief Transform position from world to bone-local space
  */
-float3 WorldToBoneLocal(float3 worldPos, FGPUBoneTransform bone)
+float3 WorldToBoneLocal(float3 WorldPos, FGPUBoneTransform Bone)
 {
-	float3 relative = worldPos - bone.Position;
-	float3 rotated = InverseRotateByQuat(relative, bone.Rotation);
-	return rotated / bone.Scale;
+	float3 Relative = WorldPos - Bone.Position;
+	float3 Rotated = InverseRotateByQuat(Relative, Bone.Rotation);
+	return Rotated / Bone.Scale;
 }
 
 /**
  * @brief Calculate bone velocity at a local position
  */
-float3 CalcBoneVelocity(float3 localPos, FGPUBoneTransform bone, float deltaTime)
+float3 CalcBoneVelocity(float3 LocalPos, FGPUBoneTransform Bone, float DeltaTime)
 {
-	if (deltaTime < 0.0001f) return float3(0, 0, 0);
+	if (DeltaTime < 0.0001f) return float3(0, 0, 0);
 
 	// Current world position
-	float3 currentWorld = BoneLocalToWorld(localPos, bone);
+	float3 CurrentWorld = BoneLocalToWorld(LocalPos, Bone);
 
 	// Previous world position (using previous bone transform)
-	FGPUBoneTransform prevBone;
-	prevBone.Position = bone.PreviousPos;
-	prevBone.Rotation = bone.PreviousRot;
-	prevBone.Scale = bone.Scale;
-	float3 prevWorld = BoneLocalToWorld(localPos, prevBone);
+	FGPUBoneTransform PrevBone;
+	PrevBone.Position = Bone.PreviousPos;
+	PrevBone.Rotation = Bone.PreviousRot;
+	PrevBone.Scale = Bone.Scale;
+	float3 PrevWorld = BoneLocalToWorld(LocalPos, PrevBone);
 
-	return (currentWorld - prevWorld) / deltaTime;
+	return (CurrentWorld - PrevWorld) / DeltaTime;
 }
 
 //=============================================================================
@@ -194,56 +193,56 @@ float3 CalcBoneVelocity(float3 localPos, FGPUBoneTransform bone, float deltaTime
 /**
  * @brief Sphere SDF
  */
-float sdSphere(float3 p, float3 center, float radius)
+float sdSphere(float3 P, float3 Center, float Radius)
 {
-	return length(p - center) - radius;
+	return length(P - Center) - Radius;
 }
 
 /**
  * @brief Capsule SDF (line segment with radius)
  */
-float sdCapsule(float3 p, float3 a, float3 b, float radius)
+float sdCapsule(float3 P, float3 A, float3 B, float Radius)
 {
-	float3 pa = p - a;
-	float3 ba = b - a;
-	float h = saturate(dot(pa, ba) / dot(ba, ba));
-	return length(pa - ba * h) - radius;
+	float3 PA = P - A;
+	float3 BA = B - A;
+	float H = saturate(dot(PA, BA) / dot(BA, BA));
+	return length(PA - BA * H) - Radius;
 }
 
 /**
  * @brief Axis-aligned box SDF (in local space)
  */
-float sdBoxLocal(float3 p, float3 halfExtent)
+float sdBoxLocal(float3 P, float3 HalfExtent)
 {
-	float3 q = abs(p) - halfExtent;
-	return length(max(q, 0.0f)) + min(max(q.x, max(q.y, q.z)), 0.0f);
+	float3 Q = abs(P) - HalfExtent;
+	return length(max(Q, 0.0f)) + min(max(Q.x, max(Q.y, Q.z)), 0.0f);
 }
 
 /**
  * @brief Oriented box SDF
  */
-float sdBox(float3 p, float3 center, float3 halfExtent, float4 rotation)
+float sdBox(float3 P, float3 Center, float3 HalfExtent, float4 Rotation)
 {
 	// Transform point to local space
-	float3 localP = InverseRotateByQuat(p - center, rotation);
-	return sdBoxLocal(localP, halfExtent);
+	float3 LocalP = InverseRotateByQuat(P - Center, Rotation);
+	return sdBoxLocal(LocalP, HalfExtent);
 }
 
 /**
  * @brief Convex hull SDF (intersection of half-spaces)
  */
 float sdConvex(
-	float3 p,
-	float3 center,
-	float boundingRadius,
-	int planeStart,
-	int planeCount,
-	StructuredBuffer<FGPUConvexPlane> planes)
+	float3 P,
+	float3 Center,
+	float BoundingRadius,
+	int PlaneStart,
+	int PlaneCount,
+	StructuredBuffer<FGPUConvexPlane> Planes)
 {
 	// Early out with bounding sphere - return large value to skip collision
 	// (Main shader already does bounding sphere check with particle radius)
-	float boundDist = length(p - center) - boundingRadius;
-	if (boundDist > 0.0f)
+	float BoundDist = length(P - Center) - BoundingRadius;
+	if (BoundDist > 0.0f)
 	{
 		// Return large positive value so collision won't trigger
 		// (effectiveDist = largeValue - ParticleRadius will still be large)
@@ -251,14 +250,14 @@ float sdConvex(
 	}
 
 	// Find maximum signed distance to all planes
-	float maxDist = -1e10f;
-	for (int i = 0; i < planeCount; ++i)
+	float MaxDist = -1e10f;
+	for (int I = 0; I < PlaneCount; ++I)
 	{
-		FGPUConvexPlane plane = planes[planeStart + i];
-		float dist = dot(p, plane.Normal) - plane.Distance;
-		maxDist = max(maxDist, dist);
+		FGPUConvexPlane Plane = Planes[PlaneStart + I];
+		float Dist = dot(P, Plane.Normal) - Plane.Distance;
+		MaxDist = max(MaxDist, Dist);
 	}
-	return maxDist;
+	return MaxDist;
 }
 
 //=============================================================================
@@ -268,49 +267,49 @@ float sdConvex(
 /**
  * @brief Numerical gradient for more accurate normal
  */
-float3 CalcNumericalGradient_Sphere(float3 p, float3 center, float radius)
+float3 CalcNumericalGradient_Sphere(float3 P, float3 Center, float Radius)
 {
-	const float eps = 0.1f;
-	float3 gradient;
-	gradient.x = sdSphere(p + float3(eps, 0, 0), center, radius)
-	           - sdSphere(p - float3(eps, 0, 0), center, radius);
-	gradient.y = sdSphere(p + float3(0, eps, 0), center, radius)
-	           - sdSphere(p - float3(0, eps, 0), center, radius);
-	gradient.z = sdSphere(p + float3(0, 0, eps), center, radius)
-	           - sdSphere(p - float3(0, 0, eps), center, radius);
-	return normalize(gradient);
+	const float Eps = 0.1f;
+	float3 Gradient;
+	Gradient.x = sdSphere(P + float3(Eps, 0, 0), Center, Radius)
+	           - sdSphere(P - float3(Eps, 0, 0), Center, Radius);
+	Gradient.y = sdSphere(P + float3(0, Eps, 0), Center, Radius)
+	           - sdSphere(P - float3(0, Eps, 0), Center, Radius);
+	Gradient.z = sdSphere(P + float3(0, 0, Eps), Center, Radius)
+	           - sdSphere(P - float3(0, 0, Eps), Center, Radius);
+	return normalize(Gradient);
 }
 
 /**
  * @brief Calculates numerical SDF gradient for a capsule
  */
-float3 CalcNumericalGradient_Capsule(float3 p, float3 a, float3 b, float radius)
+float3 CalcNumericalGradient_Capsule(float3 P, float3 A, float3 B, float Radius)
 {
-	const float eps = 0.1f;
-	float3 gradient;
-	gradient.x = sdCapsule(p + float3(eps, 0, 0), a, b, radius)
-	           - sdCapsule(p - float3(eps, 0, 0), a, b, radius);
-	gradient.y = sdCapsule(p + float3(0, eps, 0), a, b, radius)
-	           - sdCapsule(p - float3(0, eps, 0), a, b, radius);
-	gradient.z = sdCapsule(p + float3(0, 0, eps), a, b, radius)
-	           - sdCapsule(p - float3(0, 0, eps), a, b, radius);
-	return normalize(gradient);
+	const float Eps = 0.1f;
+	float3 Gradient;
+	Gradient.x = sdCapsule(P + float3(Eps, 0, 0), A, B, Radius)
+	           - sdCapsule(P - float3(Eps, 0, 0), A, B, Radius);
+	Gradient.y = sdCapsule(P + float3(0, Eps, 0), A, B, Radius)
+	           - sdCapsule(P - float3(0, Eps, 0), A, B, Radius);
+	Gradient.z = sdCapsule(P + float3(0, 0, Eps), A, B, Radius)
+	           - sdCapsule(P - float3(0, 0, Eps), A, B, Radius);
+	return normalize(Gradient);
 }
 
 /**
  * @brief Calculates numerical SDF gradient for a box
  */
-float3 CalcNumericalGradient_Box(float3 p, float3 center, float3 extent, float4 rotation)
+float3 CalcNumericalGradient_Box(float3 P, float3 Center, float3 Extent, float4 Rotation)
 {
-	const float eps = 0.1f;
-	float3 gradient;
-	gradient.x = sdBox(p + float3(eps, 0, 0), center, extent, rotation)
-	           - sdBox(p - float3(eps, 0, 0), center, extent, rotation);
-	gradient.y = sdBox(p + float3(0, eps, 0), center, extent, rotation)
-	           - sdBox(p - float3(0, eps, 0), center, extent, rotation);
-	gradient.z = sdBox(p + float3(0, 0, eps), center, extent, rotation)
-	           - sdBox(p - float3(0, 0, eps), center, extent, rotation);
-	return normalize(gradient);
+	const float Eps = 0.1f;
+	float3 Gradient;
+	Gradient.x = sdBox(P + float3(Eps, 0, 0), Center, Extent, Rotation)
+	           - sdBox(P - float3(Eps, 0, 0), Center, Extent, Rotation);
+	Gradient.y = sdBox(P + float3(0, Eps, 0), Center, Extent, Rotation)
+	           - sdBox(P - float3(0, Eps, 0), Center, Extent, Rotation);
+	Gradient.z = sdBox(P + float3(0, 0, Eps), Center, Extent, Rotation)
+	           - sdBox(P - float3(0, 0, Eps), Center, Extent, Rotation);
+	return normalize(Gradient);
 }
 
 /**
@@ -325,92 +324,90 @@ float3 CalcNumericalGradient_Box(float3 p, float3 center, float3 extent, float4 
  * Static friction:  |Δx_t| < μs * d → Δx_t = 0 (particle stops)
  * Kinetic friction: Δx_t *= min(μk * d / |Δx_t|, 1) (sliding with resistance)
  *
- * @param predictedPos - Predicted position (will be modified)
- * @param originalPos - Original position before this timestep
- * @param normal - Collision surface normal (pointing outward)
- * @param penetration - Penetration depth (positive value)
- * @param staticFriction - Static friction coefficient (μs)
- * @param kineticFriction - Kinetic friction coefficient (μk), typically same as friction param
+ * @param PredictedPos - Predicted position (will be modified)
+ * @param OriginalPos - Original position before this timestep
+ * @param Normal - Collision surface normal (pointing outward)
+ * @param Penetration - Penetration depth (positive value)
+ * @param StaticFriction - Static friction coefficient (μs)
+ * @param KineticFriction - Kinetic friction coefficient (μk), typically same as friction param
  */
 void ApplyPositionLevelFriction(
-	inout float3 predictedPos,
-	float3 originalPos,
-	float3 normal,
-	float penetration,
-	float staticFriction,
-	float kineticFriction)
+	inout float3 PredictedPos,
+	float3 OriginalPos,
+	float3 Normal,
+	float Penetration,
+	float StaticFriction,
+	float KineticFriction)
 {
 	// Push out of collision first
-	predictedPos += normal * (penetration + 0.1f);
+	PredictedPos += Normal * (Penetration + 0.1f);
 
 	// Calculate total displacement from original position
-	float3 deltaX = predictedPos - originalPos;
+	float3 DeltaX = PredictedPos - OriginalPos;
 
 	// Decompose into normal and tangent components
-	float deltaXNormal = dot(deltaX, normal);
-	float3 deltaXNormalVec = deltaXNormal * normal;
-	float3 deltaXTangent = deltaX - deltaXNormalVec;
+	float DeltaXNormal = dot(DeltaX, Normal);
+	float3 DeltaXNormalVec = DeltaXNormal * Normal;
+	float3 DeltaXTangent = DeltaX - DeltaXNormalVec;
 
-	float tangentLength = length(deltaXTangent);
+	float TangentLength = length(DeltaXTangent);
 
 	// Apply friction only if there's tangent movement
-	if (tangentLength > SMALL_NUMBER)
+	if (TangentLength > SMALL_NUMBER)
 	{
 		// d = penetration depth (contact distance)
 		// Using penetration as the reference for friction force scaling
-		float d = max(penetration, 0.1f);
+		float D = max(Penetration, 0.1f);
 
 		// Static friction threshold
-		float staticThreshold = staticFriction * d;
+		float StaticThreshold = StaticFriction * D;
 
-		if (tangentLength < staticThreshold)
+		if (TangentLength < StaticThreshold)
 		{
 			// Static friction: stop tangent movement completely
-			deltaXTangent = float3(0, 0, 0);
+			DeltaXTangent = float3(0, 0, 0);
 		}
 		else
 		{
 			// Kinetic friction: reduce tangent displacement
-			float frictionScale = min(kineticFriction * d / tangentLength, 1.0f);
-			deltaXTangent *= (1.0f - frictionScale);
+			float FrictionScale = min(KineticFriction * D / TangentLength, 1.0f);
+			DeltaXTangent *= (1.0f - FrictionScale);
 		}
 	}
 
 	// Reconstruct position with friction-adjusted displacement
-	predictedPos = originalPos + deltaXNormalVec + deltaXTangent;
+	PredictedPos = OriginalPos + DeltaXNormalVec + DeltaXTangent;
 }
 
 /**
  * @brief Apply collision response with position-level friction
  *
- * @param predictedPos - Predicted position (will be modified for push-out and friction)
- * @param originalPos - Original position before this timestep (for friction calculation)
- * @param velocity - Velocity (only used for restitution direction check, modified for bounce)
- * @param normal - Collision surface normal
- * @param penetration - Penetration depth
- * @param friction - Friction coefficient (used for both static and kinetic)
- * @param restitution - Bounce coefficient
+ * @param PredictedPos - Predicted position (will be modified for push-out and friction)
+ * @param OriginalPos - Original position before this timestep (for friction calculation)
+ * @param Velocity - Velocity (only used for restitution direction check, modified for bounce)
+ * @param Normal - Collision surface normal
+ * @param Penetration - Penetration depth
+ * @param Friction - Friction coefficient (used for both static and kinetic)
+ * @param Restitution - Bounce coefficient
  */
 void ApplyCollisionResponseWithFriction(
-	inout float3 predictedPos,
-	float3 originalPos,
-	inout float3 velocity,
-	float3 normal,
-	float penetration,
-	float friction,
-	float restitution)
+	inout float3 PredictedPos,
+	float3 OriginalPos,
+	inout float3 Velocity,
+	float3 Normal,
+	float Penetration,
+	float Friction,
+	float Restitution)
 {
 	// Apply position-level friction (handles push-out internally)
-	ApplyPositionLevelFriction(predictedPos, originalPos, normal, penetration, friction, friction);
+	ApplyPositionLevelFriction(PredictedPos, OriginalPos, Normal, Penetration, Friction, Friction);
 
 	// Apply restitution to velocity for bounce effect
 	// This affects the NEXT timestep's prediction, not current position
-	float velNormal = dot(velocity, normal);
-	if (velNormal < 0.0f)
+	float VelNormal = dot(Velocity, Normal);
+	if (VelNormal < 0.0f)
 	{
 		// Reflect normal velocity component
-		velocity -= (1.0f + restitution) * velNormal * normal;
+		Velocity -= (1.0f + Restitution) * VelNormal * Normal;
 	}
 }
-
-#endif // FLUID_COLLISION_PRIMITIVES_USH

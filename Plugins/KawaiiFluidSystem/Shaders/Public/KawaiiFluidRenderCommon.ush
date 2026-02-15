@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidCommon.ush
+ * @file KawaiiFluidRenderCommon.ush
  * @brief Shared rendering utility functions for fluid screen-space passes.
  */
 

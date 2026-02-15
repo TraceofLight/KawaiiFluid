@@ -16,8 +16,8 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidBoneDeltaAttachment.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryAttachment.ush"
 
 //=============================================================================
 // Shader Parameters
@@ -95,3 +95,5 @@ void BuildReverseMappingCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     uint oldIdx = SortedIndices[newIdx];
     OldToNewMapping[oldIdx] = newIdx;
 }
+
+

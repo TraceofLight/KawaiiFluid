@@ -18,25 +18,9 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidBoneDeltaAttachment.ush"
-
-//=============================================================================
-// Local Boundary Particle Structure (must match C++ FGPUBoundaryParticleLocal)
-//=============================================================================
-
-/**
- * @brief Data layout for FGPUBoundaryParticleLocal
- */
-struct FGPUBoundaryParticleLocal
-{
-	float3 LocalPosition;   // 12 bytes - Bone-local position
-	float Psi;              // 4 bytes  - Volume contribution
-	float3 LocalNormal;     // 12 bytes - Bone-local surface normal
-	float FrictionCoeff;    // 4 bytes  - Coulomb friction coefficient
-	int BoneIndex;          // 4 bytes  - Skeleton bone index (-1 for static mesh)
-	float3 Padding;         // 12 bytes - Alignment padding (total: 48 bytes)
-};
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryAttachment.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryParticles.ush"
 
 //=============================================================================
 // Shader Parameters
@@ -155,3 +139,5 @@ void ApplyBoneTransformCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	// Write back
 	Particles[idx] = particle;
 }
+
+

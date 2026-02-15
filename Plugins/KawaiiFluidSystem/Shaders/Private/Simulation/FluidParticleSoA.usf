@@ -13,9 +13,9 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
 
-// Half Precision Packing Utilities: defined in FluidGPUPhysics.ush
+// Half Precision Packing Utilities: defined in KawaiiFluidParticleCore.ush
 // PackHalf2, UnpackHalf2, PackVelocity, UnpackVelocity, PackDensityLambda, UnpackDensityLambda
 
 //=============================================================================
@@ -145,3 +145,5 @@ void MergeSoAToAoSCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 
 	TargetParticles[idx] = p;
 }
+
+

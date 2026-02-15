@@ -9,42 +9,9 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryParticles.ush"
 
 #define THREAD_GROUP_SIZE 256
-
-//=============================================================================
-// Structures (must match C++ FGPUBoundaryParticleLocal and FGPUBoundaryParticle)
-//=============================================================================
-
-/**
- * @brief Data layout for FGPUBoundaryParticleLocal
- */
-struct FGPUBoundaryParticleLocal
-{
-	float3 LocalPosition;   // 12 bytes - Bone-local position
-	float Psi;              // 4 bytes  - Volume contribution
-	float3 LocalNormal;     // 12 bytes - Bone-local surface normal
-	float FrictionCoeff;    // 4 bytes  - Coulomb friction coefficient (0~2)
-	int BoneIndex;          // 4 bytes  - Skeleton bone index (-1 for static mesh)
-	float3 Padding;         // 12 bytes - Alignment padding
-};
-
-/**
- * @brief Data layout for FGPUBoundaryParticle
- */
-struct FGPUBoundaryParticle
-{
-	float3 Position;        // 12 bytes - World position
-	float Psi;              // 4 bytes  - Volume contribution (total: 16)
-	float3 Normal;          // 12 bytes - World normal
-	int OwnerID;            // 4 bytes  - Owner component ID (total: 32)
-	float3 Velocity;        // 12 bytes - World velocity (for moving boundaries)
-	float FrictionCoeff;    // 4 bytes  - Coulomb friction coefficient (total: 48)
-	int BoneIndex;          // 4 bytes  - Skeleton bone index (-1 for static mesh)
-	int OriginalIndex;      // 4 bytes  - Original index before Z-Order sorting
-	float Padding1;         // 4 bytes  - Alignment padding
-	float Padding2;         // 4 bytes  - Alignment padding (total: 64)
-};
 
 //=============================================================================
 // Shader Parameters

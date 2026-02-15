@@ -11,9 +11,9 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidCollisionPrimitives.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidCollisionPrimitives.ush"
 
 //=============================================================================
 // Shader Parameters (SOA - Structure of Arrays)
@@ -242,3 +242,5 @@ void StackPressureCS(uint3 DispatchThreadId : SV_DispatchThreadID)
         PackedVelocities[idx] = PackVelocity(velocity);
     }
 }
+
+

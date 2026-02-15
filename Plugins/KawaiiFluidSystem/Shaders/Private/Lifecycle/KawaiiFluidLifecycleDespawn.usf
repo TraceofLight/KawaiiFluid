@@ -6,7 +6,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
 
 /**
  * @brief Data layout for brush despawn request
@@ -265,3 +265,5 @@ void WriteTotalCountCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		OutTotalCount[0] = 0;
 	}
 }
+
+

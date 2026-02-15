@@ -7,7 +7,7 @@
 
 #include "/Engine/Private/Common.ush"
 #include "/Engine/Private/ScreenPass.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidCommon.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidRenderCommon.ush"
 
 //-----------------------------------------------------------------------------
 // Parameters
@@ -161,3 +161,5 @@ float MainPS(FVertexOutput Input) : SV_Target0
 
     return Thickness;
 }
+
+

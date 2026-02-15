@@ -10,7 +10,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
 
 //=============================================================================
 // Render Particle Structure (must match FKawaiiRenderParticle - 32 bytes)
@@ -151,3 +151,4 @@ void ExtractRenderDataWithBoundsCS(uint3 GroupId : SV_GroupID, uint3 DTid : SV_D
 		}
 	}
 }
+

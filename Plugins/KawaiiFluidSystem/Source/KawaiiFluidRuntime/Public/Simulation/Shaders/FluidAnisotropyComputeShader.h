@@ -148,7 +148,7 @@ struct KAWAIIFLUIDRUNTIME_API FAnisotropyComputeParams
 	float NonPreservedRenderScale = 1.0f;
 };
 
-// Constants (must match FluidSpatialHash.ush and FluidAnisotropyCompute.usf)
+// Constants (must match KawaiiFluidSpatialHash.ush and FluidAnisotropyCompute.usf)
 #define ANISOTROPY_SPATIAL_HASH_SIZE 65536
 #define ANISOTROPY_MAX_PARTICLES_PER_CELL 16
 

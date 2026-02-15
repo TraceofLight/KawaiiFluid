@@ -7,7 +7,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidCommon.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidRenderCommon.ush"
 
 // -----------------------------------------------------------------------------
 // Parameters
@@ -121,7 +121,7 @@ void MainVS(
 
 /**
  * @brief Reconstruct view space position from screen UV and linear depth.
- * Wrapper for shared function in FluidCommon.ush using global InverseProjectionMatrix.
+ * Wrapper for shared function in KawaiiFluidRenderCommon.ush using global InverseProjectionMatrix.
  */
 float3 ReconstructViewPosition(float2 ScreenUV, float LinearDepth)
 {
@@ -130,7 +130,7 @@ float3 ReconstructViewPosition(float2 ScreenUV, float LinearDepth)
 
 /**
  * @brief Project view space position to screen UV.
- * Wrapper for shared function in FluidCommon.ush using global ProjectionMatrix.
+ * Wrapper for shared function in KawaiiFluidRenderCommon.ush using global ProjectionMatrix.
  */
 float2 ProjectToScreenUV(float3 ViewPos)
 {
@@ -1301,3 +1301,4 @@ void MainPS(
 	// Original scene is sampled via refraction, not alpha blending
 	OutColor = float4(FinalColor, 1.0);
 }
+

@@ -9,7 +9,7 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
 
 //=============================================================================
 // Shader Parameters
@@ -49,3 +49,5 @@ void ExtractPositionsCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 		Positions[idx] = particle.Position;
 	}
 }
+
+

@@ -16,8 +16,8 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidMortonUtils.ush"  // Unified Morton code functions
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidMortonUtils.ush"  // Unified Morton code functions
 
 //=============================================================================
 // Shader Parameters
@@ -62,7 +62,7 @@ uint Morton3DFromCell(int3 CellCoord, int3 GridMin)
     uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
     uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
-    // Use preset-specific Morton function from FluidMortonUtils.ush
+    // Use preset-specific Morton function from KawaiiFluidMortonUtils.ush
     return Morton3D(uoffset.x, uoffset.y, uoffset.z);
 }
 
@@ -122,3 +122,5 @@ void ComputeMortonCodesCellBasedCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     MortonCodes[idx] = sortKey;
     ParticleIndices[idx] = idx;
 }
+
+

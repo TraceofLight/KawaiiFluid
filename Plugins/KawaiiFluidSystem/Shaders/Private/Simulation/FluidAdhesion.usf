@@ -9,8 +9,8 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidCollisionPrimitives.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidCollisionPrimitives.ush"
 
 //=============================================================================
 // Shader Parameters
@@ -597,3 +597,5 @@ void ClearDetachedFlagCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	flags = ClearFlag(flags, GPU_PARTICLE_FLAG_JUST_DETACHED);
 	Flags[idx] = flags;
 }
+
+

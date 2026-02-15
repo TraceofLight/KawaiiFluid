@@ -16,28 +16,10 @@
 
 #include "/Engine/Public/Platform.ush"
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidGPUPhysics.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidSpatialHash.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidMortonUtils.ush"  // For Morton code functions and INVALID_INDEX
-
-//=============================================================================
-// Structures (must match C++ definitions)
-//=============================================================================
-
-/**
- * @brief Data layout for FGPUBoundaryParticle
- */
-struct FGPUBoundaryParticle
-{
-	float3 Position;      // 12 bytes - World position
-	float Psi;            // 4 bytes  - Boundary particle "mass" (total: 16)
-	float3 Normal;        // 12 bytes - Surface normal
-	int OwnerID;          // 4 bytes  - Owner component ID (total: 32)
-	float3 Velocity;      // 12 bytes - World velocity (for moving boundaries)
-	float FrictionCoeff;  // 4 bytes  - Coulomb friction coefficient (total: 48)
-	int BoneIndex;        // 4 bytes  - Skeleton bone index (-1 for static mesh)
-	float3 Padding;       // 12 bytes - Alignment padding (total: 64)
-};
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidParticleCore.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidBoundaryParticles.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidSpatialHash.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidMortonUtils.ush"  // For Morton code functions and INVALID_INDEX
 
 //=============================================================================
 // Shader Parameters (SOA - Structure of Arrays)
@@ -103,7 +85,7 @@ float DistanceSquaredToAABB(float3 testPos, float3 aabbMin, float3 aabbMax)
 
 //=============================================================================
 // SPH Kernels for Adhesion (Akinci 2013)
-// Note: AdhesionKernel and CohesionKernel are defined in FluidGPUPhysics.ush
+// Note: AdhesionKernel and CohesionKernel are defined in KawaiiFluidParticleCore.ush
 //=============================================================================
 
 //=============================================================================
@@ -135,7 +117,7 @@ uint GetMortonCellIDFromCellCoord_Adhesion(int3 cellCoord)
 	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
 	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
 
-	// Compute Morton code using preset-specific function from FluidMortonUtils.ush
+	// Compute Morton code using preset-specific function from KawaiiFluidMortonUtils.ush
 	return Morton3D(uoffset.x, uoffset.y, uoffset.z);
 }
 
@@ -520,3 +502,5 @@ void BoundaryAdhesionCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	PackedVelocities[idx] = PackVelocity(velocity);
 	Flags[idx] = flags;
 }
+
+

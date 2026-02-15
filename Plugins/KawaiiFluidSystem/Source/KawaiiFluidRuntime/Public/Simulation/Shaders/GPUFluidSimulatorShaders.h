@@ -11,7 +11,7 @@
 #include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment (NEW bone-following system)
 #include "Core/KawaiiFluidSimulationTypes.h"  // For EGridResolutionPreset
 
-// Spatial hash constants (must match FluidSpatialHash.ush)
+// Spatial hash constants (must match KawaiiFluidSpatialHash.ush)
 #define GPU_SPATIAL_HASH_SIZE 65536
 #define GPU_MAX_PARTICLES_PER_CELL 16
 
@@ -2471,3 +2471,4 @@ public:
 
 	static bool ShouldCompilePermutation(const FGlobalShaderPermutationParameters& Parameters);
 };
+

@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidMortonUtils.ush
+ * @file KawaiiFluidMortonUtils.ush
  * @brief Morton-code (Z-order) utilities for grid indexing and cell traversal.
  *
  * MORTON_GRID_AXIS_BITS is configured by C++ permutation setup
@@ -34,37 +34,37 @@
 /**
  * @brief 6-bit expansion: 0-63 -> 18-bit interleaved
  */
-uint MortonExpandBits6(uint v)
+uint MortonExpandBits6(uint V)
 {
-	v = v & 0x3Fu;  // 63 max (6 bits)
-	v = (v | (v << 8)) & 0x0000F00Fu;
-	v = (v | (v << 4)) & 0x000C30C3u;
-	v = (v | (v << 2)) & 0x00249249u;
-	return v;
+	V = V & 0x3Fu;  // 63 max (6 bits)
+	V = (V | (V << 8)) & 0x0000F00Fu;
+	V = (V | (V << 4)) & 0x000C30C3u;
+	V = (V | (V << 2)) & 0x00249249u;
+	return V;
 }
 
 /**
  * @brief 7-bit expansion: 0-127 -> 21-bit interleaved
  */
-uint MortonExpandBits7(uint v)
+uint MortonExpandBits7(uint V)
 {
-	v = v & 0x7Fu;  // 127 max (7 bits)
-	v = (v | (v << 8)) & 0x0000F00Fu;
-	v = (v | (v << 4)) & 0x000C30C3u;
-	v = (v | (v << 2)) & 0x00249249u;
-	return v;
+	V = V & 0x7Fu;  // 127 max (7 bits)
+	V = (V | (V << 8)) & 0x0000F00Fu;
+	V = (V | (V << 4)) & 0x000C30C3u;
+	V = (V | (V << 2)) & 0x00249249u;
+	return V;
 }
 
 /**
  * @brief 8-bit expansion: 0-255 -> 24-bit interleaved
  */
-uint MortonExpandBits8(uint v)
+uint MortonExpandBits8(uint V)
 {
-	v = v & 0xFFu;  // 255 max (8 bits)
-	v = (v | (v << 8)) & 0x0000F00Fu;
-	v = (v | (v << 4)) & 0x000C30C3u;
-	v = (v | (v << 2)) & 0x00249249u;
-	return v;
+	V = V & 0xFFu;  // 255 max (8 bits)
+	V = (V | (V << 8)) & 0x0000F00Fu;
+	V = (V | (V << 4)) & 0x000C30C3u;
+	V = (V | (V << 2)) & 0x00249249u;
+	return V;
 }
 
 //=============================================================================
@@ -74,34 +74,34 @@ uint MortonExpandBits8(uint v)
 /**
  * @brief Computes a 6-bit-per-axis Morton code
  */
-uint Morton3D_6bit(uint x, uint y, uint z)
+uint Morton3D_6bit(uint X, uint Y, uint Z)
 {
-	x = min(x, 63u);
-	y = min(y, 63u);
-	z = min(z, 63u);
-	return (MortonExpandBits6(z) << 2) | (MortonExpandBits6(y) << 1) | MortonExpandBits6(x);
+	X = min(X, 63u);
+	Y = min(Y, 63u);
+	Z = min(Z, 63u);
+	return (MortonExpandBits6(Z) << 2) | (MortonExpandBits6(Y) << 1) | MortonExpandBits6(X);
 }
 
 /**
  * @brief Computes a 7-bit-per-axis Morton code
  */
-uint Morton3D_7bit(uint x, uint y, uint z)
+uint Morton3D_7bit(uint X, uint Y, uint Z)
 {
-	x = min(x, 127u);
-	y = min(y, 127u);
-	z = min(z, 127u);
-	return (MortonExpandBits7(z) << 2) | (MortonExpandBits7(y) << 1) | MortonExpandBits7(x);
+	X = min(X, 127u);
+	Y = min(Y, 127u);
+	Z = min(Z, 127u);
+	return (MortonExpandBits7(Z) << 2) | (MortonExpandBits7(Y) << 1) | MortonExpandBits7(X);
 }
 
 /**
  * @brief Computes an 8-bit-per-axis Morton code
  */
-uint Morton3D_8bit(uint x, uint y, uint z)
+uint Morton3D_8bit(uint X, uint Y, uint Z)
 {
-	x = min(x, 255u);
-	y = min(y, 255u);
-	z = min(z, 255u);
-	return (MortonExpandBits8(z) << 2) | (MortonExpandBits8(y) << 1) | MortonExpandBits8(x);
+	X = min(X, 255u);
+	Y = min(Y, 255u);
+	Z = min(Z, 255u);
+	return (MortonExpandBits8(Z) << 2) | (MortonExpandBits8(Y) << 1) | MortonExpandBits8(X);
 }
 
 //=============================================================================
@@ -111,14 +111,14 @@ uint Morton3D_8bit(uint x, uint y, uint z)
 /**
  * @brief Computes a Morton code using current grid-bit configuration
  */
-uint Morton3D(uint x, uint y, uint z)
+uint Morton3D(uint X, uint Y, uint Z)
 {
 #if MORTON_GRID_AXIS_BITS == 6
-	return Morton3D_6bit(x, y, z);
+	return Morton3D_6bit(X, Y, Z);
 #elif MORTON_GRID_AXIS_BITS == 8
-	return Morton3D_8bit(x, y, z);
+	return Morton3D_8bit(X, Y, Z);
 #else  // Default to 7-bit (Medium)
-	return Morton3D_7bit(x, y, z);
+	return Morton3D_7bit(X, Y, Z);
 #endif
 }
 
@@ -130,13 +130,13 @@ uint Morton3D(uint x, uint y, uint z)
  * @brief Compute Morton-based cell ID from cell coordinates
  * Automatically uses the correct bit-width based on MORTON_GRID_AXIS_BITS
  */
-uint GetMortonCellIDFromCellCoord(int3 cellCoord, float3 boundsMin, float cellSize)
+uint GetMortonCellIDFromCellCoord(int3 CellCoord, float3 BoundsMin, float CellSize)
 {
-	int3 gridMin = int3(floor(boundsMin / cellSize));
-	int3 offset = cellCoord - gridMin;
-	uint3 uoffset = uint3(max(offset, int3(0, 0, 0)));
-	uoffset = min(uoffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
-	return Morton3D(uoffset.x, uoffset.y, uoffset.z);
+	int3 GridMin = int3(floor(BoundsMin / CellSize));
+	int3 Offset = CellCoord - GridMin;
+	uint3 UOffset = uint3(max(Offset, int3(0, 0, 0)));
+	UOffset = min(UOffset, uint3(MORTON_MAX_VALUE, MORTON_MAX_VALUE, MORTON_MAX_VALUE));
+	return Morton3D(UOffset.x, UOffset.y, UOffset.z);
 }
 
 //=============================================================================
@@ -170,16 +170,16 @@ uint GetMortonCellIDFromCellCoord(int3 cellCoord, float3 boundsMin, float cellSi
  * Uses large primes to minimize collisions
  * Handles negative coordinates automatically via unsigned casting
  */
-uint HashTile(int3 tilePos)
+uint HashTile(int3 TilePos)
 {
-	const uint p1 = 73856093u;
-	const uint p2 = 19349663u;
-	const uint p3 = 83492791u;
-	return (uint(tilePos.x) * p1) ^ (uint(tilePos.y) * p2) ^ (uint(tilePos.z) * p3);
+	const uint P1 = 73856093u;
+	const uint P2 = 19349663u;
+	const uint P3 = 83492791u;
+	return (uint(TilePos.x) * P1) ^ (uint(TilePos.y) * P2) ^ (uint(TilePos.z) * P3);
 }
 
 // Compute Hybrid Tiled Z-Order Key (21-bit, matches MAX_CELLS)
-// Input: gridPos = cell coordinate (can be any integer, including negative)
+// Input: GridPos = cell coordinate (can be any integer, including negative)
 // Output: 21-bit sort key with TileHash in upper 3 bits, LocalMorton in lower 18 bits
 //
 // CRITICAL: The 21-bit key ensures particles with the same key are CONTIGUOUS
@@ -189,35 +189,35 @@ uint HashTile(int3 tilePos)
 /**
  * @brief Computes the hybrid tiled Morton key
  */
-uint ComputeHybridTiledKey(int3 gridPos)
+uint ComputeHybridTiledKey(int3 GridPos)
 {
 	// Step 1: Extract local position within tile (lower 6 bits per axis)
 	// Bitwise AND with TILE_MASK handles negative coordinates correctly:
 	//   (-5) & 0x3F = 0xFFFFFFFB & 0x3F = 59 (valid local coordinate)
-	uint3 localPos = uint3(
-		uint(gridPos.x) & HYBRID_TILE_MASK,
-		uint(gridPos.y) & HYBRID_TILE_MASK,
-		uint(gridPos.z) & HYBRID_TILE_MASK
+	uint3 LocalPos = uint3(
+		uint(GridPos.x) & HYBRID_TILE_MASK,
+		uint(GridPos.y) & HYBRID_TILE_MASK,
+		uint(GridPos.z) & HYBRID_TILE_MASK
 	);
 
 	// Step 2: Compute 18-bit local Morton code using existing 6-bit function
-	uint localMorton = Morton3D_6bit(localPos.x, localPos.y, localPos.z);
+	uint LocalMorton = Morton3D_6bit(LocalPos.x, LocalPos.y, LocalPos.z);
 
 	// Step 3: Compute tile coordinates (upper bits = tile index)
 	// Arithmetic right shift preserves sign for negative coordinates:
 	//   (-5) >> 6 = -1 (correct tile index)
-	int3 tilePos = int3(
-		gridPos.x >> HYBRID_TILE_BITS,
-		gridPos.y >> HYBRID_TILE_BITS,
-		gridPos.z >> HYBRID_TILE_BITS
+	int3 TilePos = int3(
+		GridPos.x >> HYBRID_TILE_BITS,
+		GridPos.y >> HYBRID_TILE_BITS,
+		GridPos.z >> HYBRID_TILE_BITS
 	);
 
 	// Step 4: Hash tile coordinates to 3-bit value (8 buckets)
 	// The 3 bits provide tile separation; collisions are filtered by distance check
-	uint tileHash = HashTile(tilePos) & HYBRID_TILE_HASH_MASK;
+	uint TileHash = HashTile(TilePos) & HYBRID_TILE_HASH_MASK;
 
 	// Step 5: Combine into 21-bit key (matches MAX_CELLS = 2^21)
 	// TileHash in upper 3 bits + LocalMorton in lower 18 bits = 21 bits total
 	// No truncation needed: key == cellID, ensuring contiguous particles per cell
-	return (tileHash << HYBRID_LOCAL_MORTON_BITS) | localMorton;
+	return (TileHash << HYBRID_LOCAL_MORTON_BITS) | LocalMorton;
 }

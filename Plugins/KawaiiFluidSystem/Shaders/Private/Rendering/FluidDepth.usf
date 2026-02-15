@@ -7,7 +7,7 @@
 
 #include "/Engine/Private/Common.ush"
 #include "/Engine/Private/ScreenPass.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidCommon.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidRenderCommon.ush"
 
 //-----------------------------------------------------------------------------
 // Parameters
@@ -358,3 +358,4 @@ FPixelOutput MainPS(FVertexOutput Input)
 
 	return Output;
 }
+

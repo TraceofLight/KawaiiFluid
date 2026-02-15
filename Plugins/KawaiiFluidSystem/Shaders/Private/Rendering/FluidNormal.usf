@@ -6,7 +6,7 @@
  */
 
 #include "/Engine/Private/Common.ush"
-#include "/Plugin/KawaiiFluidSystem/Public/FluidCommon.ush"
+#include "/Plugin/KawaiiFluidSystem/Public/KawaiiFluidRenderCommon.ush"
 
 // IO
 Texture2D<float> InputDepthTexture;
@@ -219,3 +219,4 @@ void ReconstructNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     // Output
     OutputNormalTexture[PixelPosition] = float4(Normal, 1.0);
 }
+
