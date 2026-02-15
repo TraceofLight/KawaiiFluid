@@ -3,7 +3,7 @@
  * @file KawaiiFluidBoundaryAttachment.ush
  * @brief Declares GPU bone-delta attachment data and helper functions.
  *
- * Shared by FluidApplyBoneTransform.usf and FluidUpdateBoneDeltaAttachment.usf.
+ * Shared by KawaiiFluidAttachmentApply.usf and KawaiiFluidAttachmentUpdate.usf.
  */
 
 #pragma once

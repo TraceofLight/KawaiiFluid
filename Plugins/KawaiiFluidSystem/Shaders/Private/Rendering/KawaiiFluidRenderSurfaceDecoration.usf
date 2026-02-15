@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidSurfaceDecoration.usf
- * @brief Shader implementation for FluidSurfaceDecoration
+ * @file KawaiiFluidRenderSurfaceDecoration.usf
+ * @brief Shader implementation for KawaiiFluidRenderSurfaceDecoration
  */
 
 //
@@ -130,7 +130,7 @@ RWTexture2D<float4> OutputTexture;
 // Helper Functions
 //=============================================================================
 
-// Background depth threshold (matches FluidSmoothing.usf and FluidFlowAccumulation.usf)
+// Background depth threshold (matches KawaiiFluidRenderSmoothing.usf and KawaiiFluidRenderFlowAccumulation.usf)
 // This value should be consistent across all fluid shaders
 #define BACKGROUND_DEPTH_THRESH 3.0e30f
 
@@ -318,7 +318,7 @@ float3 ApplyNormalMap(float3 WorldNormal, float3 TangentNormal, float Strength)
 /**
  * @brief Compute lighting for texture albedo
  * Returns lit color with diffuse + specular
- * Uses View.DirectionalLightDirection if available (same as FluidComposite.usf)
+ * Uses View.DirectionalLightDirection if available (same as KawaiiFluidRenderComposite.usf)
  */
 float3 ComputeTextureLighting(float3 Albedo, float3 WorldNormal, float3 WorldPos)
 {
@@ -331,7 +331,7 @@ float3 ComputeTextureLighting(float3 Albedo, float3 WorldNormal, float3 WorldPos
 	// View direction (camera to surface)
 	float3 ViewDir = normalize(CameraPosition - WorldPos);
 
-	// Get light direction from View uniform buffer (same as FluidComposite.usf)
+	// Get light direction from View uniform buffer (same as KawaiiFluidRenderComposite.usf)
 	// View.DirectionalLightDirection is TO the light, so negate for FROM light
 	float3 EffectiveLightDir = normalize(-View.DirectionalLightDirection);
 	float3 EffectiveLightColor = View.DirectionalLightColor.rgb;

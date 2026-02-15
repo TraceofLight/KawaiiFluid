@@ -1,8 +1,8 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 /**
- * @file FluidNormal.usf
- * @brief Shader implementation for FluidNormal
+ * @file KawaiiFluidRenderNormal.usf
+ * @brief Shader implementation for KawaiiFluidRenderNormal
  */
 
 #include "/Engine/Private/Common.ush"
@@ -219,4 +219,3 @@ void ReconstructNormalCS(uint3 DispatchThreadId : SV_DispatchThreadID)
     // Output
     OutputNormalTexture[PixelPosition] = float4(Normal, 1.0);
 }
-

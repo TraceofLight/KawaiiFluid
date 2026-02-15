@@ -1,8 +1,8 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 /**
- * @file FluidThickness.usf
- * @brief Shader implementation for FluidThickness
+ * @file KawaiiFluidRenderThickness.usf
+ * @brief Shader implementation for KawaiiFluidRenderThickness
  */
 
 #include "/Engine/Private/Common.ush"
@@ -161,5 +161,3 @@ float MainPS(FVertexOutput Input) : SV_Target0
 
     return Thickness;
 }
-
-

@@ -1,4 +1,4 @@
-﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
+// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 #include "Rendering/Passes/KawaiiFluidNormalPass.h"
 #include "RenderGraphBuilder.h"
@@ -40,7 +40,7 @@ public:
 	}
 };
 
-IMPLEMENT_GLOBAL_SHADER(FFluidNormalCS, "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidNormal.usf",
+IMPLEMENT_GLOBAL_SHADER(FFluidNormalCS, "/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderNormal.usf",
                         "ReconstructNormalCS", SF_Compute);
 
 /**
@@ -100,3 +100,4 @@ void KawaiiFluidRenderer::RenderNormalPass(
 		PassParameters,
 		FComputeShaderUtils::GetGroupCount(Extent, FIntPoint(8, 8)));
 }
+

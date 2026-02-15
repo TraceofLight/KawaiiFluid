@@ -163,7 +163,7 @@ class FFluidSurfaceDecorationCS : public FGlobalShader
 };
 
 IMPLEMENT_GLOBAL_SHADER(FFluidSurfaceDecorationCS,
-                        "/Plugin/KawaiiFluidSystem/Private/Rendering/FluidSurfaceDecoration.usf", "SurfaceDecorationCS",
+                        "/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderSurfaceDecoration.usf", "SurfaceDecorationCS",
                         SF_Compute);
 
 //=============================================================================
@@ -455,3 +455,4 @@ void KawaiiFluidRenderer::RenderSurfaceDecorationPass(
 		PassParameters,
 		FComputeShaderUtils::GetGroupCount(TextureSize, 8));
 }
+

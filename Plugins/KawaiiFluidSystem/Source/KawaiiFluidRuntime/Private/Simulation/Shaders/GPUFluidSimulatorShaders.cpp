@@ -243,7 +243,7 @@ void FExtractPositionsCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FExtractRenderDataCS,
-	"/Plugin/KawaiiFluidSystem/Private/Rendering/FluidExtractRenderData.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderExtractData.usf",
 	"ExtractRenderDataCS", SF_Compute);
 
 /**
@@ -270,7 +270,7 @@ void FExtractRenderDataCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FExtractRenderDataWithBoundsCS,
-	"/Plugin/KawaiiFluidSystem/Private/Rendering/FluidExtractRenderDataWithBounds.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderExtractData.usf",
 	"ExtractRenderDataWithBoundsCS", SF_Compute);
 
 /**
@@ -297,7 +297,7 @@ void FExtractRenderDataWithBoundsCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FExtractRenderDataSoACS,
-	"/Plugin/KawaiiFluidSystem/Private/Rendering/FluidExtractRenderData.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Rendering/KawaiiFluidRenderExtractData.usf",
 	"ExtractRenderDataSoACS", SF_Compute);
 
 /**
@@ -1183,7 +1183,7 @@ void FComputeBoundaryCellStartEndCS::ModifyCompilationEnvironment(
 //=============================================================================
 
 IMPLEMENT_GLOBAL_SHADER(FApplyBoneTransformCS,
-	"/Plugin/KawaiiFluidSystem/Private/Attachment/FluidApplyBoneTransform.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Attachment/KawaiiFluidAttachmentApply.usf",
 	"ApplyBoneTransformCS", SF_Compute);
 
 /**
@@ -1210,7 +1210,7 @@ void FApplyBoneTransformCS::ModifyCompilationEnvironment(
 }
 
 IMPLEMENT_GLOBAL_SHADER(FUpdateBoneDeltaAttachmentCS,
-	"/Plugin/KawaiiFluidSystem/Private/Attachment/FluidUpdateBoneDeltaAttachment.usf",
+	"/Plugin/KawaiiFluidSystem/Private/Attachment/KawaiiFluidAttachmentUpdate.usf",
 	"UpdateBoneDeltaAttachmentCS", SF_Compute);
 
 /**
@@ -1556,3 +1556,4 @@ bool FCopyCountToSpawnCounterCS::ShouldCompilePermutation(const FGlobalShaderPer
 {
 	return IsFeatureLevelSupported(Parameters.Platform, ERHIFeatureLevel::SM5);
 }
+

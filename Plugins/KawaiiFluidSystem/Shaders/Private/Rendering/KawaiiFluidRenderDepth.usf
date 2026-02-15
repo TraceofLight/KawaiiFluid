@@ -1,8 +1,8 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 /**
- * @file FluidDepth.usf
- * @brief Shader implementation for FluidDepth
+ * @file KawaiiFluidRenderDepth.usf
+ * @brief Shader implementation for KawaiiFluidRenderDepth
  */
 
 #include "/Engine/Private/Common.ush"
@@ -358,4 +358,3 @@ FPixelOutput MainPS(FVertexOutput Input)
 
 	return Output;
 }
-

@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 /**
- * @file FluidUpdateBoneDeltaAttachment.usf
+ * @file KawaiiFluidAttachmentUpdate.usf
  * @brief Shader implementation for FluidUpdateBoneDeltaAttachment
  */
 
@@ -368,6 +368,3 @@ void UpdateBoneDeltaAttachmentCS(uint3 DispatchThreadId : SV_DispatchThreadID)
 	BoneDeltaAttachments[idx] = attachment;
 	Particles[idx] = particle;
 }
-
-
-
