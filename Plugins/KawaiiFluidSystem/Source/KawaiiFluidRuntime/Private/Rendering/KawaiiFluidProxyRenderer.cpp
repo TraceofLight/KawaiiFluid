@@ -119,13 +119,19 @@ void UKawaiiFluidProxyRenderer::UpdateRendering(const IKawaiiFluidDataProvider* 
 			// Enable velocity readback for Proxy rendering
 			Simulator->SetFullReadbackEnabled(true);
 
-			if (!Simulator->GetParticlePositionsAndVelocities(Positions, Velocities))
+			// Clear instances when GPU has no particles (prevents stale cache rendering)
+			if (Simulator->GetParticleCount() <= 0)
 			{
-				// Readback not available: clear instances when particle count is confirmed zero
-				if (Simulator->GetParticleCount() <= 0 && ISMComponent->GetInstanceCount() > 0)
+				if (ISMComponent->GetInstanceCount() > 0)
 				{
 					ISMComponent->ClearInstances();
 				}
+				return;
+			}
+
+			if (!Simulator->GetParticlePositionsAndVelocities(Positions, Velocities))
+			{
+				// Readback not yet available — keep previous frame's instances
 				return;
 			}
 		}

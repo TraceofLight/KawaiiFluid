@@ -1222,6 +1222,7 @@ private:
 	static constexpr int32 NUM_COUNT_READBACK_BUFFERS = 3;
 	FRHIGPUBufferReadback* CountReadbacks[NUM_COUNT_READBACK_BUFFERS] = { nullptr };
 	bool bCountReadbackValid[NUM_COUNT_READBACK_BUFFERS] = { false, false, false };
+	uint64 CountReadbackFrameNumbers[NUM_COUNT_READBACK_BUFFERS] = { 0 };
 	int32 CountReadbackWriteIndex = 0;
 
 	/** True once particles have ever existed (replaces CurrentParticleCount==0 early-out) */

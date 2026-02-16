@@ -1369,17 +1369,23 @@ void FGPUFluidSimulator::EnqueueParticleCountReadback(FRHICommandListImmediate& 
 
 	CountReadbacks[WriteIdx]->EnqueueCopy(RHICmdList, PersistentParticleCountBuffer->GetRHI(), GPUIndirectDispatch::BufferSizeBytes);
 	bCountReadbackValid[WriteIdx] = true;
+	CountReadbackFrameNumbers[WriteIdx] = GFrameCounterRenderThread;
 }
 
 void FGPUFluidSimulator::ProcessParticleCountReadback()
 {
-	// Find newest valid ready readback (most up-to-date GPU count)
+	// Find newest valid ready readback by frame number (most up-to-date GPU count)
 	int32 ReadIdx = -1;
+	uint64 NewestFrame = 0;
 	for (int32 i = 0; i < NUM_COUNT_READBACK_BUFFERS; ++i)
 	{
 		if (CountReadbacks[i] && bCountReadbackValid[i] && CountReadbacks[i]->IsReady())
 		{
-			ReadIdx = i;
+			if (CountReadbackFrameNumbers[i] > NewestFrame)
+			{
+				NewestFrame = CountReadbackFrameNumbers[i];
+				ReadIdx = i;
+			}
 		}
 	}
 
@@ -1394,18 +1400,10 @@ void FGPUFluidSimulator::ProcessParticleCountReadback()
 		const int32 GPUCount = static_cast<int32>(Data[GPUIndirectDispatch::ParticleCountElementIndex]);
 		CurrentParticleCount = GPUCount;
 
-		// Consumed: mark this slot invalid so it won't be re-read
+		// Consumed: mark this slot invalid so it won't be re-read.
+		// Other slots are left intact — newer readbacks with count>0 must survive
+		// even when an older stale count=0 readback is consumed first.
 		bCountReadbackValid[ReadIdx] = false;
-
-		// When GPU confirms 0 particles, invalidate all remaining slots.
-		// Prevents stale zero-readbacks from overwriting spawn estimates on next spawn cycle.
-		if (GPUCount == 0)
-		{
-			for (int32 i = 0; i < NUM_COUNT_READBACK_BUFFERS; ++i)
-			{
-				bCountReadbackValid[i] = false;
-			}
-		}
 	}
 	CountReadbacks[ReadIdx]->Unlock();
 }
@@ -3959,31 +3957,6 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 		return;
 	}
 
-	// If particle count is zero, clear all caches and discard pending readbacks
-	if (CurrentParticleCount <= 0)
-	{
-		{
-			FScopeLock Lock(&BufferLock);
-			CachedParticlePositions.Empty();
-			CachedParticleVelocities.Empty();
-			CachedParticleSourceIDs.Empty();
-			CachedAllParticleIDs.Empty();
-			CachedSourceIDToParticleIDs.Empty();
-			CachedParticleFlags.Empty();
-			ReadyShadowPositions.Empty();
-			ReadyShadowVelocities.Empty();
-			ReadyShadowNeighborCounts.Empty();
-			ReadyShadowPositionsFrame.store(0);
-			ReadyShadowAnisotropyFrame.store(0);
-		}
-		for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
-		{
-			if (StatsReadbackFrameNumbers[i] > 0 && StatsReadbacks[i] && StatsReadbacks[i]->IsReady())
-				StatsReadbackFrameNumbers[i] = 0;
-		}
-		return;
-	}
-
 	// Search for newest ready buffer (prevents stale pre-despawn data from refilling cache)
 	int32 ReadIdx = -1;
 	uint64 NewestFrame = 0;
@@ -4017,10 +3990,10 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
 		}
 	}
 
-	// Use min(stored, CurrentParticleCount) to handle CPU/GPU count desync after despawn.
-	// ProcessParticleCountReadback runs first, so CurrentParticleCount reflects GPU-accurate count.
-	// stored count may be stale (too high) if despawn compacted particles after enqueue.
-	const int32 ParticleCount = FMath::Min(StatsReadbackParticleCounts[ReadIdx], CurrentParticleCount);
+	// Use stored count directly — the readback buffer is a self-contained snapshot
+	// with exactly StoredCount particles of valid data. No min() clamp needed:
+	// the consumer (ProxyRenderer) checks CurrentParticleCount before rendering.
+	const int32 ParticleCount = StatsReadbackParticleCounts[ReadIdx];
 	if (ParticleCount <= 0)
 	{
 		return;
