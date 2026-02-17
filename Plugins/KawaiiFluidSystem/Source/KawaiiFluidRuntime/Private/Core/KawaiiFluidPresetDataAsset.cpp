@@ -3,7 +3,7 @@
 #include "Core/KawaiiFluidPresetDataAsset.h"
 
 #include "EditorFramework/ThumbnailInfo.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 
 /**
  * @brief Default constructor initializing default physical properties and calculating derived values.

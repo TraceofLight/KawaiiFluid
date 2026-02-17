@@ -11,7 +11,7 @@
 #include "Modules/KawaiiFluidRenderingModule.h"
 #include "Rendering/KawaiiFluidRenderer.h"
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -291,7 +291,7 @@ void FKawaiiFluidPreviewScene::ResetSimulation()
 	// Clear GPU particles
 	if (SimulationContext)
 	{
-		FGPUFluidSimulator* GPUSimulator = SimulationContext->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = SimulationContext->GetGPUSimulator();
 		if (GPUSimulator)
 		{
 			GPUSimulator->ClearAllParticles();
@@ -347,7 +347,7 @@ void FKawaiiFluidPreviewScene::SpawnParticles(float DeltaTime)
 		return;
 	}
 
-	FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
+	FKawaiiFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 	if (!GPUSimulator)
 	{
 		return;
@@ -441,7 +441,7 @@ void FKawaiiFluidPreviewScene::TickSimulation(float DeltaTime)
 		return;
 	}
 
-	FGPUFluidSimulator* GPUSimulator = SimulationContext->GetGPUSimulator();
+	FKawaiiFluidSimulator* GPUSimulator = SimulationContext->GetGPUSimulator();
 	if (!GPUSimulator)
 	{
 		return;
@@ -623,7 +623,7 @@ int32 FKawaiiFluidPreviewScene::GetGPUParticleCount() const
 {
 	if (SimulationContext)
 	{
-		FGPUFluidSimulator* GPUSimulator = SimulationContext->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = SimulationContext->GetGPUSimulator();
 		if (GPUSimulator)
 		{
 			return GPUSimulator->GetParticleCount();
@@ -636,7 +636,7 @@ int32 FKawaiiFluidPreviewScene::GetGPUParticleCount() const
  * @brief Returns the GPU simulator instance.
  * @return Pointer to GPU simulator
  */
-FGPUFluidSimulator* FKawaiiFluidPreviewScene::GetGPUSimulator() const
+FKawaiiFluidSimulator* FKawaiiFluidPreviewScene::GetGPUSimulator() const
 {
 	return SimulationContext ? SimulationContext->GetGPUSimulator() : nullptr;
 }

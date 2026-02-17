@@ -8,9 +8,9 @@
 #include "RHICommandList.h"
 #include "RenderingThread.h"
 #include "ShaderParameterUtils.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 
 /**
  * @brief Default constructor for the render resource.
@@ -185,7 +185,7 @@ void FKawaiiFluidRenderResource::ResizeBuffer(FRHICommandListBase& RHICmdList, i
  * @brief Sets the GPU simulator reference and triggers buffer resizing if necessary.
  */
 void FKawaiiFluidRenderResource::SetGPUSimulatorReference(
-	FGPUFluidSimulator* InSimulator,
+	FKawaiiFluidSimulator* InSimulator,
 	int32 InMaxParticleCount,
 	float InParticleRadius)
 {
@@ -220,7 +220,7 @@ void FKawaiiFluidRenderResource::ClearGPUSimulatorReference()
 
 FRDGBufferSRVRef FKawaiiFluidRenderResource::GetPhysicsBufferSRV(FRDGBuilder& GraphBuilder) const
 {
-	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	FKawaiiFluidSimulator* Simulator = CachedGPUSimulator.load();
 	if (!Simulator)
 	{
 		return nullptr;
@@ -245,7 +245,7 @@ bool FKawaiiFluidRenderResource::GetAnisotropyBufferSRVs(
 	FRDGBufferSRVRef& OutAxis2SRV,
 	FRDGBufferSRVRef& OutAxis3SRV) const
 {
-	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	FKawaiiFluidSimulator* Simulator = CachedGPUSimulator.load();
 	if (!Simulator || !Simulator->IsAnisotropyEnabled())
 	{
 		OutAxis1SRV = nullptr;
@@ -279,13 +279,13 @@ bool FKawaiiFluidRenderResource::GetAnisotropyBufferSRVs(
 
 bool FKawaiiFluidRenderResource::IsAnisotropyEnabled() const
 {
-	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	FKawaiiFluidSimulator* Simulator = CachedGPUSimulator.load();
 	return Simulator && Simulator->IsAnisotropyEnabled();
 }
 
 FRDGBufferSRVRef FKawaiiFluidRenderResource::GetRenderOffsetBufferSRV(FRDGBuilder& GraphBuilder) const
 {
-	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	FKawaiiFluidSimulator* Simulator = CachedGPUSimulator.load();
 	if (!Simulator || !Simulator->IsAnisotropyEnabled())
 	{
 		return nullptr;
@@ -323,7 +323,7 @@ void FKawaiiFluidRenderResource::SetRenderParticleBuffer(TRefCountPtr<FRDGPooled
 
 TRefCountPtr<FRDGPooledBuffer> FKawaiiFluidRenderResource::GetPooledCellStartBuffer() const
 {
-	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	FKawaiiFluidSimulator* Simulator = CachedGPUSimulator.load();
 	if (Simulator)
 	{
 		return Simulator->GetPersistentCellStartBuffer();
@@ -333,7 +333,7 @@ TRefCountPtr<FRDGPooledBuffer> FKawaiiFluidRenderResource::GetPooledCellStartBuf
 
 TRefCountPtr<FRDGPooledBuffer> FKawaiiFluidRenderResource::GetPooledCellEndBuffer() const
 {
-	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	FKawaiiFluidSimulator* Simulator = CachedGPUSimulator.load();
 	if (Simulator)
 	{
 		return Simulator->GetPersistentCellEndBuffer();
@@ -343,7 +343,7 @@ TRefCountPtr<FRDGPooledBuffer> FKawaiiFluidRenderResource::GetPooledCellEndBuffe
 
 bool FKawaiiFluidRenderResource::HasValidZOrderBuffers() const
 {
-	FGPUFluidSimulator* Simulator = CachedGPUSimulator.load();
+	FKawaiiFluidSimulator* Simulator = CachedGPUSimulator.load();
 	if (Simulator)
 	{
 		return Simulator->HasValidZOrderBuffers();

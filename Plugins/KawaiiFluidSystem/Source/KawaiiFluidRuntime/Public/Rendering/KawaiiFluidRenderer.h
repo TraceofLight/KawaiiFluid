@@ -16,7 +16,7 @@ class IKawaiiFluidDataProvider;
 class UKawaiiFluidRendererSubsystem;
 class FKawaiiFluidRenderResource;
 class IKawaiiFluidRenderingPipeline;
-class FGPUFluidSimulator;
+class FKawaiiFluidSimulator;
 class UKawaiiFluidSimulationContext;
 
 /**

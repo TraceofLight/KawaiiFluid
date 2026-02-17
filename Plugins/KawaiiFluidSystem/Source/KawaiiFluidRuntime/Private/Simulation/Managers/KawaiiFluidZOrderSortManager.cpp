@@ -3,8 +3,8 @@
 
 #include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
 #include "Logging/KawaiiFluidLog.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
-#include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
+#include "Simulation/Resources/GPUBoneDeltaAttachment.h"  // For FGPUBoneDeltaAttachment
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"

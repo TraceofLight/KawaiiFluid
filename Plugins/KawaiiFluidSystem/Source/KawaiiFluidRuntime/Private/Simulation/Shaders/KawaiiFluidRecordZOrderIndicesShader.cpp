@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // Shader Implementation for KawaiiFluidZOrderDebug.usf
 
-#include "Simulation/Shaders/FluidRecordZOrderIndicesShader.h"
+#include "Simulation/Shaders/KawaiiFluidRecordZOrderIndicesShader.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ShaderParameterUtils.h"

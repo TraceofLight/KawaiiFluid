@@ -51,7 +51,7 @@ public:
 
 	virtual int32 GetGPUParticleCount() const override;
 
-	virtual FGPUFluidSimulator* GetGPUSimulator() const override;
+	virtual FKawaiiFluidSimulator* GetGPUSimulator() const override;
 
 	UKawaiiFluidRenderingModule* GetRenderingModule() const { return RenderingModule; }
 

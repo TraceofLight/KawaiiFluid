@@ -4,9 +4,9 @@
 #include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
 #include "Logging/KawaiiFluidLog.h"
 
-#include <Simulation/Resources/GPUFluidSpatialData.h>
+#include <Simulation/Resources/KawaiiFluidSpatialData.h>
 
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -1193,7 +1193,7 @@ void FKawaiiFluidBoundaryManager::AddBoundarySkinningPass(
  */
 void FKawaiiFluidBoundaryManager::AddBoundaryAdhesionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 CurrentParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef InSameFrameBoundaryBuffer,

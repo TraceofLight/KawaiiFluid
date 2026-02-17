@@ -3,7 +3,7 @@
 
 #include "Simulation/Managers/KawaiiFluidCollisionManager.h"
 #include "Logging/KawaiiFluidLog.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -139,7 +139,7 @@ void FKawaiiFluidCollisionManager::UploadCollisionPrimitives(const FGPUCollision
  */
 void FKawaiiFluidCollisionManager::AddBoundsCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 ParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)
@@ -204,7 +204,7 @@ void FKawaiiFluidCollisionManager::AddBoundsCollisionPass(
  */
 void FKawaiiFluidCollisionManager::AddPrimitiveCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 ParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)
@@ -805,7 +805,7 @@ void FKawaiiFluidCollisionManager::UploadHeightmapTexture(const TArray<float>& H
  */
 void FKawaiiFluidCollisionManager::AddHeightmapCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 ParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)

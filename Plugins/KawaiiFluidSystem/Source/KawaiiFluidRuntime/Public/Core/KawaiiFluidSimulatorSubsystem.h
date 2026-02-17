@@ -22,7 +22,7 @@ class AActor;
 class ULevel;
 class FKawaiiFluidSpatialHash;
 struct FKawaiiFluidParticle;
-class FGPUFluidSimulator;
+class FKawaiiFluidSimulator;
 
 /**
  * @struct FContextCacheKey
@@ -198,7 +198,7 @@ public:
 		return GetOrCreateContext(nullptr, Preset);
 	}
 
-	void GetAllGPUSimulators(TArray<FGPUFluidSimulator*>& OutSimulators) const;
+	void GetAllGPUSimulators(TArray<FKawaiiFluidSimulator*>& OutSimulators) const;
 
 private:
 	//========================================

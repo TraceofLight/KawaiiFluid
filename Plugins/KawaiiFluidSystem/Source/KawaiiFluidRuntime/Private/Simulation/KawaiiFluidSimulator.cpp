@@ -1,15 +1,15 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Logging/KawaiiFluidLog.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
-#include "Simulation/Shaders/FluidAnisotropyComputeShader.h"
-#include "Simulation/Shaders/FluidStatsCompactShader.h"
-#include "Simulation/Shaders/FluidRecordZOrderIndicesShader.h"
+#include "Simulation/Shaders/KawaiiFluidAnisotropyComputeShader.h"
+#include "Simulation/Shaders/KawaiiFluidStatsCompactShader.h"
+#include "Simulation/Shaders/KawaiiFluidRecordZOrderIndicesShader.h"
 #include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
 #include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
-#include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
+#include "Simulation/Resources/GPUBoneDeltaAttachment.h"  // For FGPUBoneDeltaAttachment
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Simulation/Shaders/KawaiiFluidSpatialHashShaders.h"
@@ -59,7 +59,7 @@ static int32 GFluidCapturedFrame = 0;  // Tracks which frame was captured (0 = n
 // Constructor / Destructor
 //=============================================================================
 
-FGPUFluidSimulator::FGPUFluidSimulator()
+FKawaiiFluidSimulator::FKawaiiFluidSimulator()
 	: bIsInitialized(false)
 	, MaxParticleCount(0)
 	, CurrentParticleCount(0)
@@ -68,7 +68,7 @@ FGPUFluidSimulator::FGPUFluidSimulator()
 {
 }
 
-FGPUFluidSimulator::~FGPUFluidSimulator()
+FKawaiiFluidSimulator::~FKawaiiFluidSimulator()
 {
 	if (bIsInitialized)
 	{
@@ -84,7 +84,7 @@ FGPUFluidSimulator::~FGPUFluidSimulator()
  * @brief Initialize the GPU fluid simulator with maximum particle capacity.
  * @param InMaxParticleCount Maximum number of particles to support.
  */
-void FGPUFluidSimulator::Initialize(int32 InMaxParticleCount)
+void FKawaiiFluidSimulator::Initialize(int32 InMaxParticleCount)
 {
 	if (InMaxParticleCount <= 0)
 	{
@@ -129,7 +129,7 @@ void FGPUFluidSimulator::Initialize(int32 InMaxParticleCount)
 /**
  * @brief Release all simulation resources and shutdown managers.
  */
-void FGPUFluidSimulator::Release()
+void FKawaiiFluidSimulator::Release()
 {
 	if (!bIsInitialized)
 	{
@@ -227,7 +227,7 @@ void FGPUFluidSimulator::Release()
 // FRenderResource Interface
 //=============================================================================
 
-void FGPUFluidSimulator::InitRHI(FRHICommandListBase& RHICmdList)
+void FKawaiiFluidSimulator::InitRHI(FRHICommandListBase& RHICmdList)
 {
 	if (MaxParticleCount <= 0)
 	{
@@ -237,7 +237,7 @@ void FGPUFluidSimulator::InitRHI(FRHICommandListBase& RHICmdList)
 	ResizeBuffers(RHICmdList, MaxParticleCount);
 }
 
-void FGPUFluidSimulator::ReleaseRHI()
+void FKawaiiFluidSimulator::ReleaseRHI()
 {
 	FScopeLock Lock(&BufferLock);
 
@@ -292,7 +292,7 @@ void FGPUFluidSimulator::ReleaseRHI()
 	// Collision cleanup is handled by CollisionManager::Release()
 }
 
-void FGPUFluidSimulator::ResizeBuffers(FRHICommandListBase& RHICmdList, int32 NewCapacity)
+void FKawaiiFluidSimulator::ResizeBuffers(FRHICommandListBase& RHICmdList, int32 NewCapacity)
 {
 	FScopeLock Lock(&BufferLock);
 
@@ -388,7 +388,7 @@ void FGPUFluidSimulator::ResizeBuffers(FRHICommandListBase& RHICmdList, int32 Ne
  * @brief Execute a single simulation substep (Direct path).
  * @param Params Simulation parameters for this substep.
  */
-void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params)
+void FKawaiiFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params)
 {
 	if (!bIsInitialized)
 	{
@@ -416,7 +416,7 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
 	// =========================================================================
 	RefreshAllBoneTransforms();
 
-	FGPUFluidSimulator* Self = this;
+	FKawaiiFluidSimulator* Self = this;
 	FGPUFluidSimulationParams ParamsCopy = Params;
 
 	// Execute simulation directly in render command
@@ -447,7 +447,7 @@ void FGPUFluidSimulator::SimulateSubstep(const FGPUFluidSimulationParams& Params
  * @brief Store simulation parameters for deferred execution in render thread.
  * @param Params Simulation parameters to store.
  */
-void FGPUFluidSimulator::EnqueueSimulation(const FGPUFluidSimulationParams& Params)
+void FKawaiiFluidSimulator::EnqueueSimulation(const FGPUFluidSimulationParams& Params)
 {
 	FScopeLock Lock(&PendingSimulationLock);
 	PendingSimulationParams.Add(Params);
@@ -457,13 +457,13 @@ void FGPUFluidSimulator::EnqueueSimulation(const FGPUFluidSimulationParams& Para
 	// Both ViewExtension and fallback execution paths will use these refreshed transforms.
 }
 
-bool FGPUFluidSimulator::HasPendingSimulations() const
+bool FKawaiiFluidSimulator::HasPendingSimulations() const
 {
 	FScopeLock Lock(&PendingSimulationLock);
 	return PendingSimulationParams.Num() > 0;
 }
 
-void FGPUFluidSimulator::ExecutePendingSimulations_RenderThread(FRDGBuilder& GraphBuilder)
+void FKawaiiFluidSimulator::ExecutePendingSimulations_RenderThread(FRDGBuilder& GraphBuilder)
 {
 	// Move pending params to local array (thread-safe)
 	TArray<FGPUFluidSimulationParams> ParamsToExecute;
@@ -501,7 +501,7 @@ void FGPUFluidSimulator::ExecutePendingSimulations_RenderThread(FRDGBuilder& Gra
 	bHasValidGPUResults.store(true);
 }
 
-void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params)
+void FKawaiiFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params)
 {
 	// Spawn/despawn handled in BeginFrame - this is physics only
 
@@ -640,7 +640,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	// Phase 2: Build Spatial Structures (Predict -> Extract -> Sort -> Hash)
 	// Also reorders BoneDeltaAttachment buffer to stay synchronized with particles after Z-Order sorting
 	// =====================================================
-	FSimulationSpatialData SpatialData = BuildSpatialStructures(
+	FKawaiiFluidSpatialData SpatialData = BuildSpatialStructures(
 		GraphBuilder,
 		ParticleBuffer,
 		ParticlesSRVLocal,
@@ -864,9 +864,9 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	ExtractPersistentBuffers(GraphBuilder, ParticleBuffer, SpatialData);
 }
 
-void FGPUFluidSimulator::RunInitializationSimulation(const FGPUFluidSimulationParams& Params)
+void FKawaiiFluidSimulator::RunInitializationSimulation(const FGPUFluidSimulationParams& Params)
 {
-	FGPUFluidSimulator* Self = this;
+	FKawaiiFluidSimulator* Self = this;
 	FGPUFluidSimulationParams ParamsCopy = Params;
 
 	ENQUEUE_RENDER_COMMAND(GPUFluidInitSimulation)(
@@ -893,7 +893,7 @@ void FGPUFluidSimulator::RunInitializationSimulation(const FGPUFluidSimulationPa
 /**
  * @brief Orchestrate frame start operations (async readbacks, spawn/despawn).
  */
-void FGPUFluidSimulator::BeginFrame()
+void FKawaiiFluidSimulator::BeginFrame()
 {
 	if (!bIsInitialized)
 	{
@@ -907,7 +907,7 @@ void FGPUFluidSimulator::BeginFrame()
 	}
 
 	bFrameActive = true;
-	FGPUFluidSimulator* Self = this;
+	FKawaiiFluidSimulator* Self = this;
 
 	// Capture pending flags on game thread (before render command)
 	const bool bHasPendingSpawns = SpawnManager.IsValid() && SpawnManager->HasPendingSpawnRequests();
@@ -1173,7 +1173,7 @@ void FGPUFluidSimulator::BeginFrame()
 /**
  * @brief Orchestrate frame end operations (persistent extraction, enqueuing readbacks).
  */
-void FGPUFluidSimulator::EndFrame()
+void FKawaiiFluidSimulator::EndFrame()
 {
 	if (!bIsInitialized)
 	{
@@ -1186,7 +1186,7 @@ void FGPUFluidSimulator::EndFrame()
 		return;
 	}
 
-	FGPUFluidSimulator* Self = this;
+	FKawaiiFluidSimulator* Self = this;
 
 	ENQUEUE_RENDER_COMMAND(GPUFluidEndFrame)(
 		[Self](FRHICommandListImmediate& RHICmdList)
@@ -1333,7 +1333,7 @@ void FGPUFluidSimulator::EndFrame()
 // Indirect Dispatch Particle Count Buffer
 //=============================================================================
 
-FRDGBufferRef FGPUFluidSimulator::RegisterParticleCountBuffer(FRDGBuilder& GraphBuilder)
+FRDGBufferRef FKawaiiFluidSimulator::RegisterParticleCountBuffer(FRDGBuilder& GraphBuilder)
 {
 	if (PersistentParticleCountBuffer.IsValid())
 	{
@@ -1352,7 +1352,7 @@ FRDGBufferRef FGPUFluidSimulator::RegisterParticleCountBuffer(FRDGBuilder& Graph
 	return Buffer;
 }
 
-void FGPUFluidSimulator::EnqueueParticleCountReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::EnqueueParticleCountReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (!PersistentParticleCountBuffer.IsValid())
 	{
@@ -1372,7 +1372,7 @@ void FGPUFluidSimulator::EnqueueParticleCountReadback(FRHICommandListImmediate& 
 	CountReadbackFrameNumbers[WriteIdx] = GFrameCounterRenderThread;
 }
 
-void FGPUFluidSimulator::ProcessParticleCountReadback()
+void FKawaiiFluidSimulator::ProcessParticleCountReadback()
 {
 	// Find newest valid ready readback by frame number (most up-to-date GPU count)
 	int32 ReadIdx = -1;
@@ -1408,7 +1408,7 @@ void FGPUFluidSimulator::ProcessParticleCountReadback()
 	CountReadbacks[ReadIdx]->Unlock();
 }
 
-FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
+FRDGBufferRef FKawaiiFluidSimulator::PrepareParticleBuffer(
 	FRDGBuilder& GraphBuilder,
 	const FGPUFluidSimulationParams& Params)
 {
@@ -1510,7 +1510,7 @@ FRDGBufferRef FGPUFluidSimulator::PrepareParticleBuffer(
 	return ParticleBuffer;
 }
 
-FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStructures(
+FKawaiiFluidSpatialData FKawaiiFluidSimulator::BuildSpatialStructures(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef& InOutParticleBuffer,
 	FRDGBufferSRVRef& OutParticlesSRV,
@@ -1522,7 +1522,7 @@ FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStructures(
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_BuildSpatialStructures");
 
-	FSimulationSpatialData SpatialData;
+	FKawaiiFluidSpatialData SpatialData;
 
 	// Skip when no particles (avoid unnecessary GPU work)
 	if (!bEverHadParticles)
@@ -1735,10 +1735,10 @@ FSimulationSpatialData FGPUFluidSimulator::BuildSpatialStructures(
 	return SpatialData;
 }
 
-void FGPUFluidSimulator::ExecuteConstraintSolverLoop(
+void FKawaiiFluidSimulator::ExecuteConstraintSolverLoop(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
-	FSimulationSpatialData& SpatialData,
+	FKawaiiFluidSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_ConstraintSolverLoop");
@@ -1811,10 +1811,10 @@ void FGPUFluidSimulator::ExecuteConstraintSolverLoop(
 	GraphBuilder.QueueBufferExtraction(SpatialData.NeighborCountsBuffer, &NeighborCountsBuffers[CurrentNeighborBufferIndex], ERHIAccess::UAVCompute);
 }
 
-void FGPUFluidSimulator::ExecuteAdhesion(
+void FKawaiiFluidSimulator::ExecuteAdhesion(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_Adhesion");
@@ -1876,11 +1876,11 @@ void FGPUFluidSimulator::ExecuteAdhesion(
 	}
 }
 
-void FGPUFluidSimulator::ExecutePostSimulation(
+void FKawaiiFluidSimulator::ExecutePostSimulation(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef ParticleBuffer,
 	FRDGBufferUAVRef ParticlesUAV,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_PostSimulation");
@@ -2206,10 +2206,10 @@ void FGPUFluidSimulator::ExecutePostSimulation(
 	}
 }
 
-void FGPUFluidSimulator::ExtractPersistentBuffers(
+void FKawaiiFluidSimulator::ExtractPersistentBuffers(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef ParticleBuffer,
-	const FSimulationSpatialData& SpatialData)
+	const FKawaiiFluidSpatialData& SpatialData)
 {
 	RDG_EVENT_SCOPE(GraphBuilder, "GPUFluid_ExtractPersistentBuffers");
 
@@ -2268,7 +2268,7 @@ void FGPUFluidSimulator::ExtractPersistentBuffers(
 	}
 }
 
-void FGPUFluidSimulator::SwapNeighborCacheBuffers()
+void FKawaiiFluidSimulator::SwapNeighborCacheBuffers()
 {
 	// =====================================================
 	// True Double Buffering for Cohesion Force (RAW Hazard Prevention)
@@ -2306,17 +2306,17 @@ void FGPUFluidSimulator::SwapNeighborCacheBuffers()
 // GPU Particle Spawning API (Delegated to FGPUSpawnManager)
 //=============================================================================
 
-void FGPUFluidSimulator::AddSpawnRequest(const FVector3f& Position, const FVector3f& Velocity, float Mass)
+void FKawaiiFluidSimulator::AddSpawnRequest(const FVector3f& Position, const FVector3f& Velocity, float Mass)
 {
 	if (SpawnManager.IsValid()) { SpawnManager->AddSpawnRequest(Position, Velocity, Mass); }
 }
 
-void FGPUFluidSimulator::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests)
+void FKawaiiFluidSimulator::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests)
 {
 	if (SpawnManager.IsValid()) { SpawnManager->AddSpawnRequests(Requests); }
 }
 
-void FGPUFluidSimulator::AddGPUDespawnBrushRequest(const FVector3f& Center, float Radius)
+void FKawaiiFluidSimulator::AddGPUDespawnBrushRequest(const FVector3f& Center, float Radius)
 {
 	if (SpawnManager.IsValid())
 	{
@@ -2324,7 +2324,7 @@ void FGPUFluidSimulator::AddGPUDespawnBrushRequest(const FVector3f& Center, floa
 	}
 }
 
-void FGPUFluidSimulator::AddGPUDespawnSourceRequest(int32 SourceID)
+void FKawaiiFluidSimulator::AddGPUDespawnSourceRequest(int32 SourceID)
 {
 	if (SpawnManager.IsValid())
 	{
@@ -2332,7 +2332,7 @@ void FGPUFluidSimulator::AddGPUDespawnSourceRequest(int32 SourceID)
 	}
 }
 
-void FGPUFluidSimulator::SetSourceEmitterMax(int32 SourceID, int32 MaxCount)
+void FKawaiiFluidSimulator::SetSourceEmitterMax(int32 SourceID, int32 MaxCount)
 {
 	if (SpawnManager.IsValid())
 	{
@@ -2340,7 +2340,7 @@ void FGPUFluidSimulator::SetSourceEmitterMax(int32 SourceID, int32 MaxCount)
 	}
 }
 
-bool FGPUFluidSimulator::GetParticlePositionsAndIDs(TArray<FVector3f>& OutPositions, TArray<int32>& OutParticleIDs, TArray<int32>& OutSourceIDs)
+bool FKawaiiFluidSimulator::GetParticlePositionsAndIDs(TArray<FVector3f>& OutPositions, TArray<int32>& OutParticleIDs, TArray<int32>& OutSourceIDs)
 {
 	if (!bHasValidGPUResults.load())
 	{
@@ -2360,7 +2360,7 @@ bool FGPUFluidSimulator::GetParticlePositionsAndIDs(TArray<FVector3f>& OutPositi
 	return true;
 }
 
-bool FGPUFluidSimulator::GetParticlePositionsAndVelocities(TArray<FVector3f>& OutPositions, TArray<FVector3f>& OutVelocities)
+bool FKawaiiFluidSimulator::GetParticlePositionsAndVelocities(TArray<FVector3f>& OutPositions, TArray<FVector3f>& OutVelocities)
 {
 	if (!bHasValidGPUResults.load())
 	{
@@ -2379,7 +2379,7 @@ bool FGPUFluidSimulator::GetParticlePositionsAndVelocities(TArray<FVector3f>& Ou
 	return true;
 }
 
-const TArray<int32>* FGPUFluidSimulator::GetParticleIDsBySourceID(int32 SourceID) const
+const TArray<int32>* FKawaiiFluidSimulator::GetParticleIDsBySourceID(int32 SourceID) const
 {
 	if (!bHasValidGPUResults.load())
 	{
@@ -2396,7 +2396,7 @@ const TArray<int32>* FGPUFluidSimulator::GetParticleIDsBySourceID(int32 SourceID
 	return Result.Num() > 0 ? &Result : nullptr;
 }
 
-const TArray<int32>* FGPUFluidSimulator::GetAllParticleIDs() const
+const TArray<int32>* FKawaiiFluidSimulator::GetAllParticleIDs() const
 {
 	if (!bHasValidGPUResults.load())
 	{
@@ -2411,7 +2411,7 @@ const TArray<int32>* FGPUFluidSimulator::GetAllParticleIDs() const
 	return &CachedAllParticleIDs;
 }
 
-const TArray<uint32>* FGPUFluidSimulator::GetParticleFlags() const
+const TArray<uint32>* FKawaiiFluidSimulator::GetParticleFlags() const
 {
 	if (!bHasValidGPUResults.load())
 	{
@@ -2426,12 +2426,12 @@ const TArray<uint32>* FGPUFluidSimulator::GetParticleFlags() const
 	return &CachedParticleFlags;
 }
 
-void FGPUFluidSimulator::ClearSpawnRequests()
+void FKawaiiFluidSimulator::ClearSpawnRequests()
 {
 	if (SpawnManager.IsValid()) { SpawnManager->ClearSpawnRequests(); }
 }
 
-int32 FGPUFluidSimulator::GetPendingSpawnCount() const
+int32 FKawaiiFluidSimulator::GetPendingSpawnCount() const
 {
 	return SpawnManager.IsValid() ? SpawnManager->GetPendingSpawnCount() : 0;
 }
@@ -2442,42 +2442,42 @@ int32 FGPUFluidSimulator::GetPendingSpawnCount() const
 
 static FGPUBoundaryAdhesionParams GDefaultBoundaryAdhesionParams;
 
-const FGPUBoundaryAdhesionParams& FGPUFluidSimulator::GetBoundaryAdhesionParams() const
+const FGPUBoundaryAdhesionParams& FKawaiiFluidSimulator::GetBoundaryAdhesionParams() const
 {
 	return BoundarySkinningManager.IsValid() ? BoundarySkinningManager->GetBoundaryAdhesionParams() : GDefaultBoundaryAdhesionParams;
 }
 
-void FGPUFluidSimulator::UploadLocalBoundaryParticles(int32 OwnerID, const TArray<FGPUBoundaryParticleLocal>& LocalParticles)
+void FKawaiiFluidSimulator::UploadLocalBoundaryParticles(int32 OwnerID, const TArray<FGPUBoundaryParticleLocal>& LocalParticles)
 {
 	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UploadLocalBoundaryParticles(OwnerID, LocalParticles); }
 }
 
-void FGPUFluidSimulator::UploadBoneTransformsForBoundary(int32 OwnerID, const TArray<FMatrix44f>& BoneTransforms, const FMatrix44f& ComponentTransform)
+void FKawaiiFluidSimulator::UploadBoneTransformsForBoundary(int32 OwnerID, const TArray<FMatrix44f>& BoneTransforms, const FMatrix44f& ComponentTransform)
 {
 	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UploadBoneTransformsForBoundary(OwnerID, BoneTransforms, ComponentTransform); }
 }
 
-void FGPUFluidSimulator::RegisterSkeletalMeshForBoundary(int32 OwnerID, USkeletalMeshComponent* SkelMesh)
+void FKawaiiFluidSimulator::RegisterSkeletalMeshForBoundary(int32 OwnerID, USkeletalMeshComponent* SkelMesh)
 {
 	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->RegisterSkeletalMeshReference(OwnerID, SkelMesh); }
 }
 
-void FGPUFluidSimulator::RefreshAllBoneTransforms()
+void FKawaiiFluidSimulator::RefreshAllBoneTransforms()
 {
 	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->RefreshAllBoneTransforms(); }
 }
 
-void FGPUFluidSimulator::UpdateBoundaryOwnerAABB(int32 OwnerID, const FGPUBoundaryOwnerAABB& AABB)
+void FKawaiiFluidSimulator::UpdateBoundaryOwnerAABB(int32 OwnerID, const FGPUBoundaryOwnerAABB& AABB)
 {
 	if (bIsInitialized && BoundarySkinningManager.IsValid()) { BoundarySkinningManager->UpdateBoundaryOwnerAABB(OwnerID, AABB); }
 }
 
-void FGPUFluidSimulator::RemoveBoundarySkinningData(int32 OwnerID)
+void FKawaiiFluidSimulator::RemoveBoundarySkinningData(int32 OwnerID)
 {
 	if (BoundarySkinningManager.IsValid()) { BoundarySkinningManager->RemoveBoundarySkinningData(OwnerID); }
 }
 
-void FGPUFluidSimulator::ClearAllBoundarySkinningData()
+void FKawaiiFluidSimulator::ClearAllBoundarySkinningData()
 {
 	if (BoundarySkinningManager.IsValid()) { BoundarySkinningManager->ClearAllBoundarySkinningData(); }
 }
@@ -2486,7 +2486,7 @@ void FGPUFluidSimulator::ClearAllBoundarySkinningData()
 // Static Boundary Particles
 //=============================================================================
 
-void FGPUFluidSimulator::GenerateStaticBoundaryParticles(float SmoothingRadius, float RestDensity)
+void FKawaiiFluidSimulator::GenerateStaticBoundaryParticles(float SmoothingRadius, float RestDensity)
 {
 	if (!bIsInitialized || !StaticBoundaryManager.IsValid() || !CollisionManager.IsValid())
 	{
@@ -2527,7 +2527,7 @@ void FGPUFluidSimulator::GenerateStaticBoundaryParticles(float SmoothingRadius, 
 	// If not changed, GPU already has the correct data - skip upload
 }
 
-void FGPUFluidSimulator::ClearStaticBoundaryParticles()
+void FKawaiiFluidSimulator::ClearStaticBoundaryParticles()
 {
 	// Clear StaticBoundaryManager
 	if (StaticBoundaryManager.IsValid())
@@ -2545,7 +2545,7 @@ void FGPUFluidSimulator::ClearStaticBoundaryParticles()
 	KF_LOG_DEV(Log, TEXT("Static boundary particles cleared"));
 }
 
-void FGPUFluidSimulator::AddBoundaryAdhesionPass(FRDGBuilder& GraphBuilder, const FSimulationSpatialData& SpatialData, const FGPUFluidSimulationParams& Params)
+void FKawaiiFluidSimulator::AddBoundaryAdhesionPass(FRDGBuilder& GraphBuilder, const FKawaiiFluidSpatialData& SpatialData, const FGPUFluidSimulationParams& Params)
 {
 	if (BoundarySkinningManager.IsValid())
 	{
@@ -2596,7 +2596,7 @@ void FGPUFluidSimulator::AddBoundaryAdhesionPass(FRDGBuilder& GraphBuilder, cons
 	}
 }
 
-void FGPUFluidSimulator::AddBoundarySkinningPass(FRDGBuilder& GraphBuilder, FSimulationSpatialData& SpatialData, const FGPUFluidSimulationParams& Params)
+void FKawaiiFluidSimulator::AddBoundarySkinningPass(FRDGBuilder& GraphBuilder, FKawaiiFluidSpatialData& SpatialData, const FGPUFluidSimulationParams& Params)
 {
 	if (BoundarySkinningManager.IsValid())
 	{
@@ -2618,7 +2618,7 @@ void FGPUFluidSimulator::AddBoundarySkinningPass(FRDGBuilder& GraphBuilder, FSim
 // Bone Delta Attachment Buffer Management (NEW simplified bone-following)
 //=============================================================================
 
-FRDGBufferRef FGPUFluidSimulator::EnsureBoneDeltaAttachmentBuffer(
+FRDGBufferRef FKawaiiFluidSimulator::EnsureBoneDeltaAttachmentBuffer(
 	FRDGBuilder& GraphBuilder,
 	int32 RequiredCapacity)
 {
@@ -2688,7 +2688,7 @@ FRDGBufferRef FGPUFluidSimulator::EnsureBoneDeltaAttachmentBuffer(
 // Z-Order Sorting (Delegated to FGPUZOrderSortManager)
 //=============================================================================
 
-FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
+FRDGBufferRef FKawaiiFluidSimulator::ExecuteZOrderSortingPipeline(
 	FRDGBuilder& GraphBuilder, FRDGBufferRef InParticleBuffer,
 	FRDGBufferUAVRef& OutCellStartUAV, FRDGBufferSRVRef& OutCellStartSRV,
 	FRDGBufferUAVRef& OutCellEndUAV, FRDGBufferSRVRef& OutCellEndSRV,
@@ -2715,7 +2715,7 @@ FRDGBufferRef FGPUFluidSimulator::ExecuteZOrderSortingPipeline(
 // Data Transfer (CPU <-> GPU)
 //=============================================================================
 
-FGPUFluidParticle FGPUFluidSimulator::ConvertToGPU(const FKawaiiFluidParticle& CPUParticle)
+FGPUFluidParticle FKawaiiFluidSimulator::ConvertToGPU(const FKawaiiFluidParticle& CPUParticle)
 {
 	FGPUFluidParticle GPUParticle;
 
@@ -2755,7 +2755,7 @@ FGPUFluidParticle FGPUFluidSimulator::ConvertToGPU(const FKawaiiFluidParticle& C
 	return GPUParticle;
 }
 
-void FGPUFluidSimulator::ConvertFromGPU(FKawaiiFluidParticle& OutCPUParticle, const FGPUFluidParticle& GPUParticle)
+void FKawaiiFluidSimulator::ConvertFromGPU(FKawaiiFluidParticle& OutCPUParticle, const FGPUFluidParticle& GPUParticle)
 {
 	// Safety check: validate GPU data before converting
 	// If data is NaN or invalid, keep the original CPU values
@@ -2794,7 +2794,7 @@ void FGPUFluidSimulator::ConvertFromGPU(FKawaiiFluidParticle& OutCPUParticle, co
 	OutCPUParticle.bNearBoundary = (GPUParticle.Flags & EGPUParticleFlags::NearBoundary) != 0;
 }
 
-void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPUParticles, bool bAppend)
+void FKawaiiFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPUParticles, bool bAppend)
 {
 	if (!bIsInitialized)
 	{
@@ -2912,7 +2912,7 @@ void FGPUFluidSimulator::UploadParticles(const TArray<FKawaiiFluidParticle>& CPU
 	}
 }
 
-void FGPUFluidSimulator::FinalizeUpload()
+void FKawaiiFluidSimulator::FinalizeUpload()
 {
 	TArray<FGPUFluidParticle> ParticlesCopy;
 	int32 ParticleCount = 0;
@@ -2970,7 +2970,7 @@ void FGPUFluidSimulator::FinalizeUpload()
 
 	// Initialize PersistentParticleCountBuffer with upload count
 	{
-		FGPUFluidSimulator* Self = this;
+		FKawaiiFluidSimulator* Self = this;
 		const int32 UploadCount = ParticleCount;
 		ENQUEUE_RENDER_COMMAND(InitParticleCountBuffer)(
 			[Self, UploadCount](FRHICommandListImmediate& RHICmdList)
@@ -3000,7 +3000,7 @@ void FGPUFluidSimulator::FinalizeUpload()
 	}
 }
 
-void FGPUFluidSimulator::ClearCachedParticles()
+void FKawaiiFluidSimulator::ClearCachedParticles()
 {
 	FScopeLock Lock(&BufferLock);
 
@@ -3012,7 +3012,7 @@ void FGPUFluidSimulator::ClearCachedParticles()
 	KF_LOG_DEV(Log, TEXT("ClearCachedParticles: Cleared cached particles"));
 }
 
-void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
+void FKawaiiFluidSimulator::CreateImmediatePersistentBuffer()
 {
 	if (CachedGPUParticles.Num() == 0)
 	{
@@ -3023,7 +3023,7 @@ void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
 
 	// Prepare data to copy to render thread
 	TArray<FGPUFluidParticle> ParticlesCopy = CachedGPUParticles;
-	FGPUFluidSimulator* Self = this;
+	FKawaiiFluidSimulator* Self = this;
 
 	ENQUEUE_RENDER_COMMAND(CreateImmediatePersistentBuffer)(
 		[Self, ParticlesCopy = MoveTemp(ParticlesCopy)](FRHICommandListImmediate& RHICmdList)
@@ -3068,14 +3068,14 @@ void FGPUFluidSimulator::CreateImmediatePersistentBuffer()
 	FlushRenderingCommands();
 }
 
-void FGPUFluidSimulator::CreateImmediatePersistentBufferFromCopy(const TArray<FGPUFluidParticle>& InParticles, int32 InParticleCount)
+void FKawaiiFluidSimulator::CreateImmediatePersistentBufferFromCopy(const TArray<FGPUFluidParticle>& InParticles, int32 InParticleCount)
 {
 	if (InParticleCount == 0)
 	{
 		return;
 	}
 
-	FGPUFluidSimulator* Self = this;
+	FKawaiiFluidSimulator* Self = this;
 	const int32 ParticleCount = InParticleCount;
 
 	// Copy for use in lambda (copy from const ref)
@@ -3123,7 +3123,7 @@ void FGPUFluidSimulator::CreateImmediatePersistentBufferFromCopy(const TArray<FG
 	FlushRenderingCommands();
 }
 
-void FGPUFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUParticles)
+void FKawaiiFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUParticles)
 {
 	if (!bIsInitialized || CurrentParticleCount == 0)
 	{
@@ -3268,7 +3268,7 @@ void FGPUFluidSimulator::DownloadParticles(TArray<FKawaiiFluidParticle>& OutCPUP
 	KF_LOG_DEV(Verbose, TEXT("DownloadParticles: Updated %d/%d particles"), UpdatedCount, Count);
 }
 
-bool FGPUFluidSimulator::GetAllGPUParticles(TArray<FKawaiiFluidParticle>& OutParticles)
+bool FKawaiiFluidSimulator::GetAllGPUParticles(TArray<FKawaiiFluidParticle>& OutParticles)
 {
 	if (!bIsInitialized || CurrentParticleCount == 0)
 	{
@@ -3285,7 +3285,7 @@ bool FGPUFluidSimulator::GetAllGPUParticles(TArray<FKawaiiFluidParticle>& OutPar
 	return GetAllGPUParticlesSync(OutParticles);
 }
 
-bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FKawaiiFluidParticle>& OutParticles)
+bool FKawaiiFluidSimulator::GetAllGPUParticlesSync(TArray<FKawaiiFluidParticle>& OutParticles)
 {
 	if (!bIsInitialized || CurrentParticleCount == 0)
 	{
@@ -3307,7 +3307,7 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FKawaiiFluidParticle>& Ou
 	SyncReadbackBuffer.SetNum(Count);
 
 	// Perform synchronous readback on render thread
-	FGPUFluidSimulator* Self = this;
+	FKawaiiFluidSimulator* Self = this;
 	FGPUFluidParticle* DestPtr = SyncReadbackBuffer.GetData();
 	const int32 DataSize = Count * sizeof(FGPUFluidParticle);
 
@@ -3388,7 +3388,7 @@ bool FGPUFluidSimulator::GetAllGPUParticlesSync(TArray<FKawaiiFluidParticle>& Ou
 	return true;
 }
 
-bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FKawaiiFluidParticle>& OutParticles)
+bool FKawaiiFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FKawaiiFluidParticle>& OutParticles)
 {
 	OutParticles.Reset();
 
@@ -3514,9 +3514,9 @@ bool FGPUFluidSimulator::GetParticlesBySourceID(int32 SourceID, TArray<FKawaiiFl
 // Collision System (Delegated to FGPUCollisionManager)
 //=============================================================================
 
-void FGPUFluidSimulator::AddBoundsCollisionPass(
+void FKawaiiFluidSimulator::AddBoundsCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
 	// Skip bounds collision when bSkipBoundsCollision is set
@@ -3533,9 +3533,9 @@ void FGPUFluidSimulator::AddBoundsCollisionPass(
 	}
 }
 
-void FGPUFluidSimulator::AddPrimitiveCollisionPass(
+void FKawaiiFluidSimulator::AddPrimitiveCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
 	if (CollisionManager.IsValid())
@@ -3544,9 +3544,9 @@ void FGPUFluidSimulator::AddPrimitiveCollisionPass(
 	}
 }
 
-void FGPUFluidSimulator::AddHeightmapCollisionPass(
+void FKawaiiFluidSimulator::AddHeightmapCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
 	if (CollisionManager.IsValid())
@@ -3555,7 +3555,7 @@ void FGPUFluidSimulator::AddHeightmapCollisionPass(
 	}
 }
 
-void FGPUFluidSimulator::AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList)
 {
 	if (CollisionManager.IsValid())
 	{
@@ -3563,12 +3563,12 @@ void FGPUFluidSimulator::AllocateCollisionFeedbackBuffers(FRHICommandListImmedia
 	}
 }
 
-void FGPUFluidSimulator::ReleaseCollisionFeedbackBuffers()
+void FKawaiiFluidSimulator::ReleaseCollisionFeedbackBuffers()
 {
 	// Handled by CollisionManager::Release()
 }
 
-void FGPUFluidSimulator::ProcessCollisionFeedbackReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::ProcessCollisionFeedbackReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (CollisionManager.IsValid())
 	{
@@ -3576,7 +3576,7 @@ void FGPUFluidSimulator::ProcessCollisionFeedbackReadback(FRHICommandListImmedia
 	}
 }
 
-void FGPUFluidSimulator::ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (CollisionManager.IsValid())
 	{
@@ -3592,7 +3592,7 @@ void FGPUFluidSimulator::ProcessColliderContactCountReadback(FRHICommandListImme
  * @brief Allocate anisotropy readback objects for async GPU→CPU transfer.
  * @param RHICmdList RHI command list.
  */
-void FGPUFluidSimulator::AllocateAnisotropyReadbackObjects(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::AllocateAnisotropyReadbackObjects(FRHICommandListImmediate& RHICmdList)
 {
 	for (int32 i = 0; i < NUM_ANISOTROPY_READBACK_BUFFERS; ++i)
 	{
@@ -3616,7 +3616,7 @@ void FGPUFluidSimulator::AllocateAnisotropyReadbackObjects(FRHICommandListImmedi
 /**
  * @brief Release anisotropy readback objects.
  */
-void FGPUFluidSimulator::ReleaseAnisotropyReadbackObjects()
+void FKawaiiFluidSimulator::ReleaseAnisotropyReadbackObjects()
 {
 	for (int32 i = 0; i < NUM_ANISOTROPY_READBACK_BUFFERS; ++i)
 	{
@@ -3645,7 +3645,7 @@ void FGPUFluidSimulator::ReleaseAnisotropyReadbackObjects()
  * @param OutPositions Output array of particle positions (FVector).
  * @return true if valid positions were retrieved.
  */
-bool FGPUFluidSimulator::GetShadowPositions(TArray<FVector>& OutPositions) const
+bool FKawaiiFluidSimulator::GetShadowPositions(TArray<FVector>& OutPositions) const
 {
 	if (ReadyShadowPositionsFrame.load() == 0 || ReadyShadowPositions.Num() == 0)
 	{
@@ -3672,7 +3672,7 @@ bool FGPUFluidSimulator::GetShadowPositions(TArray<FVector>& OutPositions) const
  * @param OutVelocities Output array of particle velocities.
  * @return true if valid data was retrieved.
  */
-bool FGPUFluidSimulator::GetShadowPositionsAndVelocities(TArray<FVector>& OutPositions, TArray<FVector>& OutVelocities) const
+bool FKawaiiFluidSimulator::GetShadowPositionsAndVelocities(TArray<FVector>& OutPositions, TArray<FVector>& OutVelocities) const
 {
 	if (ReadyShadowPositionsFrame.load() == 0 || ReadyShadowPositions.Num() == 0)
 	{
@@ -3709,7 +3709,7 @@ bool FGPUFluidSimulator::GetShadowPositionsAndVelocities(TArray<FVector>& OutPos
  * @param OutNeighborCounts Output array of neighbor counts per particle.
  * @return true if valid data was retrieved.
  */
-bool FGPUFluidSimulator::GetShadowNeighborCounts(TArray<int32>& OutNeighborCounts) const
+bool FKawaiiFluidSimulator::GetShadowNeighborCounts(TArray<int32>& OutNeighborCounts) const
 {
 	if (ReadyShadowPositionsFrame.load() == 0 || ReadyShadowNeighborCounts.Num() == 0)
 	{
@@ -3735,7 +3735,7 @@ bool FGPUFluidSimulator::GetShadowNeighborCounts(TArray<int32>& OutNeighborCount
  * @param RHICmdList RHI command list.
  * @param ParticleCount Number of particles to read back.
  */
-void FGPUFluidSimulator::EnqueueAnisotropyReadback(FRHICommandListImmediate& RHICmdList, int32 ParticleCount)
+void FKawaiiFluidSimulator::EnqueueAnisotropyReadback(FRHICommandListImmediate& RHICmdList, int32 ParticleCount)
 {
 	if (!bAnisotropyReadbackEnabled.load() || ParticleCount <= 0)
 	{
@@ -3805,7 +3805,7 @@ void FGPUFluidSimulator::EnqueueAnisotropyReadback(FRHICommandListImmediate& RHI
 /**
  * @brief Process anisotropy readback - check for completion and copy to ready buffer.
  */
-void FGPUFluidSimulator::ProcessAnisotropyReadback()
+void FKawaiiFluidSimulator::ProcessAnisotropyReadback()
 {
 	if (!bAnisotropyReadbackEnabled.load())
 	{
@@ -3881,7 +3881,7 @@ void FGPUFluidSimulator::ProcessAnisotropyReadback()
 // Stats/Recycle Readback Implementation (Async GPU→CPU for ParticleID-based operations)
 //=============================================================================
 
-void FGPUFluidSimulator::AllocateStatsReadbackObjects(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::AllocateStatsReadbackObjects(FRHICommandListImmediate& RHICmdList)
 {
 	for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
 	{
@@ -3896,7 +3896,7 @@ void FGPUFluidSimulator::AllocateStatsReadbackObjects(FRHICommandListImmediate& 
 	KF_LOG_DEV(Log, TEXT("Stats readback objects allocated (NumBuffers=%d)"), NUM_STATS_READBACK_BUFFERS);
 }
 
-void FGPUFluidSimulator::ReleaseStatsReadbackObjects()
+void FKawaiiFluidSimulator::ReleaseStatsReadbackObjects()
 {
 	for (int32 i = 0; i < NUM_STATS_READBACK_BUFFERS; ++i)
 	{
@@ -3912,7 +3912,7 @@ void FGPUFluidSimulator::ReleaseStatsReadbackObjects()
 	StatsReadbackWriteIndex = 0;
 }
 
-void FGPUFluidSimulator::EnqueueStatsReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount, bool bCompactMode)
+void FKawaiiFluidSimulator::EnqueueStatsReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount, bool bCompactMode)
 {
 	if (ParticleCount <= 0 || SourceBuffer == nullptr)
 	{
@@ -3950,7 +3950,7 @@ void FGPUFluidSimulator::EnqueueStatsReadback(FRHICommandListImmediate& RHICmdLi
 	bStatsReadbackCompactMode[WriteIdx] = bCompactMode;
 }
 
-void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (StatsReadbacks[0] == nullptr)
 	{
@@ -4323,7 +4323,7 @@ void FGPUFluidSimulator::ProcessStatsReadback(FRHICommandListImmediate& RHICmdLi
  * @param OutAnisotropyAxis3 Output array of third ellipsoid axis.
  * @return true if valid data was retrieved.
  */
-bool FGPUFluidSimulator::GetShadowDataWithAnisotropy(
+bool FKawaiiFluidSimulator::GetShadowDataWithAnisotropy(
 	TArray<FVector>& OutPositions,
 	TArray<FVector>& OutVelocities,
 	TArray<FVector4>& OutAnisotropyAxis1,
@@ -4389,7 +4389,7 @@ bool FGPUFluidSimulator::GetShadowDataWithAnisotropy(
 // Debug Z-Order Index Readback Implementation (Async GPU→CPU)
 //=============================================================================
 
-void FGPUFluidSimulator::AllocateDebugIndexReadbackObjects(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::AllocateDebugIndexReadbackObjects(FRHICommandListImmediate& RHICmdList)
 {
 	for (int32 i = 0; i < NUM_DEBUG_INDEX_READBACK_BUFFERS; ++i)
 	{
@@ -4404,7 +4404,7 @@ void FGPUFluidSimulator::AllocateDebugIndexReadbackObjects(FRHICommandListImmedi
 	KF_LOG_DEV(Log, TEXT("Debug Z-Order index readback objects allocated (NumBuffers=%d)"), NUM_DEBUG_INDEX_READBACK_BUFFERS);
 }
 
-void FGPUFluidSimulator::ReleaseDebugIndexReadbackObjects()
+void FKawaiiFluidSimulator::ReleaseDebugIndexReadbackObjects()
 {
 	for (int32 i = 0; i < NUM_DEBUG_INDEX_READBACK_BUFFERS; ++i)
 	{
@@ -4419,7 +4419,7 @@ void FGPUFluidSimulator::ReleaseDebugIndexReadbackObjects()
 	DebugIndexReadbackWriteIndex = 0;
 }
 
-void FGPUFluidSimulator::EnqueueDebugIndexReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount)
+void FKawaiiFluidSimulator::EnqueueDebugIndexReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer, int32 ParticleCount)
 {
 	if (ParticleCount <= 0 || SourceBuffer == nullptr)
 	{
@@ -4456,7 +4456,7 @@ void FGPUFluidSimulator::EnqueueDebugIndexReadback(FRHICommandListImmediate& RHI
 	DebugIndexReadbackParticleCounts[WriteIdx] = ParticleCount;
 }
 
-void FGPUFluidSimulator::ProcessDebugIndexReadback()
+void FKawaiiFluidSimulator::ProcessDebugIndexReadback()
 {
 	if (DebugIndexReadbacks[0] == nullptr)
 	{
@@ -4516,7 +4516,7 @@ void FGPUFluidSimulator::ProcessDebugIndexReadback()
 	DebugIndexReadbackFrameNumbers[ReadIdx] = 0;
 }
 
-void FGPUFluidSimulator::AddRecordZOrderIndicesPass(FRDGBuilder& GraphBuilder, FRDGBufferRef ParticleBuffer, int32 ParticleCount)
+void FKawaiiFluidSimulator::AddRecordZOrderIndicesPass(FRDGBuilder& GraphBuilder, FRDGBufferRef ParticleBuffer, int32 ParticleCount)
 {
 	// Allocate or register persistent debug index buffer
 	FRDGBufferRef DebugIndexBuffer = nullptr;
@@ -4568,7 +4568,7 @@ void FGPUFluidSimulator::AddRecordZOrderIndicesPass(FRDGBuilder& GraphBuilder, F
 		});
 }
 
-bool FGPUFluidSimulator::GetZOrderArrayIndices(TArray<int32>& OutIndices) const
+bool FKawaiiFluidSimulator::GetZOrderArrayIndices(TArray<int32>& OutIndices) const
 {
 	// Check if data is ready
 	if (ReadyZOrderIndicesFrame.load() == 0 || CachedZOrderArrayIndices.Num() == 0)
@@ -4586,7 +4586,7 @@ bool FGPUFluidSimulator::GetZOrderArrayIndices(TArray<int32>& OutIndices) const
 // Used to expand world collision query bounds in Unlimited Simulation Range mode
 //=============================================================================
 
-void FGPUFluidSimulator::AllocateParticleBoundsReadbackObjects(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidSimulator::AllocateParticleBoundsReadbackObjects(FRHICommandListImmediate& RHICmdList)
 {
 	for (int32 i = 0; i < NUM_PARTICLE_BOUNDS_READBACK_BUFFERS; ++i)
 	{
@@ -4600,7 +4600,7 @@ void FGPUFluidSimulator::AllocateParticleBoundsReadbackObjects(FRHICommandListIm
 	KF_LOG_DEV(Log, TEXT("Particle bounds readback objects allocated (NumBuffers=%d)"), NUM_PARTICLE_BOUNDS_READBACK_BUFFERS);
 }
 
-void FGPUFluidSimulator::ReleaseParticleBoundsReadbackObjects()
+void FKawaiiFluidSimulator::ReleaseParticleBoundsReadbackObjects()
 {
 	for (int32 i = 0; i < NUM_PARTICLE_BOUNDS_READBACK_BUFFERS; ++i)
 	{
@@ -4616,7 +4616,7 @@ void FGPUFluidSimulator::ReleaseParticleBoundsReadbackObjects()
 	ReadyParticleBoundsFrame.store(0);
 }
 
-void FGPUFluidSimulator::EnqueueParticleBoundsReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer)
+void FKawaiiFluidSimulator::EnqueueParticleBoundsReadback(FRHICommandListImmediate& RHICmdList, FRHIBuffer* SourceBuffer)
 {
 	if (SourceBuffer == nullptr)
 	{
@@ -4650,7 +4650,7 @@ void FGPUFluidSimulator::EnqueueParticleBoundsReadback(FRHICommandListImmediate&
 	ParticleBoundsReadbackFrameNumbers[WriteIdx] = GFrameCounterRenderThread;
 }
 
-void FGPUFluidSimulator::ProcessParticleBoundsReadback()
+void FKawaiiFluidSimulator::ProcessParticleBoundsReadback()
 {
 	if (ParticleBoundsReadbacks[0] == nullptr)
 	{

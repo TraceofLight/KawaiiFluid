@@ -27,8 +27,8 @@
 // Unified interface
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Core/KawaiiFluidRenderParticle.h"
-#include "Simulation/GPUFluidSimulator.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/KawaiiFluidSimulator.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "RHIGPUReadback.h"  // FRHIGPUBufferReadback for particle bounds readback
 #include "Rendering/Passes/KawaiiFluidDepthPass.h"
 
@@ -175,7 +175,7 @@ void FKawaiiFluidSceneViewExtension::PreRenderViewFamily_RenderThread(
 		ProcessedResources.Add(RenderResource);
 
 		// GPU-only: Extract buffers from GPUSimulator
-		FGPUFluidSimulator* GPUSimulator = RenderResource->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = RenderResource->GetGPUSimulator();
 		const float ParticleRadius = RenderResource->GetUnifiedParticleRadius();
 
 		if (!GPUSimulator)

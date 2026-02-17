@@ -6,7 +6,7 @@
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidPresetDataAsset.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Engine/StaticMesh.h"
 
 UKawaiiFluidProxyRenderer::UKawaiiFluidProxyRenderer()
@@ -113,7 +113,7 @@ void UKawaiiFluidProxyRenderer::UpdateRendering(const IKawaiiFluidDataProvider* 
 	if (DataProvider->IsGPUSimulationActive())
 	{
 		// GPU mode: Use lightweight readback API (Position + Velocity only)
-		FGPUFluidSimulator* Simulator = DataProvider->GetGPUSimulator();
+		FKawaiiFluidSimulator* Simulator = DataProvider->GetGPUSimulator();
 		if (Simulator)
 		{
 			// Enable velocity readback for Proxy rendering

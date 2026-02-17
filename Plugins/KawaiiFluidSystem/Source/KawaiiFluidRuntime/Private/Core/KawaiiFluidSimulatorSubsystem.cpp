@@ -13,7 +13,7 @@
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "Simulation/Collision/KawaiiFluidCollider.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Engine/Level.h"
 #include "Engine/World.h"
 
@@ -486,7 +486,7 @@ UKawaiiFluidSimulationModule* UKawaiiFluidSimulatorSubsystem::GetModuleBySourceI
  * @brief Collect all active GPU simulator instances for deferred execution.
  * @param OutSimulators Array to be populated with simulator pointers.
  */
-void UKawaiiFluidSimulatorSubsystem::GetAllGPUSimulators(TArray<FGPUFluidSimulator*>& OutSimulators) const
+void UKawaiiFluidSimulatorSubsystem::GetAllGPUSimulators(TArray<FKawaiiFluidSimulator*>& OutSimulators) const
 {
 	OutSimulators.Reset();
 
@@ -494,7 +494,7 @@ void UKawaiiFluidSimulatorSubsystem::GetAllGPUSimulators(TArray<FGPUFluidSimulat
 	{
 		if (UKawaiiFluidSimulationContext* Context = Pair.Value)
 		{
-			if (FGPUFluidSimulator* Simulator = Context->GetGPUSimulator())
+			if (FKawaiiFluidSimulator* Simulator = Context->GetGPUSimulator())
 			{
 				OutSimulators.AddUnique(Simulator);
 			}
@@ -503,7 +503,7 @@ void UKawaiiFluidSimulatorSubsystem::GetAllGPUSimulators(TArray<FGPUFluidSimulat
 
 	if (DefaultContext)
 	{
-		if (FGPUFluidSimulator* Simulator = DefaultContext->GetGPUSimulator())
+		if (FKawaiiFluidSimulator* Simulator = DefaultContext->GetGPUSimulator())
 		{
 			OutSimulators.AddUnique(Simulator);
 		}
@@ -623,7 +623,7 @@ void UKawaiiFluidSimulatorSubsystem::SimulateBatchedFluidComponents(float DeltaT
 
 		if (Context->IsGPUSimulatorReady())
 		{
-			TSharedPtr<FGPUFluidSimulator> BatchGPUSimulator = Context->GetGPUSimulatorShared();
+			TSharedPtr<FKawaiiFluidSimulator> BatchGPUSimulator = Context->GetGPUSimulatorShared();
 			for (UKawaiiFluidSimulationModule* Module : Modules)
 			{
 				if (Module)

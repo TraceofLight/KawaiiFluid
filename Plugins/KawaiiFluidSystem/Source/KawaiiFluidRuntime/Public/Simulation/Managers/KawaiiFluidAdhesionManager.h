@@ -6,7 +6,7 @@
 #include "RenderGraphResources.h"
 #include "RHIResources.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/Resources/GPUFluidSpatialData.h"
+#include "Simulation/Resources/KawaiiFluidSpatialData.h"
 
 class FRHICommandListImmediate;
 class FRDGBuilder;
@@ -66,7 +66,7 @@ public:
 
 	void AddAdhesionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		FRDGBufferUAVRef AttachmentUAV,
 		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
@@ -75,7 +75,7 @@ public:
 
 	void AddUpdateAttachedPositionsPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		FRDGBufferUAVRef AttachmentUAV,
 		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
@@ -84,13 +84,13 @@ public:
 
 	void AddClearDetachedFlagPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		int32 CurrentParticleCount,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	void AddStackPressurePass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		FRDGBufferSRVRef AttachmentSRV,
 		FRDGBufferSRVRef CellCountsSRV,
 		FRDGBufferSRVRef ParticleIndicesSRV,

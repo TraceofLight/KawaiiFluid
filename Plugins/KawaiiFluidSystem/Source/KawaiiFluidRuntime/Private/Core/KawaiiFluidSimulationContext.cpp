@@ -18,7 +18,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Async/Async.h"
 #include "RenderingThread.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
 #include "Rendering/Resources/KawaiiFluidRenderResource.h"
 #include "Engine/EngineTypes.h"
@@ -401,7 +401,7 @@ void UKawaiiFluidSimulationContext::InitializeGPUSimulator(int32 MaxParticleCoun
 		return;
 	}
 
-	GPUSimulator = MakeShared<FGPUFluidSimulator>();
+	GPUSimulator = MakeShared<FKawaiiFluidSimulator>();
 	GPUSimulator->Initialize(MaxParticleCount);
 
 	KF_LOG_DEV(Log, TEXT("GPU Fluid Simulator initialized with capacity: %d"), MaxParticleCount);

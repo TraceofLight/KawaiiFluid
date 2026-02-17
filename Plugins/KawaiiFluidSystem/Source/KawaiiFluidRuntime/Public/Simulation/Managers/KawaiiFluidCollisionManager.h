@@ -7,7 +7,7 @@
 #include "RenderGraphResources.h"
 #include "RHIResources.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/Resources/GPUFluidSpatialData.h"
+#include "Simulation/Resources/KawaiiFluidSpatialData.h"
 #include "Simulation/Managers/KawaiiFluidCollisionFeedbackManager.h"
 
 class FRHICommandListImmediate;
@@ -90,21 +90,21 @@ public:
 
 	void AddBoundsCollisionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		int32 ParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	void AddPrimitiveCollisionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		int32 ParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	void AddHeightmapCollisionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		int32 ParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);

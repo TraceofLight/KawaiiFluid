@@ -1,8 +1,8 @@
 ﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Simulation/Shaders/FluidAnisotropyComputeShader.h"
+#include "Simulation/Shaders/KawaiiFluidAnisotropyComputeShader.h"
 #include "Simulation/Resources/GPUFluidParticle.h"  // Contains FGPUBoundaryParticle, FGPUCollisionSphere, FGPUCollisionCapsule, FGPUCollisionBox
-#include "Simulation/Parameters/GPUBoundaryAttachment.h"  // Contains FGPUBoneDeltaAttachment
+#include "Simulation/Resources/GPUBoneDeltaAttachment.h"  // Contains FGPUBoneDeltaAttachment
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ShaderParameterUtils.h"

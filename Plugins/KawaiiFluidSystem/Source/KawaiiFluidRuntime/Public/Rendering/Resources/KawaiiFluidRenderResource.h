@@ -9,7 +9,7 @@
 #include "Core/KawaiiFluidRenderParticle.h"
 #include <atomic>
 
-class FGPUFluidSimulator;
+class FKawaiiFluidSimulator;
 class FRDGBuilder;
 
 /**
@@ -100,11 +100,11 @@ public:
 	// GPU simulator interface
 	//========================================
 
-	void SetGPUSimulatorReference(FGPUFluidSimulator* InSimulator, int32 InMaxParticleCount, float InParticleRadius);
+	void SetGPUSimulatorReference(FKawaiiFluidSimulator* InSimulator, int32 InMaxParticleCount, float InParticleRadius);
 
 	void ClearGPUSimulatorReference();
 
-	FGPUFluidSimulator* GetGPUSimulator() const { return CachedGPUSimulator; }
+	FKawaiiFluidSimulator* GetGPUSimulator() const { return CachedGPUSimulator; }
 
 	bool HasGPUSimulator() const { return CachedGPUSimulator != nullptr; }
 
@@ -201,7 +201,7 @@ private:
 	// GPU simulator reference
 	//========================================
 
-	std::atomic<FGPUFluidSimulator*> CachedGPUSimulator{nullptr};
+	std::atomic<FKawaiiFluidSimulator*> CachedGPUSimulator{nullptr};
 
 	std::atomic<float> CachedParticleRadius{10.0f};
 

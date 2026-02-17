@@ -3,7 +3,7 @@
 #include "Simulation/Managers/KawaiiFluidAdhesionManager.h"
 #include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Managers/KawaiiFluidCollisionManager.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -83,7 +83,7 @@ void FKawaiiFluidAdhesionManager::Release()
  */
 void FKawaiiFluidAdhesionManager::AddAdhesionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	FRDGBufferUAVRef AttachmentUAV,
 	FKawaiiFluidCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
@@ -261,7 +261,7 @@ void FKawaiiFluidAdhesionManager::AddAdhesionPass(
  */
 void FKawaiiFluidAdhesionManager::AddUpdateAttachedPositionsPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	FRDGBufferUAVRef AttachmentUAV,
 	FKawaiiFluidCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
@@ -435,7 +435,7 @@ void FKawaiiFluidAdhesionManager::AddUpdateAttachedPositionsPass(
  */
 void FKawaiiFluidAdhesionManager::AddClearDetachedFlagPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 CurrentParticleCount,
 	FRDGBufferRef IndirectArgsBuffer)
 {
@@ -496,7 +496,7 @@ void FKawaiiFluidAdhesionManager::AddClearDetachedFlagPass(
  */
 void FKawaiiFluidAdhesionManager::AddStackPressurePass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	FRDGBufferSRVRef InAttachmentSRV,
 	FRDGBufferSRVRef InCellCountsSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,

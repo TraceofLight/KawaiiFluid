@@ -6,7 +6,7 @@
 #include "RenderGraphResources.h"
 #include "RHIResources.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/Resources/GPUFluidSpatialData.h"
+#include "Simulation/Resources/KawaiiFluidSpatialData.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
 
 class USkeletalMeshComponent;
@@ -176,7 +176,7 @@ public:
 
 	void AddBoundaryAdhesionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef InSameFrameBoundaryBuffer = nullptr,
