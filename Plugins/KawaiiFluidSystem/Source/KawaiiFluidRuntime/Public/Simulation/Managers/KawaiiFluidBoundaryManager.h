@@ -6,14 +6,14 @@
 #include "RenderGraphResources.h"
 #include "RHIResources.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/Resources/GPUFluidSpatialData.h"
+#include "Simulation/Resources/KawaiiFluidSpatialData.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
 
 class USkeletalMeshComponent;
 class FRDGBuilder;
 
 /**
- * @class FGPUBoundarySkinningManager
+ * @class FKawaiiFluidBoundaryManager
  * @brief Manages GPU-based boundary skinning for Flex-style adhesion.
  *
  * @param bIsInitialized State of the manager.
@@ -54,11 +54,11 @@ class FRDGBuilder;
  * @param ActiveSnapshot Currently active snapshot for simulation.
  * @param BoundarySkinningLock Critical section for thread-safe access.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUBoundarySkinningManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidBoundaryManager
 {
 public:
-	FGPUBoundarySkinningManager();
-	~FGPUBoundarySkinningManager();
+	FKawaiiFluidBoundaryManager();
+	~FKawaiiFluidBoundaryManager();
 
 	//=========================================================================
 	// Lifecycle
@@ -176,7 +176,7 @@ public:
 
 	void AddBoundaryAdhesionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef InSameFrameBoundaryBuffer = nullptr,

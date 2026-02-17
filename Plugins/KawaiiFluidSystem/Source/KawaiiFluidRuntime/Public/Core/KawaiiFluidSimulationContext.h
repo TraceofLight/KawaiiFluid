@@ -17,7 +17,7 @@ class FKawaiiFluidDensityConstraint;
 class FKawaiiFluidViscositySolver;
 class FKawaiiFluidAdhesionSolver;
 class FKawaiiFluidStackPressureSolver;
-class FGPUFluidSimulator;
+class FKawaiiFluidSimulator;
 class FKawaiiFluidRenderResource;
 struct FGPUFluidSimulationParams;
 
@@ -70,9 +70,9 @@ public:
 
 	bool IsGPUSimulatorReady() const;
 
-	FGPUFluidSimulator* GetGPUSimulator() const { return GPUSimulator.Get(); }
+	FKawaiiFluidSimulator* GetGPUSimulator() const { return GPUSimulator.Get(); }
 
-	TSharedPtr<FGPUFluidSimulator> GetGPUSimulatorShared() const { return GPUSimulator; }
+	TSharedPtr<FKawaiiFluidSimulator> GetGPUSimulatorShared() const { return GPUSimulator; }
 
 	UKawaiiFluidPresetDataAsset* GetCachedPreset() const { return CachedPreset.Get(); }
 
@@ -258,7 +258,7 @@ protected:
 	// GPU Simulation
 	//========================================
 
-	TSharedPtr<FGPUFluidSimulator> GPUSimulator;
+	TSharedPtr<FKawaiiFluidSimulator> GPUSimulator;
 
 	//========================================
 	// Render Resource

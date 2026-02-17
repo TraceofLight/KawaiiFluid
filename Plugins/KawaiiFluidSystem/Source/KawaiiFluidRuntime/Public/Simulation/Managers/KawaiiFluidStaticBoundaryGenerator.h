@@ -13,7 +13,7 @@
 #include "Simulation/Resources/GPUFluidParticle.h"
 
 /**
- * @class FGPUStaticBoundaryManager
+ * @class FKawaiiFluidStaticBoundaryGenerator
  * @brief Generates boundary particles on static mesh colliders for density contribution.
  * 
  * @param bIsInitialized State of the manager.
@@ -28,11 +28,11 @@
  * @param CachedParticleSpacing Spacing used for the current cache.
  * @param bCacheInvalidated Flag indicating cache must be fully regenerated.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUStaticBoundaryManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidStaticBoundaryGenerator
 {
 public:
-	FGPUStaticBoundaryManager();
-	~FGPUStaticBoundaryManager();
+	FKawaiiFluidStaticBoundaryGenerator();
+	~FKawaiiFluidStaticBoundaryGenerator();
 
 	//=========================================================================
 	// Lifecycle

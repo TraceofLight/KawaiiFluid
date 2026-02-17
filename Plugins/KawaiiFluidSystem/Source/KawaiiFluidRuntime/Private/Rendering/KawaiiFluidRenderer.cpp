@@ -9,7 +9,7 @@
 #include "Core/KawaiiFluidRenderParticle.h"
 #include "RenderGraphResources.h"
 #include "RenderingThread.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Engine/World.h"
 
 // Pipeline architecture
@@ -155,7 +155,7 @@ void UKawaiiFluidRenderer::UpdateRendering(const IKawaiiFluidDataProvider* DataP
 	// GPU path: Set simulator reference in RenderResource
 	// Render thread accesses GPU buffers directly through RenderResource
 	// =====================================================
-	FGPUFluidSimulator* Simulator = DataProvider->GetGPUSimulator();
+	FKawaiiFluidSimulator* Simulator = DataProvider->GetGPUSimulator();
 
 	if (!Simulator)
 	{

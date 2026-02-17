@@ -8,7 +8,7 @@
 #include "RenderGraphResources.h"
 #include "RenderGraphUtils.h"
 #include "Core/KawaiiFluidAnisotropy.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"  // For FGridResolutionDim, GridResolutionPermutation
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"  // For FGridResolutionDim, GridResolutionPermutation
 
 // Forward declaration
 struct FGPUFluidParticle;

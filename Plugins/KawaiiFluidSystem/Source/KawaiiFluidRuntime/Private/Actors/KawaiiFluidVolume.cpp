@@ -12,7 +12,7 @@
 #include "Rendering/KawaiiFluidRenderer.h"
 #include "Rendering/KawaiiFluidProxyRenderer.h"
 #include "Rendering/KawaiiFluidRendererSubsystem.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "DrawDebugHelpers.h"
 #include "NiagaraFunctionLibrary.h"
@@ -180,7 +180,7 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 			else
 			{
 				// Not brush mode: Process pending spawn/despawn only (no physics simulation)
-				FGPUFluidSimulator* GPUSim = Context->GetGPUSimulator();
+				FKawaiiFluidSimulator* GPUSim = Context->GetGPUSimulator();
 				if (GPUSim && GPUSim->IsReady())
 				{
 					GPUSim->BeginFrame();
@@ -267,7 +267,7 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 		int32 NumParticles = 0;
 
 		// Check if GPU simulation is active
-		FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 		const bool bGPUActive = SimulationModule->IsGPUSimulationActive() && GPUSimulator != nullptr;
 
 		// Skip if no particles (no registration = ISM cleared automatically in Subsystem Tick)
@@ -670,7 +670,7 @@ void AKawaiiFluidVolume::ProcessPendingSpawnRequests()
 	}
 
 	// Get GPU simulator to send requests directly (preserving SourceID from each request)
-	FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
+	FKawaiiFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 	if (!GPUSimulator)
 	{
 		KF_LOG(Warning, TEXT("FluidVolume: No GPU simulator available for spawn requests (Volume=%s)"),
@@ -1109,7 +1109,7 @@ void AKawaiiFluidVolume::DrawDebugParticles()
 	if (SimulationModule->IsGPUSimulationActive())
 	{
 		// GPU mode: Use lightweight cached positions (no sync readback)
-		FGPUFluidSimulator* Simulator = SimulationModule->GetGPUSimulator();
+		FKawaiiFluidSimulator* Simulator = SimulationModule->GetGPUSimulator();
 		if (!Simulator)
 		{
 			return;
@@ -1218,7 +1218,7 @@ void AKawaiiFluidVolume::DrawDebugStaticBoundaryParticles()
 			return;
 		}
 
-		FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 		if (!GPUSimulator || !GPUSimulator->HasStaticBoundaryParticles())
 		{
 			return;
@@ -1690,7 +1690,7 @@ void AKawaiiFluidVolume::RemoveParticlesInRadiusGPU(const FVector& WorldCenter, 
 	}
 
 	// GPU-driven brush despawn: no readback dependency
-	FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
+	FKawaiiFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 	if (GPUSimulator)
 	{
 		GPUSimulator->AddGPUDespawnBrushRequest(FVector3f(WorldCenter), Radius);
@@ -1704,7 +1704,7 @@ void AKawaiiFluidVolume::RemoveParticlesBySourceGPU(int32 SourceID)
 		return;
 	}
 
-	FGPUFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
+	FKawaiiFluidSimulator* GPUSimulator = SimulationModule->GetGPUSimulator();
 	if (GPUSimulator)
 	{
 		GPUSimulator->AddGPUDespawnSourceRequest(SourceID);

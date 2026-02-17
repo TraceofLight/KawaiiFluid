@@ -1,13 +1,13 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // GPUFluidSimulator - Simulation Pass Functions
 
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Logging/KawaiiFluidLog.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
-#include "Simulation/Managers/GPUBoundarySkinningManager.h"
-#include "Simulation/Managers/GPUZOrderSortManager.h"
-#include "Simulation/Managers/GPUCollisionManager.h"
+#include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
+#include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
+#include "Simulation/Managers/KawaiiFluidCollisionManager.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 
@@ -21,7 +21,7 @@
  * @param ParticlesUAV Read-write access to particle buffer.
  * @param Params Current simulation parameters.
  */
-void FGPUFluidSimulator::AddPredictPositionsPass(
+void FKawaiiFluidSimulator::AddPredictPositionsPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	const FGPUFluidSimulationParams& Params)
@@ -142,7 +142,7 @@ void FGPUFluidSimulator::AddPredictPositionsPass(
  * @param ParticleCount Number of particles to process.
  * @param bUsePredictedPosition Whether to extract predicted or current positions.
  */
-void FGPUFluidSimulator::AddExtractPositionsPass(
+void FKawaiiFluidSimulator::AddExtractPositionsPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferSRVRef ParticlesSRV,
 	FRDGBufferUAVRef PositionsUAV,
@@ -201,7 +201,7 @@ void FGPUFluidSimulator::AddExtractPositionsPass(
  * @param Params Simulation parameters.
  * @param SpatialData Cached spatial structures.
  */
-void FGPUFluidSimulator::AddSolveDensityPressurePass(
+void FKawaiiFluidSimulator::AddSolveDensityPressurePass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferSRVRef InCellCountsSRV,
@@ -212,7 +212,7 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
 	FRDGBufferUAVRef InNeighborCountsUAV,
 	int32 IterationIndex,
 	const FGPUFluidSimulationParams& Params,
-	const FSimulationSpatialData& SpatialData)
+	const FKawaiiFluidSpatialData& SpatialData)
 {
 	if (!bEverHadParticles)
 	{
@@ -452,7 +452,7 @@ void FGPUFluidSimulator::AddSolveDensityPressurePass(
  * @param InNeighborCountsSRV Neighbor count cache.
  * @param Params Simulation parameters.
  */
-void FGPUFluidSimulator::AddParticleSleepingPass(
+void FKawaiiFluidSimulator::AddParticleSleepingPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef InParticlesUAV,
 	FRDGBufferUAVRef InSleepCountersUAV,
@@ -512,9 +512,9 @@ void FGPUFluidSimulator::AddParticleSleepingPass(
  * @param SpatialData Cached spatial structures.
  * @param Params Simulation parameters.
  */
-void FGPUFluidSimulator::AddFinalizePositionsPass(
+void FKawaiiFluidSimulator::AddFinalizePositionsPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	const FGPUFluidSimulationParams& Params)
 {
 	if (!bEverHadParticles)
@@ -571,7 +571,7 @@ void FGPUFluidSimulator::AddFinalizePositionsPass(
  * @param ComponentTransform World transform of the component.
  * @param DeltaTime Simulation time step.
  */
-void FGPUFluidSimulator::AddApplyBoneTransformPass(
+void FKawaiiFluidSimulator::AddApplyBoneTransformPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	FRDGBufferSRVRef BoneDeltaAttachmentSRV,
@@ -637,7 +637,7 @@ void FGPUFluidSimulator::AddApplyBoneTransformPass(
  * @param WorldBoundaryParticleCount Total world boundary particle count.
  * @param Params Simulation parameters.
  */
-void FGPUFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
+void FKawaiiFluidSimulator::AddUpdateBoneDeltaAttachmentPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	FRDGBufferUAVRef BoneDeltaAttachmentUAV,

@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUCollisionFeedbackManager - Collision feedback system with async GPU readback
 
-#include "Simulation/Managers/GPUCollisionFeedbackManager.h"
+#include "Simulation/Managers/KawaiiFluidCollisionFeedbackManager.h"
 #include "Logging/KawaiiFluidLog.h"
 #include "RHIGPUReadback.h"
 #include "RenderingThread.h"
@@ -13,13 +13,13 @@ DEFINE_LOG_CATEGORY(LogGPUCollisionFeedback);
 // Constructor / Destructor
 //=============================================================================
 
-FGPUCollisionFeedbackManager::FGPUCollisionFeedbackManager()
+FKawaiiFluidCollisionFeedbackManager::FKawaiiFluidCollisionFeedbackManager()
 	: bIsInitialized(false)
 	, bFeedbackEnabled(false)
 {
 }
 
-FGPUCollisionFeedbackManager::~FGPUCollisionFeedbackManager()
+FKawaiiFluidCollisionFeedbackManager::~FKawaiiFluidCollisionFeedbackManager()
 {
 	Release();
 }
@@ -31,7 +31,7 @@ FGPUCollisionFeedbackManager::~FGPUCollisionFeedbackManager()
 /**
  * @brief Initialize the feedback manager.
  */
-void FGPUCollisionFeedbackManager::Initialize()
+void FKawaiiFluidCollisionFeedbackManager::Initialize()
 {
 	bIsInitialized = true;
 
@@ -55,7 +55,7 @@ void FGPUCollisionFeedbackManager::Initialize()
 /**
  * @brief Release all resources.
  */
-void FGPUCollisionFeedbackManager::Release()
+void FKawaiiFluidCollisionFeedbackManager::Release()
 {
 	ReleaseReadbackObjects();
 
@@ -94,7 +94,7 @@ void FGPUCollisionFeedbackManager::Release()
  * @brief Allocate readback objects (call from render thread).
  * @param RHICmdList Command list.
  */
-void FGPUCollisionFeedbackManager::AllocateReadbackObjects(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidCollisionFeedbackManager::AllocateReadbackObjects(FRHICommandListImmediate& RHICmdList)
 {
 	// Unified buffer - allocate single readback per frame instead of 7
 	for (int32 i = 0; i < NUM_FEEDBACK_BUFFERS; ++i)
@@ -121,7 +121,7 @@ void FGPUCollisionFeedbackManager::AllocateReadbackObjects(FRHICommandListImmedi
 /**
  * @brief Release readback objects.
  */
-void FGPUCollisionFeedbackManager::ReleaseReadbackObjects()
+void FKawaiiFluidCollisionFeedbackManager::ReleaseReadbackObjects()
 {
 	// Release unified readbacks (replaces 7 separate releases per buffer)
 	for (int32 i = 0; i < NUM_FEEDBACK_BUFFERS; ++i)
@@ -150,7 +150,7 @@ void FGPUCollisionFeedbackManager::ReleaseReadbackObjects()
  * @brief Process collision feedback readback (non-blocking).
  * @param RHICmdList Command list.
  */
-void FGPUCollisionFeedbackManager::ProcessFeedbackReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidCollisionFeedbackManager::ProcessFeedbackReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (!bFeedbackEnabled)
 	{
@@ -294,7 +294,7 @@ void FGPUCollisionFeedbackManager::ProcessFeedbackReadback(FRHICommandListImmedi
  * @brief Process contact count readback (non-blocking).
  * @param RHICmdList Command list.
  */
-void FGPUCollisionFeedbackManager::ProcessContactCountReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidCollisionFeedbackManager::ProcessContactCountReadback(FRHICommandListImmediate& RHICmdList)
 {
 	// Debug logging (every 60 frames)
 	static int32 DebugFrame = 0;
@@ -355,7 +355,7 @@ void FGPUCollisionFeedbackManager::ProcessContactCountReadback(FRHICommandListIm
  * @brief Enqueue copy for next frame's readback.
  * @param RHICmdList Command list.
  */
-void FGPUCollisionFeedbackManager::EnqueueReadbackCopy(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidCollisionFeedbackManager::EnqueueReadbackCopy(FRHICommandListImmediate& RHICmdList)
 {
 	// This is called after the simulation pass to enqueue copies for next frame's readback
 	if (!bIsInitialized)
@@ -443,7 +443,7 @@ void FGPUCollisionFeedbackManager::EnqueueReadbackCopy(FRHICommandListImmediate&
 /**
  * @brief Increment frame counter.
  */
-void FGPUCollisionFeedbackManager::IncrementFrameCounter()
+void FKawaiiFluidCollisionFeedbackManager::IncrementFrameCounter()
 {
 	CurrentWriteIndex = (CurrentWriteIndex + 1) % NUM_FEEDBACK_BUFFERS;
 	FeedbackFrameNumber++;
@@ -461,7 +461,7 @@ void FGPUCollisionFeedbackManager::IncrementFrameCounter()
  * @param OutCount Number of feedback entries.
  * @return true if feedback is available.
  */
-bool FGPUCollisionFeedbackManager::GetFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionFeedbackManager::GetFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	FScopeLock Lock(&FeedbackLock);
 
@@ -492,7 +492,7 @@ bool FGPUCollisionFeedbackManager::GetFeedbackForCollider(int32 ColliderIndex, T
  * @param OutCount Number of feedback entries.
  * @return true if feedback is available.
  */
-bool FGPUCollisionFeedbackManager::GetAllFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionFeedbackManager::GetAllFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	FScopeLock Lock(&FeedbackLock);
 
@@ -515,7 +515,7 @@ bool FGPUCollisionFeedbackManager::GetAllFeedback(TArray<FGPUCollisionFeedback>&
  * @param ColliderIndex Index of the collider.
  * @return Number of particles colliding with this collider.
  */
-int32 FGPUCollisionFeedbackManager::GetContactCount(int32 ColliderIndex) const
+int32 FKawaiiFluidCollisionFeedbackManager::GetContactCount(int32 ColliderIndex) const
 {
 	FScopeLock Lock(&FeedbackLock);
 
@@ -530,7 +530,7 @@ int32 FGPUCollisionFeedbackManager::GetContactCount(int32 ColliderIndex) const
  * @brief Get all collider contact counts.
  * @param OutCounts Output array of contact counts per collider.
  */
-void FGPUCollisionFeedbackManager::GetAllContactCounts(TArray<int32>& OutCounts) const
+void FKawaiiFluidCollisionFeedbackManager::GetAllContactCounts(TArray<int32>& OutCounts) const
 {
 	FScopeLock Lock(&FeedbackLock);
 	OutCounts = ReadyContactCounts;
@@ -542,7 +542,7 @@ void FGPUCollisionFeedbackManager::GetAllContactCounts(TArray<int32>& OutCounts)
  * @param OutCount Number of feedback entries.
  * @return true if feedback is available.
  */
-bool FGPUCollisionFeedbackManager::GetAllStaticMeshFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionFeedbackManager::GetAllStaticMeshFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	FScopeLock Lock(&FeedbackLock);
 
@@ -566,7 +566,7 @@ bool FGPUCollisionFeedbackManager::GetAllStaticMeshFeedback(TArray<FGPUCollision
  * @param OutCount Number of feedback entries.
  * @return true if feedback is available.
  */
-bool FGPUCollisionFeedbackManager::GetAllFluidInteractionSMFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionFeedbackManager::GetAllFluidInteractionSMFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	FScopeLock Lock(&FeedbackLock);
 

@@ -13,7 +13,7 @@ class FRHIGPUBufferReadback;
 class FRDGBuilder;
 
 /**
- * @class FGPUCollisionFeedbackManager
+ * @class FKawaiiFluidCollisionFeedbackManager
  * @brief Manages GPU collision feedback system for particle-collider interaction.
  *
  * @param bIsInitialized State of the manager.
@@ -35,11 +35,11 @@ class FRDGBuilder;
  * @param ContactCountFrameNumber Frame counter for contact count processing.
  * @param CompletedFeedbackFrame Last completed feedback frame number.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUCollisionFeedbackManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidCollisionFeedbackManager
 {
 public:
-	FGPUCollisionFeedbackManager();
-	~FGPUCollisionFeedbackManager();
+	FKawaiiFluidCollisionFeedbackManager();
+	~FKawaiiFluidCollisionFeedbackManager();
 
 	//=========================================================================
 	// Constants

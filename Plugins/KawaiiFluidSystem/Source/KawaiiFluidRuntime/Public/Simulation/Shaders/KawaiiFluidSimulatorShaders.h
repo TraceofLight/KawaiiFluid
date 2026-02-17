@@ -8,7 +8,7 @@
 #include "RenderGraphResources.h"
 #include "RenderGraphUtils.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment (NEW bone-following system)
+#include "Simulation/Resources/GPUBoneDeltaAttachment.h"  // For FGPUBoneDeltaAttachment (NEW bone-following system)
 #include "Core/KawaiiFluidSimulationTypes.h"  // For EGridResolutionPreset
 
 // Spatial hash constants (must match KawaiiFluidSpatialHash.ush)

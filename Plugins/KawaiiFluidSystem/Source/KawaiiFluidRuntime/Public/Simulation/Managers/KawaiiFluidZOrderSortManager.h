@@ -12,7 +12,7 @@
 class FRDGBuilder;
 
 /**
- * @class FGPUZOrderSortManager
+ * @class FKawaiiFluidZOrderSortManager
  * @brief Manages GPU-based particle sorting using Z-Order (Morton Code) curve.
  * 
  * @param bIsInitialized State of the manager.
@@ -23,11 +23,11 @@ class FRDGBuilder;
  * @param SimulationBoundsMax Maximum world coordinates for classic Morton computation.
  * @param ZOrderBufferParticleCapacity Current capacity of sorting-related GPU buffers.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUZOrderSortManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidZOrderSortManager
 {
 public:
-	FGPUZOrderSortManager();
-	~FGPUZOrderSortManager();
+	FKawaiiFluidZOrderSortManager();
+	~FKawaiiFluidZOrderSortManager();
 
 	//=========================================================================
 	// Lifecycle
@@ -169,4 +169,4 @@ private:
 // The old name is kept for backward compatibility during transition.
 // New code should use FGPUZOrderSortManager instead.
 //=============================================================================
-using FGPUSpatialHashManager = FGPUZOrderSortManager;
+using FGPUSpatialHashManager = FKawaiiFluidZOrderSortManager;

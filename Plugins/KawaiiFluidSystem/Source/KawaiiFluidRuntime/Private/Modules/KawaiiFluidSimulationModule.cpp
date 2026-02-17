@@ -10,8 +10,8 @@
 #include "Components/KawaiiFluidVolumeComponent.h"
 #include "Actors/KawaiiFluidVolume.h"
 #include "Core/KawaiiFluidPresetDataAsset.h"
-#include "Simulation/GPUFluidSimulator.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
+#include "Simulation/KawaiiFluidSimulator.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"  // For GPU_MORTON_GRID_AXIS_BITS
 #include "Simulation/Resources/GPUFluidParticle.h"  // For FGPUSpawnRequest
 #include "UObject/UObjectGlobals.h"  // For FCoreUObjectDelegates
 #include "UObject/ObjectSaveContext.h"  // For FObjectPreSaveContext
@@ -122,7 +122,7 @@ void UKawaiiFluidSimulationModule::PreSave(FObjectPreSaveContext SaveContext)
  */
 void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (!GPUSim)
 	{
 		return;
@@ -150,7 +150,7 @@ void UKawaiiFluidSimulationModule::SyncGPUParticlesToCPU()
  */
 void UKawaiiFluidSimulationModule::UploadCPUParticlesToGPU()
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (!GPUSim || !GPUSim->IsReady())
 	{
 		KF_LOG_DEV(Verbose, TEXT("UploadCPUParticlesToGPU: GPUSimulator not ready, %d particles waiting"), Particles.Num());
@@ -646,7 +646,7 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
 	const float CurrentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
 	int32 EventCount = 0;
 
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
 		TArray<FGPUCollisionFeedback> GPUFeedbacks;
@@ -749,7 +749,7 @@ void UKawaiiFluidSimulationModule::ProcessCollisionFeedback(
  */
 int32 UKawaiiFluidSimulationModule::SpawnParticle(FVector Position, FVector Velocity)
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (!GPUSim)
 	{
 		return -1;
@@ -780,7 +780,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticle(FVector Position, FVector Velo
  */
 void UKawaiiFluidSimulationModule::SpawnParticles(FVector Location, int32 Count, float SpawnRadius)
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (!GPUSim)
 	{
 		return;
@@ -847,7 +847,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticlesSphere(FVector Center, float R
 	const float EstimatedCount = (4.0f / 3.0f * PI * Radius * Radius * Radius) / (Spacing * Spacing * Spacing);
 
 	// GPU mode: batch spawn requests for efficiency
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
 		const float Mass = Preset ? Preset->ParticleMass : 1.0f;
@@ -1319,7 +1319,7 @@ int32 UKawaiiFluidSimulationModule::SpawnParticleDirectionalHexLayer(FVector Pos
 	int32 SpawnedCount = SpawnParticleDirectionalHexLayerBatch(Position, Direction, Speed, Radius, Spacing, Jitter, BatchRequests);
 
 	// Send batch requests
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (BatchRequests.Num() > 0 && GPUSim)
 	{
 		GPUSim->AddSpawnRequests(BatchRequests);
@@ -1427,13 +1427,13 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 	Particles.Empty();
 
 	// GPU-driven despawn: remove all particles with this Module's SourceID
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
 		GPUSim->AddGPUDespawnSourceRequest(CachedSourceID);
 
 		// Cancel pending spawns to prevent ghost particles after despawn
-		if (FGPUSpawnManager* SpawnMgr = GPUSim->GetSpawnManager())
+		if (FKawaiiFluidParticleLifecycleManager* SpawnMgr = GPUSim->GetSpawnManager())
 		{
 			SpawnMgr->CancelPendingSpawnsForSource(CachedSourceID);
 		}
@@ -1444,7 +1444,7 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 
 void UKawaiiFluidSimulationModule::DespawnByBrushGPU(FVector Center, float Radius)
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
 		GPUSim->AddGPUDespawnBrushRequest(FVector3f(Center), Radius);
@@ -1453,7 +1453,7 @@ void UKawaiiFluidSimulationModule::DespawnByBrushGPU(FVector Center, float Radiu
 
 void UKawaiiFluidSimulationModule::DespawnBySourceGPU(int32 SourceID)
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (bGPUSimulationActive && GPUSim)
 	{
 		GPUSim->AddGPUDespawnSourceRequest(SourceID);
@@ -1593,7 +1593,7 @@ bool UKawaiiFluidSimulationModule::IsGPUSimulationActive() const
 
 int32 UKawaiiFluidSimulationModule::GetGPUParticleCount() const
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (GPUSim && GPUSim->IsReady())
 	{
 		return GPUSim->GetParticleCount();
@@ -1603,10 +1603,10 @@ int32 UKawaiiFluidSimulationModule::GetGPUParticleCount() const
 
 int32 UKawaiiFluidSimulationModule::GetParticleCountForSource(int32 SourceID) const
 {
-	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
+	TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (GPUSim && GPUSim->IsReady())
 	{
-		FGPUSpawnManager* SpawnManager = GPUSim->GetSpawnManager();
+		FKawaiiFluidParticleLifecycleManager* SpawnManager = GPUSim->GetSpawnManager();
 		if (SpawnManager)
 		{
 			return SpawnManager->GetParticleCountForSource(SourceID);

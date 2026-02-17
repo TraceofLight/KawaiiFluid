@@ -6,14 +6,14 @@
 #include "RenderGraphResources.h"
 #include "RHIResources.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/Resources/GPUFluidSpatialData.h"
+#include "Simulation/Resources/KawaiiFluidSpatialData.h"
 
 class FRHICommandListImmediate;
 class FRDGBuilder;
-class FGPUCollisionManager;
+class FKawaiiFluidCollisionManager;
 
 /**
- * @class FGPUAdhesionManager
+ * @class FKawaiiFluidAdhesionManager
  * @brief Manages GPU-based particle adhesion system.
  * 
  * @param bIsInitialized State of the manager.
@@ -22,11 +22,11 @@ class FGPUCollisionManager;
  * @param PersistentAttachmentBuffer Pooled buffer tracking per-particle attachment states.
  * @param AttachmentBufferSize Current capacity of the attachment buffer.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUAdhesionManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidAdhesionManager
 {
 public:
-	FGPUAdhesionManager();
-	~FGPUAdhesionManager();
+	FKawaiiFluidAdhesionManager();
+	~FKawaiiFluidAdhesionManager();
 
 	//=========================================================================
 	// Lifecycle
@@ -66,35 +66,35 @@ public:
 
 	void AddAdhesionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		FRDGBufferUAVRef AttachmentUAV,
-		FGPUCollisionManager* CollisionManager,
+		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	void AddUpdateAttachedPositionsPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		FRDGBufferUAVRef AttachmentUAV,
-		FGPUCollisionManager* CollisionManager,
+		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	void AddClearDetachedFlagPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		int32 CurrentParticleCount,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
 
 	void AddStackPressurePass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		FRDGBufferSRVRef AttachmentSRV,
 		FRDGBufferSRVRef CellCountsSRV,
 		FRDGBufferSRVRef ParticleIndicesSRV,
-		FGPUCollisionManager* CollisionManager,
+		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);

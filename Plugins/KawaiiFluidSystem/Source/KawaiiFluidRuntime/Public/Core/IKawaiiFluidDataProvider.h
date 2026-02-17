@@ -7,7 +7,7 @@
 #include "IKawaiiFluidDataProvider.generated.h"
 
 struct FKawaiiFluidParticle;
-class FGPUFluidSimulator;
+class FKawaiiFluidSimulator;
 
 UINTERFACE(MinimalAPI, Blueprintable)
 class UKawaiiFluidDataProvider : public UInterface
@@ -73,5 +73,5 @@ public:
 	 * @brief Get the GPU fluid simulator instance for direct buffer access.
 	 * @return Pointer to GPU simulator, or nullptr if not using GPU.
 	 */
-	virtual FGPUFluidSimulator* GetGPUSimulator() const { return nullptr; }
+	virtual FKawaiiFluidSimulator* GetGPUSimulator() const { return nullptr; }
 };

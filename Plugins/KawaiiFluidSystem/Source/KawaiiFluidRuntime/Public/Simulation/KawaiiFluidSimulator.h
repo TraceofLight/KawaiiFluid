@@ -7,14 +7,14 @@
 #include "RHIResources.h"
 #include "RenderResource.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
-#include "Simulation/Resources/GPUFluidSpatialData.h"
-#include "Simulation/Managers/GPUSpawnManager.h"
-#include "Simulation/Managers/GPUCollisionManager.h"
-#include "Simulation/Managers/GPUZOrderSortManager.h"
-#include "Simulation/Managers/GPUBoundarySkinningManager.h"
-#include "Simulation/Managers/GPUAdhesionManager.h"
-#include "Simulation/Managers/GPUStaticBoundaryManager.h"
-#include "Simulation/Parameters/GPUBoundaryAttachment.h"
+#include "Simulation/Resources/KawaiiFluidSpatialData.h"
+#include "Simulation/Managers/KawaiiFluidParticleLifecycleManager.h"
+#include "Simulation/Managers/KawaiiFluidCollisionManager.h"
+#include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
+#include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
+#include "Simulation/Managers/KawaiiFluidAdhesionManager.h"
+#include "Simulation/Managers/KawaiiFluidStaticBoundaryGenerator.h"
+#include "Simulation/Resources/GPUBoneDeltaAttachment.h"
 #include "Core/KawaiiFluidAnisotropy.h"
 #include <atomic>
 
@@ -28,7 +28,7 @@ class FRHIGPUBufferReadback;
 class USkeletalMeshComponent;
 
 /**
- * @class FGPUFluidSimulator
+ * @class FKawaiiFluidSimulator
  * @brief High-performance GPU-based SPH fluid simulation engine.
  * 
  * Manages particle life cycle (spawn/despawn), physics simulation using XPBD,
@@ -52,11 +52,11 @@ class USkeletalMeshComponent;
  * @param PersistentParticleBuffer Pooled buffer for cross-frame persistence.
  * @param ParticleCountElementIndex Index of the count in the atomic buffer.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUFluidSimulator : public FRenderResource
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidSimulator : public FRenderResource
 {
 public:
-	FGPUFluidSimulator();
-	virtual ~FGPUFluidSimulator();
+	FKawaiiFluidSimulator();
+	virtual ~FKawaiiFluidSimulator();
 
 	/** Initialize simulation resources */
 	void Initialize(int32 InMaxParticleCount);
@@ -789,7 +789,7 @@ public:
 	/**
 	 * Get the spawn manager (for per-source particle count tracking)
 	 */
-	FGPUSpawnManager* GetSpawnManager() const { return SpawnManager.Get(); }
+	FKawaiiFluidParticleLifecycleManager* GetSpawnManager() const { return SpawnManager.Get(); }
 
 private:
 	//=============================================================================
@@ -804,7 +804,7 @@ private:
 		const FGPUFluidSimulationParams& Params);
 
 	/** Phase 2: Build spatial structures (Z-Order Sort or Hash Table) */
-	FSimulationSpatialData BuildSpatialStructures(
+	FKawaiiFluidSpatialData BuildSpatialStructures(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferRef& InOutParticleBuffer,
 		FRDGBufferSRVRef& OutParticlesSRV,
@@ -822,7 +822,7 @@ private:
 	void ExecuteConstraintSolverLoop(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
-		FSimulationSpatialData& SpatialData,
+		FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Phase 4: Execute adhesion passes (Bone attachment only)
@@ -831,7 +831,7 @@ private:
 	void ExecuteAdhesion(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferUAVRef ParticlesUAV,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Phase 5: Execute post-simulation passes (Viscosity, Finalize, Anisotropy) */
@@ -839,14 +839,14 @@ private:
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferRef ParticleBuffer,
 		FRDGBufferUAVRef ParticlesUAV,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Phase 6: Extract persistent buffers for next frame */
 	void ExtractPersistentBuffers(
 		FRDGBuilder& GraphBuilder,
 		FRDGBufferRef ParticleBuffer,
-		const FSimulationSpatialData& SpatialData);
+		const FKawaiiFluidSpatialData& SpatialData);
 
 	/** 
 	 * Swap neighbor cache buffers for Cohesion Force double buffering.
@@ -898,7 +898,7 @@ private:
 		FRDGBufferUAVRef NeighborCountsUAV,
 		int32 IterationIndex,
 		const FGPUFluidSimulationParams& Params,
-		const FSimulationSpatialData& SpatialData);
+		const FKawaiiFluidSpatialData& SpatialData);
 
 	/** Add viscosity pass (XSPH + Laplacian + Boundary viscosity) */
 	void AddApplyViscosityPass(
@@ -909,7 +909,7 @@ private:
 		FRDGBufferSRVRef NeighborListSRV,
 		FRDGBufferSRVRef NeighborCountsSRV,
 		const FGPUFluidSimulationParams& Params,
-		const FSimulationSpatialData& SpatialData);
+		const FKawaiiFluidSpatialData& SpatialData);
 
 	/** Add particle sleeping pass (NVIDIA Flex stabilization technique) */
 	void AddParticleSleepingPass(
@@ -923,19 +923,19 @@ private:
 	/** Add bounds collision pass */
 	void AddBoundsCollisionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add primitive collision pass (spheres, capsules, boxes, convexes) */
 	void AddPrimitiveCollisionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add heightmap collision pass (Landscape terrain) */
 	void AddHeightmapCollisionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	//-------------------------------------------------------------------------
@@ -972,7 +972,7 @@ private:
 	/** Add finalize positions pass */
 	void AddFinalizePositionsPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add extract positions pass (for spatial hash) */
@@ -986,13 +986,13 @@ private:
 	/** Add boundary adhesion pass (Flex-style adhesion to surface particles) */
 	void AddBoundaryAdhesionPass(
 		FRDGBuilder& GraphBuilder,
-		const FSimulationSpatialData& SpatialData,
+		const FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	/** Add boundary skinning pass (GPU transform of bone-local particles to world space) */
 	void AddBoundarySkinningPass(
 		FRDGBuilder& GraphBuilder,
-		FSimulationSpatialData& SpatialData,
+		FKawaiiFluidSpatialData& SpatialData,
 		const FGPUFluidSimulationParams& Params);
 
 	//=============================================================================
@@ -1201,7 +1201,7 @@ private:
 
 	// SpawnManager handles all spawn-related functionality
 	// Thread-safe spawn request queue processed on render thread
-	TUniquePtr<FGPUSpawnManager> SpawnManager;
+	TUniquePtr<FKawaiiFluidParticleLifecycleManager> SpawnManager;
 
 	// GPU Counter buffer for atomic particle count (used during spawn pass)
 	TRefCountPtr<FRDGPooledBuffer> ParticleCounterBuffer;
@@ -1246,35 +1246,35 @@ private:
 	//=============================================================================
 
 	// CollisionManager handles all collision passes and feedback
-	TUniquePtr<FGPUCollisionManager> CollisionManager;
+	TUniquePtr<FKawaiiFluidCollisionManager> CollisionManager;
 
 	//=============================================================================
 	// Z-Order Sorting (Delegated to FGPUZOrderSortManager)
 	// Z-Order Morton code sorting for cache-coherent neighbor search
 	//=============================================================================
 
-	TUniquePtr<FGPUZOrderSortManager> ZOrderSortManager;
+	TUniquePtr<FKawaiiFluidZOrderSortManager> ZOrderSortManager;
 
 	//=============================================================================
 	// Boundary Skinning (Delegated to FGPUBoundarySkinningManager)
 	// GPU-based boundary skinning and adhesion
 	//=============================================================================
 
-	TUniquePtr<FGPUBoundarySkinningManager> BoundarySkinningManager;
+	TUniquePtr<FKawaiiFluidBoundaryManager> BoundarySkinningManager;
 
 	//=============================================================================
 	// Adhesion System (Delegated to FGPUAdhesionManager)
 	// GPU-based particle adhesion to bone colliders
 	//=============================================================================
 
-	TUniquePtr<FGPUAdhesionManager> AdhesionManager;
+	TUniquePtr<FKawaiiFluidAdhesionManager> AdhesionManager;
 
 	//=============================================================================
 	// Static Boundary Particles (Delegated to FGPUStaticBoundaryManager)
 	// Generates boundary particles on static colliders for density contribution
 	//=============================================================================
 
-	TUniquePtr<FGPUStaticBoundaryManager> StaticBoundaryManager;
+	TUniquePtr<FKawaiiFluidStaticBoundaryGenerator> StaticBoundaryManager;
 
 	//=============================================================================
 	// Bone Delta Attachment (NEW simplified bone-following system)

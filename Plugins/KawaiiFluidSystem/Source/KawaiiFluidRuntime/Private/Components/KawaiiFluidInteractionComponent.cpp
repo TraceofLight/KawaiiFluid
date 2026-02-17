@@ -9,7 +9,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/StaticMesh.h"
@@ -336,13 +336,13 @@ void UKawaiiFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 
 	TArray<FGPUCollisionFeedback> AllFeedback;
 	int32 TotalFeedbackCount = 0;
-	FGPUFluidSimulator* PrimaryGPUSimulator = nullptr;
+	FKawaiiFluidSimulator* PrimaryGPUSimulator = nullptr;
 	UKawaiiFluidSimulationModule* PrimarySourceModule = nullptr;
 
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (!Module) continue;
-		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
 		if (!GPUSimulator || GPUSimulator->GetParticleCount() <= 0) continue;
 
 		const int32 ModuleContactCount = GPUSimulator->GetContactCountForOwner(MyOwnerID);
@@ -368,7 +368,7 @@ void UKawaiiFluidInteractionComponent::ProcessCollisionFeedback(float DeltaTime)
 		}
 	}
 
-	FGPUFluidSimulator* GPUSimulator = PrimaryGPUSimulator;
+	FKawaiiFluidSimulator* GPUSimulator = PrimaryGPUSimulator;
 	UKawaiiFluidSimulationModule* SourceModule = PrimarySourceModule;
 	int32 FeedbackCount = TotalFeedbackCount;
 
@@ -564,7 +564,7 @@ float UKawaiiFluidInteractionComponent::GetFluidImpactSpeed() const
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (!Module) continue;
-		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
 		if (!GPUSimulator) continue;
 		TArray<FGPUCollisionFeedback> CollisionFeedbacks; int32 FeedbackCount = 0;
 		GPUSimulator->GetAllCollisionFeedback(CollisionFeedbacks, FeedbackCount);
@@ -588,7 +588,7 @@ float UKawaiiFluidInteractionComponent::GetFluidImpactForceMagnitude() const
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (!Module) continue;
-		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
 		if (!GPUSimulator) continue;
 		TArray<FGPUCollisionFeedback> CollisionFeedbacks; int32 FeedbackCount = 0;
 		GPUSimulator->GetAllCollisionFeedback(CollisionFeedbacks, FeedbackCount);
@@ -612,7 +612,7 @@ FVector UKawaiiFluidInteractionComponent::GetFluidImpactDirection() const
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (!Module) continue;
-		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
 		if (!GPUSimulator) continue;
 		TArray<FGPUCollisionFeedback> CollisionFeedbacks; int32 FeedbackCount = 0;
 		GPUSimulator->GetAllCollisionFeedback(CollisionFeedbacks, FeedbackCount);
@@ -643,7 +643,7 @@ float UKawaiiFluidInteractionComponent::GetFluidImpactSpeedForBone(FName BoneNam
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (!Module) continue;
-		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
 		if (!GPUSimulator) continue;
 		TArray<FGPUCollisionFeedback> CollisionFeedbacks; int32 FeedbackCount = 0;
 		GPUSimulator->GetAllCollisionFeedback(CollisionFeedbacks, FeedbackCount);
@@ -675,7 +675,7 @@ float UKawaiiFluidInteractionComponent::GetFluidImpactForceMagnitudeForBone(FNam
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (!Module) continue;
-		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
 		if (!GPUSimulator) continue;
 		TArray<FGPUCollisionFeedback> CollisionFeedbacks; int32 FeedbackCount = 0;
 		GPUSimulator->GetAllCollisionFeedback(CollisionFeedbacks, FeedbackCount);
@@ -707,7 +707,7 @@ FVector UKawaiiFluidInteractionComponent::GetFluidImpactDirectionForBone(FName B
 	for (UKawaiiFluidSimulationModule* Module : TargetSubsystem->GetAllModules())
 	{
 		if (!Module) continue;
-		FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
+		FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator();
 		if (!GPUSimulator) continue;
 		TArray<FGPUCollisionFeedback> CollisionFeedbacks; int32 FeedbackCount = 0;
 		GPUSimulator->GetAllCollisionFeedback(CollisionFeedbacks, FeedbackCount);
@@ -731,7 +731,7 @@ void UKawaiiFluidInteractionComponent::EnableGPUCollisionFeedbackIfNeeded()
 	{
 		if (Module)
 		{
-			if (FGPUFluidSimulator* GPUSimulator = Module->GetGPUSimulator()) { GPUSimulator->SetCollisionFeedbackEnabled(true); bGPUFeedbackEnabled = true; }
+			if (FKawaiiFluidSimulator* GPUSimulator = Module->GetGPUSimulator()) { GPUSimulator->SetCollisionFeedbackEnabled(true); bGPUFeedbackEnabled = true; }
 		}
 	}
 }

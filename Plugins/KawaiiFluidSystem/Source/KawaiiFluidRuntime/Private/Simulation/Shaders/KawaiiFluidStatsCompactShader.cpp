@@ -1,6 +1,6 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Simulation/Shaders/FluidStatsCompactShader.h"
+#include "Simulation/Shaders/KawaiiFluidStatsCompactShader.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 #include "ShaderParameterUtils.h"

@@ -7,7 +7,7 @@
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidSimulationTypes.h"
 #include "Core/IKawaiiFluidDataProvider.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Components/KawaiiFluidInteractionComponent.h"
 #include "KawaiiFluidSimulationModule.generated.h"
 
@@ -185,7 +185,7 @@ public:
 	{
 		if (bGPUSimulationActive)
 		{
-			if (TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin())
+			if (TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin())
 			{
 				return GPUSim->GetParticleCount() + GPUSim->GetPendingSpawnCount();
 			}
@@ -415,7 +415,7 @@ public:
 	{
 		if (bGPUSimulationActive)
 		{
-			if (TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin())
+			if (TSharedPtr<FKawaiiFluidSimulator> GPUSim = WeakGPUSimulator.Pin())
 			{
 				return GPUSim->GetParticleCount() > 0 || GPUSim->GetPendingSpawnCount() > 0;
 			}
@@ -429,9 +429,9 @@ public:
 
 	virtual int32 GetGPUParticleCount() const override;
 
-	virtual FGPUFluidSimulator* GetGPUSimulator() const override { return WeakGPUSimulator.Pin().Get(); }
+	virtual FKawaiiFluidSimulator* GetGPUSimulator() const override { return WeakGPUSimulator.Pin().Get(); }
 
-	void SetGPUSimulator(const TSharedPtr<FGPUFluidSimulator>& InSimulator) { WeakGPUSimulator = InSimulator; }
+	void SetGPUSimulator(const TSharedPtr<FKawaiiFluidSimulator>& InSimulator) { WeakGPUSimulator = InSimulator; }
 
 	void SetGPUSimulationActive(bool bActive) { bGPUSimulationActive = bActive; }
 
@@ -457,7 +457,7 @@ public:
 	int32 GetSourceID() const { return CachedSourceID; }
 
 private:
-	TWeakPtr<FGPUFluidSimulator> WeakGPUSimulator;
+	TWeakPtr<FKawaiiFluidSimulator> WeakGPUSimulator;
 
 	bool bGPUSimulationActive = false;
 

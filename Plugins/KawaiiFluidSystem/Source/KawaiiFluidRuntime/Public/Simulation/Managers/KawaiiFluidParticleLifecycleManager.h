@@ -12,7 +12,7 @@ class FRHIGPUBufferReadback;
 class FRDGBuilder;
 
 /**
- * @class FGPUSpawnManager
+ * @class FKawaiiFluidParticleLifecycleManager
  * @brief Manages thread-safe particle spawn requests for GPU fluid simulation.
  * 
  * @param bIsInitialized State of the manager.
@@ -52,11 +52,11 @@ class FRDGBuilder;
  * @param CompactedBufferIndex Swap index for double-buffered output.
  * @param StreamCompactionCapacity Current capacity of compaction buffers.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUSpawnManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidParticleLifecycleManager
 {
 public:
-	FGPUSpawnManager();
-	~FGPUSpawnManager();
+	FKawaiiFluidParticleLifecycleManager();
+	~FKawaiiFluidParticleLifecycleManager();
 
 	//=========================================================================
 	// Lifecycle

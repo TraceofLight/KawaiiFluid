@@ -1,9 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUCollisionManager Implementation
 
-#include "Simulation/Managers/GPUCollisionManager.h"
+#include "Simulation/Managers/KawaiiFluidCollisionManager.h"
 #include "Logging/KawaiiFluidLog.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -18,11 +18,11 @@ DEFINE_LOG_CATEGORY(LogGPUCollisionManager);
 // Constructor / Destructor
 //=============================================================================
 
-FGPUCollisionManager::FGPUCollisionManager()
+FKawaiiFluidCollisionManager::FKawaiiFluidCollisionManager()
 {
 }
 
-FGPUCollisionManager::~FGPUCollisionManager()
+FKawaiiFluidCollisionManager::~FKawaiiFluidCollisionManager()
 {
 	Release();
 }
@@ -34,7 +34,7 @@ FGPUCollisionManager::~FGPUCollisionManager()
 /**
  * @brief Initialize the collision manager.
  */
-void FGPUCollisionManager::Initialize()
+void FKawaiiFluidCollisionManager::Initialize()
 {
 	if (bIsInitialized)
 	{
@@ -42,7 +42,7 @@ void FGPUCollisionManager::Initialize()
 	}
 
 	// Create feedback manager
-	FeedbackManager = MakeUnique<FGPUCollisionFeedbackManager>();
+	FeedbackManager = MakeUnique<FKawaiiFluidCollisionFeedbackManager>();
 	FeedbackManager->Initialize();
 
 	bIsInitialized = true;
@@ -52,7 +52,7 @@ void FGPUCollisionManager::Initialize()
 /**
  * @brief Release all resources.
  */
-void FGPUCollisionManager::Release()
+void FKawaiiFluidCollisionManager::Release()
 {
 	if (!bIsInitialized)
 	{
@@ -93,7 +93,7 @@ void FGPUCollisionManager::Release()
  * @brief Upload collision primitives to GPU.
  * @param Primitives Collection of collision primitives.
  */
-void FGPUCollisionManager::UploadCollisionPrimitives(const FGPUCollisionPrimitives& Primitives)
+void FKawaiiFluidCollisionManager::UploadCollisionPrimitives(const FGPUCollisionPrimitives& Primitives)
 {
 	if (!bIsInitialized)
 	{
@@ -137,9 +137,9 @@ void FGPUCollisionManager::UploadCollisionPrimitives(const FGPUCollisionPrimitiv
  * @param Params Simulation parameters.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUCollisionManager::AddBoundsCollisionPass(
+void FKawaiiFluidCollisionManager::AddBoundsCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 ParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)
@@ -202,9 +202,9 @@ void FGPUCollisionManager::AddBoundsCollisionPass(
  * @param Params Simulation parameters.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUCollisionManager::AddPrimitiveCollisionPass(
+void FKawaiiFluidCollisionManager::AddPrimitiveCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 ParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)
@@ -332,7 +332,7 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 		else
 		{
 			// Create ByteAddressBuffer with total unified size
-			FRDGBufferDesc UnifiedDesc = FRDGBufferDesc::CreateByteAddressDesc(FGPUCollisionFeedbackManager::UNIFIED_BUFFER_SIZE);
+			FRDGBufferDesc UnifiedDesc = FRDGBufferDesc::CreateByteAddressDesc(FKawaiiFluidCollisionFeedbackManager::UNIFIED_BUFFER_SIZE);
 			UnifiedFeedbackBuffer = GraphBuilder.CreateBuffer(UnifiedDesc, TEXT("UnifiedCollisionFeedback"));
 		}
 
@@ -358,13 +358,13 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 		}
 		else
 		{
-			FRDGBufferDesc ContactCountDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FGPUCollisionFeedbackManager::MAX_COLLIDER_COUNT);
+			FRDGBufferDesc ContactCountDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FKawaiiFluidCollisionFeedbackManager::MAX_COLLIDER_COUNT);
 			ContactCountBuffer = GraphBuilder.CreateBuffer(ContactCountDesc, TEXT("ColliderContactCounts"));
 		}
 	}
 	else
 	{
-		FRDGBufferDesc ContactCountDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FGPUCollisionFeedbackManager::MAX_COLLIDER_COUNT);
+		FRDGBufferDesc ContactCountDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(uint32), FKawaiiFluidCollisionFeedbackManager::MAX_COLLIDER_COUNT);
 		ContactCountBuffer = GraphBuilder.CreateBuffer(ContactCountDesc, TEXT("ColliderContactCounts"));
 	}
 
@@ -415,7 +415,7 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
 
 	// Collider contact count parameters (unchanged)
 	PassParameters->ColliderContactCounts = GraphBuilder.CreateUAV(ContactCountBuffer);
-	PassParameters->MaxColliderCount = FGPUCollisionFeedbackManager::MAX_COLLIDER_COUNT;
+	PassParameters->MaxColliderCount = FKawaiiFluidCollisionFeedbackManager::MAX_COLLIDER_COUNT;
 
 	if (IndirectArgsBuffer)
 	{
@@ -466,7 +466,7 @@ void FGPUCollisionManager::AddPrimitiveCollisionPass(
  * @brief Enable or disable collision feedback recording.
  * @param bEnabled Enable flag.
  */
-void FGPUCollisionManager::SetCollisionFeedbackEnabled(bool bEnabled)
+void FKawaiiFluidCollisionManager::SetCollisionFeedbackEnabled(bool bEnabled)
 {
 	if (FeedbackManager.IsValid())
 	{
@@ -478,7 +478,7 @@ void FGPUCollisionManager::SetCollisionFeedbackEnabled(bool bEnabled)
  * @brief Check if collision feedback is enabled.
  * @return true if enabled.
  */
-bool FGPUCollisionManager::IsCollisionFeedbackEnabled() const
+bool FKawaiiFluidCollisionManager::IsCollisionFeedbackEnabled() const
 {
 	return FeedbackManager.IsValid() && FeedbackManager->IsEnabled();
 }
@@ -487,7 +487,7 @@ bool FGPUCollisionManager::IsCollisionFeedbackEnabled() const
  * @brief Allocate collision feedback readback buffers.
  * @param RHICmdList Command list.
  */
-void FGPUCollisionManager::AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidCollisionManager::AllocateCollisionFeedbackBuffers(FRHICommandListImmediate& RHICmdList)
 {
 	if (FeedbackManager.IsValid())
 	{
@@ -498,7 +498,7 @@ void FGPUCollisionManager::AllocateCollisionFeedbackBuffers(FRHICommandListImmed
 /**
  * @brief Release collision feedback buffers.
  */
-void FGPUCollisionManager::ReleaseCollisionFeedbackBuffers()
+void FKawaiiFluidCollisionManager::ReleaseCollisionFeedbackBuffers()
 {
 	// Manager release is handled in Release()
 }
@@ -507,7 +507,7 @@ void FGPUCollisionManager::ReleaseCollisionFeedbackBuffers()
  * @brief Process collision feedback readback (non-blocking).
  * @param RHICmdList Command list.
  */
-void FGPUCollisionManager::ProcessCollisionFeedbackReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidCollisionManager::ProcessCollisionFeedbackReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (FeedbackManager.IsValid())
 	{
@@ -519,7 +519,7 @@ void FGPUCollisionManager::ProcessCollisionFeedbackReadback(FRHICommandListImmed
  * @brief Process collider contact count readback (non-blocking).
  * @param RHICmdList Command list.
  */
-void FGPUCollisionManager::ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidCollisionManager::ProcessColliderContactCountReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (FeedbackManager.IsValid())
 	{
@@ -534,7 +534,7 @@ void FGPUCollisionManager::ProcessColliderContactCountReadback(FRHICommandListIm
  * @param OutCount Output count.
  * @return true if successful.
  */
-bool FGPUCollisionManager::GetCollisionFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionManager::GetCollisionFeedbackForCollider(int32 ColliderIndex, TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	if (!FeedbackManager.IsValid())
 	{
@@ -551,7 +551,7 @@ bool FGPUCollisionManager::GetCollisionFeedbackForCollider(int32 ColliderIndex, 
  * @param OutCount Output count.
  * @return true if successful.
  */
-bool FGPUCollisionManager::GetAllCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionManager::GetAllCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	if (!FeedbackManager.IsValid())
 	{
@@ -566,12 +566,12 @@ bool FGPUCollisionManager::GetAllCollisionFeedback(TArray<FGPUCollisionFeedback>
  * @brief Get current collision feedback count.
  * @return Count of feedback entries.
  */
-int32 FGPUCollisionManager::GetCollisionFeedbackCount() const
+int32 FKawaiiFluidCollisionManager::GetCollisionFeedbackCount() const
 {
 	return FeedbackManager.IsValid() ? FeedbackManager->GetFeedbackCount() : 0;
 }
 
-bool FGPUCollisionManager::GetAllStaticMeshCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionManager::GetAllStaticMeshCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	if (!FeedbackManager.IsValid())
 	{
@@ -582,12 +582,12 @@ bool FGPUCollisionManager::GetAllStaticMeshCollisionFeedback(TArray<FGPUCollisio
 	return FeedbackManager->GetAllStaticMeshFeedback(OutFeedback, OutCount);
 }
 
-int32 FGPUCollisionManager::GetStaticMeshCollisionFeedbackCount() const
+int32 FKawaiiFluidCollisionManager::GetStaticMeshCollisionFeedbackCount() const
 {
 	return FeedbackManager.IsValid() ? FeedbackManager->GetStaticMeshFeedbackCount() : 0;
 }
 
-bool FGPUCollisionManager::GetAllFluidInteractionSMCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
+bool FKawaiiFluidCollisionManager::GetAllFluidInteractionSMCollisionFeedback(TArray<FGPUCollisionFeedback>& OutFeedback, int32& OutCount)
 {
 	if (!FeedbackManager.IsValid())
 	{
@@ -598,7 +598,7 @@ bool FGPUCollisionManager::GetAllFluidInteractionSMCollisionFeedback(TArray<FGPU
 	return FeedbackManager->GetAllFluidInteractionSMFeedback(OutFeedback, OutCount);
 }
 
-int32 FGPUCollisionManager::GetFluidInteractionSMCollisionFeedbackCount() const
+int32 FKawaiiFluidCollisionManager::GetFluidInteractionSMCollisionFeedbackCount() const
 {
 	return FeedbackManager.IsValid() ? FeedbackManager->GetFluidInteractionSMFeedbackCount() : 0;
 }
@@ -608,7 +608,7 @@ int32 FGPUCollisionManager::GetFluidInteractionSMCollisionFeedbackCount() const
  * @param ColliderIndex Index.
  * @return Count.
  */
-int32 FGPUCollisionManager::GetColliderContactCount(int32 ColliderIndex) const
+int32 FKawaiiFluidCollisionManager::GetColliderContactCount(int32 ColliderIndex) const
 {
 	if (!FeedbackManager.IsValid())
 	{
@@ -621,7 +621,7 @@ int32 FGPUCollisionManager::GetColliderContactCount(int32 ColliderIndex) const
  * @brief Get all collider contact counts.
  * @param OutCounts Output counts array.
  */
-void FGPUCollisionManager::GetAllColliderContactCounts(TArray<int32>& OutCounts) const
+void FKawaiiFluidCollisionManager::GetAllColliderContactCounts(TArray<int32>& OutCounts) const
 {
 	if (!FeedbackManager.IsValid())
 	{
@@ -636,7 +636,7 @@ void FGPUCollisionManager::GetAllColliderContactCounts(TArray<int32>& OutCounts)
  * @param OwnerID Owner unique ID.
  * @return Total contacts.
  */
-int32 FGPUCollisionManager::GetContactCountForOwner(int32 OwnerID) const
+int32 FKawaiiFluidCollisionManager::GetContactCountForOwner(int32 OwnerID) const
 {
 	// Debug logging (every 60 frames)
 	static int32 OwnerCountDebugFrame = 0;
@@ -709,7 +709,7 @@ int32 FGPUCollisionManager::GetContactCountForOwner(int32 OwnerID) const
  * @param Width Texture width.
  * @param Height Texture height.
  */
-void FGPUCollisionManager::UploadHeightmapTexture(const TArray<float>& HeightData, int32 Width, int32 Height)
+void FKawaiiFluidCollisionManager::UploadHeightmapTexture(const TArray<float>& HeightData, int32 Width, int32 Height)
 {
 	if (!bIsInitialized)
 	{
@@ -803,9 +803,9 @@ void FGPUCollisionManager::UploadHeightmapTexture(const TArray<float>& HeightDat
  * @param Params Simulation parameters.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUCollisionManager::AddHeightmapCollisionPass(
+void FKawaiiFluidCollisionManager::AddHeightmapCollisionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 ParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)

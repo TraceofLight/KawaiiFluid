@@ -1,12 +1,12 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUBoundarySkinningManager - GPU Boundary Skinning and Adhesion System
 
-#include "Simulation/Managers/GPUBoundarySkinningManager.h"
+#include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
 #include "Logging/KawaiiFluidLog.h"
 
-#include <Simulation/Resources/GPUFluidSpatialData.h>
+#include <Simulation/Resources/KawaiiFluidSpatialData.h>
 
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -23,7 +23,7 @@ static constexpr int32 BOUNDARY_MAX_PARTICLES_PER_CELL = 16;
 // Constructor / Destructor
 //=============================================================================
 
-FGPUBoundarySkinningManager::FGPUBoundarySkinningManager()
+FKawaiiFluidBoundaryManager::FKawaiiFluidBoundaryManager()
 	: bIsInitialized(false)
 	, StaticBoundaryParticleCount(0)
 	, StaticBoundaryBufferCapacity(0)
@@ -36,7 +36,7 @@ FGPUBoundarySkinningManager::FGPUBoundarySkinningManager()
 {
 }
 
-FGPUBoundarySkinningManager::~FGPUBoundarySkinningManager()
+FKawaiiFluidBoundaryManager::~FKawaiiFluidBoundaryManager()
 {
 	Release();
 }
@@ -48,7 +48,7 @@ FGPUBoundarySkinningManager::~FGPUBoundarySkinningManager()
 /**
  * @brief Initialize the manager.
  */
-void FGPUBoundarySkinningManager::Initialize()
+void FKawaiiFluidBoundaryManager::Initialize()
 {
 	bIsInitialized = true;
 	KF_LOG_DEV(Log, TEXT("GPUBoundarySkinningManager initialized"));
@@ -57,7 +57,7 @@ void FGPUBoundarySkinningManager::Initialize()
 /**
  * @brief Release all resources.
  */
-void FGPUBoundarySkinningManager::Release()
+void FKawaiiFluidBoundaryManager::Release()
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -101,7 +101,7 @@ void FGPUBoundarySkinningManager::Release()
  * @brief Upload static boundary particles to persistent GPU buffer.
  * @param Particles World-space static boundary particles.
  */
-void FGPUBoundarySkinningManager::UploadStaticBoundaryParticles(const TArray<FGPUBoundaryParticle>& Particles)
+void FKawaiiFluidBoundaryManager::UploadStaticBoundaryParticles(const TArray<FGPUBoundaryParticle>& Particles)
 {
 	if (!bIsInitialized)
 	{
@@ -129,7 +129,7 @@ void FGPUBoundarySkinningManager::UploadStaticBoundaryParticles(const TArray<FGP
 /**
  * @brief Clear static boundary particles.
  */
-void FGPUBoundarySkinningManager::ClearStaticBoundaryParticles()
+void FKawaiiFluidBoundaryManager::ClearStaticBoundaryParticles()
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -151,7 +151,7 @@ void FGPUBoundarySkinningManager::ClearStaticBoundaryParticles()
  * @param GraphBuilder RDG builder.
  * @param Params Simulation parameters.
  */
-void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params)
+void FKawaiiFluidBoundaryManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& GraphBuilder, const FGPUFluidSimulationParams& Params)
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -529,7 +529,7 @@ void FGPUBoundarySkinningManager::ExecuteStaticBoundaryZOrderSort(FRDGBuilder& G
  * @param OwnerID Unique ID for the mesh owner.
  * @param LocalParticles Bone-local boundary particles.
  */
-void FGPUBoundarySkinningManager::UploadLocalBoundaryParticles(int32 OwnerID, const TArray<FGPUBoundaryParticleLocal>& LocalParticles)
+void FKawaiiFluidBoundaryManager::UploadLocalBoundaryParticles(int32 OwnerID, const TArray<FGPUBoundaryParticleLocal>& LocalParticles)
 {
 	if (!bIsInitialized || LocalParticles.Num() == 0)
 	{
@@ -561,7 +561,7 @@ void FGPUBoundarySkinningManager::UploadLocalBoundaryParticles(int32 OwnerID, co
  * @param BoneTransforms Current bone transforms.
  * @param ComponentTransform Component world transform.
  */
-void FGPUBoundarySkinningManager::UploadBoneTransformsForBoundary(int32 OwnerID, const TArray<FMatrix44f>& BoneTransforms, const FMatrix44f& ComponentTransform)
+void FKawaiiFluidBoundaryManager::UploadBoneTransformsForBoundary(int32 OwnerID, const TArray<FMatrix44f>& BoneTransforms, const FMatrix44f& ComponentTransform)
 {
 	if (!bIsInitialized)
 	{
@@ -583,7 +583,7 @@ void FGPUBoundarySkinningManager::UploadBoneTransformsForBoundary(int32 OwnerID,
  * @param OwnerID Unique ID for the mesh owner.
  * @param SkelMesh Skeletal mesh component.
  */
-void FGPUBoundarySkinningManager::RegisterSkeletalMeshReference(int32 OwnerID, USkeletalMeshComponent* SkelMesh)
+void FKawaiiFluidBoundaryManager::RegisterSkeletalMeshReference(int32 OwnerID, USkeletalMeshComponent* SkelMesh)
 {
 	if (!bIsInitialized || !SkelMesh)
 	{
@@ -611,7 +611,7 @@ void FGPUBoundarySkinningManager::RegisterSkeletalMeshReference(int32 OwnerID, U
 /**
  * @brief Refresh bone transforms from all registered skeletal meshes.
  */
-void FGPUBoundarySkinningManager::RefreshAllBoneTransforms()
+void FKawaiiFluidBoundaryManager::RefreshAllBoneTransforms()
 {
 	// MUST be called on Game Thread, right before render thread starts
 	check(IsInGameThread());
@@ -672,7 +672,7 @@ void FGPUBoundarySkinningManager::RefreshAllBoneTransforms()
 		BoundarySkinningDataMap.Num());
 }
 
-const TArray<FMatrix44f>* FGPUBoundarySkinningManager::GetBoneTransforms(int32 OwnerID) const
+const TArray<FMatrix44f>* FKawaiiFluidBoundaryManager::GetBoneTransforms(int32 OwnerID) const
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -684,7 +684,7 @@ const TArray<FMatrix44f>* FGPUBoundarySkinningManager::GetBoneTransforms(int32 O
 	return nullptr;
 }
 
-const TArray<FMatrix44f>* FGPUBoundarySkinningManager::GetFirstAvailableBoneTransforms(int32* OutOwnerID) const
+const TArray<FMatrix44f>* FKawaiiFluidBoundaryManager::GetFirstAvailableBoneTransforms(int32* OutOwnerID) const
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -702,7 +702,7 @@ const TArray<FMatrix44f>* FGPUBoundarySkinningManager::GetFirstAvailableBoneTran
 	return nullptr;
 }
 
-int32 FGPUBoundarySkinningManager::GetBoneCount(int32 OwnerID) const
+int32 FKawaiiFluidBoundaryManager::GetBoneCount(int32 OwnerID) const
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -718,7 +718,7 @@ int32 FGPUBoundarySkinningManager::GetBoneCount(int32 OwnerID) const
  * @brief Remove skinning data for an owner.
  * @param OwnerID Unique ID.
  */
-void FGPUBoundarySkinningManager::RemoveBoundarySkinningData(int32 OwnerID)
+void FKawaiiFluidBoundaryManager::RemoveBoundarySkinningData(int32 OwnerID)
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -747,7 +747,7 @@ void FGPUBoundarySkinningManager::RemoveBoundarySkinningData(int32 OwnerID)
 /**
  * @brief Clear all boundary skinning data.
  */
-void FGPUBoundarySkinningManager::ClearAllBoundarySkinningData()
+void FKawaiiFluidBoundaryManager::ClearAllBoundarySkinningData()
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -768,7 +768,7 @@ void FGPUBoundarySkinningManager::ClearAllBoundarySkinningData()
 	KF_LOG_DEV(Log, TEXT("ClearAllBoundarySkinningData"));
 }
 
-bool FGPUBoundarySkinningManager::IsBoundaryAdhesionEnabled() const
+bool FKawaiiFluidBoundaryManager::IsBoundaryAdhesionEnabled() const
 {
 	// Boundary adhesion is enabled when:
 	// 1. Adhesion is globally enabled
@@ -786,7 +786,7 @@ bool FGPUBoundarySkinningManager::IsBoundaryAdhesionEnabled() const
  * @param OwnerID Unique ID.
  * @param AABB World-space AABB.
  */
-void FGPUBoundarySkinningManager::UpdateBoundaryOwnerAABB(int32 OwnerID, const FGPUBoundaryOwnerAABB& AABB)
+void FKawaiiFluidBoundaryManager::UpdateBoundaryOwnerAABB(int32 OwnerID, const FGPUBoundaryOwnerAABB& AABB)
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -795,7 +795,7 @@ void FGPUBoundarySkinningManager::UpdateBoundaryOwnerAABB(int32 OwnerID, const F
 	RecalculateCombinedAABB();
 }
 
-void FGPUBoundarySkinningManager::RecalculateCombinedAABB()
+void FKawaiiFluidBoundaryManager::RecalculateCombinedAABB()
 {
 	// Reset to invalid state
 	CombinedBoundaryAABB = FGPUBoundaryOwnerAABB();
@@ -827,7 +827,7 @@ void FGPUBoundarySkinningManager::RecalculateCombinedAABB()
 	bBoundaryAABBDirty = false;
 }
 
-bool FGPUBoundarySkinningManager::DoesBoundaryOverlapVolume(const FVector3f& VolumeMin, const FVector3f& VolumeMax, float AdhesionRadius) const
+bool FKawaiiFluidBoundaryManager::DoesBoundaryOverlapVolume(const FVector3f& VolumeMin, const FVector3f& VolumeMax, float AdhesionRadius) const
 {
 	if (!CombinedBoundaryAABB.IsValid())
 	{
@@ -841,7 +841,7 @@ bool FGPUBoundarySkinningManager::DoesBoundaryOverlapVolume(const FVector3f& Vol
 	return ExpandedBoundaryAABB.Intersects(VolumeAABB);
 }
 
-bool FGPUBoundarySkinningManager::ShouldSkipBoundaryAdhesionPass(const FGPUFluidSimulationParams& Params) const
+bool FKawaiiFluidBoundaryManager::ShouldSkipBoundaryAdhesionPass(const FGPUFluidSimulationParams& Params) const
 {
 	// If adhesion is not enabled, skip
 	if (!IsBoundaryAdhesionEnabled())
@@ -898,7 +898,7 @@ bool FGPUBoundarySkinningManager::ShouldSkipBoundaryAdhesionPass(const FGPUFluid
  * @param DeltaTime Frame delta time.
  * @param OutSkinningOutputs Optional outputs.
  */
-void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
+void FKawaiiFluidBoundaryManager::AddBoundarySkinningPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef& OutWorldBoundaryBuffer,
 	int32& OutBoundaryParticleCount,
@@ -1191,9 +1191,9 @@ void FGPUBoundarySkinningManager::AddBoundarySkinningPass(
  * @param InZOrderCellEndSRV Optional cell end SRV.
  * @param IndirectArgsBuffer Optional indirect arguments.
  */
-void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
+void FKawaiiFluidBoundaryManager::AddBoundaryAdhesionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 CurrentParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef InSameFrameBoundaryBuffer,
@@ -1474,7 +1474,7 @@ void FGPUBoundarySkinningManager::AddBoundaryAdhesionPass(
  * @param OutParticleCount Output count.
  * @return true if performed.
  */
-bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
+bool FKawaiiFluidBoundaryManager::ExecuteBoundaryZOrderSort(
 	FRDGBuilder& GraphBuilder,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef InSameFrameBoundaryBuffer,
@@ -1870,7 +1870,7 @@ bool FGPUBoundarySkinningManager::ExecuteBoundaryZOrderSort(
 /**
  * @brief Snapshot current bone transforms for deferred simulation execution.
  */
-void FGPUBoundarySkinningManager::SnapshotBoneTransformsForPendingSimulation()
+void FKawaiiFluidBoundaryManager::SnapshotBoneTransformsForPendingSimulation()
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -1923,7 +1923,7 @@ void FGPUBoundarySkinningManager::SnapshotBoneTransformsForPendingSimulation()
  * @brief Pop and activate a snapshotted bone transform for execution.
  * @return true if a snapshot was available and is now active.
  */
-bool FGPUBoundarySkinningManager::PopAndActivateSnapshot()
+bool FKawaiiFluidBoundaryManager::PopAndActivateSnapshot()
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 
@@ -1946,13 +1946,13 @@ bool FGPUBoundarySkinningManager::PopAndActivateSnapshot()
 /**
  * @brief Clear the active snapshot after simulation execution completes.
  */
-void FGPUBoundarySkinningManager::ClearActiveSnapshot()
+void FKawaiiFluidBoundaryManager::ClearActiveSnapshot()
 {
 	FScopeLock Lock(&BoundarySkinningLock);
 	ActiveSnapshot.Reset();
 }
 
-const FGPUBoundarySkinningManager::FBoneTransformSnapshotData* FGPUBoundarySkinningManager::GetActiveSnapshotData(int32 OwnerID) const
+const FKawaiiFluidBoundaryManager::FBoneTransformSnapshotData* FKawaiiFluidBoundaryManager::GetActiveSnapshotData(int32 OwnerID) const
 {
 	// Note: Lock should already be held by caller or this should be called from within a locked context
 	if (!ActiveSnapshot.IsSet())

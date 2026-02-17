@@ -1,9 +1,9 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
-#include "Simulation/Managers/GPUAdhesionManager.h"
+#include "Simulation/Managers/KawaiiFluidAdhesionManager.h"
 #include "Logging/KawaiiFluidLog.h"
-#include "Simulation/Managers/GPUCollisionManager.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
+#include "Simulation/Managers/KawaiiFluidCollisionManager.h"
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -15,12 +15,12 @@ DEFINE_LOG_CATEGORY_STATIC(LogGPUAdhesionManager, Log, All);
 // Constructor / Destructor
 //=============================================================================
 
-FGPUAdhesionManager::FGPUAdhesionManager()
+FKawaiiFluidAdhesionManager::FKawaiiFluidAdhesionManager()
 	: bIsInitialized(false)
 {
 }
 
-FGPUAdhesionManager::~FGPUAdhesionManager()
+FKawaiiFluidAdhesionManager::~FKawaiiFluidAdhesionManager()
 {
 	if (bIsInitialized)
 	{
@@ -35,7 +35,7 @@ FGPUAdhesionManager::~FGPUAdhesionManager()
 /**
  * @brief Initialize the adhesion manager.
  */
-void FGPUAdhesionManager::Initialize()
+void FKawaiiFluidAdhesionManager::Initialize()
 {
 	if (bIsInitialized)
 	{
@@ -50,7 +50,7 @@ void FGPUAdhesionManager::Initialize()
 /**
  * @brief Release all resources.
  */
-void FGPUAdhesionManager::Release()
+void FKawaiiFluidAdhesionManager::Release()
 {
 	if (!bIsInitialized)
 	{
@@ -81,11 +81,11 @@ void FGPUAdhesionManager::Release()
  * @param Params Simulation parameters.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUAdhesionManager::AddAdhesionPass(
+void FKawaiiFluidAdhesionManager::AddAdhesionPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	FRDGBufferUAVRef AttachmentUAV,
-	FGPUCollisionManager* CollisionManager,
+	FKawaiiFluidCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)
@@ -259,11 +259,11 @@ void FGPUAdhesionManager::AddAdhesionPass(
  * @param Params Simulation parameters.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUAdhesionManager::AddUpdateAttachedPositionsPass(
+void FKawaiiFluidAdhesionManager::AddUpdateAttachedPositionsPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	FRDGBufferUAVRef AttachmentUAV,
-	FGPUCollisionManager* CollisionManager,
+	FKawaiiFluidCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)
@@ -433,9 +433,9 @@ void FGPUAdhesionManager::AddUpdateAttachedPositionsPass(
  * @param CurrentParticleCount Current particle count.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUAdhesionManager::AddClearDetachedFlagPass(
+void FKawaiiFluidAdhesionManager::AddClearDetachedFlagPass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	int32 CurrentParticleCount,
 	FRDGBufferRef IndirectArgsBuffer)
 {
@@ -494,13 +494,13 @@ void FGPUAdhesionManager::AddClearDetachedFlagPass(
  * @param Params Simulation parameters.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUAdhesionManager::AddStackPressurePass(
+void FKawaiiFluidAdhesionManager::AddStackPressurePass(
 	FRDGBuilder& GraphBuilder,
-	const FSimulationSpatialData& SpatialData,
+	const FKawaiiFluidSpatialData& SpatialData,
 	FRDGBufferSRVRef InAttachmentSRV,
 	FRDGBufferSRVRef InCellCountsSRV,
 	FRDGBufferSRVRef InParticleIndicesSRV,
-	FGPUCollisionManager* CollisionManager,
+	FKawaiiFluidCollisionManager* CollisionManager,
 	int32 CurrentParticleCount,
 	const FGPUFluidSimulationParams& Params,
 	FRDGBufferRef IndirectArgsBuffer)

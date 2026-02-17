@@ -7,7 +7,7 @@
 #include "RenderGraphResources.h"
 
 /**
- * @struct FSimulationSpatialData
+ * @struct FKawaiiFluidSpatialData
  * @brief Contains all spatial hashing and SOA particle buffers for GPU fluid simulation.
  * 
  * @param CellCountsBuffer Legacy hash table cell counts buffer.
@@ -64,7 +64,7 @@
  * @param BoundaryZOrderParticleCount Legacy alias for SkinnedZOrderParticleCount.
  * @param bBoundaryZOrderPerformed Legacy alias for bSkinnedZOrderPerformed.
  */
-struct FSimulationSpatialData
+struct FKawaiiFluidSpatialData
 {
 	// Hash Table buffers (Legacy / Compatibility)
 	FRDGBufferRef CellCountsBuffer = nullptr;

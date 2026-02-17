@@ -1,10 +1,10 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUZOrderSortManager - Z-Order Morton Code Sorting System
 
-#include "Simulation/Managers/GPUZOrderSortManager.h"
+#include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
 #include "Logging/KawaiiFluidLog.h"
-#include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
-#include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
+#include "Simulation/Shaders/KawaiiFluidSimulatorShaders.h"
+#include "Simulation/Resources/GPUBoneDeltaAttachment.h"  // For FGPUBoneDeltaAttachment
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
@@ -16,13 +16,13 @@ DEFINE_LOG_CATEGORY(LogGPUZOrderSort);
 // Constructor / Destructor
 //=============================================================================
 
-FGPUZOrderSortManager::FGPUZOrderSortManager()
+FKawaiiFluidZOrderSortManager::FKawaiiFluidZOrderSortManager()
 	: bIsInitialized(false)
 	, ZOrderBufferParticleCapacity(0)
 {
 }
 
-FGPUZOrderSortManager::~FGPUZOrderSortManager()
+FKawaiiFluidZOrderSortManager::~FKawaiiFluidZOrderSortManager()
 {
 	Release();
 }
@@ -34,7 +34,7 @@ FGPUZOrderSortManager::~FGPUZOrderSortManager()
 /**
  * @brief Initialize the manager.
  */
-void FGPUZOrderSortManager::Initialize()
+void FKawaiiFluidZOrderSortManager::Initialize()
 {
 	bIsInitialized = true;
 	KF_LOG_DEV(Log, TEXT("GPUZOrderSortManager initialized"));
@@ -43,7 +43,7 @@ void FGPUZOrderSortManager::Initialize()
 /**
  * @brief Release all resources.
  */
-void FGPUZOrderSortManager::Release()
+void FKawaiiFluidZOrderSortManager::Release()
 {
 	ZOrderBufferParticleCapacity = 0;
 	bIsInitialized = false;
@@ -72,7 +72,7 @@ void FGPUZOrderSortManager::Release()
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  * @return Sorted particle buffer.
  */
-FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
+FRDGBufferRef FKawaiiFluidZOrderSortManager::ExecuteZOrderSortingPipeline(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef InParticleBuffer,
 	FRDGBufferUAVRef& OutCellStartUAV,
@@ -242,7 +242,7 @@ FRDGBufferRef FGPUZOrderSortManager::ExecuteZOrderSortingPipeline(
  * @param Params Simulation parameters.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUZOrderSortManager::AddComputeMortonCodesPass(
+void FKawaiiFluidZOrderSortManager::AddComputeMortonCodesPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferSRVRef ParticlesSRV,
 	FRDGBufferUAVRef MortonCodesUAV,
@@ -326,7 +326,7 @@ void FGPUZOrderSortManager::AddComputeMortonCodesPass(
  * @param ParticleCount Number of particles to sort.
  * @param AllocParticleCount Allocation size.
  */
-void FGPUZOrderSortManager::AddRadixSortPasses(
+void FKawaiiFluidZOrderSortManager::AddRadixSortPasses(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef& InOutMortonCodes,
 	FRDGBufferRef& InOutParticleIndices,
@@ -460,7 +460,7 @@ void FGPUZOrderSortManager::AddRadixSortPasses(
  * @param SortedAttachmentsUAV Optional output sorted attachments.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUZOrderSortManager::AddReorderParticlesPass(
+void FKawaiiFluidZOrderSortManager::AddReorderParticlesPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferSRVRef OldParticlesSRV,
 	FRDGBufferSRVRef SortedIndicesSRV,
@@ -538,7 +538,7 @@ void FGPUZOrderSortManager::AddReorderParticlesPass(
  * @param CurrentParticleCount Number of particles.
  * @param IndirectArgsBuffer Optional indirect dispatch arguments.
  */
-void FGPUZOrderSortManager::AddComputeCellStartEndPass(
+void FKawaiiFluidZOrderSortManager::AddComputeCellStartEndPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferSRVRef SortedMortonCodesSRV,
 	FRDGBufferUAVRef CellStartUAV,

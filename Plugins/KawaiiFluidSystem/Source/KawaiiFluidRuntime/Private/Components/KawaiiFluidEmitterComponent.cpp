@@ -7,7 +7,7 @@
 #include "Core/KawaiiFluidSimulatorSubsystem.h"
 #include "Core/KawaiiFluidSimulationStats.h"
 #include "Modules/KawaiiFluidSimulationModule.h"
-#include "Simulation/GPUFluidSimulator.h"
+#include "Simulation/KawaiiFluidSimulator.h"
 #include "Core/KawaiiFluidPresetDataAsset.h"
 #include "DrawDebugHelpers.h"
 #include "Components/ArrowComponent.h"
@@ -156,7 +156,7 @@ void UKawaiiFluidEmitterComponent::BeginPlay()
 		UKawaiiFluidSimulationModule* Module = GetSimulationModule();
 		if (Module)
 		{
-			if (FGPUFluidSimulator* GPUSim = Module->GetGPUSimulator())
+			if (FKawaiiFluidSimulator* GPUSim = Module->GetGPUSimulator())
 			{
 				GPUSim->SetSourceEmitterMax(CachedSourceID, MaxParticleCount);
 			}
@@ -246,7 +246,7 @@ void UKawaiiFluidEmitterComponent::EndPlay(const EEndPlayReason::Type EndPlayRea
 		UKawaiiFluidSimulationModule* Module = GetSimulationModule();
 		if (Module)
 		{
-			if (FGPUFluidSimulator* GPUSim = Module->GetGPUSimulator())
+			if (FKawaiiFluidSimulator* GPUSim = Module->GetGPUSimulator())
 			{
 				GPUSim->SetSourceEmitterMax(CachedSourceID, 0);
 			}
@@ -1339,14 +1339,14 @@ void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 	}
 
 	// Get the GPU simulator
-	FGPUFluidSimulator* GPUSim = Module->GetGPUSimulator();
+	FKawaiiFluidSimulator* GPUSim = Module->GetGPUSimulator();
 	if (!GPUSim)
 	{
 		return;
 	}
 
 	// Also clear GPUSpawnManager's pending queue (requests may have been transferred there)
-	if (FGPUSpawnManager* SpawnMgr = GPUSim->GetSpawnManager())
+	if (FKawaiiFluidParticleLifecycleManager* SpawnMgr = GPUSim->GetSpawnManager())
 	{
 		const int32 CancelledCount = SpawnMgr->CancelPendingSpawnsForSource(CachedSourceID);
 		if (CancelledCount > 0)
