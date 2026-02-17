@@ -8,12 +8,12 @@
 #include "RenderResource.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
 #include "Simulation/Resources/GPUFluidSpatialData.h"
-#include "Simulation/Managers/GPUSpawnManager.h"
-#include "Simulation/Managers/GPUCollisionManager.h"
-#include "Simulation/Managers/GPUZOrderSortManager.h"
-#include "Simulation/Managers/GPUBoundarySkinningManager.h"
-#include "Simulation/Managers/GPUAdhesionManager.h"
-#include "Simulation/Managers/GPUStaticBoundaryManager.h"
+#include "Simulation/Managers/KawaiiFluidParticleLifecycleManager.h"
+#include "Simulation/Managers/KawaiiFluidCollisionManager.h"
+#include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
+#include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
+#include "Simulation/Managers/KawaiiFluidAdhesionManager.h"
+#include "Simulation/Managers/KawaiiFluidStaticBoundaryGenerator.h"
 #include "Simulation/Parameters/GPUBoundaryAttachment.h"
 #include "Core/KawaiiFluidAnisotropy.h"
 #include <atomic>
@@ -789,7 +789,7 @@ public:
 	/**
 	 * Get the spawn manager (for per-source particle count tracking)
 	 */
-	FGPUSpawnManager* GetSpawnManager() const { return SpawnManager.Get(); }
+	FKawaiiFluidParticleLifecycleManager* GetSpawnManager() const { return SpawnManager.Get(); }
 
 private:
 	//=============================================================================
@@ -1201,7 +1201,7 @@ private:
 
 	// SpawnManager handles all spawn-related functionality
 	// Thread-safe spawn request queue processed on render thread
-	TUniquePtr<FGPUSpawnManager> SpawnManager;
+	TUniquePtr<FKawaiiFluidParticleLifecycleManager> SpawnManager;
 
 	// GPU Counter buffer for atomic particle count (used during spawn pass)
 	TRefCountPtr<FRDGPooledBuffer> ParticleCounterBuffer;
@@ -1246,35 +1246,35 @@ private:
 	//=============================================================================
 
 	// CollisionManager handles all collision passes and feedback
-	TUniquePtr<FGPUCollisionManager> CollisionManager;
+	TUniquePtr<FKawaiiFluidCollisionManager> CollisionManager;
 
 	//=============================================================================
 	// Z-Order Sorting (Delegated to FGPUZOrderSortManager)
 	// Z-Order Morton code sorting for cache-coherent neighbor search
 	//=============================================================================
 
-	TUniquePtr<FGPUZOrderSortManager> ZOrderSortManager;
+	TUniquePtr<FKawaiiFluidZOrderSortManager> ZOrderSortManager;
 
 	//=============================================================================
 	// Boundary Skinning (Delegated to FGPUBoundarySkinningManager)
 	// GPU-based boundary skinning and adhesion
 	//=============================================================================
 
-	TUniquePtr<FGPUBoundarySkinningManager> BoundarySkinningManager;
+	TUniquePtr<FKawaiiFluidBoundaryManager> BoundarySkinningManager;
 
 	//=============================================================================
 	// Adhesion System (Delegated to FGPUAdhesionManager)
 	// GPU-based particle adhesion to bone colliders
 	//=============================================================================
 
-	TUniquePtr<FGPUAdhesionManager> AdhesionManager;
+	TUniquePtr<FKawaiiFluidAdhesionManager> AdhesionManager;
 
 	//=============================================================================
 	// Static Boundary Particles (Delegated to FGPUStaticBoundaryManager)
 	// Generates boundary particles on static colliders for density contribution
 	//=============================================================================
 
-	TUniquePtr<FGPUStaticBoundaryManager> StaticBoundaryManager;
+	TUniquePtr<FKawaiiFluidStaticBoundaryGenerator> StaticBoundaryManager;
 
 	//=============================================================================
 	// Bone Delta Attachment (NEW simplified bone-following system)

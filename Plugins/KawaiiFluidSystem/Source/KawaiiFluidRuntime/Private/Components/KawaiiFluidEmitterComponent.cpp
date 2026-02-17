@@ -1346,7 +1346,7 @@ void UKawaiiFluidEmitterComponent::ClearSpawnedParticles()
 	}
 
 	// Also clear GPUSpawnManager's pending queue (requests may have been transferred there)
-	if (FGPUSpawnManager* SpawnMgr = GPUSim->GetSpawnManager())
+	if (FKawaiiFluidParticleLifecycleManager* SpawnMgr = GPUSim->GetSpawnManager())
 	{
 		const int32 CancelledCount = SpawnMgr->CancelPendingSpawnsForSource(CachedSourceID);
 		if (CancelledCount > 0)

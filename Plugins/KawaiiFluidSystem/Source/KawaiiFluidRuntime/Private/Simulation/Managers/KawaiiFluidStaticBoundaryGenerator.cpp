@@ -6,7 +6,7 @@
 // - Only new primitives trigger generation; existing primitives reuse cached data
 // - GPU upload only when active primitive set changes
 
-#include "Simulation/Managers/GPUStaticBoundaryManager.h"
+#include "Simulation/Managers/KawaiiFluidStaticBoundaryGenerator.h"
 #include "Logging/KawaiiFluidLog.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogGPUStaticBoundary, Log, All);
@@ -16,11 +16,11 @@ DEFINE_LOG_CATEGORY(LogGPUStaticBoundary);
 // Constructor / Destructor
 //=============================================================================
 
-FGPUStaticBoundaryManager::FGPUStaticBoundaryManager()
+FKawaiiFluidStaticBoundaryGenerator::FKawaiiFluidStaticBoundaryGenerator()
 {
 }
 
-FGPUStaticBoundaryManager::~FGPUStaticBoundaryManager()
+FKawaiiFluidStaticBoundaryGenerator::~FKawaiiFluidStaticBoundaryGenerator()
 {
 	Release();
 }
@@ -32,7 +32,7 @@ FGPUStaticBoundaryManager::~FGPUStaticBoundaryManager()
 /**
  * @brief Initialize the manager.
  */
-void FGPUStaticBoundaryManager::Initialize()
+void FKawaiiFluidStaticBoundaryGenerator::Initialize()
 {
 	if (bIsInitialized)
 	{
@@ -46,7 +46,7 @@ void FGPUStaticBoundaryManager::Initialize()
 /**
  * @brief Release all resources.
  */
-void FGPUStaticBoundaryManager::Release()
+void FKawaiiFluidStaticBoundaryGenerator::Release()
 {
 	if (!bIsInitialized)
 	{
@@ -73,7 +73,7 @@ void FGPUStaticBoundaryManager::Release()
  * @param GeometryHash Geometry hash.
  * @return 64-bit unique key.
  */
-uint64 FGPUStaticBoundaryManager::MakePrimitiveKey(EPrimitiveType Type, int32 OwnerID, uint32 GeometryHash)
+uint64 FKawaiiFluidStaticBoundaryGenerator::MakePrimitiveKey(EPrimitiveType Type, int32 OwnerID, uint32 GeometryHash)
 {
 	// Key format: (Type:8 | OwnerID:32 | GeometryHash:24) = 64-bit
 	uint64 Key = 0;
@@ -86,7 +86,7 @@ uint64 FGPUStaticBoundaryManager::MakePrimitiveKey(EPrimitiveType Type, int32 Ow
 /**
  * @brief Compute geometry hash for a sphere.
  */
-uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionSphere& Sphere)
+uint32 FKawaiiFluidStaticBoundaryGenerator::ComputeGeometryHash(const FGPUCollisionSphere& Sphere)
 {
 	// Hash: Center position + Radius
 	uint32 Hash = GetTypeHash(Sphere.Center.X);
@@ -99,7 +99,7 @@ uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionSphere&
 /**
  * @brief Compute geometry hash for a capsule.
  */
-uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionCapsule& Capsule)
+uint32 FKawaiiFluidStaticBoundaryGenerator::ComputeGeometryHash(const FGPUCollisionCapsule& Capsule)
 {
 	// Hash: Start + End + Radius
 	uint32 Hash = GetTypeHash(Capsule.Start.X);
@@ -115,7 +115,7 @@ uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionCapsule
 /**
  * @brief Compute geometry hash for a box.
  */
-uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionBox& Box)
+uint32 FKawaiiFluidStaticBoundaryGenerator::ComputeGeometryHash(const FGPUCollisionBox& Box)
 {
 	// Hash: Center + Extent + Rotation
 	uint32 Hash = GetTypeHash(Box.Center.X);
@@ -134,7 +134,7 @@ uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionBox& Bo
 /**
  * @brief Compute geometry hash for a convex hull.
  */
-uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionConvex& Convex)
+uint32 FKawaiiFluidStaticBoundaryGenerator::ComputeGeometryHash(const FGPUCollisionConvex& Convex)
 {
 	// Hash: Center + BoundingRadius + PlaneStartIndex + PlaneCount
 	uint32 Hash = GetTypeHash(Convex.Center.X);
@@ -161,7 +161,7 @@ uint32 FGPUStaticBoundaryManager::ComputeGeometryHash(const FGPUCollisionConvex&
  * @param RestDensity Rest density.
  * @return true if changed.
  */
-bool FGPUStaticBoundaryManager::GenerateBoundaryParticles(
+bool FKawaiiFluidStaticBoundaryGenerator::GenerateBoundaryParticles(
 	const TArray<FGPUCollisionSphere>& Spheres,
 	const TArray<FGPUCollisionCapsule>& Capsules,
 	const TArray<FGPUCollisionBox>& Boxes,
@@ -353,7 +353,7 @@ bool FGPUStaticBoundaryManager::GenerateBoundaryParticles(
 /**
  * @brief Clear all generated boundary particles and cache.
  */
-void FGPUStaticBoundaryManager::ClearBoundaryParticles()
+void FKawaiiFluidStaticBoundaryGenerator::ClearBoundaryParticles()
 {
 	BoundaryParticles.Reset();
 	PrimitiveCache.Empty();
@@ -365,7 +365,7 @@ void FGPUStaticBoundaryManager::ClearBoundaryParticles()
 /**
  * @brief Invalidate cache.
  */
-void FGPUStaticBoundaryManager::InvalidateCache()
+void FKawaiiFluidStaticBoundaryGenerator::InvalidateCache()
 {
 	PrimitiveCache.Empty();
 	ActivePrimitiveKeys.Empty();
@@ -385,7 +385,7 @@ void FGPUStaticBoundaryManager::InvalidateCache()
  * @param RestDensity Rest density.
  * @return Psi value.
  */
-float FGPUStaticBoundaryManager::CalculatePsi(float Spacing, float RestDensity) const
+float FKawaiiFluidStaticBoundaryGenerator::CalculatePsi(float Spacing, float RestDensity) const
 {
 	// Psi (ψ) - Boundary particle density contribution (Akinci 2012)
 	//
@@ -419,7 +419,7 @@ float FGPUStaticBoundaryManager::CalculatePsi(float Spacing, float RestDensity) 
  * @param OwnerID Owner ID.
  * @param OutParticles Output array.
  */
-void FGPUStaticBoundaryManager::GenerateSphereBoundaryParticles(
+void FKawaiiFluidStaticBoundaryGenerator::GenerateSphereBoundaryParticles(
 	const FVector3f& Center,
 	float Radius,
 	float Spacing,
@@ -473,7 +473,7 @@ void FGPUStaticBoundaryManager::GenerateSphereBoundaryParticles(
  * @param OwnerID Owner ID.
  * @param OutParticles Output array.
  */
-void FGPUStaticBoundaryManager::GenerateCapsuleBoundaryParticles(
+void FKawaiiFluidStaticBoundaryGenerator::GenerateCapsuleBoundaryParticles(
 	const FVector3f& Start,
 	const FVector3f& End,
 	float Radius,
@@ -602,7 +602,7 @@ void FGPUStaticBoundaryManager::GenerateCapsuleBoundaryParticles(
  * @param OwnerID Owner ID.
  * @param OutParticles Output array.
  */
-void FGPUStaticBoundaryManager::GenerateBoxBoundaryParticles(
+void FKawaiiFluidStaticBoundaryGenerator::GenerateBoxBoundaryParticles(
 	const FVector3f& Center,
 	const FVector3f& Extent,
 	const FQuat4f& Rotation,
@@ -688,7 +688,7 @@ void FGPUStaticBoundaryManager::GenerateBoxBoundaryParticles(
  * @param OwnerID Owner ID.
  * @param OutParticles Output array.
  */
-void FGPUStaticBoundaryManager::GenerateConvexBoundaryParticles(
+void FKawaiiFluidStaticBoundaryGenerator::GenerateConvexBoundaryParticles(
 	const FGPUCollisionConvex& Convex,
 	const TArray<FGPUConvexPlane>& AllPlanes,
 	float Spacing,

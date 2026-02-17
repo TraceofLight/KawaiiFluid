@@ -1433,7 +1433,7 @@ void UKawaiiFluidSimulationModule::ClearAllParticles()
 		GPUSim->AddGPUDespawnSourceRequest(CachedSourceID);
 
 		// Cancel pending spawns to prevent ghost particles after despawn
-		if (FGPUSpawnManager* SpawnMgr = GPUSim->GetSpawnManager())
+		if (FKawaiiFluidParticleLifecycleManager* SpawnMgr = GPUSim->GetSpawnManager())
 		{
 			SpawnMgr->CancelPendingSpawnsForSource(CachedSourceID);
 		}
@@ -1606,7 +1606,7 @@ int32 UKawaiiFluidSimulationModule::GetParticleCountForSource(int32 SourceID) co
 	TSharedPtr<FGPUFluidSimulator> GPUSim = WeakGPUSimulator.Pin();
 	if (GPUSim && GPUSim->IsReady())
 	{
-		FGPUSpawnManager* SpawnManager = GPUSim->GetSpawnManager();
+		FKawaiiFluidParticleLifecycleManager* SpawnManager = GPUSim->GetSpawnManager();
 		if (SpawnManager)
 		{
 			return SpawnManager->GetParticleCountForSource(SourceID);

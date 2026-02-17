@@ -7,8 +7,8 @@
 #include "Simulation/Shaders/FluidAnisotropyComputeShader.h"
 #include "Simulation/Shaders/FluidStatsCompactShader.h"
 #include "Simulation/Shaders/FluidRecordZOrderIndicesShader.h"
-#include "Simulation/Managers/GPUZOrderSortManager.h"
-#include "Simulation/Managers/GPUBoundarySkinningManager.h"
+#include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
+#include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
 #include "Simulation/Parameters/GPUBoundaryAttachment.h"  // For FGPUBoneDeltaAttachment
 #include "Core/KawaiiFluidParticle.h"
 #include "Core/KawaiiFluidSimulationStats.h"
@@ -95,27 +95,27 @@ void FGPUFluidSimulator::Initialize(int32 InMaxParticleCount)
 	MaxParticleCount = InMaxParticleCount;
 
 	// Initialize SpawnManager
-	SpawnManager = MakeUnique<FGPUSpawnManager>();
+	SpawnManager = MakeUnique<FKawaiiFluidParticleLifecycleManager>();
 	SpawnManager->Initialize(InMaxParticleCount);
 
 	// Initialize CollisionManager
-	CollisionManager = MakeUnique<FGPUCollisionManager>();
+	CollisionManager = MakeUnique<FKawaiiFluidCollisionManager>();
 	CollisionManager->Initialize();
 
 	// Initialize ZOrderSortManager
-	ZOrderSortManager = MakeUnique<FGPUZOrderSortManager>();
+	ZOrderSortManager = MakeUnique<FKawaiiFluidZOrderSortManager>();
 	ZOrderSortManager->Initialize();
 
 	// Initialize BoundarySkinningManager
-	BoundarySkinningManager = MakeUnique<FGPUBoundarySkinningManager>();
+	BoundarySkinningManager = MakeUnique<FKawaiiFluidBoundaryManager>();
 	BoundarySkinningManager->Initialize();
 
 	// Initialize AdhesionManager
-	AdhesionManager = MakeUnique<FGPUAdhesionManager>();
+	AdhesionManager = MakeUnique<FKawaiiFluidAdhesionManager>();
 	AdhesionManager->Initialize();
 
 	// Initialize StaticBoundaryManager
-	StaticBoundaryManager = MakeUnique<FGPUStaticBoundaryManager>();
+	StaticBoundaryManager = MakeUnique<FKawaiiFluidStaticBoundaryGenerator>();
 	StaticBoundaryManager->Initialize();
 
 	// Initialize render resource on render thread
@@ -581,7 +581,7 @@ void FGPUFluidSimulator::SimulateSubstep_RDG(FRDGBuilder& GraphBuilder, const FG
 	if (BoundarySkinningManager.IsValid() && BoundarySkinningManager->IsGPUBoundarySkinningEnabled())
 	{
 		// Step 1: Run BoundarySkinningCS first to create WorldBoundaryParticles
-		FGPUBoundarySkinningManager::FBoundarySkinningOutputs SkinningOutputs;
+		FKawaiiFluidBoundaryManager::FBoundarySkinningOutputs SkinningOutputs;
 		BoundarySkinningManager->AddBoundarySkinningPass(
 			GraphBuilder, WorldBoundaryParticlesBuffer, WorldBoundaryParticleCount, Params.DeltaTime,
 			&SkinningOutputs);

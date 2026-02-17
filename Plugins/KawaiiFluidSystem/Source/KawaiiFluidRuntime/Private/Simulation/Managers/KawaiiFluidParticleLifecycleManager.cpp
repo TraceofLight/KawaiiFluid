@@ -1,7 +1,7 @@
 // Copyright 2026 Team_Bruteforce. All Rights Reserved.
 // FGPUSpawnManager - Thread-safe particle spawn queue manager
 
-#include "Simulation/Managers/GPUSpawnManager.h"
+#include "Simulation/Managers/KawaiiFluidParticleLifecycleManager.h"
 #include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
@@ -16,13 +16,13 @@ DEFINE_LOG_CATEGORY(LogGPUSpawnManager);
 // Constructor / Destructor
 //=============================================================================
 
-FGPUSpawnManager::FGPUSpawnManager()
+FKawaiiFluidParticleLifecycleManager::FKawaiiFluidParticleLifecycleManager()
 	: bIsInitialized(false)
 	, MaxParticleCapacity(0)
 {
 }
 
-FGPUSpawnManager::~FGPUSpawnManager()
+FKawaiiFluidParticleLifecycleManager::~FKawaiiFluidParticleLifecycleManager()
 {
 	Release();
 }
@@ -35,7 +35,7 @@ FGPUSpawnManager::~FGPUSpawnManager()
  * @brief Initialize the spawn manager with max particle capacity.
  * @param InMaxParticleCount Maximum particle capacity.
  */
-void FGPUSpawnManager::Initialize(int32 InMaxParticleCount)
+void FKawaiiFluidParticleLifecycleManager::Initialize(int32 InMaxParticleCount)
 {
 	if (InMaxParticleCount <= 0)
 	{
@@ -71,7 +71,7 @@ void FGPUSpawnManager::Initialize(int32 InMaxParticleCount)
 /**
  * @brief Release all resources.
  */
-void FGPUSpawnManager::Release()
+void FKawaiiFluidParticleLifecycleManager::Release()
 {
 	{
 		FScopeLock Lock(&SpawnLock);
@@ -145,7 +145,7 @@ void FGPUSpawnManager::Release()
  * @param Velocity Initial velocity.
  * @param Mass Particle mass (0 = use default).
  */
-void FGPUSpawnManager::AddSpawnRequest(const FVector3f& Position, const FVector3f& Velocity, float Mass)
+void FKawaiiFluidParticleLifecycleManager::AddSpawnRequest(const FVector3f& Position, const FVector3f& Velocity, float Mass)
 {
 	FScopeLock Lock(&SpawnLock);
 
@@ -166,7 +166,7 @@ void FGPUSpawnManager::AddSpawnRequest(const FVector3f& Position, const FVector3
  * @brief Add multiple spawn requests at once (thread-safe, more efficient).
  * @param Requests Array of spawn requests.
  */
-void FGPUSpawnManager::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests)
+void FKawaiiFluidParticleLifecycleManager::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests)
 {
 	if (Requests.Num() == 0)
 	{
@@ -185,7 +185,7 @@ void FGPUSpawnManager::AddSpawnRequests(const TArray<FGPUSpawnRequest>& Requests
 /**
  * @brief Clear all pending spawn requests.
  */
-void FGPUSpawnManager::ClearSpawnRequests()
+void FKawaiiFluidParticleLifecycleManager::ClearSpawnRequests()
 {
 	FScopeLock Lock(&SpawnLock);
 	PendingSpawnRequests.Empty();
@@ -196,7 +196,7 @@ void FGPUSpawnManager::ClearSpawnRequests()
  * @brief Get number of pending spawn requests (thread-safe).
  * @return Number of requests.
  */
-int32 FGPUSpawnManager::GetPendingSpawnCount() const
+int32 FKawaiiFluidParticleLifecycleManager::GetPendingSpawnCount() const
 {
 	FScopeLock Lock(&SpawnLock);
 	return PendingSpawnRequests.Num();
@@ -207,7 +207,7 @@ int32 FGPUSpawnManager::GetPendingSpawnCount() const
  * @param SourceID Source ID to cancel spawns for.
  * @return Number of cancelled spawn requests.
  */
-int32 FGPUSpawnManager::CancelPendingSpawnsForSource(int32 SourceID)
+int32 FKawaiiFluidParticleLifecycleManager::CancelPendingSpawnsForSource(int32 SourceID)
 {
 	FScopeLock Lock(&SpawnLock);
 
@@ -244,7 +244,7 @@ int32 FGPUSpawnManager::CancelPendingSpawnsForSource(int32 SourceID)
  * @param Center World position of brush center.
  * @param Radius Brush radius.
  */
-void FGPUSpawnManager::AddGPUDespawnBrushRequest(const FVector3f& Center, float Radius)
+void FKawaiiFluidParticleLifecycleManager::AddGPUDespawnBrushRequest(const FVector3f& Center, float Radius)
 {
 	FScopeLock Lock(&GPUDespawnLock);
 	PendingGPUBrushDespawns.Emplace(Center, Radius);
@@ -255,7 +255,7 @@ void FGPUSpawnManager::AddGPUDespawnBrushRequest(const FVector3f& Center, float 
  * @brief Add a source despawn request - removes all particles with matching SourceID (thread-safe).
  * @param SourceID Source component ID to despawn.
  */
-void FGPUSpawnManager::AddGPUDespawnSourceRequest(int32 SourceID)
+void FKawaiiFluidParticleLifecycleManager::AddGPUDespawnSourceRequest(int32 SourceID)
 {
 	if (SourceID < 0 || SourceID >= EGPUParticleSource::MaxSourceCount)
 	{
@@ -277,7 +277,7 @@ void FGPUSpawnManager::AddGPUDespawnSourceRequest(int32 SourceID)
  * @param SourceID Source component ID (0 to MaxSourceCount-1).
  * @param MaxCount Max particles for this source (0 = no limit / disable).
  */
-void FGPUSpawnManager::SetSourceEmitterMax(int32 SourceID, int32 MaxCount)
+void FKawaiiFluidParticleLifecycleManager::SetSourceEmitterMax(int32 SourceID, int32 MaxCount)
 {
 	if (SourceID < 0 || SourceID >= EGPUParticleSource::MaxSourceCount)
 	{
@@ -318,7 +318,7 @@ void FGPUSpawnManager::SetSourceEmitterMax(int32 SourceID, int32 MaxCount)
  * @brief Swap pending GPU despawn requests to active buffers.
  * @return true if any despawn requests were swapped.
  */
-bool FGPUSpawnManager::SwapGPUDespawnBuffers()
+bool FKawaiiFluidParticleLifecycleManager::SwapGPUDespawnBuffers()
 {
 	FScopeLock Lock(&GPUDespawnLock);
 
@@ -351,7 +351,7 @@ bool FGPUSpawnManager::SwapGPUDespawnBuffers()
  * @param NextParticleIDHint Hint for IDShiftBits computation.
  * @param ParticleCountBuffer GPU particle count buffer.
  */
-void FGPUSpawnManager::AddGPUDespawnPass(
+void FKawaiiFluidParticleLifecycleManager::AddGPUDespawnPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferRef& InOutParticleBuffer,
 	int32& InOutParticleCount,
@@ -785,7 +785,7 @@ void FGPUSpawnManager::AddGPUDespawnPass(
 /**
  * @brief Swap pending requests to active buffer.
  */
-void FGPUSpawnManager::SwapBuffers()
+void FKawaiiFluidParticleLifecycleManager::SwapBuffers()
 {
 	FScopeLock Lock(&SpawnLock);
 
@@ -802,7 +802,7 @@ void FGPUSpawnManager::SwapBuffers()
  * @param ParticleCounterUAV Atomic counter UAV.
  * @param MaxParticleCount Maximum particle capacity.
  */
-void FGPUSpawnManager::AddSpawnParticlesPass(
+void FKawaiiFluidParticleLifecycleManager::AddSpawnParticlesPass(
 	FRDGBuilder& GraphBuilder,
 	FRDGBufferUAVRef ParticlesUAV,
 	FRDGBufferUAVRef ParticleCounterUAV,
@@ -863,7 +863,7 @@ void FGPUSpawnManager::AddSpawnParticlesPass(
  * @brief Update next particle ID after spawning.
  * @param SpawnedCount Number of particles successfully spawned.
  */
-void FGPUSpawnManager::OnSpawnComplete(int32 SpawnedCount)
+void FKawaiiFluidParticleLifecycleManager::OnSpawnComplete(int32 SpawnedCount)
 {
 	if (SpawnedCount > 0)
 	{
@@ -880,7 +880,7 @@ void FGPUSpawnManager::OnSpawnComplete(int32 SpawnedCount)
  * @param GraphBuilder RDG builder.
  * @return Source counter UAV.
  */
-FRDGBufferUAVRef FGPUSpawnManager::RegisterSourceCounterUAV(FRDGBuilder& GraphBuilder)
+FRDGBufferUAVRef FKawaiiFluidParticleLifecycleManager::RegisterSourceCounterUAV(FRDGBuilder& GraphBuilder)
 {
 	// Create persistent buffer if not exists
 	if (!SourceCounterBuffer.IsValid())
@@ -910,7 +910,7 @@ FRDGBufferUAVRef FGPUSpawnManager::RegisterSourceCounterUAV(FRDGBuilder& GraphBu
  * @param SourceID Source component ID.
  * @return Particle count or -1 if invalid.
  */
-int32 FGPUSpawnManager::GetParticleCountForSource(int32 SourceID) const
+int32 FKawaiiFluidParticleLifecycleManager::GetParticleCountForSource(int32 SourceID) const
 {
 	// Check SourceID range
 	if (SourceID < 0 || SourceID >= EGPUParticleSource::MaxSourceCount)
@@ -936,7 +936,7 @@ int32 FGPUSpawnManager::GetParticleCountForSource(int32 SourceID) const
  * @brief Get all source counts.
  * @return Array of particle counts per source.
  */
-TArray<int32> FGPUSpawnManager::GetAllSourceCounts() const
+TArray<int32> FKawaiiFluidParticleLifecycleManager::GetAllSourceCounts() const
 {
 	FScopeLock Lock(&SourceCountLock);
 	return CachedSourceCounts;
@@ -946,7 +946,7 @@ TArray<int32> FGPUSpawnManager::GetAllSourceCounts() const
  * @brief Enqueue source counter readback.
  * @param RHICmdList Command list.
  */
-void FGPUSpawnManager::EnqueueSourceCounterReadback(FRHICommandListImmediate& RHICmdList)
+void FKawaiiFluidParticleLifecycleManager::EnqueueSourceCounterReadback(FRHICommandListImmediate& RHICmdList)
 {
 	if (!SourceCounterBuffer.IsValid())
 	{
@@ -985,7 +985,7 @@ void FGPUSpawnManager::EnqueueSourceCounterReadback(FRHICommandListImmediate& RH
 /**
  * @brief Process source counter readback (check completion, copy to cache).
  */
-void FGPUSpawnManager::ProcessSourceCounterReadback()
+void FKawaiiFluidParticleLifecycleManager::ProcessSourceCounterReadback()
 {
 	// Nothing pending
 	if (SourceCounterPendingCount <= 0)
@@ -1025,7 +1025,7 @@ void FGPUSpawnManager::ProcessSourceCounterReadback()
  * @brief Clear all source counters.
  * @param GraphBuilder RDG builder.
  */
-void FGPUSpawnManager::ClearSourceCounters(FRDGBuilder& GraphBuilder)
+void FKawaiiFluidParticleLifecycleManager::ClearSourceCounters(FRDGBuilder& GraphBuilder)
 {
 	if (!SourceCounterBuffer.IsValid())
 	{
@@ -1051,7 +1051,7 @@ void FGPUSpawnManager::ClearSourceCounters(FRDGBuilder& GraphBuilder)
  * @brief Initialize source counters from uploaded particles.
  * @param Particles Array of particles to count by SourceID.
  */
-void FGPUSpawnManager::InitializeSourceCountersFromParticles(const TArray<FGPUFluidParticle>& Particles)
+void FKawaiiFluidParticleLifecycleManager::InitializeSourceCountersFromParticles(const TArray<FGPUFluidParticle>& Particles)
 {
 	if (Particles.Num() == 0)
 	{
@@ -1085,7 +1085,7 @@ void FGPUSpawnManager::InitializeSourceCountersFromParticles(const TArray<FGPUFl
 		CountsUint32[i] = static_cast<uint32>(SourceCounts[i]);
 	}
 
-	FGPUSpawnManager* Self = this;
+	FKawaiiFluidParticleLifecycleManager* Self = this;
 	TArray<uint32> CountsCopy = CountsUint32;
 
 	ENQUEUE_RENDER_COMMAND(InitializeSourceCounters)(
@@ -1143,7 +1143,7 @@ void FGPUSpawnManager::InitializeSourceCountersFromParticles(const TArray<FGPUFl
  * @param GraphBuilder RDG builder.
  * @param RequiredCapacity Required particle capacity.
  */
-void FGPUSpawnManager::EnsureStreamCompactionBuffers(FRDGBuilder& GraphBuilder, int32 RequiredCapacity)
+void FKawaiiFluidParticleLifecycleManager::EnsureStreamCompactionBuffers(FRDGBuilder& GraphBuilder, int32 RequiredCapacity)
 {
 	// Already allocated with sufficient capacity
 	if (PersistentAliveMaskBuffer.IsValid() && StreamCompactionCapacity >= RequiredCapacity)
@@ -1188,14 +1188,14 @@ void FGPUSpawnManager::EnsureStreamCompactionBuffers(FRDGBuilder& GraphBuilder, 
 // Stream Compaction Buffer Accessors
 //=============================================================================
 
-FRDGBufferSRVRef FGPUSpawnManager::GetLastPrefixSumsSRV(FRDGBuilder& GraphBuilder) const
+FRDGBufferSRVRef FKawaiiFluidParticleLifecycleManager::GetLastPrefixSumsSRV(FRDGBuilder& GraphBuilder) const
 {
 	check(PersistentPrefixSumsBuffer.IsValid());
 	FRDGBufferRef Buffer = GraphBuilder.RegisterExternalBuffer(PersistentPrefixSumsBuffer, TEXT("DespawnPrefixSums"));
 	return GraphBuilder.CreateSRV(Buffer);
 }
 
-FRDGBufferSRVRef FGPUSpawnManager::GetLastAliveMaskSRV(FRDGBuilder& GraphBuilder) const
+FRDGBufferSRVRef FKawaiiFluidParticleLifecycleManager::GetLastAliveMaskSRV(FRDGBuilder& GraphBuilder) const
 {
 	check(PersistentAliveMaskBuffer.IsValid());
 	FRDGBufferRef Buffer = GraphBuilder.RegisterExternalBuffer(PersistentAliveMaskBuffer, TEXT("DespawnAliveMask"));

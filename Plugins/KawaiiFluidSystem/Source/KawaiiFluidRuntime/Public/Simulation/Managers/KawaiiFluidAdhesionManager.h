@@ -10,10 +10,10 @@
 
 class FRHICommandListImmediate;
 class FRDGBuilder;
-class FGPUCollisionManager;
+class FKawaiiFluidCollisionManager;
 
 /**
- * @class FGPUAdhesionManager
+ * @class FKawaiiFluidAdhesionManager
  * @brief Manages GPU-based particle adhesion system.
  * 
  * @param bIsInitialized State of the manager.
@@ -22,11 +22,11 @@ class FGPUCollisionManager;
  * @param PersistentAttachmentBuffer Pooled buffer tracking per-particle attachment states.
  * @param AttachmentBufferSize Current capacity of the attachment buffer.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUAdhesionManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidAdhesionManager
 {
 public:
-	FGPUAdhesionManager();
-	~FGPUAdhesionManager();
+	FKawaiiFluidAdhesionManager();
+	~FKawaiiFluidAdhesionManager();
 
 	//=========================================================================
 	// Lifecycle
@@ -68,7 +68,7 @@ public:
 		FRDGBuilder& GraphBuilder,
 		const FSimulationSpatialData& SpatialData,
 		FRDGBufferUAVRef AttachmentUAV,
-		FGPUCollisionManager* CollisionManager,
+		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
@@ -77,7 +77,7 @@ public:
 		FRDGBuilder& GraphBuilder,
 		const FSimulationSpatialData& SpatialData,
 		FRDGBufferUAVRef AttachmentUAV,
-		FGPUCollisionManager* CollisionManager,
+		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);
@@ -94,7 +94,7 @@ public:
 		FRDGBufferSRVRef AttachmentSRV,
 		FRDGBufferSRVRef CellCountsSRV,
 		FRDGBufferSRVRef ParticleIndicesSRV,
-		FGPUCollisionManager* CollisionManager,
+		FKawaiiFluidCollisionManager* CollisionManager,
 		int32 CurrentParticleCount,
 		const FGPUFluidSimulationParams& Params,
 		FRDGBufferRef IndirectArgsBuffer = nullptr);

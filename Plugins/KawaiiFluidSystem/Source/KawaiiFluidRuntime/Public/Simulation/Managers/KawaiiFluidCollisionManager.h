@@ -8,13 +8,13 @@
 #include "RHIResources.h"
 #include "Simulation/Resources/GPUFluidParticle.h"
 #include "Simulation/Resources/GPUFluidSpatialData.h"
-#include "Simulation/Managers/GPUCollisionFeedbackManager.h"
+#include "Simulation/Managers/KawaiiFluidCollisionFeedbackManager.h"
 
 class FRHICommandListImmediate;
 class FRDGBuilder;
 
 /**
- * @class FGPUCollisionManager
+ * @class FKawaiiFluidCollisionManager
  * @brief Manages all collision-related systems for GPU fluid simulation.
  * 
  * @param bIsInitialized State of the manager.
@@ -33,11 +33,11 @@ class FRDGBuilder;
  * @param bBoneTransformsValid Flag indicating valid bone transform data.
  * @param FeedbackManager Internal manager for GPU->CPU collision feedback.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUCollisionManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidCollisionManager
 {
 public:
-	FGPUCollisionManager();
-	~FGPUCollisionManager();
+	FKawaiiFluidCollisionManager();
+	~FKawaiiFluidCollisionManager();
 
 	//=========================================================================
 	// Lifecycle
@@ -145,7 +145,7 @@ public:
 
 	int32 GetContactCountForOwner(int32 OwnerID) const;
 
-	FGPUCollisionFeedbackManager* GetFeedbackManager() const { return FeedbackManager.Get(); }
+	FKawaiiFluidCollisionFeedbackManager* GetFeedbackManager() const { return FeedbackManager.Get(); }
 
 	//=========================================================================
 	// Cached Data Accessors (for SimPasses)
@@ -196,5 +196,5 @@ private:
 	// Collision Feedback
 	//=========================================================================
 
-	TUniquePtr<FGPUCollisionFeedbackManager> FeedbackManager;
+	TUniquePtr<FKawaiiFluidCollisionFeedbackManager> FeedbackManager;
 };

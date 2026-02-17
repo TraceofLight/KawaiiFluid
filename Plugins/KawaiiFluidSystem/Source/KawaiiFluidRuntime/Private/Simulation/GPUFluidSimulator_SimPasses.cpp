@@ -5,9 +5,9 @@
 #include "Logging/KawaiiFluidLog.h"
 #include "Simulation/Shaders/GPUFluidSimulatorShaders.h"
 #include "Simulation/Utils/GPUIndirectDispatchUtils.h"
-#include "Simulation/Managers/GPUBoundarySkinningManager.h"
-#include "Simulation/Managers/GPUZOrderSortManager.h"
-#include "Simulation/Managers/GPUCollisionManager.h"
+#include "Simulation/Managers/KawaiiFluidBoundaryManager.h"
+#include "Simulation/Managers/KawaiiFluidZOrderSortManager.h"
+#include "Simulation/Managers/KawaiiFluidCollisionManager.h"
 #include "RenderGraphBuilder.h"
 #include "RenderGraphUtils.h"
 

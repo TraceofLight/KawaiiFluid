@@ -13,7 +13,7 @@ class USkeletalMeshComponent;
 class FRDGBuilder;
 
 /**
- * @class FGPUBoundarySkinningManager
+ * @class FKawaiiFluidBoundaryManager
  * @brief Manages GPU-based boundary skinning for Flex-style adhesion.
  *
  * @param bIsInitialized State of the manager.
@@ -54,11 +54,11 @@ class FRDGBuilder;
  * @param ActiveSnapshot Currently active snapshot for simulation.
  * @param BoundarySkinningLock Critical section for thread-safe access.
  */
-class KAWAIIFLUIDRUNTIME_API FGPUBoundarySkinningManager
+class KAWAIIFLUIDRUNTIME_API FKawaiiFluidBoundaryManager
 {
 public:
-	FGPUBoundarySkinningManager();
-	~FGPUBoundarySkinningManager();
+	FKawaiiFluidBoundaryManager();
+	~FKawaiiFluidBoundaryManager();
 
 	//=========================================================================
 	// Lifecycle
