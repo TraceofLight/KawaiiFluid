@@ -215,8 +215,15 @@ void KawaiiFluidRenderer::RenderKawaiiFluidDepthPass(
 		FRDGBufferSRVRef RenderOffsetSRV = RR->GetRenderOffsetBufferSRV(GraphBuilder);
 		if (!RenderOffsetSRV)
 		{
-			// Create dummy buffer if RenderOffset is not available
-			FRDGBufferDesc DummyOffsetDesc = FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), 1);
+			// RenderOffset can be unavailable for initial frames. Match Position buffer element
+			// count to prevent InstanceId out-of-bounds reads in the vertex shader.
+			const uint32 PositionBufferNumElements = FMath::Max<uint32>(
+				1,
+				PositionPooledBuffer->GetSize() / sizeof(FVector3f));
+
+			FRDGBufferDesc DummyOffsetDesc = FRDGBufferDesc::CreateStructuredDesc(
+				sizeof(FVector3f),
+				PositionBufferNumElements);
 			FRDGBufferRef DummyOffsetBuffer = GraphBuilder.CreateBuffer(DummyOffsetDesc, TEXT("DummyRenderOffset"));
 			AddClearUAVPass(GraphBuilder, GraphBuilder.CreateUAV(DummyOffsetBuffer), 0);
 			RenderOffsetSRV = GraphBuilder.CreateSRV(DummyOffsetBuffer);

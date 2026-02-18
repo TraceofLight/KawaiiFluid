@@ -1952,6 +1952,11 @@ void FKawaiiFluidSimulator::ExecutePostSimulation(
 	if (bIsLastSubstep && CachedAnisotropyParams.bEnabled && CurrentParticleCount > 0)
 	{
 		const int32 UpdateInterval = FMath::Max(1, CachedAnisotropyParams.UpdateInterval);
+		// Use capacity-based sizing/dispatch to avoid CPU count readback lag creating
+		// undersized anisotropy/render-offset buffers during burst spawn windows.
+		const int32 AnisotropyBufferCapacity = FMath::Max(
+			1,
+			FMath::Max(CurrentParticleCount, MaxParticleCount));
 		++AnisotropyFrameCounter;
 
 		// DEBUG: Log whether anisotropy computation will execute - disabled for performance
@@ -1974,11 +1979,13 @@ void FKawaiiFluidSimulator::ExecutePostSimulation(
 			FRDGBufferRef Axis3Buffer = nullptr;
 
 			// Check if persistent buffers exist and have correct size
+			const uint32 RequiredAnisotropyBytes =
+				static_cast<uint32>(AnisotropyBufferCapacity * sizeof(FVector4f));
 			const bool bHasPersistentAnisotropyBuffers =
 				PersistentAnisotropyAxis1Buffer.IsValid() &&
 				PersistentAnisotropyAxis2Buffer.IsValid() &&
 				PersistentAnisotropyAxis3Buffer.IsValid() &&
-				PersistentAnisotropyAxis1Buffer->GetSize() >= static_cast<uint32>(CurrentParticleCount * sizeof(FVector4f));
+			PersistentAnisotropyAxis1Buffer->GetSize() >= RequiredAnisotropyBytes;
 
 			if (bHasPersistentAnisotropyBuffers)
 			{
@@ -1994,7 +2001,7 @@ void FKawaiiFluidSimulator::ExecutePostSimulation(
 			{
 				// First frame or particle count changed - create new buffers
 				FFluidAnisotropyPassBuilder::CreateAnisotropyBuffers(
-					GraphBuilder, CurrentParticleCount, Axis1Buffer, Axis2Buffer, Axis3Buffer);
+				GraphBuilder, AnisotropyBufferCapacity, Axis1Buffer, Axis2Buffer, Axis3Buffer);
 			}
 
 			if (Axis1Buffer && Axis2Buffer && Axis3Buffer && SpatialData.CellStartSRV && SpatialData.CellEndSRV)
@@ -2025,7 +2032,7 @@ void FKawaiiFluidSimulator::ExecutePostSimulation(
 				AnisotropyParams.OutAxis1UAV = GraphBuilder.CreateUAV(Axis1Buffer);
 				AnisotropyParams.OutAxis2UAV = GraphBuilder.CreateUAV(Axis2Buffer);
 				AnisotropyParams.OutAxis3UAV = GraphBuilder.CreateUAV(Axis3Buffer);
-				AnisotropyParams.ParticleCount = CurrentParticleCount;
+				AnisotropyParams.ParticleCount = AnisotropyBufferCapacity;
 				if (CurrentIndirectArgsBuffer)
 				{
 					AnisotropyParams.ParticleCountBufferSRV = GraphBuilder.CreateSRV(CurrentIndirectArgsBuffer);
@@ -2033,7 +2040,7 @@ void FKawaiiFluidSimulator::ExecutePostSimulation(
 
 				// Render offset for surface particles (pulled toward neighbors)
 				FRDGBufferRef RenderOffsetBuffer = GraphBuilder.CreateBuffer(
-					FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), CurrentParticleCount),
+					FRDGBufferDesc::CreateStructuredDesc(sizeof(FVector3f), AnisotropyBufferCapacity),
 					TEXT("FluidRenderOffset"));
 				AnisotropyParams.OutRenderOffsetUAV = GraphBuilder.CreateUAV(RenderOffsetBuffer);
 				AnisotropyParams.ParticleRadius = Params.ParticleRadius;
