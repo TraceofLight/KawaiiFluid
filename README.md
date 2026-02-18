@@ -6,6 +6,14 @@
 
 ## [Documentation](https://gtlbruteforce.github.io/KawaiiFluid/)
 
+## [Demo Video](https://youtu.be/Rdh7IZGyjHk?si=cl6rx2PiD71s2H1c)
+
+## [Available on FAB](https://fab.com/s/60d5be7c7589)
+
+## Why the Name "Kawaii Fluid"?
+The name "Kawaii" comes from the Japanese word かわいい ("cute"), reflecting the project's original concept of creating East Asian-inspired slime effects.
+Within this project, we use the term in a broader sense to describe fluid visuals that are aesthetically pleasing.
+
 ## Project Overview
 
 Kawaii Fluid provides seamless interaction between fluids and dynamic actors. It achieves realistic viscosity and two-way coupling (force feedback) using state-of-the-art simulation techniques.
@@ -14,6 +22,7 @@ Kawaii Fluid provides seamless interaction between fluids and dynamic actors. It
 *   **XPBD & XSPH Hybrid Solver**: Stable pressure and realistic internal friction.
 *   **Massive Particle Count**: Tens of thousands of particles at real-time frame rates.
 *   **Dynamic Interaction**: Real-time collision with Skeletal Meshes and character attachment.
+*   **Screen Space Fluid Rendering**: Smooth fluid surfaces with high-quality visual reconstruction.
 
 ## System Architecture
 
@@ -40,7 +49,7 @@ Real-time feedback loop where actors receive impulses and fluid particles respon
 
 ## Technical Specs
 *   **Solvers**: XPBD (Macklin 2016), XSPH (Macklin & Müller 2013).
-*   **Rendering**: SSFR (Yu & Turk 2013).
+*   **Rendering**: SSFR (van der Laan et al. 2009), Anisotropic Smoothing (Yu & Turk 2013).
 *   **Optimization**: SoA, Half-Precision, Z-order Sorting.
 *   **Engine**: Unreal Engine 5.7 (DirectX 12).
 
