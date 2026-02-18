@@ -1,3 +1,8 @@
+![UE Version](https://img.shields.io/badge/Unreal%20Engine-5.6--5.7-0e1128?logo=unrealengine&logoColor=white)
+[![GitHub release (latest by tag)](https://img.shields.io/github/v/release/GTLBruteForce/KawaiiFluid)](https://github.com/GTLBruteForce/KawaiiFluid/releases)
+[![Downloads](https://img.shields.io/github/downloads/GTLBruteForce/KawaiiFluid/total)](https://github.com/GTLBruteForce/KawaiiFluid/releases)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/GTLBruteForce/KawaiiFluid)
+
 # Kawaii Fluid System
 
 **Kawaii Fluid** is a high-performance, **2-way interactive viscous fluid system** for Unreal Engine 5.7. It simulates complex liquid dynamics in real-time by leveraging advanced GPU-based physics solvers and optimized data structures.
