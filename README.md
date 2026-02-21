@@ -54,9 +54,6 @@ Real-time feedback loop where actors receive impulses and fluid particles respon
 
 ## Technical Specs
 *   **Solvers**: XPBD (Macklin 2016), XSPH (Macklin & Müller 2013).
-*   **Rendering**: SSFR (van der Laan et al. 2009), Anisotropic Smoothing (Yu & Turk 2013).
+*   **Rendering**: SSFR (van der Laan et al. 2009), Anisotropic Smoothing (Yu & Turk 2013), Narrow-Range Filter (Truong & Yuksel 2018).
 *   **Optimization**: SoA, Half-Precision, Z-order Sorting.
 *   **Engine**: Unreal Engine 5.7 (DirectX 12).
-
-## License
-Copyright 2026 Team_Bruteforce. All Rights Reserved.

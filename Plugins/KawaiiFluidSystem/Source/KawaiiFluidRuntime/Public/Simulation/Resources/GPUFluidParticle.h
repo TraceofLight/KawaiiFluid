@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "RenderGraphResources.h"
 
-// TODO(KHJ): 이거 Core인지 아니면 여기 파라미터에 둬도 되는지 확인할 것
-
 /**
  * @struct FGPUFluidParticle
  * @brief GPU Fluid Particle structure mirroring the HLSL struct.

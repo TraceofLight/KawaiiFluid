@@ -4,7 +4,7 @@
 5.7. It delivers real-time, high-fidelity liquid dynamics by combining **XPBD** and **XSPH** solvers
 with a highly optimized GPU pipeline.
 
-## 🏗️ Core Architecture
+## Core Architecture
 
 ### KawaiiFluidRuntime
 
@@ -21,7 +21,7 @@ The engine of the system, handling massive parallel calculations.
     * **Bone Colliders**: 2-way impulse exchange between skeletal meshes and fluid.
     * **Character Attachment**: Boundary tagging for fluid sticking to moving characters.
 
-## 🚀 Core Technologies
+## Core Technologies
 
 ### 1. Performance Optimization
 
@@ -49,7 +49,3 @@ Real-time feedback loop between fluid particles and game actors.
   event triggers.
 * **Boundary Tagging**: Specialized logic for character-fluid attachment and boundary behavior.
   ![Bone Collision](media/near-boundary-flag.png)
-
----
-
-Copyright 2026 Team_Bruteforce. All Rights Reserved.

@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright 2026 Team_Bruteforce. All Rights Reserved.
 
 using UnrealBuildTool;
 using System.IO;
@@ -42,7 +42,7 @@ public class KawaiiFluidRuntime : ModuleRules
 				"RenderCore",
 				"Renderer",
 				"RHI",
-				"Niagara"  // Niagara Component 사용을 위해 추가
+				"Niagara"  // Required for Niagara component usage
 			}
 		);
 
@@ -51,10 +51,10 @@ public class KawaiiFluidRuntime : ModuleRules
 			{
 				"Slate",
 				"SlateCore",
-				"Projects", // IPluginManager 위해 추가
-				"RenderCore", // AddShaderSourceDirectoryMapping 위해 추가
+				"Projects", // Required for IPluginManager
+				"RenderCore", // Required for AddShaderSourceDirectoryMapping
 				"Renderer",
-				"Landscape", // Heightmap collision을 위한 Landscape 모듈
+				"Landscape", // Landscape module for heightmap collision
 				"MeshDescription", // Low-poly shadow sphere generation
 				"StaticMeshDescription" // FStaticMeshAttributes
 			}
