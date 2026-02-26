@@ -1227,7 +1227,7 @@ void FKawaiiFluidSimulator::EndFrame()
 					// Register PersistentParticleBuffer in RDG (currently Z-Order sorted)
 					FRDGBufferRef ParticleBuffer = GraphBuilder.RegisterExternalBuffer(Self->PersistentParticleBuffer);
 
-					// Debug Z-Order Index Recording
+					// Debug Z-Order Index Recording (Post-Sort: records indices after Z-Order sort)
 					if (Self->bDebugZOrderIndexEnabled.load())
 					{
 						Self->AddRecordZOrderIndicesPass(GraphBuilder, ParticleBuffer, Self->CurrentParticleCount);

@@ -26,7 +26,8 @@ enum class EKawaiiFluidDebugDrawMode : uint8
 {
 	None UMETA(DisplayName = "None", ToolTip = "No debug visualization (normal Metaball rendering)."),
 	ISM UMETA(DisplayName = "ISM Sphere", ToolTip = "Render particles as instanced spheres with a solid color."),
-	Point_ZOrderArrayIndex UMETA(DisplayName = "Z-Order Array Index", ToolTip = "Debug points colored by their array index to verify Z-Order sorting."),
+	Point_ZOrderArrayIndex UMETA(DisplayName = "Z-Order Array Index (Post-Sort)", ToolTip = "Debug points colored by their array index AFTER Z-Order sorting."),
+	Point_ZOrderPreSortIndex UMETA(DisplayName = "Z-Order Array Index (Pre-Sort)", ToolTip = "Debug points colored by their array index BEFORE Z-Order sorting to visualize unsorted state."),
 	Point_ZOrderMortonCode UMETA(DisplayName = "Z-Order Morton Code", ToolTip = "Debug points colored by their Morton code to verify Z-Order consistency."),
 	Point_PositionX UMETA(DisplayName = "Position X", ToolTip = "Debug points colored based on their X-axis position (Red gradient)."),
 	Point_PositionY UMETA(DisplayName = "Position Y", ToolTip = "Debug points colored based on their Y-axis position (Green gradient)."),

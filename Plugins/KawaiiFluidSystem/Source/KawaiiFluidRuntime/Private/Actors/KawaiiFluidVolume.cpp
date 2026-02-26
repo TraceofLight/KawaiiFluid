@@ -338,11 +338,11 @@ void AKawaiiFluidVolume::Tick(float DeltaSeconds)
 			const bool bNeedDebug = IsPointDebugMode(VolumeComponent->DebugDrawMode);
 			const bool bNeedDebugZOrder = (VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::Point_ZOrderArrayIndex);
 			const bool bNeedReadback = bNeedShadow || bNeedVFX || bNeedDebug;
-			
+
 			// Only enable readback when actually needed (avoids GPU barrier overhead)
 			GPUSimulator->SetShadowReadbackEnabled(bNeedReadback);
 			GPUSimulator->SetAnisotropyReadbackEnabled(bNeedShadow); // Anisotropy only for shadow rendering
-			GPUSimulator->SetDebugZOrderIndexEnabled(bNeedDebugZOrder); // Enable Z-Order index recording for debug visualization
+			GPUSimulator->SetDebugZOrderIndexEnabled(bNeedDebugZOrder); // Enable Z-Order index recording for Post-Sort debug visualization
 
 			TArray<FVector> NewVelocities;
 			TArray<FVector4> NewAnisotropyAxis1, NewAnisotropyAxis2, NewAnisotropyAxis3;
@@ -1132,9 +1132,9 @@ void AKawaiiFluidVolume::DrawDebugParticles()
 		// Get flags for Point_IsAttached debug mode
 		const TArray<uint32>* Flags = Simulator->GetParticleFlags();
 
-		// Get Z-Order array indices for Point_ZOrderArrayIndex debug mode
+		// Get Z-Order array indices for Point_ZOrderArrayIndex debug mode (Post-Sort only)
 		TArray<int32> ZOrderIndices;
-		const bool bHasZOrderIndices = (VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::Point_ZOrderArrayIndex) && 
+		const bool bHasZOrderIndices = (VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::Point_ZOrderArrayIndex) &&
 										Simulator->GetZOrderArrayIndices(ZOrderIndices);
 
 		// Update bounds for position-based coloring
@@ -1153,10 +1153,20 @@ void AKawaiiFluidVolume::DrawDebugParticles()
 			FVector Pos(Positions[i]);
 			const bool bNearBoundary = Flags && i < Flags->Num() && ((*Flags)[i] & EGPUParticleFlags::NearBoundary);
 			
-			// Get Z-Order array index if available (ParticleID → ZOrderIndex mapping)
-			const int32 ZOrderIndex = (bHasZOrderIndices && ParticleIDs[i] < ZOrderIndices.Num()) ? ZOrderIndices[ParticleIDs[i]] : -1;
-			
-			FColor Color = ComputeDebugDrawColor(i, TotalCount, Pos, 0.0f, bNearBoundary, ZOrderIndex);
+			// Determine color index based on debug mode:
+			// - Post-Sort (Point_ZOrderArrayIndex): Z-Order sorted array index from GPU readback
+			// - Pre-Sort (Point_ZOrderPreSortIndex): ParticleID (= spawn order, represents unsorted state)
+			int32 ColorIndex = -1;
+			if (VolumeComponent->DebugDrawMode == EKawaiiFluidDebugDrawMode::Point_ZOrderPreSortIndex)
+			{
+				ColorIndex = ParticleIDs[i];
+			}
+			else if (bHasZOrderIndices && ParticleIDs[i] < ZOrderIndices.Num())
+			{
+				ColorIndex = ZOrderIndices[ParticleIDs[i]];
+			}
+
+			FColor Color = ComputeDebugDrawColor(i, TotalCount, Pos, 0.0f, bNearBoundary, ColorIndex);
 			DrawDebugPoint(World, Pos, DebugPointSize, Color, false, -1.0f, 0);
 		}
 	}
@@ -1569,6 +1579,7 @@ FColor AKawaiiFluidVolume::ComputeDebugDrawColor(int32 ParticleIndex, int32 Tota
 	switch (DrawMode)
 	{
 	case EKawaiiFluidDebugDrawMode::Point_ZOrderArrayIndex:
+	case EKawaiiFluidDebugDrawMode::Point_ZOrderPreSortIndex:
 	case EKawaiiFluidDebugDrawMode::DebugDraw:  // Legacy fallthrough (default to ZOrderArrayIndex)
 		{
 			// Rainbow gradient based on Z-Order array index (actual post-sort index)
